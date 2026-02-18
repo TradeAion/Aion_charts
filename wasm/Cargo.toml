@@ -23,6 +23,8 @@ web-sys = { version = "0.3", features = [
     "Document",
     "Element",
     "HtmlCanvasElement",
+    "HtmlElement",
+    "CssStyleDeclaration",
     "CanvasRenderingContext2d",
     "TextMetrics",
     "GpuCanvasContext",
@@ -30,6 +32,11 @@ web-sys = { version = "0.3", features = [
     "Gpu",
     "console",
     "Performance",
+    "MouseEvent",
+    "WheelEvent",
+    "EventTarget",
+    "EventListener",
+    "AddEventListenerOptions",
 ] }
 log = "0.4"
 console_log = "1.0"

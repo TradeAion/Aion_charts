@@ -16,6 +16,8 @@ pub struct ChartEngine {
     pub style: ChartStyle,
     pub crosshair: CrosshairState,
     pub dpr: f64,
+    /// Dynamic Y-axis width in CSS px (set by the WASM layer after measuring text).
+    pub y_axis_css_w: f64,
 }
 
 impl ChartEngine {
@@ -33,6 +35,7 @@ impl ChartEngine {
             style,
             crosshair,
             dpr,
+            y_axis_css_w: 0.0,
         }
     }
 
@@ -77,16 +80,14 @@ impl ChartEngine {
         self.crosshair.y = y;
 
         if active && !self.bars.is_empty() {
-            // Snap to nearest bar
-            let chart_w = self.viewport.width as f64 - self.style.y_axis_width as f64 * self.dpr;
-            let bar_idx = self.viewport.pixel_to_bar(x * self.dpr, chart_w);
+            let layout = crate::core::renderer::series::ChartLayout::from_physical(
+                self.viewport.width, self.viewport.height, self.dpr, &self.style,
+                if self.y_axis_css_w > 0.0 { self.y_axis_css_w } else { 34.0 },
+            );
+            let bar_idx = self.viewport.pixel_to_bar(x * self.dpr, layout.chart_w);
             let idx = bar_idx.round() as usize;
             self.crosshair.bar_index = if idx < self.bars.len() { Some(idx) } else { None };
-
-            let chart_h = self.viewport.height as f64
-                * (1.0 - self.viewport.volume_height_ratio as f64)
-                - self.style.x_axis_height as f64 * self.dpr;
-            self.crosshair.price = self.viewport.pixel_to_price(y * self.dpr, chart_h);
+            self.crosshair.price = self.viewport.pixel_to_price(y * self.dpr, layout.candle_h);
         }
     }
 
@@ -107,6 +108,7 @@ impl ChartEngine {
             dpr: self.dpr,
             logical_width: logical_w,
             logical_height: logical_h,
+            y_axis_css_w: if self.y_axis_css_w > 0.0 { self.y_axis_css_w } else { 34.0 },
         };
 
         self.renderer.render_frame(&ctx)

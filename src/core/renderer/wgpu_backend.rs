@@ -100,7 +100,7 @@ impl Renderer for WgpuRenderer {
 
     fn render_frame(&mut self, ctx: &RenderContext) -> Result<(), String> {
         let layout = ChartLayout::from_physical(
-            ctx.viewport.width, ctx.viewport.height, ctx.dpr, ctx.style,
+            ctx.viewport.width, ctx.viewport.height, ctx.dpr, ctx.style, ctx.y_axis_css_w,
         );
 
         // Generate geometry — SAME code path as Canvas2D

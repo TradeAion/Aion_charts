@@ -1,32 +1,37 @@
-//! RayCore WASM bindings — JS interop layer.
+//! RayCore WASM bindings — clean public API.
 //!
-//! 3-canvas architecture (like LWC):
-//!   - grid canvas    (z-index:0) — grid lines behind candles (Canvas2D always)
-//!   - main canvas    (z-index:1) — candles + volume (WebGPU or Canvas2D)
-//!   - overlay canvas (z-index:2) — axes, crosshair, watermark (Canvas2D always)
+//! Architecture:
+//!   - CanvasManager creates the 3-canvas stack (grid, chart, overlay)
+//!   - InteractionHandler processes pointer/wheel events (pure state machine)
+//!   - ChartEngine owns viewport, data, style, renders via Canvas2D or WebGPU
+//!   - GridRenderer / OverlayRenderer draw axes, crosshair, watermark
+//!
+//! Public WASM API:
+//!   RayCore.create("container-id")      → sets up everything
+//!   core.pointer_move(x, y)             → crosshair + drag
+//!   core.pointer_down(x, y)             → start drag
+//!   core.pointer_up()                   → end drag
+//!   core.pointer_leave()                → hide crosshair
+//!   core.wheel(x, y, delta_y)           → zoom
+//!   core.resize()                       → handle container resize
+//!   core.demo_mode()                    → load sample data
+//!   core.render()                       → draw one frame (call from RAF)
 
 use wasm_bindgen::prelude::*;
-use web_sys::HtmlCanvasElement;
 use raycore::{
     Bar, ChartEngine, ChartLayout,
     GpuContext, WgpuRenderer, Canvas2DRenderer,
     RendererBackend, OverlayRenderer, GridRenderer,
+    InteractionHandler, generate_sample_data,
     geometry_generator,
 };
+
+mod canvas_manager;
+use canvas_manager::CanvasManager;
 
 fn init_logging() {
     console_error_panic_hook::set_once();
     let _ = console_log::init_with_level(log::Level::Info);
-}
-
-fn get_canvas(canvas_id: &str) -> Result<HtmlCanvasElement, JsValue> {
-    let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
-    let document = window.document().ok_or_else(|| JsValue::from_str("no document"))?;
-    document
-        .get_element_by_id(canvas_id)
-        .ok_or_else(|| JsValue::from_str(&format!("canvas '{}' not found", canvas_id)))?
-        .dyn_into::<HtmlCanvasElement>()
-        .map_err(|_| JsValue::from_str("element is not a canvas"))
 }
 
 fn webgpu_available() -> bool {
@@ -51,94 +56,92 @@ pub struct RayCore {
     engine: ChartEngine,
     grid: GridRenderer,
     overlay: OverlayRenderer,
-    canvas_id: String,
-    #[allow(dead_code)]
-    grid_id: String,
-    #[allow(dead_code)]
-    overlay_id: String,
+    canvas_mgr: CanvasManager,
+    interaction: InteractionHandler,
+    /// Cached Y-axis width in CSS px (updated each frame).
+    y_axis_css_w: f64,
 }
 
 #[wasm_bindgen]
 impl RayCore {
-    pub async fn create(grid_id: &str, canvas_id: &str, overlay_id: &str) -> Result<RayCore, JsValue> {
+    /// Create a new RayCore instance inside a container div.
+    /// Internally creates the 3-canvas stack and initializes rendering.
+    pub async fn create(container_id: &str) -> Result<RayCore, JsValue> {
         let preferred = if webgpu_available() { "webgpu" } else { "canvas2d" };
-        Self::create_with(grid_id, canvas_id, overlay_id, preferred).await
+        Self::create_with(container_id, preferred).await
     }
 
-    pub async fn create_with(grid_id: &str, canvas_id: &str, overlay_id: &str, renderer: &str) -> Result<RayCore, JsValue> {
+    /// Create with a specific renderer backend ("webgpu" or "canvas2d").
+    pub async fn create_with(container_id: &str, renderer: &str) -> Result<RayCore, JsValue> {
         init_logging();
 
-        let grid_canvas = get_canvas(grid_id)?;
-        let canvas = get_canvas(canvas_id)?;
-        let overlay_canvas = get_canvas(overlay_id)?;
+        let canvas_mgr = CanvasManager::new(container_id)?;
         let dpr = get_dpr();
 
-        let css_w = canvas.client_width() as f64;
-        let css_h = canvas.client_height() as f64;
+        let (css_w, css_h) = canvas_mgr.css_size();
         let phys_w = (css_w * dpr).round() as u32;
         let phys_h = (css_h * dpr).round() as u32;
-
-        for c in [&grid_canvas, &canvas, &overlay_canvas] {
-            c.set_width(phys_w.max(1));
-            c.set_height(phys_h.max(1));
-        }
+        canvas_mgr.set_physical_size(phys_w, phys_h);
 
         log::info!(
-            "RayCore: creating '{}' renderer — CSS {}x{}, physical {}x{}, dpr={}",
+            "RayCore: creating '{}' — CSS {}x{}, physical {}x{}, dpr={}",
             renderer, css_w, css_h, phys_w, phys_h, dpr
         );
 
         let backend = match renderer {
             "webgpu" => {
                 match GpuContext::new(
-                    wgpu::SurfaceTarget::Canvas(canvas.clone()),
+                    wgpu::SurfaceTarget::Canvas(canvas_mgr.chart_canvas.clone()),
                     phys_w.max(1),
                     phys_h.max(1),
-                )
-                .await
-                {
+                ).await {
                     Ok(gpu) => {
                         log::info!("WebGPU adapter: {:?}", gpu.format);
                         RendererBackend::Wgpu(WgpuRenderer::new(gpu))
                     }
                     Err(e) => {
                         log::warn!("WebGPU unavailable: {}. Falling back to Canvas2D.", e);
-                        let r = Canvas2DRenderer::new(canvas, dpr)
+                        let r = Canvas2DRenderer::new(canvas_mgr.chart_canvas.clone(), dpr)
                             .map_err(|e| JsValue::from_str(&e))?;
                         RendererBackend::Canvas2D(r)
                     }
                 }
             }
             _ => {
-                let r = Canvas2DRenderer::new(canvas, dpr)
+                let r = Canvas2DRenderer::new(canvas_mgr.chart_canvas.clone(), dpr)
                     .map_err(|e| JsValue::from_str(&e))?;
                 RendererBackend::Canvas2D(r)
             }
         };
 
-        let grid = GridRenderer::new(grid_canvas, dpr)
+        let grid = GridRenderer::new(canvas_mgr.grid_canvas.clone(), dpr)
             .map_err(|e| JsValue::from_str(&e))?;
-        let overlay = OverlayRenderer::new(overlay_canvas, dpr)
+        let overlay = OverlayRenderer::new(canvas_mgr.overlay_canvas.clone(), dpr)
             .map_err(|e| JsValue::from_str(&e))?;
 
         let engine = ChartEngine::new(backend, phys_w.max(1), phys_h.max(1), dpr);
 
-        log::info!("RayCore initialized with renderer: {}", engine.renderer_name());
+        let mut interaction = InteractionHandler::new();
+        interaction.set_container_size(css_w, css_h);
+
+        log::info!("RayCore initialized: {}", engine.renderer_name());
 
         Ok(RayCore {
             engine,
             grid,
             overlay,
-            canvas_id: canvas_id.to_string(),
-            grid_id: grid_id.to_string(),
-            overlay_id: overlay_id.to_string(),
+            canvas_mgr,
+            interaction,
+            y_axis_css_w: 0.0,
         })
     }
 
+    /// Get the active renderer name ("webgpu" or "canvas2d").
     pub fn renderer_name(&self) -> String {
         self.engine.renderer_name().to_string()
     }
 
+    /// Get supported renderers on this platform.
     pub fn get_supported_renderers() -> js_sys::Array {
         let arr = js_sys::Array::new();
         arr.push(&JsValue::from_str("canvas2d"));
@@ -148,6 +151,9 @@ impl RayCore {
         arr
     }
 
+    // ── Data loading ─────────────────────────────────────────────────────────
+
+    /// Load bar data from separate typed arrays.
     pub fn set_data_arrays(
         &mut self,
         open: &[f32],
@@ -176,9 +182,10 @@ impl RayCore {
             .collect();
 
         self.engine.set_data(bars);
-        log::info!("set_data_arrays: {} bars loaded", count);
+        log::info!("set_data_arrays: {} bars", count);
     }
 
+    /// Load bar data from packed f32 array (8 floats per bar).
     pub fn set_data(&mut self, data: &[f32]) {
         const N: usize = 8;
         if data.len() % N != 0 {
@@ -203,23 +210,95 @@ impl RayCore {
             .collect();
         let n = bars.len();
         self.engine.set_data(bars);
-        log::info!("set_data: {} bars loaded", n);
+        log::info!("set_data: {} bars", n);
     }
 
-    pub fn resize(&mut self, css_width: f64, css_height: f64) {
-        let dpr = self.engine.dpr.max(1.0);
-        let phys_w = (css_width * dpr).round() as u32;
-        let phys_h = (css_height * dpr).round() as u32;
+    // ── Demo mode ────────────────────────────────────────────────────────────
 
-        if let Some(canvas) = self.canvas() {
-            canvas.set_width(phys_w.max(1));
-            canvas.set_height(phys_h.max(1));
-        }
+    /// Load built-in sample data for demo/testing.
+    /// Generates 600 bars of realistic candlestick data.
+    pub fn demo_mode(&mut self) {
+        let now_ms = js_sys::Date::now() as u64;
+        let num_bars = 600;
+        let interval_ms = 60_000; // 1-minute bars
+        let start_ms = now_ms - (num_bars as u64) * interval_ms;
 
+        let bars = generate_sample_data(num_bars, start_ms, interval_ms);
+        self.engine.set_data(bars);
+        log::info!("demo_mode: {} bars loaded", num_bars);
+    }
+
+    // ── Interaction (pointer/wheel forwarded from JS) ────────────────────────
+
+    /// Pointer move — CSS px relative to container.
+    pub fn pointer_move(&mut self, x: f64, y: f64) {
+        let y_axis_w = if self.y_axis_css_w > 0.0 { self.y_axis_css_w } else { 34.0 };
+        self.interaction.pointer_move(
+            x, y,
+            &mut self.engine.viewport,
+            &mut self.engine.crosshair,
+            self.engine.bars.as_slice(),
+            &self.engine.style,
+            self.engine.dpr,
+            y_axis_w,
+        );
+    }
+
+    /// Pointer down — CSS px relative to container.
+    pub fn pointer_down(&mut self, x: f64, _y: f64) {
+        self.interaction.pointer_down(x, _y);
+    }
+
+    /// Pointer up.
+    pub fn pointer_up(&mut self) {
+        self.interaction.pointer_up();
+    }
+
+    /// Pointer leave — hide crosshair.
+    pub fn pointer_leave(&mut self) {
+        self.interaction.pointer_leave(&mut self.engine.crosshair);
+    }
+
+    /// Wheel event — zoom with focal point.
+    pub fn wheel(&mut self, x: f64, y: f64, delta_y: f64) {
+        let y_axis_w = if self.y_axis_css_w > 0.0 { self.y_axis_css_w } else { 34.0 };
+        self.interaction.wheel(
+            x, y, delta_y,
+            &mut self.engine.viewport,
+            self.engine.bars.as_slice(),
+            &self.engine.style,
+            self.engine.dpr,
+            y_axis_w,
+        );
+    }
+
+    // ── Layout ───────────────────────────────────────────────────────────────
+
+    /// Handle container resize. Call from JS ResizeObserver.
+    pub fn resize(&mut self) {
+        let (css_w, css_h) = self.canvas_mgr.css_size();
+        let dpr = get_dpr();
+        let phys_w = (css_w * dpr).round() as u32;
+        let phys_h = (css_h * dpr).round() as u32;
+
+        self.canvas_mgr.set_physical_size(phys_w, phys_h);
         self.grid.resize(phys_w.max(1), phys_h.max(1), dpr);
         self.overlay.resize(phys_w.max(1), phys_h.max(1), dpr);
         self.engine.resize(phys_w.max(1), phys_h.max(1), dpr);
+        self.interaction.set_container_size(css_w, css_h);
     }
+
+    /// Get the current Y-axis width in CSS pixels.
+    pub fn y_axis_width(&self) -> f64 {
+        self.y_axis_css_w
+    }
+
+    /// Get the current X-axis height in CSS pixels.
+    pub fn x_axis_height(&self) -> f64 {
+        self.engine.style.time_axis_height()
+    }
+
+    // ── Viewport control ─────────────────────────────────────────────────────
 
     pub fn zoom_to_range(&mut self, start: u64, end: u64) {
         self.engine.zoom_to_range(start, end);
@@ -241,52 +320,76 @@ impl RayCore {
         vec![self.engine.viewport.start_bar, self.engine.viewport.end_bar]
     }
 
-    pub fn set_crosshair(&mut self, x: f64, y: f64, active: bool) {
-        self.engine.set_crosshair(x, y, active);
+    /// Is the user currently dragging?
+    pub fn is_dragging(&self) -> bool {
+        self.interaction.is_dragging()
     }
 
-    pub fn crosshair_info(&self) -> Vec<f64> {
-        let ch = &self.engine.crosshair;
-        vec![
-            ch.x,
-            ch.y,
-            ch.price,
-            ch.bar_index.map(|i| i as f64).unwrap_or(-1.0),
-            if ch.active { 1.0 } else { 0.0 },
-        ]
-    }
+    // ── Render ───────────────────────────────────────────────────────────────
 
-    /// Render one frame:
-    /// 1. Main canvas — bg + grid lines + candles + volume (unified DrawList)
-    /// 2. Overlay canvas — axes, crosshair, watermark
+    /// Render one frame. Call from requestAnimationFrame.
     ///
-    /// The grid canvas is no longer drawn to — the main canvas DrawList includes
-    /// bg fill and grid lines, so no transparency/compositing issues arise.
+    /// Internally:
+    /// 1. Auto-fit price range
+    /// 2. Compute ticks + measure text → dynamic Y-axis width
+    /// 3. Grid canvas — grid lines
+    /// 4. Chart canvas — candles + volume
+    /// 5. Overlay canvas — axes, crosshair, watermark
     pub fn render(&mut self) {
         if !self.engine.viewport.price_locked {
             self.engine.viewport.auto_fit_price(self.engine.bars.as_slice());
         }
 
+        let dpr = self.engine.dpr;
+        let style = &self.engine.style;
+
+        // Step 1: preliminary layout with previous frame's y_axis_css_w
+        let prelim_layout = ChartLayout::from_physical(
+            self.engine.viewport.width,
+            self.engine.viewport.height,
+            dpr,
+            style,
+            if self.y_axis_css_w > 0.0 { self.y_axis_css_w } else { 34.0 },
+        );
+
+        // Step 2: compute ticks to measure text widths
+        let (_, prelim_y_ticks, _) = geometry_generator::generate(
+            self.engine.bars.as_slice(),
+            &self.engine.viewport,
+            style,
+            &prelim_layout,
+        );
+
+        // Step 3: measure max Y-axis label width → compute dynamic axis width
+        let max_text_w_phys = self.overlay.measure_max_tick_width(style, &prelim_y_ticks);
+        let max_text_w_css = max_text_w_phys / dpr;
+        let y_axis_css_w = style.price_axis_width(max_text_w_css);
+        self.y_axis_css_w = y_axis_css_w;
+
+        // Step 4: final layout with measured y-axis width
         let layout = ChartLayout::from_physical(
             self.engine.viewport.width,
             self.engine.viewport.height,
-            self.engine.dpr,
-            &self.engine.style,
+            dpr,
+            style,
+            y_axis_css_w,
         );
 
-        // Main canvas render (bg + grid + candles + volume via DrawList)
+        // Step 5: grid canvas (background grid lines + ticks)
+        let (y_ticks, x_ticks) = self.grid.render(
+            self.engine.bars.as_slice(),
+            &self.engine.viewport,
+            style,
+            &layout,
+        );
+
+        // Step 6: main chart canvas (candles + volume)
+        self.engine.y_axis_css_w = y_axis_css_w;
         if let Err(e) = self.engine.render() {
             log::warn!("render error: {}", e);
         }
 
-        // Compute ticks for overlay axis labels — same math as geometry_generator
-        let (_, y_ticks, x_ticks) = geometry_generator::generate(
-            self.engine.bars.as_slice(),
-            &self.engine.viewport,
-            &self.engine.style,
-            &layout,
-        );
-
+        // Step 7: overlay (axes, crosshair, watermark)
         self.overlay.render(
             self.engine.bars.as_slice(),
             &self.engine.viewport,
@@ -296,9 +399,5 @@ impl RayCore {
             &y_ticks,
             &x_ticks,
         );
-    }
-
-    fn canvas(&self) -> Option<HtmlCanvasElement> {
-        get_canvas(&self.canvas_id).ok()
     }
 }

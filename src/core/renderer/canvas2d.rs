@@ -72,7 +72,7 @@ impl Renderer for Canvas2DRenderer {
 
     fn render_frame(&mut self, rc: &RenderContext) -> Result<(), String> {
         let layout = ChartLayout::from_physical(
-            self.physical_width, self.physical_height, self.dpr, rc.style,
+            self.physical_width, self.physical_height, self.dpr, rc.style, rc.y_axis_css_w,
         );
 
         // Generate geometry — single source of truth

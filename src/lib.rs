@@ -19,6 +19,8 @@ pub use crate::core::renderer::geometry_generator;
 pub use crate::core::renderer::wgpu_context::GpuContext;
 pub use crate::core::renderer::wgpu_backend::WgpuRenderer;
 pub use crate::core::renderer::pipeline_manager::PipelineManager;
+pub use crate::core::interaction::InteractionHandler;
+pub use crate::core::demo_data::generate_sample_data;
 
 #[cfg(target_arch = "wasm32")]
 pub use crate::core::renderer::canvas2d::Canvas2DRenderer;

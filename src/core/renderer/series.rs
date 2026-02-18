@@ -26,9 +26,13 @@ pub struct ChartLayout {
 }
 
 impl ChartLayout {
-    pub fn from_physical(phys_w: u32, phys_h: u32, dpr: f64, style: &ChartStyle) -> Self {
-        let y_axis_w = style.y_axis_width as f64 * dpr;
-        let x_axis_h = style.x_axis_height as f64 * dpr;
+    /// Build layout from physical dimensions.
+    /// `y_axis_css_w` is the dynamically computed price axis width in CSS px
+    /// (from `ChartStyle::price_axis_width(max_text_w)`). Pass 0 for auto with
+    /// a reasonable default (LWC Constants.DefaultOptimalWidth = 34).
+    pub fn from_physical(phys_w: u32, phys_h: u32, dpr: f64, style: &ChartStyle, y_axis_css_w: f64) -> Self {
+        let y_axis_w = (if y_axis_css_w > 0.0 { y_axis_css_w } else { 34.0 }) * dpr;
+        let x_axis_h = style.time_axis_height() * dpr;
         let vol_h = phys_h as f64 * 0.15;
         let chart_w = (phys_w as f64 - y_axis_w).max(1.0);
         let candle_h = (phys_h as f64 - x_axis_h - vol_h).max(1.0);
