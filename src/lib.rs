@@ -1,8 +1,8 @@
 //! RayCore — high-performance charting engine.
 //!
-//! Supports multiple rendering backends:
-//! - WebGPU (wgpu 28) — primary, highest performance
-//! - Canvas 2D — fallback for browsers without WebGPU
+//! Unified Geometry architecture: all visual math computed once in
+//! geometry_generator.rs → DrawList consumed identically by Canvas2D
+//! and WebGPU renderers. Pixel-perfect consistency guaranteed.
 
 pub mod core;
 
@@ -14,6 +14,8 @@ pub use crate::core::renderer::traits::{
     Renderer, RendererBackend, RenderContext, ChartStyle, CrosshairState,
 };
 pub use crate::core::renderer::series::ChartLayout;
+pub use crate::core::renderer::draw_list::{DrawList, ColoredRect};
+pub use crate::core::renderer::geometry_generator;
 pub use crate::core::renderer::wgpu_context::GpuContext;
 pub use crate::core::renderer::wgpu_backend::WgpuRenderer;
 pub use crate::core::renderer::pipeline_manager::PipelineManager;

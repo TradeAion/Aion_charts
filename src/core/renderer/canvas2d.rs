@@ -1,21 +1,17 @@
-//! Canvas2DRenderer — HTML5 Canvas 2D backend.
+//! Canvas2DRenderer — dumb DrawList consumer.
 //!
-//! This renderer ONLY draws candles and volume using composable
-//! PaneSeriesRenderer components. All shared UI elements (axes, grid,
-//! crosshair, watermark) live in separate renderers (GridRenderer,
-//! OverlayRenderer) on their own canvases.
-//!
-//! The Canvas2D backend clears with a transparent background so the
-//! grid canvas behind it shows through.
+//! Receives a pre-computed DrawList (from GeometryGenerator) and draws every
+//! ColoredRect via CanvasRenderingContext2d.fill_rect(). No candle logic here.
+//! This guarantees pixel-perfect consistency with the WebGPU path.
 
 #![cfg(target_arch = "wasm32")]
 
-use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, CanvasRenderingContext2d};
+use wasm_bindgen::prelude::*;
 use crate::core::renderer::traits::{Renderer, RenderContext};
-use crate::core::renderer::series::{ChartLayout, PaneSeriesRenderer};
-use crate::core::renderer::candle_series::CandleSeriesCanvas2D;
-use crate::core::renderer::volume_series::VolumeSeriesCanvas2D;
+use crate::core::renderer::series::ChartLayout;
+use crate::core::renderer::draw_list::DrawList;
+use crate::core::renderer::geometry_generator;
 
 pub struct Canvas2DRenderer {
     #[allow(dead_code)]
@@ -24,8 +20,6 @@ pub struct Canvas2DRenderer {
     physical_width: u32,
     physical_height: u32,
     dpr: f64,
-    /// Composable series renderers, drawn in order.
-    series: Vec<Box<dyn PaneSeriesRenderer>>,
 }
 
 impl Canvas2DRenderer {
@@ -41,13 +35,28 @@ impl Canvas2DRenderer {
         let pw = canvas.width();
         let ph = canvas.height();
 
-        // Default series: volume first (behind), then candles on top
-        let series: Vec<Box<dyn PaneSeriesRenderer>> = vec![
-            Box::new(VolumeSeriesCanvas2D::new()),
-            Box::new(CandleSeriesCanvas2D::new()),
-        ];
+        Ok(Self { canvas, ctx, physical_width: pw, physical_height: ph, dpr })
+    }
 
-        Ok(Self { canvas, ctx, physical_width: pw, physical_height: ph, dpr, series })
+    /// Render a DrawList — simple loop over rects.
+    fn draw_list(&self, dl: &DrawList) {
+        for rect in &dl.rects {
+            if rect.w <= 0.0 || rect.h <= 0.0 { continue; }
+            let color = format!(
+                "rgba({},{},{},{})",
+                (rect.r * 255.0) as u8,
+                (rect.g * 255.0) as u8,
+                (rect.b * 255.0) as u8,
+                rect.a,
+            );
+            self.ctx.set_fill_style_str(&color);
+            self.ctx.fill_rect(
+                rect.x as f64,
+                rect.y as f64,
+                rect.w as f64,
+                rect.h as f64,
+            );
+        }
     }
 }
 
@@ -66,13 +75,11 @@ impl Renderer for Canvas2DRenderer {
             self.physical_width, self.physical_height, self.dpr, rc.style,
         );
 
-        // Clear with transparent so the grid canvas behind shows through
-        self.ctx.clear_rect(0.0, 0.0, self.physical_width as f64, self.physical_height as f64);
+        // Generate geometry — single source of truth
+        let (dl, _, _) = geometry_generator::generate(rc.bars, rc.viewport, rc.style, &layout);
 
-        // Draw each series in order (volume behind, candles on top)
-        for s in &self.series {
-            s.draw(&self.ctx, rc.bars, rc.viewport, rc.style, &layout);
-        }
+        // No clear needed — DrawList starts with opaque bg rect
+        self.draw_list(&dl);
 
         Ok(())
     }

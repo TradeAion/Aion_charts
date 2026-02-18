@@ -16,7 +16,6 @@ path = "src/lib.rs"
 [dependencies]
 wgpu = "28.0"
 bytemuck = { version = "1.21", features = ["derive"] }
-glam = "0.29"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 

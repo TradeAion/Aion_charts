@@ -57,18 +57,27 @@ impl GpuContext {
         let (device, queue): (wgpu::Device, wgpu::Queue) = device_result;
 
         let caps = surface.get_capabilities(&adapter);
+        // Prefer non-sRGB format so shader output matches Canvas2D colors exactly.
+        // Our style colors (e.g. [0.102, 0.737, 0.612]) are sRGB values meant to
+        // be used directly. An sRGB format would gamma-encode them a second time.
         let format = caps.formats.iter()
-            .find(|f| f.is_srgb())
+            .find(|f| !f.is_srgb())
             .copied()
             .unwrap_or(caps.formats[0]);
+
+        log::info!("Surface format: {:?}, available: {:?}", format, caps.formats);
 
         // Prefer PreMultiplied alpha so the canvas is transparent and the
         // grid canvas behind it shows through.
         let alpha_mode = if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PreMultiplied) {
             wgpu::CompositeAlphaMode::PreMultiplied
+        } else if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PostMultiplied) {
+            wgpu::CompositeAlphaMode::PostMultiplied
         } else {
             caps.alpha_modes[0]
         };
+
+        log::info!("Surface alpha_mode: {:?}, available: {:?}", alpha_mode, caps.alpha_modes);
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,

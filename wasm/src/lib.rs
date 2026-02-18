@@ -4,10 +4,6 @@
 //!   - grid canvas    (z-index:0) — grid lines behind candles (Canvas2D always)
 //!   - main canvas    (z-index:1) — candles + volume (WebGPU or Canvas2D)
 //!   - overlay canvas (z-index:2) — axes, crosshair, watermark (Canvas2D always)
-//!
-//!   const core = await RayCore.create("grid-canvas", "chart-canvas", "overlay-canvas");
-//!   core.set_data_arrays(open, high, low, close, volume, timestamps);
-//!   core.render();
 
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
@@ -15,6 +11,7 @@ use raycore::{
     Bar, ChartEngine, ChartLayout,
     GpuContext, WgpuRenderer, Canvas2DRenderer,
     RendererBackend, OverlayRenderer, GridRenderer,
+    geometry_generator,
 };
 
 fn init_logging() {
@@ -49,8 +46,6 @@ fn get_dpr() -> f64 {
         .max(1.0)
 }
 
-// ── JS-visible struct ─────────────────────────────────────────────────────────
-
 #[wasm_bindgen]
 pub struct RayCore {
     engine: ChartEngine,
@@ -65,16 +60,11 @@ pub struct RayCore {
 
 #[wasm_bindgen]
 impl RayCore {
-    // ── Construction ─────────────────────────────────────────────────────────
-
-    /// Create a RayCore instance — auto-detects renderer (WebGPU → Canvas2D).
-    /// 3 canvases: grid (background), chart (main), overlay (top).
     pub async fn create(grid_id: &str, canvas_id: &str, overlay_id: &str) -> Result<RayCore, JsValue> {
         let preferred = if webgpu_available() { "webgpu" } else { "canvas2d" };
         Self::create_with(grid_id, canvas_id, overlay_id, preferred).await
     }
 
-    /// Create with a specific renderer: "webgpu" or "canvas2d".
     pub async fn create_with(grid_id: &str, canvas_id: &str, overlay_id: &str, renderer: &str) -> Result<RayCore, JsValue> {
         init_logging();
 
@@ -83,13 +73,11 @@ impl RayCore {
         let overlay_canvas = get_canvas(overlay_id)?;
         let dpr = get_dpr();
 
-        // Physical size = CSS size × dpr
         let css_w = canvas.client_width() as f64;
         let css_h = canvas.client_height() as f64;
         let phys_w = (css_w * dpr).round() as u32;
         let phys_h = (css_h * dpr).round() as u32;
 
-        // Set physical canvas dimensions (high-DPI) for all 3 canvases
         for c in [&grid_canvas, &canvas, &overlay_canvas] {
             c.set_width(phys_w.max(1));
             c.set_height(phys_h.max(1));
@@ -147,8 +135,6 @@ impl RayCore {
         })
     }
 
-    // ── Renderer info ─────────────────────────────────────────────────────────
-
     pub fn renderer_name(&self) -> String {
         self.engine.renderer_name().to_string()
     }
@@ -161,8 +147,6 @@ impl RayCore {
         }
         arr
     }
-
-    // ── Data ──────────────────────────────────────────────────────────────────
 
     pub fn set_data_arrays(
         &mut self,
@@ -222,23 +206,18 @@ impl RayCore {
         log::info!("set_data: {} bars loaded", n);
     }
 
-    // ── Viewport ──────────────────────────────────────────────────────────────
-
     pub fn resize(&mut self, css_width: f64, css_height: f64) {
         let dpr = self.engine.dpr.max(1.0);
         let phys_w = (css_width * dpr).round() as u32;
         let phys_h = (css_height * dpr).round() as u32;
 
-        // Update main canvas physical dimensions
         if let Some(canvas) = self.canvas() {
             canvas.set_width(phys_w.max(1));
             canvas.set_height(phys_h.max(1));
         }
 
-        // Update grid and overlay canvas dimensions
         self.grid.resize(phys_w.max(1), phys_h.max(1), dpr);
         self.overlay.resize(phys_w.max(1), phys_h.max(1), dpr);
-
         self.engine.resize(phys_w.max(1), phys_h.max(1), dpr);
     }
 
@@ -262,8 +241,6 @@ impl RayCore {
         vec![self.engine.viewport.start_bar, self.engine.viewport.end_bar]
     }
 
-    // ── Crosshair ─────────────────────────────────────────────────────────────
-
     pub fn set_crosshair(&mut self, x: f64, y: f64, active: bool) {
         self.engine.set_crosshair(x, y, active);
     }
@@ -279,12 +256,12 @@ impl RayCore {
         ]
     }
 
-    // ── Rendering ─────────────────────────────────────────────────────────────
-
     /// Render one frame:
-    /// 1. Grid canvas (background) — grid lines
-    /// 2. Main canvas — candles + volume (WebGPU or Canvas2D)
-    /// 3. Overlay canvas — axes, crosshair, watermark
+    /// 1. Main canvas — bg + grid lines + candles + volume (unified DrawList)
+    /// 2. Overlay canvas — axes, crosshair, watermark
+    ///
+    /// The grid canvas is no longer drawn to — the main canvas DrawList includes
+    /// bg fill and grid lines, so no transparency/compositing issues arise.
     pub fn render(&mut self) {
         if !self.engine.viewport.price_locked {
             self.engine.viewport.auto_fit_price(self.engine.bars.as_slice());
@@ -297,20 +274,19 @@ impl RayCore {
             &self.engine.style,
         );
 
-        // 1. Grid (background canvas) — returns computed ticks for axes
-        let (y_ticks, x_ticks) = self.grid.render(
+        // Main canvas render (bg + grid + candles + volume via DrawList)
+        if let Err(e) = self.engine.render() {
+            log::warn!("render error: {}", e);
+        }
+
+        // Compute ticks for overlay axis labels — same math as geometry_generator
+        let (_, y_ticks, x_ticks) = geometry_generator::generate(
             self.engine.bars.as_slice(),
             &self.engine.viewport,
             &self.engine.style,
             &layout,
         );
 
-        // 2. Main canvas — candles + volume
-        if let Err(e) = self.engine.render() {
-            log::warn!("render error: {}", e);
-        }
-
-        // 3. Overlay (top canvas) — axes, crosshair, watermark
         self.overlay.render(
             self.engine.bars.as_slice(),
             &self.engine.viewport,
@@ -321,8 +297,6 @@ impl RayCore {
             &x_ticks,
         );
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
 
     fn canvas(&self) -> Option<HtmlCanvasElement> {
         get_canvas(&self.canvas_id).ok()

@@ -1,17 +1,12 @@
-//! PaneSeriesRenderer trait — composable Canvas2D series renderers.
+//! Series sizing — LWC-matching candlestick sizing algorithms.
 //!
-//! Each series type (candles, volume, line, area, etc.) implements this trait.
-//! The Canvas2D backend holds a list of these and iterates through them.
-//! This mirrors LWC's architecture where PaneRendererCandlesticks,
-//! PaneRendererHistogram, etc. are independent, composable renderers.
+//! These are used by GeometryGenerator (the single source of truth)
+//! to compute pixel-exact candle dimensions.
 
-use crate::core::data::Bar;
 use crate::core::viewport::Viewport;
 use crate::core::renderer::traits::ChartStyle;
-use web_sys::CanvasRenderingContext2d;
 
 /// Layout of the chart area in physical pixels.
-/// Shared between all series renderers and the overlay.
 #[derive(Debug, Clone, Copy)]
 pub struct ChartLayout {
     /// Width of the chart drawing area (excludes Y-axis).
@@ -22,12 +17,15 @@ pub struct ChartLayout {
     pub vol_h: f64,
     /// Height of the X-axis.
     pub x_axis_h: f64,
+    /// Total physical width (including Y-axis).
+    pub total_w: f64,
+    /// Total physical height (including X-axis).
+    pub total_h: f64,
     /// Device pixel ratio.
     pub dpr: f64,
 }
 
 impl ChartLayout {
-    /// Compute chart layout from physical dimensions and style.
     pub fn from_physical(phys_w: u32, phys_h: u32, dpr: f64, style: &ChartStyle) -> Self {
         let y_axis_w = style.y_axis_width as f64 * dpr;
         let x_axis_h = style.x_axis_height as f64 * dpr;
@@ -39,6 +37,8 @@ impl ChartLayout {
             candle_h,
             vol_h: vol_h.max(1.0),
             x_axis_h,
+            total_w: phys_w as f64,
+            total_h: phys_h as f64,
             dpr,
         }
     }
@@ -47,7 +47,6 @@ impl ChartLayout {
 // ── LWC-matching candlestick sizing (pixel-exact) ─────────────────────────
 
 /// Matches LWC `optimalCandlestickWidth(barSpacing, pixelRatio)`.
-/// Returns bar body width in physical pixels (integer).
 pub fn optimal_candlestick_width(bar_spacing: f64, pixel_ratio: f64) -> f64 {
     let special_from = 2.5;
     let special_to = 4.0;
@@ -66,15 +65,14 @@ pub fn optimal_candlestick_width(bar_spacing: f64, pixel_ratio: f64) -> f64 {
     optimal.max(pixel_ratio.floor())
 }
 
-/// Compute wick width in physical pixels matching LWC.
-/// Always at least floor(pixelRatio) (= 1 CSS pixel), never wider than bar_width.
+/// Wick width in physical pixels matching LWC.
 pub fn wick_width(bar_spacing: f64, pixel_ratio: f64, bar_width: f64) -> f64 {
     let w = (pixel_ratio.floor()).min((bar_spacing * pixel_ratio).floor());
     let w = w.max(pixel_ratio.floor());
     w.min(bar_width)
 }
 
-/// Compute border width in physical pixels matching LWC.
+/// Border width in physical pixels matching LWC.
 pub fn border_width(pixel_ratio: f64, bar_width: f64) -> f64 {
     let mut bw = (1.0 * pixel_ratio).floor();
     if bar_width <= 2.0 * bw {
@@ -82,7 +80,6 @@ pub fn border_width(pixel_ratio: f64, bar_width: f64) -> f64 {
     }
     let res = bw.max(pixel_ratio.floor());
     if bar_width <= res * 2.0 {
-        // Can't fit border + body, return original (border-only mode)
         return (1.0 * pixel_ratio).floor().max(pixel_ratio.floor());
     }
     res
@@ -103,23 +100,17 @@ pub fn parity_fix(bar_width: f64, wick_width: f64) -> f64 {
 /// All computed candle sizes in physical pixels for a given bar_spacing and dpr.
 #[derive(Debug, Clone, Copy)]
 pub struct CandleSizing {
-    /// Bar body width (physical px, integer).
     pub bar_width: f64,
-    /// Wick width (physical px, integer).
     pub wick_width: f64,
-    /// Border width (physical px, integer).
     pub border_width: f64,
-    /// Whether body fill should be drawn (bar_width > 2*border_width).
     pub draw_body: bool,
-    /// Bar spacing in logical (CSS) pixels.
     pub bar_spacing: f64,
 }
 
 impl CandleSizing {
-    /// Compute all sizing from layout and viewport, matching LWC exactly.
     pub fn compute(layout: &ChartLayout, vp: &Viewport) -> Self {
         let visible_bars = vp.end_bar - vp.start_bar;
-        let bar_spacing = layout.chart_w / (visible_bars * layout.dpr); // logical px per bar
+        let bar_spacing = layout.chart_w / (visible_bars * layout.dpr);
         let dpr = layout.dpr;
 
         let mut bw = optimal_candlestick_width(bar_spacing, dpr);
@@ -136,18 +127,4 @@ impl CandleSizing {
             bar_spacing,
         }
     }
-}
-
-/// A composable Canvas2D series renderer.
-/// Each series type implements this; the backend iterates through all of them.
-pub trait PaneSeriesRenderer {
-    /// Draw this series onto the given Canvas2D context.
-    fn draw(
-        &self,
-        ctx: &CanvasRenderingContext2d,
-        bars: &[Bar],
-        viewport: &Viewport,
-        style: &ChartStyle,
-        layout: &ChartLayout,
-    );
 }

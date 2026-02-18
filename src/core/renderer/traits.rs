@@ -1,8 +1,8 @@
 //! Renderer trait — the abstraction layer between core logic and rendering backends.
 //!
-//! All renderers (WgpuRenderer, Canvas2DRenderer, future WebGLRenderer, etc.)
-//! implement this trait. Core logic (ChartEngine, Viewport, DataSeries) never
-//! touches any rendering API directly — only through this trait.
+//! All renderers (WgpuRenderer, Canvas2DRenderer) implement this trait.
+//! Both renderers internally call geometry_generator::generate() to get
+//! the same DrawList, then render it with their respective APIs.
 
 use crate::core::data::Bar;
 use crate::core::viewport::Viewport;
@@ -66,15 +66,10 @@ impl Default for ChartStyle {
 /// Crosshair state — the position of the crosshair in logical coordinates.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CrosshairState {
-    /// Whether crosshair is active (mouse is over chart).
     pub active: bool,
-    /// Mouse X in CSS pixels (relative to canvas).
     pub x: f64,
-    /// Mouse Y in CSS pixels (relative to canvas).
     pub y: f64,
-    /// Snapped bar index (nearest bar to cursor).
     pub bar_index: Option<usize>,
-    /// Price at cursor Y.
     pub price: f64,
 }
 
@@ -84,39 +79,25 @@ pub struct RenderContext<'a> {
     pub viewport: &'a Viewport,
     pub style: &'a ChartStyle,
     pub crosshair: &'a CrosshairState,
-    /// Device pixel ratio for high-DPI rendering.
     pub dpr: f64,
-    /// Logical width (CSS pixels).
     pub logical_width: f64,
-    /// Logical height (CSS pixels).
     pub logical_height: f64,
 }
 
 /// Tick mark for axis rendering.
 #[derive(Debug, Clone)]
 pub struct TickMark {
-    /// Position in logical coordinate space (bar index for X, price for Y).
     pub value: f64,
-    /// Pixel position (physical pixels).
     pub pixel: f64,
-    /// Label to display.
     pub label: String,
-    /// Whether this is a major tick (gets a grid line).
     pub major: bool,
 }
 
 /// The renderer-agnostic trait. Every rendering backend implements this.
 pub trait Renderer {
-    /// Name of this renderer backend (e.g., "webgpu", "canvas2d").
     fn name(&self) -> &str;
-
-    /// Resize the rendering surface.
     fn resize(&mut self, physical_width: u32, physical_height: u32, dpr: f64);
-
-    /// Perform a full frame render.
     fn render_frame(&mut self, ctx: &RenderContext) -> Result<(), String>;
-
-    /// Check if the renderer is still valid (e.g., GPU context not lost).
     fn is_valid(&self) -> bool { true }
 }
 
