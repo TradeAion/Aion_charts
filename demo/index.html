@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>RayCharts Core — Demo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0e0e11;
+      color: #ccc;
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    header {
+      padding: 10px 16px;
+      background: #16161a;
+      border-bottom: 1px solid #2a2a30;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    header h1 { font-size: 16px; color: #e0e0e0; }
+    header span { font-size: 12px; color: #888; }
+    .controls {
+      display: flex;
+      gap: 8px;
+      margin-left: auto;
+    }
+    .controls button {
+      padding: 4px 12px;
+      background: #2a2a30;
+      color: #ccc;
+      border: 1px solid #3a3a40;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .controls button:hover { background: #3a3a40; }
+    #chart-container {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+    #chart-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    #status {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      font-size: 11px;
+      color: #666;
+      pointer-events: none;
+    }
+    #error-banner {
+      display: none;
+      background: #3a1010;
+      color: #ff6b6b;
+      padding: 12px 16px;
+      font-size: 13px;
+      border-bottom: 1px solid #5a2020;
+    }
+  </style>
+</head>
+<body>
+  <div id="error-banner"></div>
+  <header>
+    <h1>RayCharts Core</h1>
+    <span>WebGPU Candlestick Renderer</span>
+    <div class="controls">
+      <button id="btn-zoom-in">Zoom In</button>
+      <button id="btn-zoom-out">Zoom Out</button>
+      <button id="btn-pan-left">&larr; Pan</button>
+      <button id="btn-pan-right">Pan &rarr;</button>
+      <button id="btn-reset">Reset</button>
+    </div>
+  </header>
+  <div id="chart-container">
+    <canvas id="chart-canvas"></canvas>
+    <div id="status">Initializing WebGPU...</div>
+  </div>
+
+  <script type="module">
+    import init, { RayCore } from '../pkg/raycore_wasm.js';
+
+    const status = document.getElementById('status');
+    const errorBanner = document.getElementById('error-banner');
+
+    function showError(msg) {
+      errorBanner.textContent = msg;
+      errorBanner.style.display = 'block';
+      status.textContent = 'Error';
+    }
+
+    // Check WebGPU support
+    if (!navigator.gpu) {
+      showError(
+        'WebGPU is not supported in this browser. Please use Chrome 113+, Edge 113+, or another WebGPU-capable browser. ' +
+        'Make sure hardware acceleration is enabled.'
+      );
+    }
+
+    // Generate sample OHLCV data (random walk)
+    function generateSampleData(numBars) {
+      const open = new Float32Array(numBars);
+      const high = new Float32Array(numBars);
+      const low = new Float32Array(numBars);
+      const close = new Float32Array(numBars);
+      const volume = new Float32Array(numBars);
+
+      let price = 100;
+      for (let i = 0; i < numBars; i++) {
+        const change = (Math.random() - 0.48) * 3; // slight upward bias
+        const o = price;
+        const c = price + change;
+        const h = Math.max(o, c) + Math.random() * 2;
+        const l = Math.min(o, c) - Math.random() * 2;
+        const v = 500 + Math.random() * 2000;
+
+        open[i] = o;
+        high[i] = h;
+        low[i] = l;
+        close[i] = c;
+        volume[i] = v;
+
+        price = c;
+      }
+      return { open, high, low, close, volume };
+    }
+
+    async function main() {
+      try {
+        status.textContent = 'Loading WASM module...';
+        await init();
+
+        // Size the canvas to its container
+        const canvas = document.getElementById('chart-canvas');
+        const container = document.getElementById('chart-container');
+        const dpr = window.devicePixelRatio || 1;
+
+        function sizeCanvas() {
+          const w = container.clientWidth;
+          const h = container.clientHeight;
+          canvas.width = Math.round(w * dpr);
+          canvas.height = Math.round(h * dpr);
+          return { w, h };
+        }
+
+        const { w, h } = sizeCanvas();
+
+        status.textContent = 'Requesting WebGPU device...';
+        const core = await RayCore.create('chart-canvas');
+
+        core.resize(canvas.width, canvas.height);
+
+        status.textContent = 'Generating sample data...';
+        const numBars = 500;
+        const data = generateSampleData(numBars);
+        core.set_data_arrays(data.open, data.high, data.low, data.close, data.volume);
+
+        // Show all bars initially
+        core.zoom_to_range(BigInt(0), BigInt(numBars));
+
+        status.textContent = '';
+
+        // Render loop
+        let running = true;
+        function frame() {
+          if (!running) return;
+          try {
+            core.render();
+          } catch (e) {
+            console.error('Render error:', e);
+            showError('Render error: ' + e.message);
+            running = false;
+            return;
+          }
+          requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+
+        // Handle resize
+        const resizeObserver = new ResizeObserver(() => {
+          sizeCanvas();
+          core.resize(canvas.width, canvas.height);
+        });
+        resizeObserver.observe(container);
+
+        // Controls
+        const midBar = () => {
+          const range = core.visible_range();
+          return (range[0] + range[1]) / 2;
+        };
+
+        document.getElementById('btn-zoom-in').addEventListener('click', () => {
+          core.zoom(midBar(), 0.8);
+        });
+        document.getElementById('btn-zoom-out').addEventListener('click', () => {
+          core.zoom(midBar(), 1.25);
+        });
+        document.getElementById('btn-pan-left').addEventListener('click', () => {
+          core.pan(-10);
+        });
+        document.getElementById('btn-pan-right').addEventListener('click', () => {
+          core.pan(10);
+        });
+        document.getElementById('btn-reset').addEventListener('click', () => {
+          core.zoom_to_range(BigInt(0), BigInt(numBars));
+        });
+
+        // Mouse wheel zoom + drag pan
+        canvas.addEventListener('wheel', (e) => {
+          e.preventDefault();
+          const rect = canvas.getBoundingClientRect();
+          const xFrac = (e.clientX - rect.left) / rect.width;
+          const range = core.visible_range();
+          const focalBar = range[0] + xFrac * (range[1] - range[0]);
+          const factor = e.deltaY > 0 ? 1.1 : 0.9;
+          core.zoom(focalBar, factor);
+        }, { passive: false });
+
+        let dragging = false;
+        let lastX = 0;
+        canvas.addEventListener('mousedown', (e) => {
+          dragging = true;
+          lastX = e.clientX;
+          canvas.style.cursor = 'grabbing';
+        });
+        window.addEventListener('mousemove', (e) => {
+          if (!dragging) return;
+          const dx = e.clientX - lastX;
+          lastX = e.clientX;
+          const range = core.visible_range();
+          const barsVisible = range[1] - range[0];
+          const barsPanned = -(dx / canvas.getBoundingClientRect().width) * barsVisible;
+          core.pan(barsPanned);
+        });
+        window.addEventListener('mouseup', () => {
+          dragging = false;
+          canvas.style.cursor = 'default';
+        });
+
+      } catch (e) {
+        console.error('Init error:', e);
+        showError('Failed to initialize: ' + e.message);
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>
