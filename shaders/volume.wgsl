@@ -1,14 +1,19 @@
 // Volume shader — instanced histogram bars.
 //
-// Each instance: x, volume, bar_width, is_bullish.
-// Generates 4 vertices per instance (triangle strip rectangle from 0 to volume).
+// Each instance: x, volume, bar_width (legacy), is_bullish.
+// Generates 6 vertices per instance (TriangleList: 2 triangles = 1 quad).
+// Bar width comes from uniform bar_width_px / px_per_bar.
 
 struct ViewportUniforms {
     projection: mat4x4<f32>,
     width_px: f32,
     height_px: f32,
     visible_bars: f32,
-    _pad: f32,
+    px_per_bar: f32,
+    bar_width_px: f32,
+    wick_width_px: f32,
+    border_width_px: f32,
+    draw_body: f32,
 };
 
 @group(0) @binding(0)
@@ -36,15 +41,18 @@ fn vs_main(
 ) -> VertexOutput {
     var out: VertexOutput;
 
-    let half_w = instance.bar_width * 0.5;
+    let ppb = max(viewport.px_per_bar, 0.001);
+    let half_w = (viewport.bar_width_px / ppb) * 0.5;
     var pos: vec2<f32>;
 
-    // Triangle strip: BL, BR, TL, TR
+    // TriangleList: BL, BR, TL,  TL, BR, TR
     switch (vertex_index) {
         case 0u: { pos = vec2<f32>(instance.x - half_w, 0.0); }
         case 1u: { pos = vec2<f32>(instance.x + half_w, 0.0); }
         case 2u: { pos = vec2<f32>(instance.x - half_w, instance.volume); }
-        case 3u: { pos = vec2<f32>(instance.x + half_w, instance.volume); }
+        case 3u: { pos = vec2<f32>(instance.x - half_w, instance.volume); }
+        case 4u: { pos = vec2<f32>(instance.x + half_w, 0.0); }
+        case 5u: { pos = vec2<f32>(instance.x + half_w, instance.volume); }
         default: { pos = vec2<f32>(0.0, 0.0); }
     }
 

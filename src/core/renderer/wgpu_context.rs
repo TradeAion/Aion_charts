@@ -15,33 +15,32 @@ pub struct GpuContext {
 
 impl GpuContext {
     /// Create a GpuContext from a raw window handle (native) or canvas (wasm).
-    /// The `target` must be a valid surface target that outlives `'static`.
+    /// Returns `Err` if WebGPU is unavailable so the caller can fall back.
     pub async fn new(
         target: impl Into<wgpu::SurfaceTarget<'static>>,
         width: u32,
         height: u32,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
         });
 
-        let surface = instance.create_surface(target).expect("Failed to create surface");
+        let surface = instance.create_surface(target)
+            .map_err(|e| format!("Failed to create surface: {:?}", e))?;
 
-        let adapter = instance
+        let adapter: wgpu::Adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
             })
             .await
-            .expect("No suitable GPU adapter found");
+            .map_err(|e| format!("No suitable GPU adapter found: {:?}", e))?;
 
         log::info!("Adapter: {:?}", adapter.get_info());
 
-        // wgpu 28: request_device takes 1 arg, DeviceDescriptor needs
-        // experimental_features and trace fields.
-        let (device, queue) = adapter
+        let device_result = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("raycore-device"),
@@ -54,7 +53,8 @@ impl GpuContext {
                 },
             )
             .await
-            .expect("Failed to create device");
+            .map_err(|e| format!("Failed to create device: {:?}", e))?;
+        let (device, queue): (wgpu::Device, wgpu::Queue) = device_result;
 
         let caps = surface.get_capabilities(&adapter);
         let format = caps.formats.iter()
@@ -62,26 +62,34 @@ impl GpuContext {
             .copied()
             .unwrap_or(caps.formats[0]);
 
+        // Prefer PreMultiplied alpha so the canvas is transparent and the
+        // grid canvas behind it shows through.
+        let alpha_mode = if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PreMultiplied) {
+            wgpu::CompositeAlphaMode::PreMultiplied
+        } else {
+            caps.alpha_modes[0]
+        };
+
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width: width.max(1),
             height: height.max(1),
             present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: caps.alpha_modes[0],
+            alpha_mode,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
 
         surface.configure(&device, &config);
 
-        Self {
+        Ok(Self {
             surface,
             device,
             queue,
             config,
             format,
-        }
+        })
     }
 
     /// Reconfigure surface on resize.

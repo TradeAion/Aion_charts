@@ -109,8 +109,15 @@ impl CandleRenderer {
 
         queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
 
-        // Upload uniforms
-        let uniforms = viewport.candle_uniforms();
+        // Upload uniforms (legacy — pass defaults for new sizing fields)
+        let uniforms = viewport.candle_uniforms(
+            viewport.width as f32,   // chart_w
+            viewport.height as f32,  // candle_h
+            8.0,                     // bar_width_px
+            1.0,                     // wick_width_px
+            1.0,                     // border_width_px
+            true,                    // draw_body
+        );
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
     }
 

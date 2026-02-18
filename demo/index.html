@@ -12,57 +12,107 @@
       display: flex;
       flex-direction: column;
       height: 100vh;
+      overflow: hidden;
     }
     header {
-      padding: 10px 16px;
+      padding: 8px 16px;
       background: #16161a;
       border-bottom: 1px solid #2a2a30;
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: 14px;
+      flex-shrink: 0;
     }
-    header h1 { font-size: 16px; color: #e0e0e0; }
-    header span { font-size: 12px; color: #888; }
+    header h1 { font-size: 15px; color: #e0e0e0; font-weight: 600; }
+    #renderer-badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: #1a3a2a;
+      color: #1abc9c;
+      border: 1px solid #1abc9c44;
+    }
+    #renderer-badge.canvas2d {
+      background: #1a2a3a;
+      color: #4a9eff;
+      border-color: #4a9eff44;
+    }
     .controls {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       margin-left: auto;
+      align-items: center;
     }
     .controls button {
-      padding: 4px 12px;
+      padding: 4px 11px;
       background: #2a2a30;
       color: #ccc;
       border: 1px solid #3a3a40;
       border-radius: 4px;
       cursor: pointer;
       font-size: 12px;
+      transition: background 0.15s;
     }
-    .controls button:hover { background: #3a3a40; }
+    .controls button:hover { background: #3a3a42; }
+    .controls button.active { background: #1a3a2a; color: #1abc9c; border-color: #1abc9c55; }
+    .sep { width: 1px; height: 18px; background: #2a2a30; }
     #chart-container {
       flex: 1;
       position: relative;
       overflow: hidden;
+      min-height: 0;
     }
-    #chart-canvas {
+    /* 3-canvas stack: grid (bottom) → chart (middle) → overlay (top) */
+    #grid-canvas, #chart-canvas, #overlay-canvas {
+      position: absolute;
+      top: 0; left: 0;
       width: 100%;
       height: 100%;
       display: block;
     }
-    #status {
+    #grid-canvas    { z-index: 0; }
+    #chart-canvas   { z-index: 1; }
+    #overlay-canvas { z-index: 2; pointer-events: none; }
+    #hud {
       position: absolute;
       top: 8px;
       left: 8px;
       font-size: 11px;
-      color: #666;
+      color: #555;
       pointer-events: none;
+      line-height: 1.6;
+      z-index: 3;
+    }
+    #crosshair-info {
+      position: absolute;
+      bottom: 36px;
+      left: 8px;
+      font-size: 11px;
+      color: #888;
+      pointer-events: none;
+      font-variant-numeric: tabular-nums;
+      z-index: 3;
     }
     #error-banner {
       display: none;
-      background: #3a1010;
+      background: #2a1010;
       color: #ff6b6b;
-      padding: 12px 16px;
+      padding: 10px 16px;
       font-size: 13px;
       border-bottom: 1px solid #5a2020;
+      flex-shrink: 0;
+    }
+    #loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0e0e11dd;
+      font-size: 14px;
+      color: #666;
+      letter-spacing: 0.05em;
+      z-index: 10;
     }
   </style>
 </head>
@@ -70,187 +120,213 @@
   <div id="error-banner"></div>
   <header>
     <h1>RayCharts Core</h1>
-    <span>WebGPU Candlestick Renderer</span>
+    <span id="renderer-badge">…</span>
     <div class="controls">
-      <button id="btn-zoom-in">Zoom In</button>
-      <button id="btn-zoom-out">Zoom Out</button>
-      <button id="btn-pan-left">&larr; Pan</button>
-      <button id="btn-pan-right">Pan &rarr;</button>
+      <button id="btn-renderer-auto">Auto</button>
+      <button id="btn-renderer-webgpu">WebGPU</button>
+      <button id="btn-renderer-canvas2d">Canvas 2D</button>
+      <div class="sep"></div>
+      <button id="btn-zoom-in">+ Zoom</button>
+      <button id="btn-zoom-out">- Zoom</button>
+      <button id="btn-pan-left">Pan Left</button>
+      <button id="btn-pan-right">Pan Right</button>
       <button id="btn-reset">Reset</button>
     </div>
   </header>
+
   <div id="chart-container">
+    <canvas id="grid-canvas"></canvas>
     <canvas id="chart-canvas"></canvas>
-    <div id="status">Initializing WebGPU...</div>
+    <canvas id="overlay-canvas"></canvas>
+    <div id="loading">Initializing…</div>
+    <div id="hud"></div>
+    <div id="crosshair-info"></div>
   </div>
 
   <script type="module">
     import init, { RayCore } from '../pkg/raycore_wasm.js';
 
-    const status = document.getElementById('status');
-    const errorBanner = document.getElementById('error-banner');
+    const errorBanner  = document.getElementById('error-banner');
+    const loading      = document.getElementById('loading');
+    const hud          = document.getElementById('hud');
+    const xhairInfo    = document.getElementById('crosshair-info');
+    const badge        = document.getElementById('renderer-badge');
+    const container    = document.getElementById('chart-container');
 
+    // ── Error helper ────────────────────────────────────────────────────────
     function showError(msg) {
-      errorBanner.textContent = msg;
+      errorBanner.textContent = 'Error: ' + msg;
       errorBanner.style.display = 'block';
-      status.textContent = 'Error';
+      loading.style.display = 'none';
     }
 
-    // Check WebGPU support
-    if (!navigator.gpu) {
-      showError(
-        'WebGPU is not supported in this browser. Please use Chrome 113+, Edge 113+, or another WebGPU-capable browser. ' +
-        'Make sure hardware acceleration is enabled.'
-      );
-    }
-
-    // Generate sample OHLCV data (random walk)
-    function generateSampleData(numBars) {
-      const open = new Float32Array(numBars);
-      const high = new Float32Array(numBars);
-      const low = new Float32Array(numBars);
-      const close = new Float32Array(numBars);
-      const volume = new Float32Array(numBars);
-
-      let price = 100;
-      for (let i = 0; i < numBars; i++) {
-        const change = (Math.random() - 0.48) * 3; // slight upward bias
-        const o = price;
-        const c = price + change;
-        const h = Math.max(o, c) + Math.random() * 2;
-        const l = Math.min(o, c) - Math.random() * 2;
-        const v = 500 + Math.random() * 2000;
-
-        open[i] = o;
-        high[i] = h;
-        low[i] = l;
-        close[i] = c;
-        volume[i] = v;
-
+    // ── Sample data generator ────────────────────────────────────────────────
+    function generateSampleData(n) {
+      const open = new Float32Array(n), high = new Float32Array(n),
+            low  = new Float32Array(n), close = new Float32Array(n),
+            volume = new Float32Array(n),
+            timestamps = new BigUint64Array(n);
+      let price = 42000;
+      const startMs = Date.now() - n * 60_000;
+      for (let i = 0; i < n; i++) {
+        const chg = (Math.random() - 0.48) * price * 0.012;
+        const o = price, c = price + chg;
+        const h = Math.max(o, c) + Math.random() * price * 0.005;
+        const l = Math.min(o, c) - Math.random() * price * 0.005;
+        open[i] = o; high[i] = h; low[i] = l; close[i] = c;
+        volume[i] = 200 + Math.random() * 4000;
+        timestamps[i] = BigInt(Math.round(startMs + i * 60_000));
         price = c;
       }
-      return { open, high, low, close, volume };
+      return { open, high, low, close, volume, timestamps };
     }
 
-    async function main() {
+    // ── RayCore instance management ─────────────────────────────────────────
+    let core = null;
+    let rafId = null;
+    let sampleData = null;
+    const NUM_BARS = 600;
+
+    // Replace the main canvas (avoids context-type lock when switching backends).
+    // Grid and overlay canvases are always Canvas2D, so they never need replacing.
+    function freshMainCanvas() {
+      const old = document.getElementById('chart-canvas');
+      if (old) old.remove();
+      const c = document.createElement('canvas');
+      c.id = 'chart-canvas';
+      c.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:block;z-index:1;';
+      // Insert before the overlay canvas so stacking order is correct
+      const overlay = document.getElementById('overlay-canvas');
+      container.insertBefore(c, overlay);
+      return c;
+    }
+
+    async function spawnCore(rendererHint) {
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      if (core)  { core.free(); core = null; }
+
+      // Replace main canvas (context-type lock), keep grid and overlay canvases
+      freshMainCanvas();
+
+      loading.style.display = 'flex';
+      loading.textContent = 'Initializing ' + (rendererHint || 'auto') + '...';
+
       try {
-        status.textContent = 'Loading WASM module...';
-        await init();
+        core = rendererHint
+          ? await RayCore.create_with('grid-canvas', 'chart-canvas', 'overlay-canvas', rendererHint)
+          : await RayCore.create('grid-canvas', 'chart-canvas', 'overlay-canvas');
 
-        // Size the canvas to its container
-        const canvas = document.getElementById('chart-canvas');
-        const container = document.getElementById('chart-container');
-        const dpr = window.devicePixelRatio || 1;
+        const rName = core.renderer_name();
+        badge.textContent = rName === 'webgpu' ? 'WebGPU' : 'Canvas 2D';
+        badge.className = rName;
 
-        function sizeCanvas() {
-          const w = container.clientWidth;
-          const h = container.clientHeight;
-          canvas.width = Math.round(w * dpr);
-          canvas.height = Math.round(h * dpr);
-          return { w, h };
-        }
+        if (!sampleData) sampleData = generateSampleData(NUM_BARS);
+        core.set_data_arrays(
+          sampleData.open, sampleData.high, sampleData.low,
+          sampleData.close, sampleData.volume, sampleData.timestamps
+        );
+        core.zoom_to_range(BigInt(0), BigInt(NUM_BARS));
 
-        const { w, h } = sizeCanvas();
-
-        status.textContent = 'Requesting WebGPU device...';
-        const core = await RayCore.create('chart-canvas');
-
-        core.resize(canvas.width, canvas.height);
-
-        status.textContent = 'Generating sample data...';
-        const numBars = 500;
-        const data = generateSampleData(numBars);
-        core.set_data_arrays(data.open, data.high, data.low, data.close, data.volume);
-
-        // Show all bars initially
-        core.zoom_to_range(BigInt(0), BigInt(numBars));
-
-        status.textContent = '';
-
-        // Render loop
-        let running = true;
-        function frame() {
-          if (!running) return;
-          try {
-            core.render();
-          } catch (e) {
-            console.error('Render error:', e);
-            showError('Render error: ' + e.message);
-            running = false;
-            return;
-          }
-          requestAnimationFrame(frame);
-        }
-        requestAnimationFrame(frame);
-
-        // Handle resize
-        const resizeObserver = new ResizeObserver(() => {
-          sizeCanvas();
-          core.resize(canvas.width, canvas.height);
-        });
-        resizeObserver.observe(container);
-
-        // Controls
-        const midBar = () => {
-          const range = core.visible_range();
-          return (range[0] + range[1]) / 2;
-        };
-
-        document.getElementById('btn-zoom-in').addEventListener('click', () => {
-          core.zoom(midBar(), 0.8);
-        });
-        document.getElementById('btn-zoom-out').addEventListener('click', () => {
-          core.zoom(midBar(), 1.25);
-        });
-        document.getElementById('btn-pan-left').addEventListener('click', () => {
-          core.pan(-10);
-        });
-        document.getElementById('btn-pan-right').addEventListener('click', () => {
-          core.pan(10);
-        });
-        document.getElementById('btn-reset').addEventListener('click', () => {
-          core.zoom_to_range(BigInt(0), BigInt(numBars));
-        });
-
-        // Mouse wheel zoom + drag pan
-        canvas.addEventListener('wheel', (e) => {
-          e.preventDefault();
-          const rect = canvas.getBoundingClientRect();
-          const xFrac = (e.clientX - rect.left) / rect.width;
-          const range = core.visible_range();
-          const focalBar = range[0] + xFrac * (range[1] - range[0]);
-          const factor = e.deltaY > 0 ? 1.1 : 0.9;
-          core.zoom(focalBar, factor);
-        }, { passive: false });
-
-        let dragging = false;
-        let lastX = 0;
-        canvas.addEventListener('mousedown', (e) => {
-          dragging = true;
-          lastX = e.clientX;
-          canvas.style.cursor = 'grabbing';
-        });
-        window.addEventListener('mousemove', (e) => {
-          if (!dragging) return;
-          const dx = e.clientX - lastX;
-          lastX = e.clientX;
-          const range = core.visible_range();
-          const barsVisible = range[1] - range[0];
-          const barsPanned = -(dx / canvas.getBoundingClientRect().width) * barsVisible;
-          core.pan(barsPanned);
-        });
-        window.addEventListener('mouseup', () => {
-          dragging = false;
-          canvas.style.cursor = 'default';
-        });
-
-      } catch (e) {
-        console.error('Init error:', e);
-        showError('Failed to initialize: ' + e.message);
+        loading.style.display = 'none';
+        startRenderLoop();
+        hud.textContent = rName + ' | ' + NUM_BARS + ' bars | dpr=' + (window.devicePixelRatio||1).toFixed(1);
+      } catch(e) {
+        console.error(e);
+        showError('Init failed: ' + (e.message || e));
       }
     }
 
-    main();
+    // ── Render loop ─────────────────────────────────────────────────────────
+    function startRenderLoop() {
+      function frame() {
+        rafId = requestAnimationFrame(frame);
+        try { core.render(); } catch(e) {
+          console.error('Render error:', e);
+          cancelAnimationFrame(rafId); rafId = null;
+        }
+      }
+      rafId = requestAnimationFrame(frame);
+    }
+
+    // ── Resize ──────────────────────────────────────────────────────────────
+    const ro = new ResizeObserver(() => {
+      if (!core) return;
+      core.resize(container.clientWidth, container.clientHeight);
+    });
+    ro.observe(container);
+
+    // ── Controls ────────────────────────────────────────────────────────────
+    const midBar = () => { const r = core.visible_range(); return (r[0]+r[1])/2; };
+
+    document.getElementById('btn-zoom-in'   ).onclick = () => core?.zoom(midBar(), 0.8);
+    document.getElementById('btn-zoom-out'  ).onclick = () => core?.zoom(midBar(), 1.25);
+    document.getElementById('btn-pan-left'  ).onclick = () => core?.pan(-15);
+    document.getElementById('btn-pan-right' ).onclick = () => core?.pan(15);
+    document.getElementById('btn-reset'     ).onclick = () => core?.zoom_to_range(BigInt(0), BigInt(NUM_BARS));
+    document.getElementById('btn-renderer-auto'    ).onclick = () => spawnCore(null);
+    document.getElementById('btn-renderer-webgpu'  ).onclick = () => spawnCore('webgpu');
+    document.getElementById('btn-renderer-canvas2d').onclick = () => spawnCore('canvas2d');
+
+    // ── Mouse events — bound to container so they survive canvas replacement ─
+    let dragging = false, lastX = 0;
+
+    container.addEventListener('wheel', e => {
+      e.preventDefault();
+      if (!core) return;
+      const rect = container.getBoundingClientRect();
+      const xFrac = (e.clientX - rect.left) / rect.width;
+      const r = core.visible_range();
+      core.zoom(r[0] + xFrac * (r[1] - r[0]), e.deltaY > 0 ? 1.1 : 0.909);
+    }, { passive: false });
+
+    container.addEventListener('mousedown', e => {
+      dragging = true; lastX = e.clientX;
+      container.style.cursor = 'grabbing';
+    });
+
+    window.addEventListener('mousemove', e => {
+      if (!core) return;
+      const rect = container.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      core.set_crosshair(x, y, true);
+      const info = core.crosshair_info();
+      if (info[4] > 0) {
+        const barIdx = info[3] >= 0 ? Math.round(info[3]) : -1;
+        const ts = (barIdx >= 0 && sampleData)
+          ? new Date(Number(sampleData.timestamps[barIdx])).toUTCString().slice(5, 22)
+          : '';
+        xhairInfo.textContent = ts + '  |  $' + info[2].toFixed(2);
+      }
+
+      if (dragging) {
+        const dx = e.clientX - lastX; lastX = e.clientX;
+        const r = core.visible_range();
+        core.pan(-(dx / rect.width) * (r[1] - r[0]));
+      }
+    });
+
+    window.addEventListener('mouseup', () => {
+      dragging = false;
+      container.style.cursor = '';
+    });
+
+    container.addEventListener('mouseleave', () => {
+      core?.set_crosshair(0, 0, false);
+      xhairInfo.textContent = '';
+    });
+
+    // ── Boot ─────────────────────────────────────────────────────────────────
+    (async () => {
+      try {
+        await init();
+        await spawnCore(null);
+      } catch(e) {
+        console.error(e);
+        showError('Failed to load WASM: ' + (e.message || e));
+      }
+    })();
   </script>
 </body>
 </html>

@@ -1,111 +1,169 @@
-//! WASM entry point — thin JS interop layer for RayCore.
+//! RayCore WASM bindings — JS interop layer.
 //!
-//! This crate re-exports the core engine behind `#[wasm_bindgen]` functions.
-//! All heavy logic lives in the `raycore` crate; this is just the bridge.
+//! 3-canvas architecture (like LWC):
+//!   - grid canvas    (z-index:0) — grid lines behind candles (Canvas2D always)
+//!   - main canvas    (z-index:1) — candles + volume (WebGPU or Canvas2D)
+//!   - overlay canvas (z-index:2) — axes, crosshair, watermark (Canvas2D always)
+//!
+//!   const core = await RayCore.create("grid-canvas", "chart-canvas", "overlay-canvas");
+//!   core.set_data_arrays(open, high, low, close, volume, timestamps);
+//!   core.render();
 
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
-use raycore::{Bar, ChartEngine, GpuContext};
+use raycore::{
+    Bar, ChartEngine, ChartLayout,
+    GpuContext, WgpuRenderer, Canvas2DRenderer,
+    RendererBackend, OverlayRenderer, GridRenderer,
+};
 
-/// Initialize panic hook and logger (called once).
 fn init_logging() {
     console_error_panic_hook::set_once();
     let _ = console_log::init_with_level(log::Level::Info);
 }
 
-/// The JS-facing handle to the chart engine.
+fn get_canvas(canvas_id: &str) -> Result<HtmlCanvasElement, JsValue> {
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
+    let document = window.document().ok_or_else(|| JsValue::from_str("no document"))?;
+    document
+        .get_element_by_id(canvas_id)
+        .ok_or_else(|| JsValue::from_str(&format!("canvas '{}' not found", canvas_id)))?
+        .dyn_into::<HtmlCanvasElement>()
+        .map_err(|_| JsValue::from_str("element is not a canvas"))
+}
+
+fn webgpu_available() -> bool {
+    let window = match web_sys::window() {
+        Some(w) => w,
+        None => return false,
+    };
+    js_sys::Reflect::get(&window.navigator(), &JsValue::from_str("gpu"))
+        .map(|v| !v.is_undefined() && !v.is_null())
+        .unwrap_or(false)
+}
+
+fn get_dpr() -> f64 {
+    web_sys::window()
+        .map(|w| w.device_pixel_ratio())
+        .unwrap_or(1.0)
+        .max(1.0)
+}
+
+// ── JS-visible struct ─────────────────────────────────────────────────────────
+
 #[wasm_bindgen]
 pub struct RayCore {
     engine: ChartEngine,
+    grid: GridRenderer,
+    overlay: OverlayRenderer,
+    canvas_id: String,
+    #[allow(dead_code)]
+    grid_id: String,
+    #[allow(dead_code)]
+    overlay_id: String,
 }
 
 #[wasm_bindgen]
 impl RayCore {
-    /// Create a new RayCore instance attached to a `<canvas>` element by ID.
-    ///
-    /// This is async because WebGPU adapter/device requests are async.
-    /// Call from JS: `const core = await RayCore.create("my-canvas");`
-    pub async fn create(canvas_id: &str) -> Result<RayCore, JsValue> {
+    // ── Construction ─────────────────────────────────────────────────────────
+
+    /// Create a RayCore instance — auto-detects renderer (WebGPU → Canvas2D).
+    /// 3 canvases: grid (background), chart (main), overlay (top).
+    pub async fn create(grid_id: &str, canvas_id: &str, overlay_id: &str) -> Result<RayCore, JsValue> {
+        let preferred = if webgpu_available() { "webgpu" } else { "canvas2d" };
+        Self::create_with(grid_id, canvas_id, overlay_id, preferred).await
+    }
+
+    /// Create with a specific renderer: "webgpu" or "canvas2d".
+    pub async fn create_with(grid_id: &str, canvas_id: &str, overlay_id: &str, renderer: &str) -> Result<RayCore, JsValue> {
         init_logging();
 
-        let window = web_sys::window().ok_or("no window")?;
-        let document = window.document().ok_or("no document")?;
-        let canvas = document
-            .get_element_by_id(canvas_id)
-            .ok_or_else(|| format!("canvas '{}' not found", canvas_id))?
-            .dyn_into::<HtmlCanvasElement>()
-            .map_err(|_| "element is not a canvas")?;
+        let grid_canvas = get_canvas(grid_id)?;
+        let canvas = get_canvas(canvas_id)?;
+        let overlay_canvas = get_canvas(overlay_id)?;
+        let dpr = get_dpr();
 
-        let width = canvas.client_width() as u32;
-        let height = canvas.client_height() as u32;
+        // Physical size = CSS size × dpr
+        let css_w = canvas.client_width() as f64;
+        let css_h = canvas.client_height() as f64;
+        let phys_w = (css_w * dpr).round() as u32;
+        let phys_h = (css_h * dpr).round() as u32;
 
-        // wgpu 28 accepts HtmlCanvasElement as a SurfaceTarget
-        let gpu = GpuContext::new(
-            wgpu::SurfaceTarget::Canvas(canvas),
-            width.max(1),
-            height.max(1),
-        )
-        .await;
-
-        let engine = ChartEngine::new(gpu, width, height);
+        // Set physical canvas dimensions (high-DPI) for all 3 canvases
+        for c in [&grid_canvas, &canvas, &overlay_canvas] {
+            c.set_width(phys_w.max(1));
+            c.set_height(phys_h.max(1));
+        }
 
         log::info!(
-            "RayCore initialized: {}x{}, format={:?}",
-            width,
-            height,
-            engine.gpu.format
+            "RayCore: creating '{}' renderer — CSS {}x{}, physical {}x{}, dpr={}",
+            renderer, css_w, css_h, phys_w, phys_h, dpr
         );
 
-        Ok(RayCore { engine })
+        let backend = match renderer {
+            "webgpu" => {
+                match GpuContext::new(
+                    wgpu::SurfaceTarget::Canvas(canvas.clone()),
+                    phys_w.max(1),
+                    phys_h.max(1),
+                )
+                .await
+                {
+                    Ok(gpu) => {
+                        log::info!("WebGPU adapter: {:?}", gpu.format);
+                        RendererBackend::Wgpu(WgpuRenderer::new(gpu))
+                    }
+                    Err(e) => {
+                        log::warn!("WebGPU unavailable: {}. Falling back to Canvas2D.", e);
+                        let r = Canvas2DRenderer::new(canvas, dpr)
+                            .map_err(|e| JsValue::from_str(&e))?;
+                        RendererBackend::Canvas2D(r)
+                    }
+                }
+            }
+            _ => {
+                let r = Canvas2DRenderer::new(canvas, dpr)
+                    .map_err(|e| JsValue::from_str(&e))?;
+                RendererBackend::Canvas2D(r)
+            }
+        };
+
+        let grid = GridRenderer::new(grid_canvas, dpr)
+            .map_err(|e| JsValue::from_str(&e))?;
+        let overlay = OverlayRenderer::new(overlay_canvas, dpr)
+            .map_err(|e| JsValue::from_str(&e))?;
+
+        let engine = ChartEngine::new(backend, phys_w.max(1), phys_h.max(1), dpr);
+
+        log::info!("RayCore initialized with renderer: {}", engine.renderer_name());
+
+        Ok(RayCore {
+            engine,
+            grid,
+            overlay,
+            canvas_id: canvas_id.to_string(),
+            grid_id: grid_id.to_string(),
+            overlay_id: overlay_id.to_string(),
+        })
     }
 
-    /// Resize the rendering surface.
-    pub fn resize(&mut self, width: u32, height: u32) {
-        self.engine.resize(width, height);
+    // ── Renderer info ─────────────────────────────────────────────────────────
+
+    pub fn renderer_name(&self) -> String {
+        self.engine.renderer_name().to_string()
     }
 
-    /// Set bar data from a Float32Array.
-    ///
-    /// The array must be a flat sequence of [timestamp_lo, timestamp_hi, open, high, low, close, volume, _pad]
-    /// where timestamp is split into two f32 values (lo and hi 32 bits of u64).
-    ///
-    /// For simplicity in Phase 1, we accept a flat f32 array with 8 floats per bar:
-    ///   [index_as_f32, 0.0, open, high, low, close, volume, 0.0]
-    /// The timestamp field is reconstructed from the index.
-    pub fn set_data(&mut self, data: &[f32]) {
-        const FLOATS_PER_BAR: usize = 8;
-        if data.len() % FLOATS_PER_BAR != 0 {
-            log::error!("set_data: array length must be multiple of 8");
-            return;
+    pub fn get_supported_renderers() -> js_sys::Array {
+        let arr = js_sys::Array::new();
+        arr.push(&JsValue::from_str("canvas2d"));
+        if webgpu_available() {
+            arr.push(&JsValue::from_str("webgpu"));
         }
-
-        let bar_count = data.len() / FLOATS_PER_BAR;
-        let mut bars = Vec::with_capacity(bar_count);
-
-        for i in 0..bar_count {
-            let base = i * FLOATS_PER_BAR;
-            // Reconstruct timestamp from first two f32s (lo + hi bits of u64)
-            let ts_lo = data[base] as u32;
-            let ts_hi = data[base + 1] as u32;
-            let timestamp = ((ts_hi as u64) << 32) | (ts_lo as u64);
-
-            bars.push(Bar {
-                timestamp,
-                open: data[base + 2],
-                high: data[base + 3],
-                low: data[base + 4],
-                close: data[base + 5],
-                volume: data[base + 6],
-                _pad: 0.0,
-            });
-        }
-
-        self.engine.set_data(bars);
-        log::info!("set_data: loaded {} bars", bar_count);
+        arr
     }
 
-    /// Convenience: set bar data from simple arrays (easier from JS).
-    /// Each array has `count` elements.
+    // ── Data ──────────────────────────────────────────────────────────────────
+
     pub fn set_data_arrays(
         &mut self,
         open: &[f32],
@@ -113,62 +171,160 @@ impl RayCore {
         low: &[f32],
         close: &[f32],
         volume: &[f32],
+        timestamps: &[u64],
     ) {
-        let count = open.len().min(high.len()).min(low.len()).min(close.len()).min(volume.len());
-        let mut bars = Vec::with_capacity(count);
-        for i in 0..count {
-            bars.push(Bar {
-                timestamp: i as u64,
+        let count = open.len()
+            .min(high.len())
+            .min(low.len())
+            .min(close.len())
+            .min(volume.len());
+
+        let bars: Vec<Bar> = (0..count)
+            .map(|i| Bar {
+                timestamp: if i < timestamps.len() { timestamps[i] } else { i as u64 },
                 open: open[i],
                 high: high[i],
                 low: low[i],
                 close: close[i],
                 volume: volume[i],
                 _pad: 0.0,
-            });
-        }
+            })
+            .collect();
+
         self.engine.set_data(bars);
-        log::info!("set_data_arrays: loaded {} bars", count);
+        log::info!("set_data_arrays: {} bars loaded", count);
     }
 
-    /// Zoom to a specific bar range.
+    pub fn set_data(&mut self, data: &[f32]) {
+        const N: usize = 8;
+        if data.len() % N != 0 {
+            log::error!("set_data: array length must be multiple of 8, got {}", data.len());
+            return;
+        }
+        let bars: Vec<Bar> = (0..data.len() / N)
+            .map(|i| {
+                let b = i * N;
+                let ts_lo = data[b] as u32;
+                let ts_hi = data[b + 1] as u32;
+                Bar {
+                    timestamp: ((ts_hi as u64) << 32) | ts_lo as u64,
+                    open: data[b + 2],
+                    high: data[b + 3],
+                    low: data[b + 4],
+                    close: data[b + 5],
+                    volume: data[b + 6],
+                    _pad: 0.0,
+                }
+            })
+            .collect();
+        let n = bars.len();
+        self.engine.set_data(bars);
+        log::info!("set_data: {} bars loaded", n);
+    }
+
+    // ── Viewport ──────────────────────────────────────────────────────────────
+
+    pub fn resize(&mut self, css_width: f64, css_height: f64) {
+        let dpr = self.engine.dpr.max(1.0);
+        let phys_w = (css_width * dpr).round() as u32;
+        let phys_h = (css_height * dpr).round() as u32;
+
+        // Update main canvas physical dimensions
+        if let Some(canvas) = self.canvas() {
+            canvas.set_width(phys_w.max(1));
+            canvas.set_height(phys_h.max(1));
+        }
+
+        // Update grid and overlay canvas dimensions
+        self.grid.resize(phys_w.max(1), phys_h.max(1), dpr);
+        self.overlay.resize(phys_w.max(1), phys_h.max(1), dpr);
+
+        self.engine.resize(phys_w.max(1), phys_h.max(1), dpr);
+    }
+
     pub fn zoom_to_range(&mut self, start: u64, end: u64) {
         self.engine.zoom_to_range(start, end);
     }
 
-    /// Render one frame.
-    pub fn render(&mut self) {
-        match self.engine.render() {
-            Ok(()) => {}
-            Err(wgpu::SurfaceError::Lost) => {
-                let w = self.engine.gpu.config.width;
-                let h = self.engine.gpu.config.height;
-                self.engine.gpu.resize(w, h);
-            }
-            Err(wgpu::SurfaceError::OutOfMemory) => {
-                log::error!("Out of GPU memory!");
-            }
-            Err(e) => {
-                log::warn!("Surface error: {:?}", e);
-            }
+    pub fn pan(&mut self, delta_bars: f64) {
+        let data_len = self.engine.bars.len();
+        self.engine.viewport.pan_clamped(delta_bars, data_len);
+    }
+
+    pub fn zoom(&mut self, focal_bar: f64, factor: f64) {
+        self.engine.viewport.zoom(focal_bar, factor);
+        if !self.engine.viewport.price_locked {
+            self.engine.viewport.auto_fit_price(self.engine.bars.as_slice());
         }
     }
 
-    /// Get the current visible bar range as [start, end].
     pub fn visible_range(&self) -> Vec<f64> {
+        vec![self.engine.viewport.start_bar, self.engine.viewport.end_bar]
+    }
+
+    // ── Crosshair ─────────────────────────────────────────────────────────────
+
+    pub fn set_crosshair(&mut self, x: f64, y: f64, active: bool) {
+        self.engine.set_crosshair(x, y, active);
+    }
+
+    pub fn crosshair_info(&self) -> Vec<f64> {
+        let ch = &self.engine.crosshair;
         vec![
-            self.engine.viewport.start_bar,
-            self.engine.viewport.end_bar,
+            ch.x,
+            ch.y,
+            ch.price,
+            ch.bar_index.map(|i| i as f64).unwrap_or(-1.0),
+            if ch.active { 1.0 } else { 0.0 },
         ]
     }
 
-    /// Pan by a number of bars.
-    pub fn pan(&mut self, delta_bars: f64) {
-        self.engine.viewport.pan(delta_bars);
+    // ── Rendering ─────────────────────────────────────────────────────────────
+
+    /// Render one frame:
+    /// 1. Grid canvas (background) — grid lines
+    /// 2. Main canvas — candles + volume (WebGPU or Canvas2D)
+    /// 3. Overlay canvas — axes, crosshair, watermark
+    pub fn render(&mut self) {
+        if !self.engine.viewport.price_locked {
+            self.engine.viewport.auto_fit_price(self.engine.bars.as_slice());
+        }
+
+        let layout = ChartLayout::from_physical(
+            self.engine.viewport.width,
+            self.engine.viewport.height,
+            self.engine.dpr,
+            &self.engine.style,
+        );
+
+        // 1. Grid (background canvas) — returns computed ticks for axes
+        let (y_ticks, x_ticks) = self.grid.render(
+            self.engine.bars.as_slice(),
+            &self.engine.viewport,
+            &self.engine.style,
+            &layout,
+        );
+
+        // 2. Main canvas — candles + volume
+        if let Err(e) = self.engine.render() {
+            log::warn!("render error: {}", e);
+        }
+
+        // 3. Overlay (top canvas) — axes, crosshair, watermark
+        self.overlay.render(
+            self.engine.bars.as_slice(),
+            &self.engine.viewport,
+            &self.engine.style,
+            &self.engine.crosshair,
+            &layout,
+            &y_ticks,
+            &x_ticks,
+        );
     }
 
-    /// Zoom around a focal bar. factor > 1 = zoom out, < 1 = zoom in.
-    pub fn zoom(&mut self, focal_bar: f64, factor: f64) {
-        self.engine.viewport.zoom(focal_bar, factor);
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    fn canvas(&self) -> Option<HtmlCanvasElement> {
+        get_canvas(&self.canvas_id).ok()
     }
 }

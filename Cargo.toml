@@ -18,8 +18,6 @@ wgpu = "28.0"
 bytemuck = { version = "1.21", features = ["derive"] }
 glam = "0.29"
 log = "0.4"
-
-# Serialization (compact binary)
 serde = { version = "1", features = ["derive"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -35,6 +33,9 @@ web-sys = { version = "0.3", features = [
     "Document",
     "Element",
     "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "TextMetrics",
+    "DomStringMap",
     "console",
 ] }
 console_log = "1.0"

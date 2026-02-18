@@ -102,8 +102,8 @@ impl VolumeRenderer {
 
         queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
 
-        // Upload volume uniforms (projection maps 0..max_vol)
-        let uniforms = viewport.volume_uniforms(max_vol);
+        // Upload volume uniforms (legacy — pass defaults for new sizing fields)
+        let uniforms = viewport.volume_uniforms(max_vol, viewport.width as f32, 8.0);
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
     }
 

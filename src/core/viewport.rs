@@ -22,7 +22,16 @@ pub struct ViewportUniforms {
     pub height_px: f32,
     /// Visible bar count (for LOD decisions in shaders).
     pub visible_bars: f32,
-    pub _pad: f32,
+    /// Physical pixels per bar slot in chart area.
+    pub px_per_bar: f32,
+    /// Bar body width in physical pixels (from optimalCandlestickWidth).
+    pub bar_width_px: f32,
+    /// Wick width in physical pixels (floor(dpr), constant).
+    pub wick_width_px: f32,
+    /// Border width in physical pixels.
+    pub border_width_px: f32,
+    /// 1.0 if body fill should be drawn, 0.0 otherwise.
+    pub draw_body: f32,
 }
 
 /// Logical viewport state — bar range + price range + screen size.
@@ -133,27 +142,67 @@ impl Viewport {
     }
 
     /// Produce the GPU-ready uniform struct for candle rendering.
-    pub fn candle_uniforms(&self) -> ViewportUniforms {
+    /// `chart_w` = chart area width in physical px.
+    /// `candle_h` = candle area height in physical px (needed by shader for border → price conversion).
+    pub fn candle_uniforms(&self, chart_w: f32, candle_h: f32, bar_width_px: f32, wick_width_px: f32, border_width_px: f32, draw_body: bool) -> ViewportUniforms {
         let proj = self.candle_projection();
+        let visible = self.visible_bar_count() as f32;
         ViewportUniforms {
             projection: proj.to_cols_array(),
             width_px: self.width as f32,
-            height_px: self.height as f32,
-            visible_bars: self.visible_bar_count() as f32,
-            _pad: 0.0,
+            height_px: candle_h, // shader uses this for px→price conversion
+            visible_bars: visible,
+            px_per_bar: if visible > 0.0 { chart_w / visible } else { 1.0 },
+            bar_width_px,
+            wick_width_px,
+            border_width_px,
+            draw_body: if draw_body { 1.0 } else { 0.0 },
         }
     }
 
     /// Produce the GPU-ready uniform struct for volume rendering.
-    pub fn volume_uniforms(&self, max_vol: f32) -> ViewportUniforms {
+    pub fn volume_uniforms(&self, max_vol: f32, chart_w: f32, bar_width_px: f32) -> ViewportUniforms {
         let proj = self.volume_projection(max_vol);
+        let visible = self.visible_bar_count() as f32;
         ViewportUniforms {
             projection: proj.to_cols_array(),
             width_px: self.width as f32,
             height_px: self.height as f32,
-            visible_bars: self.visible_bar_count() as f32,
-            _pad: 0.0,
+            visible_bars: visible,
+            px_per_bar: if visible > 0.0 { chart_w / visible } else { 1.0 },
+            bar_width_px,
+            wick_width_px: 0.0,
+            border_width_px: 0.0,
+            draw_body: 0.0,
         }
+    }
+
+    // --- Coordinate conversion helpers (renderer-agnostic) ---
+
+    /// Convert bar index to fractional position [0..1] within visible range.
+    #[inline]
+    pub fn bar_to_frac(&self, bar_idx: f64) -> f64 {
+        (bar_idx - self.start_bar) / (self.end_bar - self.start_bar)
+    }
+
+    /// Convert price to fractional position [0..1] within price range (0=bottom, 1=top).
+    #[inline]
+    pub fn price_to_frac(&self, price: f64) -> f64 {
+        (price - self.price_min) / (self.price_max - self.price_min)
+    }
+
+    /// Convert pixel X (in logical chart area) to bar index.
+    #[inline]
+    pub fn pixel_to_bar(&self, x_px: f64, chart_width_px: f64) -> f64 {
+        let frac = x_px / chart_width_px;
+        self.start_bar + frac * (self.end_bar - self.start_bar)
+    }
+
+    /// Convert pixel Y (in logical chart area) to price.
+    #[inline]
+    pub fn pixel_to_price(&self, y_px: f64, chart_height_px: f64) -> f64 {
+        let frac = 1.0 - (y_px / chart_height_px);
+        self.price_min + frac * (self.price_max - self.price_min)
     }
 
     // --- Pan / Zoom helpers ---
@@ -162,6 +211,19 @@ impl Viewport {
     pub fn pan(&mut self, delta_bars: f64) {
         self.start_bar += delta_bars;
         self.end_bar += delta_bars;
+    }
+
+    /// Pan with clamping to keep at least half the visible range over real data.
+    /// `data_len` = total number of bars in the dataset.
+    pub fn pan_clamped(&mut self, delta_bars: f64, data_len: usize) {
+        let span = self.end_bar - self.start_bar;
+        let half = span * 0.5;
+        let lo   = -half;
+        let hi   = data_len as f64 + half - span;
+
+        let new_start = (self.start_bar + delta_bars).clamp(lo, hi);
+        self.start_bar = new_start;
+        self.end_bar   = new_start + span;
     }
 
     /// Zoom around a focal bar index. factor > 1 zooms out, < 1 zooms in.
