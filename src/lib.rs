@@ -32,9 +32,6 @@ pub use crate::core::renderer::canvas2d::Canvas2DRenderer;
 pub use crate::core::renderer::overlay::OverlayRenderer;
 
 #[cfg(target_arch = "wasm32")]
-pub use crate::core::renderer::grid::GridRenderer;
-
-#[cfg(target_arch = "wasm32")]
 pub use crate::core::renderer::price_axis::PriceAxisRenderer;
 
 #[cfg(target_arch = "wasm32")]

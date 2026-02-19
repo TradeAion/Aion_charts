@@ -76,9 +76,27 @@ impl CandleSizing {
         let bar_spacing = pane_w / (visible_bars * dpr);
 
         let mut bw = optimal_candlestick_width(bar_spacing, dpr);
-        let ww = wick_width(bar_spacing, dpr, bw);
+        let mut ww = wick_width(bar_spacing, dpr, bw);
         bw = parity_fix(bw, ww);
-        let bdw = border_width(dpr, bw);
+        let mut bdw = border_width(dpr, bw);
+
+        // ── High-DPR proportion guard ──
+        // At high browser zoom (DPR 3+), the LWC sizing functions break
+        // down because their floor(dpr) minimums for wick/border grow
+        // linearly while bar_width grows sublinearly. Example at DPR=5:
+        //   wick_width min = 5, border_width min = 5, bar_width = 7
+        //   → body inner = 7 - 2*5 = -3px (gone!)
+        //
+        // Fix: cap wick to ≤ ⌊bar/3⌋ (min 1px), then derive max border
+        // from the remaining width so inner body ≥ 1px.
+        // Do NOT re-run parity_fix after capping — the shader's asymmetric
+        // edges() handles off-center wicks correctly, and parity_fix would
+        // shrink bw by 1, potentially re-breaking proportions.
+        ww = ww.min((bw / 3.0).floor().max(1.0));
+        // Max border: leave at least 1px for inner body fill.
+        let max_border = ((bw - 1.0) / 2.0).floor().max(0.0);
+        bdw = bdw.min(max_border);
+
         let draw_body = bw > bdw * 2.0;
 
         Self {

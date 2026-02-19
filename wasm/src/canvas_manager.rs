@@ -43,24 +43,21 @@ impl CanvasPair {
     }
 }
 
-/// The pane widget has 3 canvases: grid (z0), chart (z1), overlay/top (z2).
-/// This matches LWC's PaneWidget which has multiple layers.
+/// The pane widget has 2 canvases: chart (z0), overlay/top (z1).
 pub struct PaneCanvases {
-    pub grid: HtmlCanvasElement,
     pub chart: HtmlCanvasElement,
     pub top: HtmlCanvasElement,
 }
 
 impl PaneCanvases {
     fn new(doc: &Document) -> Result<Self, JsValue> {
-        let grid = create_canvas(doc, "raycore-pane-grid", 0)?;
-        let chart = create_canvas(doc, "raycore-pane-chart", 1)?;
-        let top = create_canvas(doc, "raycore-pane-top", 2)?;
-        Ok(Self { grid, chart, top })
+        let chart = create_canvas(doc, "raycore-pane-chart", 0)?;
+        let top = create_canvas(doc, "raycore-pane-top", 1)?;
+        Ok(Self { chart, top })
     }
 
     pub fn set_size(&self, pw: u32, ph: u32) {
-        for c in [&self.grid, &self.chart, &self.top] {
+        for c in [&self.chart, &self.top] {
             c.set_width(pw.max(1));
             c.set_height(ph.max(1));
         }
@@ -142,7 +139,6 @@ impl WidgetLayout {
         grid_wrapper.append_child(&pane_container)?;
 
         let pane = PaneCanvases::new(&doc)?;
-        pane_container.append_child(&pane.grid)?;
         pane_container.append_child(&pane.chart)?;
         pane_container.append_child(&pane.top)?;
 

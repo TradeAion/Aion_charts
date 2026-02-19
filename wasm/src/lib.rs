@@ -20,7 +20,7 @@ use std::rc::Rc;
 use raycore::{
     Bar, ChartEngine, ChartStyle,
     GpuContext, WgpuRenderer, Canvas2DRenderer,
-    RendererBackend, OverlayRenderer, GridRenderer,
+    RendererBackend, OverlayRenderer,
     PriceAxisRenderer, TimeAxisRenderer,
     InteractionHandler, HitZone,
     generate_sample_data, tick_marks,
@@ -54,7 +54,6 @@ fn get_dpr() -> f64 {
 /// Internal chart state shared between event closures and the public API.
 struct ChartInner {
     engine: ChartEngine,
-    grid: GridRenderer,
     overlay: OverlayRenderer,
     price_axis_renderer: PriceAxisRenderer,
     time_axis_renderer: TimeAxisRenderer,
@@ -217,9 +216,7 @@ impl RayCore {
             }
         };
 
-        // Pane renderers
-        let grid = GridRenderer::new(layout.pane.grid.clone(), dpr)
-            .map_err(|e| JsValue::from_str(&e))?;
+        // Pane overlay renderer
         let overlay = OverlayRenderer::new(layout.pane.top.clone(), dpr)
             .map_err(|e| JsValue::from_str(&e))?;
 
@@ -244,7 +241,6 @@ impl RayCore {
 
         let inner = Rc::new(RefCell::new(ChartInner {
             engine,
-            grid,
             overlay,
             price_axis_renderer,
             time_axis_renderer,
@@ -729,7 +725,6 @@ impl RayCore {
                 let ppw = (pw * dpr).round() as u32;
                 let pph = (ph * dpr).round() as u32;
                 s.engine.resize(ppw.max(1), pph.max(1), dpr);
-                s.grid.resize(ppw.max(1), pph.max(1), dpr);
                 s.overlay.resize(ppw.max(1), pph.max(1), dpr);
 
                 // Resize axis renderers
@@ -886,10 +881,7 @@ impl RayCore {
         // 3. Update CSS grid layout (this may cause pane to resize)
         s.layout.update_axis_sizes(price_axis_css_w, time_axis_css_h);
 
-        // 4. Grid (pane base canvas) — background + grid lines
-        s.grid.render(&style, &y_ticks, &x_ticks);
-
-        // 5. Engine render — candles + volume on pane chart canvas
+        // 4. Engine render — candles + volume on pane chart canvas
         if let Err(e) = s.engine.render(&y_ticks, &x_ticks) {
             log::warn!("render error: {}", e);
         }

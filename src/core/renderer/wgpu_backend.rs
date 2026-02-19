@@ -46,8 +46,10 @@ pub struct CandleInstance {
 pub struct CandleUniforms {
     pub width: f32,
     pub height: f32,
-    pub bar_half_w: f32,
-    pub wick_half_w: f32,
+    /// Full bar width in physical pixels (NOT half). Shader computes edges asymmetrically.
+    pub bar_width: f32,
+    /// Full wick width in physical pixels (NOT half). Shader computes edges asymmetrically.
+    pub wick_width: f32,
     pub border_width: f32,
     pub draw_body: f32,
     pub _pad0: f32,
@@ -287,7 +289,7 @@ impl WgpuRenderer {
             wgpu::LoadOp::Load
         } else {
             frame.cleared = true;
-            wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 })
+            wgpu::LoadOp::Clear(wgpu::Color { r: 0.09020, g: 0.09020, b: 0.09020, a: 1.0 })
         };
         {
             let mut pass = frame.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -385,7 +387,7 @@ impl WgpuRenderer {
             wgpu::LoadOp::Load
         } else {
             frame.cleared = true;
-            wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 })
+            wgpu::LoadOp::Clear(wgpu::Color { r: 0.09020, g: 0.09020, b: 0.09020, a: 1.0 })
         };
         {
             let mut pass = frame.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -436,17 +438,12 @@ impl ChartRenderer for WgpuRenderer {
         let pane_w = ctx.viewport.width as f64;
         let pane_h = ctx.viewport.height as f64;
 
-        // Background fill
+        // Background fill only — no grid lines
         let bg = &ctx.style.bg_color;
-        let mut rects = vec![ColoredRect {
+        let rects = vec![ColoredRect {
             x: 0.0, y: 0.0, w: pane_w as f32, h: pane_h as f32,
             r: bg[0], g: bg[1], b: bg[2], a: bg[3],
         }];
-        // Grid lines
-        let grid = geometry_generator::generate_grid_rects(
-            ctx.style, ctx.y_ticks, ctx.x_ticks, pane_w, pane_h,
-        );
-        rects.extend_from_slice(&grid);
 
         let count = self.upload_rects(&rects, ctx.viewport.width, ctx.viewport.height);
         self.draw_rect_pass(count);
@@ -469,8 +466,8 @@ impl ChartRenderer for WgpuRenderer {
         let uniforms = CandleUniforms {
             width: pane_w as f32,
             height: pane_h as f32,
-            bar_half_w: (sizing.bar_width * 0.5).floor() as f32,
-            wick_half_w: (sizing.wick_width * 0.5).floor() as f32,
+            bar_width: sizing.bar_width as f32,
+            wick_width: sizing.wick_width as f32,
             border_width: sizing.border_width as f32,
             draw_body: if sizing.draw_body { 1.0 } else { 0.0 },
             _pad0: 0.0,
@@ -526,7 +523,7 @@ impl ChartRenderer for WgpuRenderer {
                         view: &frame.view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }),
+                            load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.09020, g: 0.09020, b: 0.09020, a: 1.0 }),
                             store: wgpu::StoreOp::Store,
                         },
                         depth_slice: None,

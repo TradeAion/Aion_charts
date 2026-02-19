@@ -1,0 +1,16 @@
+{
+  "name": "raycore-wasm",
+  "type": "module",
+  "description": "RayCore WASM entry point — thin JS interop layer",
+  "version": "0.1.0",
+  "files": [
+    "raycore_wasm_bg.wasm",
+    "raycore_wasm.js",
+    "raycore_wasm.d.ts"
+  ],
+  "main": "raycore_wasm.js",
+  "types": "raycore_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

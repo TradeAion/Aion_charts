@@ -13,14 +13,23 @@
 // All coordinates are in physical pixels. The shader converts to NDC.
 // Colors come from the uniform buffer, not hardcoded, so the Rust style
 // system is the single source of truth.
+//
+// IMPORTANT — edge computation for odd/even pixel widths:
+// We receive FULL widths (not half), then compute edges asymmetrically:
+//   left  = floor(center - floor(w / 2))
+//   right = left + w
+// This guarantees the rect is exactly `w` pixels wide regardless of
+// odd/even width or fractional center position. `floor(w/2)` for
+// even widths splits perfectly; for odd widths (e.g. wick_width=1),
+// the extra pixel goes to the right, matching LWC's convention.
 
 struct CandleUniforms {
     // Viewport dimensions (physical pixels) — for pixel→NDC conversion.
     width: f32,
     height: f32,
-    // Candle sizing (physical pixels) — computed by CandleSizing on CPU.
-    bar_half_w: f32,
-    wick_half_w: f32,
+    // Candle sizing (physical pixels) — FULL widths, NOT halves.
+    bar_width: f32,
+    wick_width: f32,
     border_width: f32,
     // 1.0 = draw inner body fill; 0.0 = skip (bar too narrow).
     draw_body: f32,
@@ -74,6 +83,15 @@ fn px_to_ndc(px: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
 }
 
+// Asymmetric edge computation: exact pixel width for both odd and even sizes.
+//   left  = floor(center) - floor(w / 2)
+//   right = left + w
+fn edges(center: f32, w: f32) -> vec2<f32> {
+    let l = floor(center) - floor(w * 0.5);
+    let r = l + w;
+    return vec2<f32>(l, r);
+}
+
 @vertex
 fn vs_main(
     inst: CandleInstance,
@@ -85,16 +103,14 @@ fn vs_main(
 
     // Body top/bottom in pixel Y (Y-down: smaller Y = higher price).
     // Bullish: close < open in pixel-Y (close is higher price = smaller Y).
-    let body_top = min(inst.open_y, inst.close_y);
-    let body_bottom_raw = max(inst.open_y, inst.close_y);
+    let body_top = floor(min(inst.open_y, inst.close_y));
+    let body_bottom_raw = floor(max(inst.open_y, inst.close_y));
     // Ensure minimum 1px body height.
     let body_bottom = max(body_bottom_raw, body_top + 1.0);
 
-    // Quad edges.
-    let left  = inst.center_x - u.bar_half_w;
-    let right = inst.center_x + u.bar_half_w;
-    let wick_left  = inst.center_x - u.wick_half_w;
-    let wick_right = inst.center_x + u.wick_half_w;
+    // Asymmetric edge computation for body and wick.
+    let bar_edges  = edges(inst.center_x, u.bar_width);
+    let wick_edges = edges(inst.center_x, u.wick_width);
 
     let quad_idx = vertex_index / 6u;
     let vi = vertex_index % 6u;
@@ -107,21 +123,21 @@ fn vs_main(
 
     if (quad_idx == 0u) {
         // Upper wick: from high_y (top) down to body_top.
-        px = quad_corner(vi, wick_left, wick_right, inst.high_y, body_top);
+        px = quad_corner(vi, wick_edges.x, wick_edges.y, floor(inst.high_y), body_top);
         color = wick_color;
     } else if (quad_idx == 1u) {
         // Lower wick: from body_bottom down to low_y.
-        px = quad_corner(vi, wick_left, wick_right, body_bottom, inst.low_y);
+        px = quad_corner(vi, wick_edges.x, wick_edges.y, body_bottom, floor(inst.low_y));
         color = wick_color;
     } else if (quad_idx == 2u) {
         // Border / outer body rect.
-        px = quad_corner(vi, left, right, body_top, body_bottom);
+        px = quad_corner(vi, bar_edges.x, bar_edges.y, body_top, body_bottom);
         color = wick_color; // border uses wick color (LWC convention)
     } else {
         // Body fill — inset by border_width.
         let bw = u.border_width;
-        let inner_left  = left + bw;
-        let inner_right = right - bw;
+        let inner_left  = bar_edges.x + bw;
+        let inner_right = bar_edges.y - bw;
         let inner_top    = body_top + bw;
         let inner_bottom = body_bottom - bw;
         if (u.draw_body > 0.5 && inner_right > inner_left && inner_bottom > inner_top) {

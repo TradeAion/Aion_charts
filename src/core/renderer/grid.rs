@@ -65,35 +65,8 @@ impl GridRenderer {
         let w = self.pw as f64;
         let h = self.ph as f64;
 
-        // Clear with chart background
+        // Clear with chart background (no grid lines)
         self.ctx.set_fill_style_str(&rgba(&style.bg_color));
         self.ctx.fill_rect(0.0, 0.0, w, h);
-
-        // Draw grid lines
-        self.ctx.set_stroke_style_str(&rgba(&style.grid_color));
-        self.ctx.set_line_width(1.0);
-        self.ctx.begin_path();
-
-        // Horizontal grid lines (at price ticks)
-        for t in y_ticks {
-            if !t.major { continue; }
-            let y = snap(t.pixel);
-            if y > 0.0 && y < h {
-                self.ctx.move_to(0.0, y);
-                self.ctx.line_to(w, y);
-            }
-        }
-
-        // Vertical grid lines (at time ticks)
-        for t in x_ticks {
-            if !t.major { continue; }
-            let x = snap(t.pixel);
-            if x > 0.0 && x < w {
-                self.ctx.move_to(x, 0.0);
-                self.ctx.line_to(x, h);
-            }
-        }
-
-        self.ctx.stroke();
     }
 }

@@ -28,9 +28,6 @@ pub mod canvas2d;
 pub mod overlay;
 
 #[cfg(target_arch = "wasm32")]
-pub mod grid;
-
-#[cfg(target_arch = "wasm32")]
 pub mod price_axis;
 
 #[cfg(target_arch = "wasm32")]

@@ -134,7 +134,7 @@ impl ChartStyle {
 impl Default for ChartStyle {
     fn default() -> Self {
         Self {
-            bg_color: [0.067, 0.075, 0.094, 1.0],       // #111318
+            bg_color: [0.09020, 0.09020, 0.09020, 1.0],       // #171717
             bullish_color: [0.102, 0.737, 0.612, 1.0],   // #1ABC9C
             bearish_color: [0.906, 0.298, 0.235, 1.0],   // #E74C3C
             bullish_volume_color: [0.102, 0.737, 0.612, 0.35],
@@ -144,7 +144,7 @@ impl Default for ChartStyle {
             grid_color: [0.2, 0.2, 0.24, 0.4],
             axis_border_color: [0.2, 0.2, 0.24, 1.0],    // #333 solid
             axis_text_color: [0.55, 0.55, 0.6, 1.0],
-            axis_bg_color: [0.09, 0.095, 0.11, 1.0],
+            axis_bg_color: [0.09020, 0.09020, 0.09020, 1.0],     // #171717
             crosshair_color: [0.584, 0.596, 0.631, 1.0], // #9598A1  (LWC default)
             crosshair_label_bg: [0.075, 0.09, 0.133, 1.0], // #131722 (LWC default)
             crosshair_label_text: [0.9, 0.9, 0.9, 1.0],
