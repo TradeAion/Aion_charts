@@ -18,7 +18,7 @@ use wasm_bindgen::JsCast;
 use std::cell::RefCell;
 use std::rc::Rc;
 use raycore::{
-    Bar, ChartEngine,
+    Bar, ChartEngine, ChartStyle,
     GpuContext, WgpuRenderer, Canvas2DRenderer,
     RendererBackend, OverlayRenderer, GridRenderer,
     PriceAxisRenderer, TimeAxisRenderer,
@@ -786,6 +786,59 @@ impl RayCore {
             &s.engine.crosshair, s.engine.bars.as_slice(),
             &s.engine.viewport, &style, pane_css_w,
         );
+
+        // 9. Corner stub — background + borders (LWC: PriceAxisStub)
+        Self::render_corner_stub(&s.layout, &style, dpr);
+    }
+
+    /// Render the corner stub (bottom-right intersection of time axis row + price axis column).
+    /// LWC: PriceAxisStub draws bg + horizontal border at top + vertical border at left.
+    fn render_corner_stub(layout: &WidgetLayout, style: &ChartStyle, dpr: f64) {
+        let canvas = &layout.corner_stub;
+        let w = canvas.width() as f64;
+        let h = canvas.height() as f64;
+        if w <= 0.0 || h <= 0.0 { return; }
+
+        let ctx = match canvas
+            .get_context("2d")
+            .ok()
+            .flatten()
+        {
+            Some(c) => match c.dyn_into::<web_sys::CanvasRenderingContext2d>() {
+                Ok(ctx) => ctx,
+                Err(_) => return,
+            },
+            None => return,
+        };
+
+        // Background (LWC: model.backgroundBottomColor())
+        let bg = format!(
+            "rgba({},{},{},{})",
+            (style.bg_color[0] * 255.0) as u8,
+            (style.bg_color[1] * 255.0) as u8,
+            (style.bg_color[2] * 255.0) as u8,
+            style.bg_color[3],
+        );
+        ctx.set_fill_style_str(&bg);
+        ctx.fill_rect(0.0, 0.0, w, h);
+
+        // Border color
+        let border = format!(
+            "rgba({},{},{},{})",
+            (style.axis_border_color[0] * 255.0) as u8,
+            (style.axis_border_color[1] * 255.0) as u8,
+            (style.axis_border_color[2] * 255.0) as u8,
+            style.axis_border_color[3],
+        );
+        ctx.set_fill_style_str(&border);
+
+        let border_size = (style.axis_border_size as f64 * dpr).max(1.0).floor();
+
+        // Horizontal border at top (continuation of time axis border)
+        ctx.fill_rect(0.0, 0.0, w, border_size);
+
+        // Vertical border at left (continuation of price axis border)
+        ctx.fill_rect(0.0, 0.0, border_size, h);
     }
 
     /// Dispose: disconnect resize observer.

@@ -78,11 +78,16 @@ pub struct WidgetLayout {
     pub pane_container: HtmlDivElement,
     pub price_axis_container: HtmlDivElement,
     pub time_axis_container: HtmlDivElement,
+    /// Corner stub — bottom-right intersection of time axis row + price axis column.
+    /// Matches LWC's PriceAxisStub widget.
+    pub corner_stub_container: HtmlDivElement,
 
     // ── Canvases per widget ──
     pub pane: PaneCanvases,
     pub price_axis: CanvasPair,
     pub time_axis: CanvasPair,
+    /// Corner stub canvas (single layer — just bg + borders).
+    pub corner_stub: HtmlCanvasElement,
 }
 
 impl WidgetLayout {
@@ -153,11 +158,12 @@ impl WidgetLayout {
         price_axis_container.append_child(&price_axis.base)?;
         price_axis_container.append_child(&price_axis.top)?;
 
-        // ── Time axis container — grid[0-1,1] (bottom, spans pane + price axis) ──
+        // ── Time axis container — grid[1,1] (bottom of pane, NOT spanning price axis) ──
+        // LWC: time axis td is sized to paneWidth only; corner stub is separate.
         let time_axis_container = create_widget_container(&doc, "raycore-time-axis")?;
         time_axis_container.style().set_css_text(
             "position:relative;overflow:hidden;\
-             grid-column:1 / -1;grid-row:2;\
+             grid-column:1;grid-row:2;\
              min-width:0;min-height:0;"
         );
         grid_wrapper.append_child(&time_axis_container)?;
@@ -166,15 +172,30 @@ impl WidgetLayout {
         time_axis_container.append_child(&time_axis.base)?;
         time_axis_container.append_child(&time_axis.top)?;
 
+        // ── Corner stub — grid[2,2] (bottom-right intersection) ──
+        // LWC: PriceAxisStub draws bg + border at intersection.
+        let corner_stub_container = create_widget_container(&doc, "raycore-corner-stub")?;
+        corner_stub_container.style().set_css_text(
+            "position:relative;overflow:hidden;\
+             grid-column:2;grid-row:2;\
+             min-width:0;min-height:0;"
+        );
+        grid_wrapper.append_child(&corner_stub_container)?;
+
+        let corner_stub = create_canvas(&doc, "raycore-corner-stub-canvas", 0)?;
+        corner_stub_container.append_child(&corner_stub)?;
+
         Ok(Self {
             container,
             grid_wrapper,
             pane_container,
             price_axis_container,
             time_axis_container,
+            corner_stub_container,
             pane,
             price_axis,
             time_axis,
+            corner_stub,
         })
     }
 
@@ -228,6 +249,14 @@ impl WidgetLayout {
         )
     }
 
+    /// Get the corner stub container's CSS size.
+    pub fn corner_stub_css_size(&self) -> (f64, f64) {
+        (
+            self.corner_stub_container.client_width() as f64,
+            self.corner_stub_container.client_height() as f64,
+        )
+    }
+
     /// Resize all widget canvases to their container sizes at the given DPR.
     pub fn resize_all_canvases(&self, dpr: f64) {
         // Pane canvases
@@ -247,6 +276,13 @@ impl WidgetLayout {
         let tpw = (tw * dpr).round() as u32;
         let tph = (th * dpr).round() as u32;
         self.time_axis.set_size(tpw, tph);
+
+        // Corner stub canvas
+        let (sw, sh) = self.corner_stub_css_size();
+        let spw = (sw * dpr).round() as u32;
+        let sph = (sh * dpr).round() as u32;
+        self.corner_stub.set_width(spw.max(1));
+        self.corner_stub.set_height(sph.max(1));
     }
 }
 
