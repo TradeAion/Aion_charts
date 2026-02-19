@@ -13,6 +13,7 @@
 //! - overlay.rs: crosshair lines + watermark on pane top canvas
 
 pub mod traits;
+pub mod theme;
 pub mod series;
 pub mod draw_list;
 pub mod tick_marks;
