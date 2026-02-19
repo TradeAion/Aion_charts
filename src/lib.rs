@@ -12,14 +12,15 @@ pub use crate::core::data::{Bar, BarArray};
 pub use crate::core::viewport::Viewport;
 pub use crate::core::engine::ChartEngine;
 pub use crate::core::renderer::traits::{
-    Renderer, RendererBackend, RenderContext, ChartStyle, CrosshairState, CrosshairMode, TickMark,
+    ChartRenderer, Renderer, RendererBackend, RenderContext, ChartStyle,
+    CrosshairState, CrosshairMode, TickMark,
 };
 pub use crate::core::renderer::series::CandleSizing;
 pub use crate::core::renderer::draw_list::{DrawList, ColoredRect};
 pub use crate::core::renderer::geometry_generator;
 pub use crate::core::renderer::tick_marks;
 pub use crate::core::renderer::wgpu_context::GpuContext;
-pub use crate::core::renderer::wgpu_backend::WgpuRenderer;
+pub use crate::core::renderer::wgpu_backend::{WgpuRenderer, CandleInstance, CandleUniforms};
 pub use crate::core::renderer::pipeline_manager::PipelineManager;
 pub use crate::core::interaction::{InteractionHandler, HitZone};
 pub use crate::core::demo_data::generate_sample_data;

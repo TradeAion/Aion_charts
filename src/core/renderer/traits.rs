@@ -1,8 +1,14 @@
 //! Renderer trait — the abstraction layer between core logic and rendering backends.
 //!
-//! All renderers (WgpuRenderer, Canvas2DRenderer) implement this trait.
-//! Both renderers internally call geometry_generator::generate() to get
-//! the same DrawList, then render it with their respective APIs.
+//! The `ChartRenderer` trait splits rendering into discrete phases so the
+//! WebGPU backend can use dedicated shader pipelines per element type
+//! (candles, volume, grid, lines, text, crosshair), while Canvas2D can
+//! use its existing DrawList approach as a fallback.
+//!
+//! Borrow-checker constraint (wgpu): `begin_frame` acquires the
+//! SurfaceTexture + TextureView + CommandEncoder and stores them in `self`.
+//! Each `draw_*` method creates a short-lived RenderPass that drops
+//! immediately, avoiding self-referential borrows.
 
 use crate::core::data::Bar;
 use crate::core::viewport::Viewport;
@@ -197,12 +203,70 @@ pub struct TickMark {
     pub major: bool,
 }
 
-/// The renderer-agnostic trait. Every rendering backend implements this.
-pub trait Renderer {
+// ── The ChartRenderer trait ──────────────────────────────────────────────────
+
+/// The phased rendering trait. Every rendering backend implements this.
+///
+/// The rendering pipeline is split into discrete phases so that:
+/// - The WebGPU backend can use dedicated shader pipelines per element type.
+/// - The Canvas2D fallback can use its existing DrawList approach.
+/// - The engine can call individual phases for custom z-ordering.
+///
+/// **Borrow-checker contract (wgpu):**
+/// - `begin_frame` acquires the SurfaceTexture, creates a TextureView and
+///   CommandEncoder, storing them in `self`.
+/// - Each `draw_*` method creates a **short-lived** `RenderPass` that borrows
+///   the encoder, draws, and drops before the method returns.
+/// - `end_frame` submits the CommandEncoder and presents the surface.
+pub trait ChartRenderer {
     fn name(&self) -> &str;
     fn resize(&mut self, physical_width: u32, physical_height: u32, dpr: f64);
-    fn render_frame(&mut self, ctx: &RenderContext) -> Result<(), String>;
     fn is_valid(&self) -> bool { true }
+
+    /// Acquire surface texture, create TextureView + CommandEncoder.
+    /// Store them in `self` for the draw methods to use.
+    fn begin_frame(&mut self, ctx: &RenderContext) -> Result<(), String>;
+
+    /// Draw background fill + grid lines.
+    fn draw_grid(&mut self, ctx: &RenderContext) -> Result<(), String>;
+
+    /// Draw candlesticks.
+    /// - WebGPU: OHLCV data -> instance buffer -> candle shader.
+    /// - Canvas2D: geometry_generator -> DrawList -> fill_rect loop.
+    fn draw_candles(&mut self, ctx: &RenderContext) -> Result<(), String>;
+
+    /// Draw volume bars.
+    /// - WebGPU: separate instance buffer + volume shader (or reuse rect pipeline).
+    /// - Canvas2D: geometry_generator -> DrawList.
+    fn draw_volume(&mut self, ctx: &RenderContext) -> Result<(), String>;
+
+    /// Draw indicator/study lines (SMA, EMA, etc).
+    fn draw_lines(&mut self, ctx: &RenderContext) -> Result<(), String>;
+
+    /// Draw text labels (axis prices, timestamps).
+    /// WebGPU will use a texture atlas; Canvas2D uses fillText.
+    fn draw_text(&mut self, ctx: &RenderContext) -> Result<(), String>;
+
+    /// Draw crosshair overlay. Kept as a separate pass so that in the future
+    /// it can render to a separate texture/overlay without re-rendering all
+    /// candles when only the mouse moved.
+    fn draw_crosshair(&mut self, ctx: &RenderContext) -> Result<(), String>;
+
+    /// Submit command buffer, present surface texture.
+    fn end_frame(&mut self) -> Result<(), String>;
+
+    /// Default full-pipeline executor. Calls all phases in order.
+    /// The engine can also call individual phases for custom z-indexing.
+    fn render_frame(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        self.begin_frame(ctx)?;
+        self.draw_grid(ctx)?;
+        self.draw_volume(ctx)?;
+        self.draw_candles(ctx)?;
+        self.draw_lines(ctx)?;
+        self.draw_text(ctx)?;
+        self.draw_crosshair(ctx)?;
+        self.end_frame()
+    }
 }
 
 /// Enum wrapper so ChartEngine can hold either renderer without dyn dispatch overhead.
@@ -212,7 +276,7 @@ pub enum RendererBackend {
     Canvas2D(super::canvas2d::Canvas2DRenderer),
 }
 
-impl Renderer for RendererBackend {
+impl ChartRenderer for RendererBackend {
     fn name(&self) -> &str {
         match self {
             Self::Wgpu(r) => r.name(),
@@ -229,14 +293,6 @@ impl Renderer for RendererBackend {
         }
     }
 
-    fn render_frame(&mut self, ctx: &RenderContext) -> Result<(), String> {
-        match self {
-            Self::Wgpu(r) => r.render_frame(ctx),
-            #[cfg(target_arch = "wasm32")]
-            Self::Canvas2D(r) => r.render_frame(ctx),
-        }
-    }
-
     fn is_valid(&self) -> bool {
         match self {
             Self::Wgpu(r) => r.is_valid(),
@@ -244,4 +300,73 @@ impl Renderer for RendererBackend {
             Self::Canvas2D(r) => r.is_valid(),
         }
     }
+
+    fn begin_frame(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        match self {
+            Self::Wgpu(r) => r.begin_frame(ctx),
+            #[cfg(target_arch = "wasm32")]
+            Self::Canvas2D(r) => r.begin_frame(ctx),
+        }
+    }
+
+    fn draw_grid(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        match self {
+            Self::Wgpu(r) => r.draw_grid(ctx),
+            #[cfg(target_arch = "wasm32")]
+            Self::Canvas2D(r) => r.draw_grid(ctx),
+        }
+    }
+
+    fn draw_candles(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        match self {
+            Self::Wgpu(r) => r.draw_candles(ctx),
+            #[cfg(target_arch = "wasm32")]
+            Self::Canvas2D(r) => r.draw_candles(ctx),
+        }
+    }
+
+    fn draw_volume(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        match self {
+            Self::Wgpu(r) => r.draw_volume(ctx),
+            #[cfg(target_arch = "wasm32")]
+            Self::Canvas2D(r) => r.draw_volume(ctx),
+        }
+    }
+
+    fn draw_lines(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        match self {
+            Self::Wgpu(r) => r.draw_lines(ctx),
+            #[cfg(target_arch = "wasm32")]
+            Self::Canvas2D(r) => r.draw_lines(ctx),
+        }
+    }
+
+    fn draw_text(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        match self {
+            Self::Wgpu(r) => r.draw_text(ctx),
+            #[cfg(target_arch = "wasm32")]
+            Self::Canvas2D(r) => r.draw_text(ctx),
+        }
+    }
+
+    fn draw_crosshair(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        match self {
+            Self::Wgpu(r) => r.draw_crosshair(ctx),
+            #[cfg(target_arch = "wasm32")]
+            Self::Canvas2D(r) => r.draw_crosshair(ctx),
+        }
+    }
+
+    fn end_frame(&mut self) -> Result<(), String> {
+        match self {
+            Self::Wgpu(r) => r.end_frame(),
+            #[cfg(target_arch = "wasm32")]
+            Self::Canvas2D(r) => r.end_frame(),
+        }
+    }
 }
+
+// Keep the old `Renderer` name as an alias during migration so downstream
+// code (wasm/src/lib.rs) that imports `Renderer` doesn't break yet.
+// TODO: remove once all consumers switch to `ChartRenderer`.
+pub use ChartRenderer as Renderer;

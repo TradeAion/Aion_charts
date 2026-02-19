@@ -1,83 +1,271 @@
-//! WgpuRenderer — dumb DrawList consumer (WebGPU path).
+//! WgpuRenderer — phased WebGPU renderer implementing ChartRenderer.
 //!
-//! Receives a DrawList from GeometryGenerator and uploads all ColoredRects
-//! as instances to a single GPU buffer. One draw call renders everything.
-//! The shader trivially converts pixel coords to NDC.
+//! Architecture:
+//! - `begin_frame` acquires SurfaceTexture + creates CommandEncoder (stored in self).
+//! - Each `draw_*` method creates a short-lived RenderPass (borrows encoder, draws, drops).
+//! - `end_frame` submits the encoder and presents.
+//! - This avoids the self-referential borrow trap with wgpu::RenderPass.
+//!
+//! Rendering pipelines:
+//! - **Rect pipeline** (rect.wgsl): for grid lines, background, volume bars —
+//!   uses the existing ColoredRect instance format (pixel coords).
+//! - **Candle pipeline** (candles.wgsl): instanced OHLCV rendering —
+//!   CPU maps f64 world data to f32 pixel coords, shader generates geometry.
+//!   24 verts/instance (upper wick + lower wick + border + body fill).
 
+use bytemuck::{Pod, Zeroable};
+use crate::core::data::Bar;
+use crate::core::viewport::Viewport;
 use crate::core::renderer::wgpu_context::GpuContext;
 use crate::core::renderer::pipeline_manager::{PipelineManager, RectViewportUniform};
-use crate::core::renderer::traits::{Renderer, RenderContext};
-use crate::core::renderer::draw_list::{DrawList, ColoredRect};
+use crate::core::renderer::traits::{ChartRenderer, RenderContext};
+use crate::core::renderer::draw_list::ColoredRect;
 use crate::core::renderer::geometry_generator;
+use crate::core::renderer::series::CandleSizing;
+
+// ── GPU data types ───────────────────────────────────────────────────────────
+
+/// Per-instance candle data uploaded to GPU. All values in physical pixels.
+/// The CPU converts f64 world coords → f32 pixel coords relative to the
+/// current viewport origin, solving the f64→f32 precision trap.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct CandleInstance {
+    pub center_x: f32,
+    pub open_y: f32,
+    pub high_y: f32,
+    pub low_y: f32,
+    pub close_y: f32,
+    /// 1.0 = bullish, 0.0 = bearish
+    pub state: f32,
+}
+
+/// Uniform block for the candle pipeline.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct CandleUniforms {
+    pub width: f32,
+    pub height: f32,
+    pub bar_half_w: f32,
+    pub wick_half_w: f32,
+    pub border_width: f32,
+    pub draw_body: f32,
+    pub _pad0: f32,
+    pub _pad1: f32,
+    // Colors — vec4 each (16 bytes)
+    pub bullish_body: [f32; 4],
+    pub bearish_body: [f32; 4],
+    pub bullish_wick: [f32; 4],
+    pub bearish_wick: [f32; 4],
+}
+
+// ── Frame state (borrow-safe) ────────────────────────────────────────────────
+
+/// Transient per-frame GPU state. Stored in self between begin_frame/end_frame.
+/// The encoder lives here; each draw_* method creates a short-lived RenderPass.
+struct FrameState {
+    output: wgpu::SurfaceTexture,
+    view: wgpu::TextureView,
+    encoder: wgpu::CommandEncoder,
+    /// True if the first render pass has already cleared the surface.
+    cleared: bool,
+}
+
+// ── Buffer pool helpers ──────────────────────────────────────────────────────
+
+const INITIAL_CANDLE_CAPACITY: usize = 8192;
+const INITIAL_RECT_CAPACITY: usize = 16384;
+
+// ── WgpuRenderer ─────────────────────────────────────────────────────────────
 
 pub struct WgpuRenderer {
     pub gpu: GpuContext,
-    pipelines: PipelineManager,
-    instance_buf: wgpu::Buffer,
-    uniform_buf: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
-    capacity: usize,
-    rect_count: u32,
-}
 
-const INITIAL_CAPACITY: usize = 16384;
+    // Rect pipeline (grid, bg, volume) — existing path
+    rect_pipelines: PipelineManager,
+    rect_instance_buf: wgpu::Buffer,
+    rect_uniform_buf: wgpu::Buffer,
+    rect_bind_group: wgpu::BindGroup,
+    rect_capacity: usize,
+
+    // Candle pipeline — new instanced OHLCV path
+    candle_pipeline: wgpu::RenderPipeline,
+    candle_instance_buf: wgpu::Buffer,
+    candle_uniform_buf: wgpu::Buffer,
+    candle_bind_group: wgpu::BindGroup,
+    #[allow(dead_code)]
+    candle_bind_group_layout: wgpu::BindGroupLayout,
+    candle_capacity: usize,
+
+    // Per-frame state (Some between begin_frame..end_frame)
+    frame: Option<FrameState>,
+}
 
 impl WgpuRenderer {
     pub fn new(gpu: GpuContext) -> Self {
-        let pipelines = PipelineManager::new(&gpu.device, gpu.format);
+        // ── Rect pipeline (existing) ──
+        let rect_pipelines = PipelineManager::new(&gpu.device, gpu.format);
 
-        let instance_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        let rect_instance_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("rect_instances"),
-            size: (INITIAL_CAPACITY * std::mem::size_of::<ColoredRect>()) as u64,
+            size: (INITIAL_RECT_CAPACITY * std::mem::size_of::<ColoredRect>()) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        let uniform_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        let rect_uniform_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("rect_viewport_uniform"),
             size: std::mem::size_of::<RectViewportUniform>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let rect_bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("rect_bind_group"),
-            layout: &pipelines.uniform_bind_group_layout,
+            layout: &rect_pipelines.uniform_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: uniform_buf.as_entire_binding(),
+                resource: rect_uniform_buf.as_entire_binding(),
+            }],
+        });
+
+        // ── Candle pipeline (new) ──
+        let candle_bind_group_layout =
+            gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("candle_uniform_bgl"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let candle_pipeline_layout =
+            gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("candle_pipeline_layout"),
+                bind_group_layouts: &[&candle_bind_group_layout],
+                immediate_size: 0,
+            });
+
+        let candle_shader = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("candle_shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../../shaders/candles.wgsl").into(),
+            ),
+        });
+
+        let candle_pipeline =
+            gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("candle_pipeline"),
+                layout: Some(&candle_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &candle_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<CandleInstance>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &wgpu::vertex_attr_array![
+                            0 => Float32,   // center_x
+                            1 => Float32,   // open_y
+                            2 => Float32,   // high_y
+                            3 => Float32,   // low_y
+                            4 => Float32,   // close_y
+                            5 => Float32,   // state
+                        ],
+                    }],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &candle_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: gpu.format,
+                        blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+
+        let candle_instance_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("candle_instances"),
+            size: (INITIAL_CANDLE_CAPACITY * std::mem::size_of::<CandleInstance>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let candle_uniform_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("candle_uniforms"),
+            size: std::mem::size_of::<CandleUniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let candle_bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("candle_bind_group"),
+            layout: &candle_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: candle_uniform_buf.as_entire_binding(),
             }],
         });
 
         Self {
             gpu,
-            pipelines,
-            instance_buf,
-            uniform_buf,
-            bind_group,
-            capacity: INITIAL_CAPACITY,
-            rect_count: 0,
+            rect_pipelines,
+            rect_instance_buf,
+            rect_uniform_buf,
+            rect_bind_group,
+            rect_capacity: INITIAL_RECT_CAPACITY,
+            candle_pipeline,
+            candle_instance_buf,
+            candle_uniform_buf,
+            candle_bind_group,
+            candle_bind_group_layout,
+            candle_capacity: INITIAL_CANDLE_CAPACITY,
+            frame: None,
         }
     }
 
-    fn upload(&mut self, dl: &DrawList, phys_w: u32, phys_h: u32) {
-        self.rect_count = dl.rects.len() as u32;
-        if self.rect_count == 0 { return; }
+    // ── Rect helpers ─────────────────────────────────────────────────────────
 
-        // Grow buffer if needed
-        if dl.rects.len() > self.capacity {
-            self.capacity = dl.rects.len().next_power_of_two();
-            self.instance_buf = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+    /// Upload ColoredRects to the rect instance buffer. Returns count.
+    fn upload_rects(&mut self, rects: &[ColoredRect], phys_w: u32, phys_h: u32) -> u32 {
+        let count = rects.len() as u32;
+        if count == 0 { return 0; }
+
+        // Grow if needed
+        if rects.len() > self.rect_capacity {
+            self.rect_capacity = rects.len().next_power_of_two();
+            self.rect_instance_buf = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("rect_instances"),
-                size: (self.capacity * std::mem::size_of::<ColoredRect>()) as u64,
+                size: (self.rect_capacity * std::mem::size_of::<ColoredRect>()) as u64,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
         }
 
         self.gpu.queue.write_buffer(
-            &self.instance_buf, 0,
-            bytemuck::cast_slice(&dl.rects),
+            &self.rect_instance_buf, 0,
+            bytemuck::cast_slice(rects),
         );
 
         let uniform = RectViewportUniform {
@@ -86,49 +274,28 @@ impl WgpuRenderer {
             _pad0: 0.0,
             _pad1: 0.0,
         };
-        self.gpu.queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&uniform));
-    }
-}
+        self.gpu.queue.write_buffer(&self.rect_uniform_buf, 0, bytemuck::bytes_of(&uniform));
 
-impl Renderer for WgpuRenderer {
-    fn name(&self) -> &str { "webgpu" }
-
-    fn resize(&mut self, physical_width: u32, physical_height: u32, _dpr: f64) {
-        self.gpu.resize(physical_width, physical_height);
+        count
     }
 
-    fn render_frame(&mut self, ctx: &RenderContext) -> Result<(), String> {
-        let pane_w = ctx.viewport.width as f64;
-        let pane_h = ctx.viewport.height as f64;
-
-        // Generate geometry — SAME code path as Canvas2D
-        let dl = geometry_generator::generate(
-            ctx.bars, ctx.viewport, ctx.style, pane_w, pane_h, ctx.dpr,
-            ctx.y_ticks, ctx.x_ticks,
-        );
-
-        self.upload(&dl, ctx.viewport.width, ctx.viewport.height);
-
-        let output = self.gpu.surface.get_current_texture()
-            .map_err(|e| format!("Surface error: {:?}", e))?;
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        let mut encoder = self.gpu.device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor { label: Some("raycore_encoder") }
-        );
-
+    /// Issue a render pass that draws rect instances.
+    fn draw_rect_pass(&mut self, rect_count: u32) {
+        if rect_count == 0 { return; }
+        let frame = self.frame.as_mut().expect("draw_rect_pass called outside begin/end_frame");
+        let load_op = if frame.cleared {
+            wgpu::LoadOp::Load
+        } else {
+            frame.cleared = true;
+            wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 })
+        };
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut pass = frame.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("rect_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: &frame.view,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.0, g: 0.0, b: 0.0, a: 0.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
+                    ops: wgpu::Operations { load: load_op, store: wgpu::StoreOp::Store },
                     depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
@@ -136,20 +303,246 @@ impl Renderer for WgpuRenderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            pass.set_pipeline(&self.rect_pipelines.rect_pipeline);
+            pass.set_bind_group(0, &self.rect_bind_group, &[]);
+            pass.set_vertex_buffer(0, self.rect_instance_buf.slice(..));
+            pass.draw(0..6, 0..rect_count);
+        } // RenderPass drops here — encoder borrow released
+    }
 
-            if self.rect_count > 0 {
-                pass.set_pipeline(&self.pipelines.rect_pipeline);
-                pass.set_bind_group(0, &self.bind_group, &[]);
-                pass.set_vertex_buffer(0, self.instance_buf.slice(..));
-                // 6 vertices per quad (TriangleList)
-                pass.draw(0..6, 0..self.rect_count);
-            }
+    // ── Candle helpers ───────────────────────────────────────────────────────
+
+    /// Build CandleInstance array from visible bars. Maps f64 world coords
+    /// to f32 pixel coords relative to viewport origin.
+    fn build_candle_instances(
+        bars: &[Bar],
+        viewport: &Viewport,
+        pane_w: f64,
+        candle_h: f64,
+    ) -> Vec<CandleInstance> {
+        let start = (viewport.start_bar.floor() as usize).saturating_sub(1).min(bars.len());
+        let end = ((viewport.end_bar.ceil() as usize) + 1).min(bars.len());
+        if start >= end { return Vec::new(); }
+
+        let bar_range = viewport.end_bar - viewport.start_bar;
+        let price_range = viewport.price_max - viewport.price_min;
+
+        let mut instances = Vec::with_capacity(end - start);
+        for i in start..end {
+            let b = &bars[i];
+            // f64 world → f32 pixel, relative to viewport origin
+            let center_x = ((i as f64 + 0.5 - viewport.start_bar) / bar_range * pane_w).round() as f32;
+            let open_y = (candle_h * (1.0 - (b.open as f64 - viewport.price_min) / price_range)).round() as f32;
+            let high_y = (candle_h * (1.0 - (b.high as f64 - viewport.price_min) / price_range)).round() as f32;
+            let low_y = (candle_h * (1.0 - (b.low as f64 - viewport.price_min) / price_range)).round() as f32;
+            let close_y = (candle_h * (1.0 - (b.close as f64 - viewport.price_min) / price_range)).round() as f32;
+            let state = if b.close >= b.open { 1.0f32 } else { 0.0f32 };
+
+            instances.push(CandleInstance {
+                center_x, open_y, high_y, low_y, close_y, state,
+            });
+        }
+        instances
+    }
+
+    /// Upload candle instances and uniforms. Returns instance count.
+    fn upload_candles(
+        &mut self,
+        instances: &[CandleInstance],
+        uniforms: &CandleUniforms,
+    ) -> u32 {
+        let count = instances.len() as u32;
+        if count == 0 { return 0; }
+
+        // Grow buffer if needed
+        if instances.len() > self.candle_capacity {
+            self.candle_capacity = instances.len().next_power_of_two();
+            self.candle_instance_buf = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("candle_instances"),
+                size: (self.candle_capacity * std::mem::size_of::<CandleInstance>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
         }
 
-        self.gpu.queue.submit(std::iter::once(encoder.finish()));
-        output.present();
-        Ok(())
+        self.gpu.queue.write_buffer(
+            &self.candle_instance_buf, 0,
+            bytemuck::cast_slice(instances),
+        );
+        self.gpu.queue.write_buffer(
+            &self.candle_uniform_buf, 0,
+            bytemuck::bytes_of(uniforms),
+        );
+
+        count
+    }
+
+    /// Issue a render pass that draws candle instances.
+    fn draw_candle_pass(&mut self, candle_count: u32) {
+        if candle_count == 0 { return; }
+        let frame = self.frame.as_mut().expect("draw_candle_pass called outside begin/end_frame");
+        let load_op = if frame.cleared {
+            wgpu::LoadOp::Load
+        } else {
+            frame.cleared = true;
+            wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 })
+        };
+        {
+            let mut pass = frame.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("candle_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &frame.view,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: load_op, store: wgpu::StoreOp::Store },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.candle_pipeline);
+            pass.set_bind_group(0, &self.candle_bind_group, &[]);
+            pass.set_vertex_buffer(0, self.candle_instance_buf.slice(..));
+            // 24 vertices per candle (4 quads × 6 verts)
+            pass.draw(0..24, 0..candle_count);
+        } // RenderPass drops here
+    }
+}
+
+// ── ChartRenderer implementation ─────────────────────────────────────────────
+
+impl ChartRenderer for WgpuRenderer {
+    fn name(&self) -> &str { "webgpu" }
+
+    fn resize(&mut self, physical_width: u32, physical_height: u32, _dpr: f64) {
+        self.gpu.resize(physical_width, physical_height);
     }
 
     fn is_valid(&self) -> bool { true }
+
+    fn begin_frame(&mut self, _ctx: &RenderContext) -> Result<(), String> {
+        let output = self.gpu.surface.get_current_texture()
+            .map_err(|e| format!("Surface error: {:?}", e))?;
+        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let encoder = self.gpu.device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor { label: Some("raycore_encoder") }
+        );
+        self.frame = Some(FrameState { output, view, encoder, cleared: false });
+        Ok(())
+    }
+
+    fn draw_grid(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        let pane_w = ctx.viewport.width as f64;
+        let pane_h = ctx.viewport.height as f64;
+
+        // Background fill
+        let bg = &ctx.style.bg_color;
+        let mut rects = vec![ColoredRect {
+            x: 0.0, y: 0.0, w: pane_w as f32, h: pane_h as f32,
+            r: bg[0], g: bg[1], b: bg[2], a: bg[3],
+        }];
+        // Grid lines
+        let grid = geometry_generator::generate_grid_rects(
+            ctx.style, ctx.y_ticks, ctx.x_ticks, pane_w, pane_h,
+        );
+        rects.extend_from_slice(&grid);
+
+        let count = self.upload_rects(&rects, ctx.viewport.width, ctx.viewport.height);
+        self.draw_rect_pass(count);
+        Ok(())
+    }
+
+    fn draw_candles(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        let pane_w = ctx.viewport.width as f64;
+        let pane_h = ctx.viewport.height as f64;
+        let vol_h = pane_h * 0.15;
+        let candle_h = pane_h - vol_h;
+
+        let sizing = CandleSizing::compute_from_pane(pane_w, ctx.viewport, ctx.dpr);
+
+        // Build per-instance pixel-space data on CPU (f64 → f32 conversion)
+        let instances = Self::build_candle_instances(
+            ctx.bars, ctx.viewport, pane_w, candle_h,
+        );
+
+        let uniforms = CandleUniforms {
+            width: pane_w as f32,
+            height: pane_h as f32,
+            bar_half_w: (sizing.bar_width * 0.5).floor() as f32,
+            wick_half_w: (sizing.wick_width * 0.5).floor() as f32,
+            border_width: sizing.border_width as f32,
+            draw_body: if sizing.draw_body { 1.0 } else { 0.0 },
+            _pad0: 0.0,
+            _pad1: 0.0,
+            bullish_body: ctx.style.bullish_color,
+            bearish_body: ctx.style.bearish_color,
+            bullish_wick: ctx.style.wick_bullish_color,
+            bearish_wick: ctx.style.wick_bearish_color,
+        };
+
+        let count = self.upload_candles(&instances, &uniforms);
+        self.draw_candle_pass(count);
+        Ok(())
+    }
+
+    fn draw_volume(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        let pane_w = ctx.viewport.width as f64;
+        let pane_h = ctx.viewport.height as f64;
+        let vol_rects = geometry_generator::generate_volume_rects(
+            ctx.bars, ctx.viewport, ctx.style, pane_w, pane_h, ctx.dpr,
+        );
+        let count = self.upload_rects(&vol_rects, ctx.viewport.width, ctx.viewport.height);
+        self.draw_rect_pass(count);
+        Ok(())
+    }
+
+    fn draw_lines(&mut self, _ctx: &RenderContext) -> Result<(), String> {
+        // TODO: indicator lines — future pipeline
+        Ok(())
+    }
+
+    fn draw_text(&mut self, _ctx: &RenderContext) -> Result<(), String> {
+        // TODO: texture atlas text rendering
+        Ok(())
+    }
+
+    fn draw_crosshair(&mut self, _ctx: &RenderContext) -> Result<(), String> {
+        // TODO: crosshair overlay
+        Ok(())
+    }
+
+    fn end_frame(&mut self) -> Result<(), String> {
+        let frame = self.frame.take()
+            .ok_or_else(|| "end_frame called without begin_frame".to_string())?;
+
+        // If nothing was drawn, issue a clear pass so the surface is valid
+        if !frame.cleared {
+            let mut encoder = frame.encoder;
+            {
+                let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("clear_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &frame.view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+            }
+            self.gpu.queue.submit(std::iter::once(encoder.finish()));
+            frame.output.present();
+        } else {
+            self.gpu.queue.submit(std::iter::once(frame.encoder.finish()));
+            frame.output.present();
+        }
+        Ok(())
+    }
 }
