@@ -87,12 +87,11 @@ impl OverlayRenderer {
         let pw = self.physical_width as f64;
         let ph = self.physical_height as f64;
         self.ctx.clear_rect(0.0, 0.0, pw, ph);
-
-        self.draw_watermark(style, layout);
-        self.draw_y_axis(style, layout, y_ticks);
-        self.draw_x_axis(style, layout, x_ticks);
-        self.draw_crosshair(crosshair, bars, vp, style, layout);
-    }
+  
+          self.draw_y_axis(style, layout, y_ticks);
+          self.draw_x_axis(style, layout, x_ticks);
+          self.draw_crosshair(crosshair, bars, vp, style, layout);
+      }
 
     // ── Y-Axis (price) — LWC-matching ────────────────────────────────────
 
@@ -404,16 +403,5 @@ impl OverlayRenderer {
         self.ctx.set_text_baseline("middle");
         let text_x_t = bx1 + h_margin;
         let _ = self.ctx.fill_text(&bar_lbl, text_x_t, text_y_phys);
-    }
-
-    // ── Watermark ───────────────────────────────────────────────────────
-
-    fn draw_watermark(&self, s: &ChartStyle, layout: &ChartLayout) {
-        let fs = s.font_size_watermark as f64 * self.dpr;
-        self.ctx.set_fill_style_str(&rgba(&s.watermark_color));
-        self.ctx.set_font(&format!("bold {}px {}", fs, s.font_family));
-        self.ctx.set_text_align("center");
-        self.ctx.set_text_baseline("middle");
-        let _ = self.ctx.fill_text("RayCharts", layout.chart_w / 2.0, layout.candle_h / 2.0);
     }
 }

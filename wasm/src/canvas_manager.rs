@@ -72,7 +72,7 @@ pub struct WidgetLayout {
     /// The outer container provided by the user.
     container: HtmlElement,
     /// The CSS-grid wrapper we create inside the container.
-    grid_wrapper: HtmlDivElement,
+    pub grid_wrapper: HtmlDivElement,
 
     // ── Widget containers (real DOM elements for events) ──
     pub pane_container: HtmlDivElement,

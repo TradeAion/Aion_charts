@@ -62,8 +62,6 @@ impl OverlayRenderer {
         let pw = self.pw as f64;
         let ph = self.ph as f64;
         self.ctx.clear_rect(0.0, 0.0, pw, ph);
-
-        self.draw_watermark(style, pw, ph);
         self.draw_crosshair(crosshair, style, pw, ph);
     }
 
@@ -111,14 +109,5 @@ impl OverlayRenderer {
 
         // Reset dash
         let _ = self.ctx.set_line_dash(&js_sys::Array::new());
-    }
-
-    fn draw_watermark(&self, style: &ChartStyle, pane_w: f64, pane_h: f64) {
-        let fs = style.font_size_watermark as f64 * self.dpr;
-        self.ctx.set_fill_style_str(&rgba(&style.watermark_color));
-        self.ctx.set_font(&format!("bold {}px {}", fs, style.font_family));
-        self.ctx.set_text_align("center");
-        self.ctx.set_text_baseline("middle");
-        let _ = self.ctx.fill_text("RayCharts", pane_w / 2.0, pane_h / 2.0);
     }
 }
