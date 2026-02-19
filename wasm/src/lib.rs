@@ -255,15 +255,12 @@ impl RayCore {
         let mut closures: Vec<Closure<dyn FnMut(web_sys::Event)>> = Vec::new();
         let mut wheel_closures: Vec<Closure<dyn FnMut(web_sys::WheelEvent)>> = Vec::new();
 
-        // ── PANE events (on pane's top canvas — topmost z-index in pane) ──
+        // ── PANE events (on container div — canvases have pointer-events:none) ──
         let pane_el: web_sys::Element = {
-            let borrow = inner.borrow();
-            borrow.layout.pane.top.clone().unchecked_into()
-        };
-        let pane_container_el: web_sys::Element = {
             let borrow = inner.borrow();
             borrow.layout.pane_container.clone().unchecked_into()
         };
+        let pane_container_el: web_sys::Element = pane_el.clone();
 
         // pane: pointerenter
         {
@@ -281,8 +278,9 @@ impl RayCore {
             let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
                 let mut s = inner.borrow_mut();
                 s.on_pointer_leave(HitZone::Chart);
+                // Reset container cursor to default for this zone
                 let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
-                let _ = html_el.style().set_property("cursor", "");
+                let _ = html_el.style().set_property("cursor", "crosshair");
             }));
             pane_el.add_event_listener_with_callback("pointerleave", cb.as_ref().unchecked_ref())?;
             closures.push(cb);
@@ -307,16 +305,13 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let pane_c = pane_container_el.clone();
-            let pane_top = {
-                let borrow = inner.borrow();
-                borrow.layout.pane.top.clone()
-            };
             let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                 let pe: web_sys::PointerEvent = e.unchecked_into();
                 let (x, y) = event_css_pos(&pe, &pane_c);
                 let mut s = inner.borrow_mut();
                 s.on_pointer_down(x, y, HitZone::Chart);
-                let _ = pane_top.set_pointer_capture(pe.pointer_id());
+                let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
+                let _ = html_el.set_pointer_capture(pe.pointer_id());
             }));
             pane_el.add_event_listener_with_callback("pointerdown", cb.as_ref().unchecked_ref())?;
             closures.push(cb);
@@ -325,17 +320,13 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let pane_c = pane_container_el.clone();
-            let pane_top = {
-                let borrow = inner.borrow();
-                borrow.layout.pane.top.clone()
-            };
             let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                 let pe: web_sys::PointerEvent = e.unchecked_into();
                 let mut s = inner.borrow_mut();
                 s.on_pointer_up();
-                let _ = pane_top.release_pointer_capture(pe.pointer_id());
-                let cursor = s.cursor_css();
                 let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
+                let _ = html_el.release_pointer_capture(pe.pointer_id());
+                let cursor = s.cursor_css();
                 let _ = html_el.style().set_property("cursor", cursor);
             }));
             pane_el.add_event_listener_with_callback("pointerup", cb.as_ref().unchecked_ref())?;
@@ -366,15 +357,12 @@ impl RayCore {
             closures.push(cb);
         }
 
-        // ── PRICE AXIS events ──
+        // ── PRICE AXIS events (on container div) ──
         let price_el: web_sys::Element = {
-            let borrow = inner.borrow();
-            borrow.layout.price_axis.top.clone().unchecked_into()
-        };
-        let price_container_el: web_sys::Element = {
             let borrow = inner.borrow();
             borrow.layout.price_axis_container.clone().unchecked_into()
         };
+        let price_container_el: web_sys::Element = price_el.clone();
 
         // price axis: pointerenter
         {
@@ -393,7 +381,7 @@ impl RayCore {
                 let mut s = inner.borrow_mut();
                 s.on_pointer_leave(HitZone::PriceAxis);
                 let html_el: &web_sys::HtmlElement = price_c.unchecked_ref();
-                let _ = html_el.style().set_property("cursor", "");
+                let _ = html_el.style().set_property("cursor", "ns-resize");
             }));
             price_el.add_event_listener_with_callback("pointerleave", cb.as_ref().unchecked_ref())?;
             closures.push(cb);
@@ -418,16 +406,13 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let price_c = price_container_el.clone();
-            let price_top = {
-                let borrow = inner.borrow();
-                borrow.layout.price_axis.top.clone()
-            };
             let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                 let pe: web_sys::PointerEvent = e.unchecked_into();
                 let (_x, y) = event_css_pos(&pe, &price_c);
                 let mut s = inner.borrow_mut();
                 s.on_pointer_down(0.0, y, HitZone::PriceAxis);
-                let _ = price_top.set_pointer_capture(pe.pointer_id());
+                let html_el: &web_sys::HtmlElement = price_c.unchecked_ref();
+                let _ = html_el.set_pointer_capture(pe.pointer_id());
             }));
             price_el.add_event_listener_with_callback("pointerdown", cb.as_ref().unchecked_ref())?;
             closures.push(cb);
@@ -436,17 +421,13 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let price_c = price_container_el.clone();
-            let price_top = {
-                let borrow = inner.borrow();
-                borrow.layout.price_axis.top.clone()
-            };
             let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                 let pe: web_sys::PointerEvent = e.unchecked_into();
                 let mut s = inner.borrow_mut();
                 s.on_pointer_up();
-                let _ = price_top.release_pointer_capture(pe.pointer_id());
-                let cursor = s.cursor_css();
                 let html_el: &web_sys::HtmlElement = price_c.unchecked_ref();
+                let _ = html_el.release_pointer_capture(pe.pointer_id());
+                let cursor = s.cursor_css();
                 let _ = html_el.style().set_property("cursor", cursor);
             }));
             price_el.add_event_listener_with_callback("pointerup", cb.as_ref().unchecked_ref())?;
@@ -475,15 +456,12 @@ impl RayCore {
             closures.push(cb);
         }
 
-        // ── TIME AXIS events ──
+        // ── TIME AXIS events (on container div) ──
         let time_el: web_sys::Element = {
-            let borrow = inner.borrow();
-            borrow.layout.time_axis.top.clone().unchecked_into()
-        };
-        let time_container_el: web_sys::Element = {
             let borrow = inner.borrow();
             borrow.layout.time_axis_container.clone().unchecked_into()
         };
+        let time_container_el: web_sys::Element = time_el.clone();
 
         // time axis: pointerenter
         {
@@ -502,7 +480,7 @@ impl RayCore {
                 let mut s = inner.borrow_mut();
                 s.on_pointer_leave(HitZone::TimeAxis);
                 let html_el: &web_sys::HtmlElement = time_c.unchecked_ref();
-                let _ = html_el.style().set_property("cursor", "");
+                let _ = html_el.style().set_property("cursor", "ew-resize");
             }));
             time_el.add_event_listener_with_callback("pointerleave", cb.as_ref().unchecked_ref())?;
             closures.push(cb);
@@ -527,16 +505,13 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let time_c = time_container_el.clone();
-            let time_top = {
-                let borrow = inner.borrow();
-                borrow.layout.time_axis.top.clone()
-            };
             let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                 let pe: web_sys::PointerEvent = e.unchecked_into();
                 let (x, _y) = event_css_pos(&pe, &time_c);
                 let mut s = inner.borrow_mut();
                 s.on_pointer_down(x, 0.0, HitZone::TimeAxis);
-                let _ = time_top.set_pointer_capture(pe.pointer_id());
+                let html_el: &web_sys::HtmlElement = time_c.unchecked_ref();
+                let _ = html_el.set_pointer_capture(pe.pointer_id());
             }));
             time_el.add_event_listener_with_callback("pointerdown", cb.as_ref().unchecked_ref())?;
             closures.push(cb);
@@ -545,17 +520,13 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let time_c = time_container_el.clone();
-            let time_top = {
-                let borrow = inner.borrow();
-                borrow.layout.time_axis.top.clone()
-            };
             let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                 let pe: web_sys::PointerEvent = e.unchecked_into();
                 let mut s = inner.borrow_mut();
                 s.on_pointer_up();
-                let _ = time_top.release_pointer_capture(pe.pointer_id());
-                let cursor = s.cursor_css();
                 let html_el: &web_sys::HtmlElement = time_c.unchecked_ref();
+                let _ = html_el.release_pointer_capture(pe.pointer_id());
+                let cursor = s.cursor_css();
                 let _ = html_el.style().set_property("cursor", cursor);
             }));
             time_el.add_event_listener_with_callback("pointerup", cb.as_ref().unchecked_ref())?;

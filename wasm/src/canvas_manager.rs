@@ -136,7 +136,8 @@ impl WidgetLayout {
         pane_container.style().set_css_text(
             "position:relative;overflow:hidden;\
              grid-column:1;grid-row:1;\
-             min-width:0;min-height:0;"
+             min-width:0;min-height:0;\
+             cursor:crosshair;"
         );
         grid_wrapper.append_child(&pane_container)?;
 
@@ -150,7 +151,8 @@ impl WidgetLayout {
         price_axis_container.style().set_css_text(
             "position:relative;overflow:hidden;\
              grid-column:2;grid-row:1;\
-             min-width:0;min-height:0;"
+             min-width:0;min-height:0;\
+             cursor:ns-resize;"
         );
         grid_wrapper.append_child(&price_axis_container)?;
 
@@ -164,7 +166,8 @@ impl WidgetLayout {
         time_axis_container.style().set_css_text(
             "position:relative;overflow:hidden;\
              grid-column:1;grid-row:2;\
-             min-width:0;min-height:0;"
+             min-width:0;min-height:0;\
+             cursor:ew-resize;"
         );
         grid_wrapper.append_child(&time_axis_container)?;
 
@@ -178,7 +181,8 @@ impl WidgetLayout {
         corner_stub_container.style().set_css_text(
             "position:relative;overflow:hidden;\
              grid-column:2;grid-row:2;\
-             min-width:0;min-height:0;"
+             min-width:0;min-height:0;\
+             cursor:default;"
         );
         grid_wrapper.append_child(&corner_stub_container)?;
 
@@ -300,7 +304,7 @@ fn create_canvas(
 
     canvas.set_id(id);
     canvas.style().set_css_text(&format!(
-        "position:absolute;top:0;left:0;width:100%;height:100%;display:block;z-index:{};",
+        "position:absolute;top:0;left:0;width:100%;height:100%;display:block;z-index:{};pointer-events:none;",
         z_index
     ));
 

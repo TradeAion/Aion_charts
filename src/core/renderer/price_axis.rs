@@ -115,7 +115,7 @@ impl PriceAxisRenderer {
     }
 
     /// Render the top layer: crosshair price label.
-    /// `crosshair_y` is in CSS px relative to the pane.
+    /// Matches LWC's PriceAxisViewRenderer._calculateGeometry for alignRight=true.
     pub fn render_top(
         &self,
         crosshair: &CrosshairState,
@@ -153,50 +153,74 @@ impl PriceAxisRenderer {
         let padding_bottom = padding_top;
 
         let text_w = self.top_ctx.measure_text(&price_lbl).map(|m| m.width()).unwrap_or(40.0).ceil();
-        let label_h = fs + padding_top + padding_bottom;
-        let label_w = border_size + padding_inner + padding_outer + text_w + tick_length;
+        let total_h = fs + padding_top + padding_bottom;
+        let total_w = border_size + padding_inner + padding_outer + text_w + tick_length;
 
         // LWC: label height parity must match tick height parity
-        let tick_h_i = (dpr.floor().max(1.0)) as i32;
-        let mut label_h_i = label_h.round() as i32;
-        if label_h_i % 2 != tick_h_i % 2 { label_h_i += 1; }
-        let label_h = label_h_i as f64;
+        let tick_h_bmp = dpr.floor().max(1.0);
+        let tick_h_i = tick_h_bmp as i32;
+        let mut total_h_bmp = total_h.round() as i32;
+        if total_h_bmp % 2 != tick_h_i % 2 { total_h_bmp += 1; }
+        let total_h_bmp = total_h_bmp as f64;
+        let total_w_bmp = total_w.round();
 
+        let horz_border_bmp = if border_size > 0.0 {
+            (border_size).max(1.0).floor()
+        } else { 0.0 };
+
+        let tick_size_bmp = tick_length;
+
+        // LWC: yMid = round(coordinate * vpr) - floor(vpr * 0.5)
         let y_mid = my.round() - (dpr * 0.5).floor();
-        let y_top = (y_mid + tick_h_i as f64 / 2.0 - label_h / 2.0).floor();
-        let label_w_r = label_w.round().min(w);
+        let y_top = (y_mid + tick_h_bmp / 2.0 - total_h_bmp / 2.0).floor();
+        let y_bottom = y_top + total_h_bmp;
+
+        // LWC alignRight: xInside = bitmapSize.width - horzBorderBitmap (right edge minus border)
+        let x_inside = w - horz_border_bmp;
+        // xOutside = xInside - totalWidthBitmap (label extends leftward)
+        let x_outside = x_inside - total_w_bmp;
+        // xTick = xInside - tickSizeBitmap
+        let x_tick = x_inside - tick_size_bmp;
+
         let radius = (2.0 * dpr).round();
 
-        // Draw rounded rect (left corners rounded since border is at left)
+        // Draw rounded rect — LWC alignRight corners: [radius, 0, 0, radius]
+        // = top-left rounded, top-right square, bottom-right square, bottom-left rounded
         self.top_ctx.set_fill_style_str(&rgba(&style.crosshair_label_bg));
         self.top_ctx.begin_path();
-        let x1 = 0.0;
-        let x2 = label_w_r;
-        let y1 = y_top;
-        let y2 = y_top + label_h;
-
-        self.top_ctx.move_to(x1 + radius, y1);
-        self.top_ctx.line_to(x2, y1);
-        self.top_ctx.line_to(x2, y2);
-        self.top_ctx.line_to(x1 + radius, y2);
-        let _ = self.top_ctx.arc_to(x1, y2, x1, y2 - radius, radius);
-        self.top_ctx.line_to(x1, y1 + radius);
-        let _ = self.top_ctx.arc_to(x1, y1, x1 + radius, y1, radius);
+        // Start top-left (rounded)
+        self.top_ctx.move_to(x_outside + radius, y_top);
+        // Top edge -> top-right (square)
+        self.top_ctx.line_to(x_inside, y_top);
+        // Right edge -> bottom-right (square)
+        self.top_ctx.line_to(x_inside, y_bottom);
+        // Bottom edge -> bottom-left (rounded)
+        self.top_ctx.line_to(x_outside + radius, y_bottom);
+        let _ = self.top_ctx.arc_to(x_outside, y_bottom, x_outside, y_bottom - radius, radius);
+        // Left edge -> top-left (rounded)
+        self.top_ctx.line_to(x_outside, y_top + radius);
+        let _ = self.top_ctx.arc_to(x_outside, y_top, x_outside + radius, y_top, radius);
         self.top_ctx.close_path();
         self.top_ctx.fill();
 
-        // Tick mark on label
-        let tick_h_px = dpr.floor().max(1.0);
-        let tick_off = (dpr * 0.5).floor();
+        // Tick mark — LWC: fillRect(xInside, yMid, xTick - xInside, tickHeight)
+        // For alignRight, xTick < xInside, so we draw from xTick to xInside
         self.top_ctx.set_fill_style_str(&rgba(&style.crosshair_label_text));
-        self.top_ctx.fill_rect(0.0, y_mid - tick_off, tick_length, tick_h_px);
+        self.top_ctx.fill_rect(x_tick, y_mid, x_inside - x_tick, tick_h_bmp);
 
-        // Price text
+        // Separator (border line) — LWC: fillRect(right - horzBorder, yTop, horzBorder, yBottom - yTop)
+        // using pane background color
+        self.top_ctx.set_fill_style_str(&rgba(&style.bg_color));
+        self.top_ctx.fill_rect(w - horz_border_bmp, y_top, horz_border_bmp, y_bottom - y_top);
+
+        // Price text — LWC: right-aligned at xInside - tickSize - paddingInner - horzBorder
+        // All in bitmap coords (canvas is sized at bitmap resolution)
+        self.top_ctx.set_font(&font);
         self.top_ctx.set_fill_style_str(&rgba(&style.crosshair_label_text));
-        self.top_ctx.set_text_align("left");
+        self.top_ctx.set_text_align("right");
         self.top_ctx.set_text_baseline("middle");
-        let text_x = tick_length + padding_inner;
-        let text_y = (y1 + y2) / 2.0;
+        let text_x = x_inside - tick_size_bmp - padding_inner - horz_border_bmp;
+        let text_y = (y_top + y_bottom) / 2.0;
         let _ = self.top_ctx.fill_text(&price_lbl, text_x, text_y);
     }
 }
