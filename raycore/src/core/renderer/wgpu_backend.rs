@@ -7,6 +7,7 @@
 use crate::core::renderer::wgpu_context::GpuContext;
 use crate::core::renderer::pipeline_manager::{PipelineManager, RectViewportUniform};
 use crate::core::renderer::traits::{Renderer, RenderContext};
+use crate::core::renderer::series::ChartLayout;
 use crate::core::renderer::draw_list::{DrawList, ColoredRect};
 use crate::core::renderer::geometry_generator;
 
@@ -98,14 +99,12 @@ impl Renderer for WgpuRenderer {
     }
 
     fn render_frame(&mut self, ctx: &RenderContext) -> Result<(), String> {
-        let pane_w = ctx.viewport.width as f64;
-        let pane_h = ctx.viewport.height as f64;
+        let layout = ChartLayout::from_physical(
+            ctx.viewport.width, ctx.viewport.height, ctx.dpr, ctx.style, ctx.y_axis_css_w,
+        );
 
         // Generate geometry — SAME code path as Canvas2D
-        let dl = geometry_generator::generate(
-            ctx.bars, ctx.viewport, ctx.style, pane_w, pane_h, ctx.dpr,
-            ctx.y_ticks, ctx.x_ticks,
-        );
+        let (dl, _, _) = geometry_generator::generate(ctx.bars, ctx.viewport, ctx.style, &layout);
 
         self.upload(&dl, ctx.viewport.width, ctx.viewport.height);
 

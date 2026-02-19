@@ -153,16 +153,6 @@ impl Default for ChartStyle {
     }
 }
 
-/// Crosshair mode — matches LWC's CrosshairMode enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CrosshairMode {
-    /// Free crosshair — no snap. Lines follow pointer exactly.
-    #[default]
-    Normal,
-    /// Magnet mode — Y snaps to nearest close price at the hovered bar index.
-    Magnet,
-}
-
 /// Crosshair state — the position of the crosshair in logical coordinates.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CrosshairState {
@@ -171,21 +161,19 @@ pub struct CrosshairState {
     pub y: f64,
     pub bar_index: Option<usize>,
     pub price: f64,
-    pub mode: CrosshairMode,
 }
 
 /// Information about the current render frame, passed to the renderer.
-/// The renderer's canvas is sized to the pane (chart area) only.
 pub struct RenderContext<'a> {
     pub bars: &'a [Bar],
     pub viewport: &'a Viewport,
     pub style: &'a ChartStyle,
     pub crosshair: &'a CrosshairState,
     pub dpr: f64,
-    /// Pre-computed tick marks for grid lines (price axis ticks).
-    pub y_ticks: &'a [TickMark],
-    /// Pre-computed tick marks for grid lines (time axis ticks).
-    pub x_ticks: &'a [TickMark],
+    pub logical_width: f64,
+    pub logical_height: f64,
+    /// Dynamic Y-axis width in CSS px (measured from text widths).
+    pub y_axis_css_w: f64,
 }
 
 /// Tick mark for axis rendering.

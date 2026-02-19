@@ -2,12 +2,14 @@
 //!
 //! Receives a pre-computed DrawList (from GeometryGenerator) and draws every
 //! ColoredRect via CanvasRenderingContext2d.fill_rect(). No candle logic here.
+//! This guarantees pixel-perfect consistency with the WebGPU path.
 
 #![cfg(target_arch = "wasm32")]
 
 use web_sys::{HtmlCanvasElement, CanvasRenderingContext2d};
 use wasm_bindgen::prelude::*;
 use crate::core::renderer::traits::{Renderer, RenderContext};
+use crate::core::renderer::series::ChartLayout;
 use crate::core::renderer::draw_list::DrawList;
 use crate::core::renderer::geometry_generator;
 
@@ -69,19 +71,14 @@ impl Renderer for Canvas2DRenderer {
     }
 
     fn render_frame(&mut self, rc: &RenderContext) -> Result<(), String> {
-        let pane_w = self.physical_width as f64;
-        let pane_h = self.physical_height as f64;
-
-        // Clear canvas (transparent — DrawList includes background fill)
-        self.ctx.clear_rect(0.0, 0.0, pane_w, pane_h);
-
-        // Generate geometry — single source of truth
-        let dl = geometry_generator::generate(
-            rc.bars, rc.viewport, rc.style,
-            pane_w, pane_h, self.dpr,
-            rc.y_ticks, rc.x_ticks,
+        let layout = ChartLayout::from_physical(
+            self.physical_width, self.physical_height, self.dpr, rc.style, rc.y_axis_css_w,
         );
 
+        // Generate geometry — single source of truth
+        let (dl, _, _) = geometry_generator::generate(rc.bars, rc.viewport, rc.style, &layout);
+
+        // No clear needed — DrawList starts with opaque bg rect
         self.draw_list(&dl);
 
         Ok(())

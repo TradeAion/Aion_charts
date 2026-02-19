@@ -5,49 +5,44 @@
 //! identically, guaranteeing visual consistency.
 //!
 //! All candle sizing uses LWC-matching algorithms from series.rs.
-//! Tick computation is in tick_marks.rs (shared with axis renderers).
 
 use crate::core::data::Bar;
 use crate::core::viewport::Viewport;
 use crate::core::renderer::traits::{ChartStyle, TickMark};
-use crate::core::renderer::series::CandleSizing;
+use crate::core::renderer::series::{ChartLayout, CandleSizing};
 use crate::core::renderer::draw_list::{DrawList, ColoredRect};
+use crate::core::formatters::{format_price, format_timestamp, nice_step};
 
 /// Generate the complete DrawList for one frame.
 /// Order: background → grid lines → volume → candles.
-/// `pane_w` and `pane_h` are in physical pixels (chart area only, no axes).
+/// Returns (DrawList, y_ticks, x_ticks) — ticks are needed by the overlay for axis labels.
 pub fn generate(
     bars: &[Bar],
     viewport: &Viewport,
     style: &ChartStyle,
-    pane_w: f64,
-    pane_h: f64,
-    dpr: f64,
-    y_ticks: &[TickMark],
-    x_ticks: &[TickMark],
-) -> DrawList {
+    layout: &ChartLayout,
+) -> (DrawList, Vec<TickMark>, Vec<TickMark>) {
     let mut dl = DrawList::new();
 
-    // Background fill
-    let (br, bg, bb, ba) = color4(&style.bg_color);
+    // 1. Background fill — makes the canvas opaque, no alpha compositing needed
+    let bg = &style.bg_color;
     dl.rects.push(ColoredRect {
-        x: 0.0, y: 0.0, w: pane_w as f32, h: pane_h as f32,
-        r: br, g: bg, b: bb, a: ba,
+        x: 0.0, y: 0.0,
+        w: layout.total_w as f32, h: layout.total_h as f32,
+        r: bg[0], g: bg[1], b: bg[2], a: bg[3],
     });
 
-    // Grid lines (as thin rects, 1 physical pixel wide)
-    generate_grid_lines(&mut dl, style, y_ticks, x_ticks, pane_w, pane_h);
+    // 2. Grid lines (as thin rects)
+    let y_ticks = compute_y_ticks(viewport, layout);
+    let x_ticks = compute_x_ticks(viewport, bars, layout);
+    generate_grid_lines(viewport, style, layout, &y_ticks, &x_ticks, &mut dl);
 
-    let sizing = CandleSizing::compute_from_pane(pane_w, viewport, dpr);
+    // 3. Data
+    let sizing = CandleSizing::compute(layout, viewport);
+    generate_volume(bars, viewport, style, layout, &sizing, &mut dl);
+    generate_candles(bars, viewport, style, layout, &sizing, &mut dl);
 
-    // Volume occupies the bottom 15% of pane
-    let vol_h = pane_h * 0.15;
-    let candle_h = pane_h - vol_h;
-
-    generate_volume(bars, viewport, style, pane_w, candle_h, vol_h, &sizing, &mut dl);
-    generate_candles(bars, viewport, style, pane_w, candle_h, &sizing, &mut dl);
-
-    dl
+    (dl, y_ticks, x_ticks)
 }
 
 // ── Coordinate helpers (physical pixel space) ────────────────────────────────
@@ -65,45 +60,6 @@ fn price_to_y(price: f64, vp: &Viewport, candle_h: f64) -> f64 {
 
 fn color4(c: &[f32; 4]) -> (f32, f32, f32, f32) {
     (c[0], c[1], c[2], c[3])
-}
-
-// ── Grid lines (background grid, rendered as 1px rects) ──────────────────────
-
-fn snap(v: f64) -> f64 { v.floor() + 0.5 }
-
-fn generate_grid_lines(
-    dl: &mut DrawList,
-    style: &ChartStyle,
-    y_ticks: &[TickMark],
-    x_ticks: &[TickMark],
-    pane_w: f64,
-    pane_h: f64,
-) {
-    let (gr, gg, gb, ga) = color4(&style.grid_color);
-
-    // Horizontal grid lines (at price ticks) — major ticks only
-    for t in y_ticks {
-        if !t.major { continue; }
-        let y = snap(t.pixel);
-        if y > 0.0 && y < pane_h {
-            dl.rects.push(ColoredRect {
-                x: 0.0, y: y as f32, w: pane_w as f32, h: 1.0,
-                r: gr, g: gg, b: gb, a: ga,
-            });
-        }
-    }
-
-    // Vertical grid lines (at time ticks) — major ticks only
-    for t in x_ticks {
-        if !t.major { continue; }
-        let x = snap(t.pixel);
-        if x > 0.0 && x < pane_w {
-            dl.rects.push(ColoredRect {
-                x: x as f32, y: 0.0, w: 1.0, h: pane_h as f32,
-                r: gr, g: gg, b: gb, a: ga,
-            });
-        }
-    }
 }
 
 // ── Inner-border fill (matches LWC fillRectInnerBorder) ──────────────────────
@@ -129,8 +85,7 @@ fn generate_candles(
     bars: &[Bar],
     vp: &Viewport,
     style: &ChartStyle,
-    chart_w: f64,
-    candle_h: f64,
+    layout: &ChartLayout,
     sizing: &CandleSizing,
     dl: &mut DrawList,
 ) {
@@ -138,7 +93,7 @@ fn generate_candles(
     let end = ((vp.end_bar.ceil() as usize) + 1).min(bars.len());
     if start >= end { return; }
 
-    let _dpr = sizing.bar_spacing; // for border check we use actual bar_spacing
+    let dpr = layout.dpr;
     let half_bar = (sizing.bar_width * 0.5).floor();
     let wick_offset = (sizing.wick_width * 0.5).floor();
 
@@ -153,11 +108,14 @@ fn generate_candles(
             color4(&style.wick_bearish_color)
         };
 
-        let phys_x = bar_to_x(i as f64 + 0.5, vp, chart_w).round();
-        let body_top = price_to_y(b.open.max(b.close) as f64, vp, candle_h).round();
-        let body_bottom = price_to_y(b.open.min(b.close) as f64, vp, candle_h).round();
-        let high_y = price_to_y(b.high as f64, vp, candle_h).round();
-        let low_y = price_to_y(b.low as f64, vp, candle_h).round();
+        let phys_x = bar_to_x(i as f64 + 0.5, vp, layout.chart_w).round();
+
+        // max price → smaller Y (higher on screen) = visual top
+        let body_top = price_to_y(b.open.max(b.close) as f64, vp, layout.candle_h).round();
+        // min price → larger Y (lower on screen) = visual bottom
+        let body_bottom = price_to_y(b.open.min(b.close) as f64, vp, layout.candle_h).round();
+        let high_y = price_to_y(b.high as f64, vp, layout.candle_h).round();
+        let low_y = price_to_y(b.low as f64, vp, layout.candle_h).round();
 
         let mut left = phys_x - wick_offset;
         let right = left + sizing.wick_width - 1.0;
@@ -166,6 +124,7 @@ fn generate_candles(
         }
         let width = right - left + 1.0;
 
+        // Upper wick: from high to body top
         if body_top > high_y {
             dl.rects.push(ColoredRect {
                 x: left as f32, y: high_y as f32,
@@ -173,6 +132,7 @@ fn generate_candles(
                 r: wr, g: wg, b: wb, a: wa,
             });
         }
+        // Lower wick: from body bottom to low
         if low_y > body_bottom + 1.0 {
             dl.rects.push(ColoredRect {
                 x: left as f32, y: (body_bottom + 1.0) as f32,
@@ -195,11 +155,13 @@ fn generate_candles(
             color4(&style.wick_bearish_color)
         };
 
-        let phys_x = bar_to_x(i as f64 + 0.5, vp, chart_w).round();
+        let phys_x = bar_to_x(i as f64 + 0.5, vp, layout.chart_w).round();
+
         let mut left = phys_x - half_bar;
         let right = left + sizing.bar_width - 1.0;
-        let top = price_to_y(b.open.max(b.close) as f64, vp, candle_h).round();
-        let bottom = price_to_y(b.open.min(b.close) as f64, vp, candle_h).round();
+
+        let top = price_to_y(b.open.max(b.close) as f64, vp, layout.candle_h).round();
+        let bottom = price_to_y(b.open.min(b.close) as f64, vp, layout.candle_h).round();
 
         if let Some(pe) = prev_edge {
             left = left.max(pe + 1.0).min(right);
@@ -208,7 +170,7 @@ fn generate_candles(
         let w = right - left + 1.0;
         let h = (bottom - top + 1.0).max(1.0);
 
-        if sizing.bar_spacing * sizing.dpr > 2.0 * sizing.border_width {
+        if sizing.bar_spacing * dpr > 2.0 * sizing.border_width {
             push_inner_border(
                 dl,
                 left as f32, top as f32, w as f32, h as f32,
@@ -236,11 +198,11 @@ fn generate_candles(
                 color4(&style.bearish_color)
             };
 
-            let phys_x = bar_to_x(i as f64 + 0.5, vp, chart_w).round();
+            let phys_x = bar_to_x(i as f64 + 0.5, vp, layout.chart_w).round();
             let left = phys_x - half_bar;
             let right = left + sizing.bar_width - 1.0;
-            let top = price_to_y(b.open.max(b.close) as f64, vp, candle_h).round();
-            let bottom = price_to_y(b.open.min(b.close) as f64, vp, candle_h).round();
+            let top = price_to_y(b.open.max(b.close) as f64, vp, layout.candle_h).round();
+            let bottom = price_to_y(b.open.min(b.close) as f64, vp, layout.candle_h).round();
 
             let bl = left + sizing.border_width;
             let bt = top + sizing.border_width;
@@ -264,9 +226,7 @@ fn generate_volume(
     bars: &[Bar],
     vp: &Viewport,
     style: &ChartStyle,
-    chart_w: f64,
-    candle_h: f64,
-    vol_h: f64,
+    layout: &ChartLayout,
     sizing: &CandleSizing,
     dl: &mut DrawList,
 ) {
@@ -288,9 +248,9 @@ fn generate_volume(
             color4(&style.bearish_volume_color)
         };
 
-        let cx = bar_to_x(i as f64 + 0.5, vp, chart_w);
-        let h = (b.volume as f64 / max_vol as f64) * vol_h;
-        let top = candle_h + vol_h - h;
+        let cx = bar_to_x(i as f64 + 0.5, vp, layout.chart_w);
+        let h = (b.volume as f64 / max_vol as f64) * layout.vol_h;
+        let top = layout.candle_h + layout.vol_h - h;
 
         let phys_x = cx.round();
         let left = phys_x - half_bar;
@@ -300,5 +260,92 @@ fn generate_volume(
             w: sizing.bar_width as f32, h: h.ceil() as f32,
             r: cr, g: cg, b: cb, a: ca,
         });
+    }
+}
+
+// ── Grid tick computation ────────────────────────────────────────────────────
+
+fn compute_y_ticks(vp: &Viewport, layout: &ChartLayout) -> Vec<TickMark> {
+    let range = vp.price_max - vp.price_min;
+    if range <= 0.0 { return vec![]; }
+    let step = nice_step(range / (layout.candle_h / (40.0 * layout.dpr)).max(3.0).min(15.0));
+    let first = (vp.price_min / step).ceil() * step;
+    let mut out = Vec::new();
+    let mut v = first;
+    while v <= vp.price_max {
+        let px = price_to_y(v, vp, layout.candle_h);
+        out.push(TickMark {
+            value: v,
+            pixel: px,
+            label: format_price(v, step),
+            major: true,
+        });
+        v += step;
+    }
+    out
+}
+
+fn compute_x_ticks(vp: &Viewport, bars: &[Bar], layout: &ChartLayout) -> Vec<TickMark> {
+    let count = vp.end_bar - vp.start_bar;
+    if count <= 0.0 { return vec![]; }
+    let step = nice_step(count / (layout.chart_w / (100.0 * layout.dpr)).max(2.0)).max(1.0);
+    let first = (vp.start_bar / step).ceil() * step;
+    let mut out = Vec::new();
+    let mut v = first;
+    while v <= vp.end_bar {
+        let px = bar_to_x(v, vp, layout.chart_w);
+        let bar_i = v as usize;
+        let label = if bar_i < bars.len() && bars[bar_i].timestamp > 0 {
+            format_timestamp(bars[bar_i].timestamp)
+        } else {
+            format!("{}", v as i64)
+        };
+        out.push(TickMark { value: v, pixel: px, label, major: true });
+        v += step;
+    }
+    out
+}
+
+// ── Grid line generation (thin rects) ────────────────────────────────────────
+
+/// Pixel snap for crisp 1px lines (matches LWC `snap`).
+#[inline]
+fn snap(v: f64) -> f64 { v.floor() }
+
+fn generate_grid_lines(
+    vp: &Viewport,
+    style: &ChartStyle,
+    layout: &ChartLayout,
+    y_ticks: &[TickMark],
+    x_ticks: &[TickMark],
+    dl: &mut DrawList,
+) {
+    let gc = &style.grid_color;
+    let total_h = layout.candle_h + layout.vol_h;
+
+    // Horizontal grid lines (at price ticks) — 1px tall rects
+    for t in y_ticks {
+        if !t.major { continue; }
+        let y = snap(price_to_y(t.value, vp, layout.candle_h));
+        if y > 0.0 && y < total_h {
+            dl.rects.push(ColoredRect {
+                x: 0.0, y: y as f32,
+                w: layout.chart_w as f32, h: 1.0,
+                r: gc[0], g: gc[1], b: gc[2], a: gc[3],
+            });
+        }
+    }
+
+    // Vertical grid lines (at time ticks) — 1px wide rects
+    for t in x_ticks {
+        if !t.major { continue; }
+        let x = snap(bar_to_x(t.value, vp, layout.chart_w));
+        if x > 0.0 && x < layout.chart_w {
+            dl.rects.push(ColoredRect {
+                x: x as f32, y: 0.0,
+                w: 1.0, h: total_h as f32,
+                r: gc[0], g: gc[1], b: gc[2], a: gc[3],
+            });
+        }
     }
 }

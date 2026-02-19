@@ -1,52 +1,8 @@
 //! Series sizing — LWC-matching candlestick sizing algorithms.
 //!
-//! These are used by GeometryGenerator (the single source of truth)
-//! to compute pixel-exact candle dimensions.
+//! Used by GeometryGenerator to compute pixel-exact candle dimensions.
 
 use crate::core::viewport::Viewport;
-use crate::core::renderer::traits::ChartStyle;
-
-/// Layout of the chart area in physical pixels.
-#[derive(Debug, Clone, Copy)]
-pub struct ChartLayout {
-    /// Width of the chart drawing area (excludes Y-axis).
-    pub chart_w: f64,
-    /// Height of the candle/price area.
-    pub candle_h: f64,
-    /// Height of the volume area.
-    pub vol_h: f64,
-    /// Height of the X-axis.
-    pub x_axis_h: f64,
-    /// Total physical width (including Y-axis).
-    pub total_w: f64,
-    /// Total physical height (including X-axis).
-    pub total_h: f64,
-    /// Device pixel ratio.
-    pub dpr: f64,
-}
-
-impl ChartLayout {
-    /// Build layout from physical dimensions.
-    /// `y_axis_css_w` is the dynamically computed price axis width in CSS px
-    /// (from `ChartStyle::price_axis_width(max_text_w)`). Pass 0 for auto with
-    /// a reasonable default (LWC Constants.DefaultOptimalWidth = 34).
-    pub fn from_physical(phys_w: u32, phys_h: u32, dpr: f64, style: &ChartStyle, y_axis_css_w: f64) -> Self {
-        let y_axis_w = (if y_axis_css_w > 0.0 { y_axis_css_w } else { 34.0 }) * dpr;
-        let x_axis_h = style.time_axis_height() * dpr;
-        let vol_h = phys_h as f64 * 0.15;
-        let chart_w = (phys_w as f64 - y_axis_w).max(1.0);
-        let candle_h = (phys_h as f64 - x_axis_h - vol_h).max(1.0);
-        Self {
-            chart_w,
-            candle_h,
-            vol_h: vol_h.max(1.0),
-            x_axis_h,
-            total_w: phys_w as f64,
-            total_h: phys_h as f64,
-            dpr,
-        }
-    }
-}
 
 // ── LWC-matching candlestick sizing (pixel-exact) ─────────────────────────
 
@@ -109,13 +65,15 @@ pub struct CandleSizing {
     pub border_width: f64,
     pub draw_body: bool,
     pub bar_spacing: f64,
+    pub dpr: f64,
 }
 
 impl CandleSizing {
-    pub fn compute(layout: &ChartLayout, vp: &Viewport) -> Self {
+    /// Compute candle sizing from pane dimensions (no ChartLayout needed).
+    /// `pane_w` is the pane width in physical pixels.
+    pub fn compute_from_pane(pane_w: f64, vp: &Viewport, dpr: f64) -> Self {
         let visible_bars = vp.end_bar - vp.start_bar;
-        let bar_spacing = layout.chart_w / (visible_bars * layout.dpr);
-        let dpr = layout.dpr;
+        let bar_spacing = pane_w / (visible_bars * dpr);
 
         let mut bw = optimal_candlestick_width(bar_spacing, dpr);
         let ww = wick_width(bar_spacing, dpr, bw);
@@ -129,6 +87,7 @@ impl CandleSizing {
             border_width: bdw,
             draw_body,
             bar_spacing,
+            dpr,
         }
     }
 }

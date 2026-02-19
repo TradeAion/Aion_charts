@@ -22,12 +22,6 @@ pub struct Viewport {
     pub volume_height_ratio: f32,
     /// True if price axis is locked by user.
     pub price_locked: bool,
-    /// LWC scaleMargins.top — fraction of chart height reserved above data (default 0.2).
-    pub scale_margin_top: f64,
-    /// LWC scaleMargins.bottom — fraction of chart height reserved below data (default 0.1).
-    pub scale_margin_bottom: f64,
-    /// True when price range needs recalculation (LWC _invalidatedForRange pattern).
-    pub price_invalidated: bool,
 }
 
 impl Viewport {
@@ -41,9 +35,6 @@ impl Viewport {
             height,
             volume_height_ratio: 0.15,
             price_locked: false,
-            scale_margin_top: 0.2,
-            scale_margin_bottom: 0.1,
-            price_invalidated: true,
         }
     }
 
@@ -55,20 +46,13 @@ impl Viewport {
     pub fn set_range(&mut self, start: f64, end: f64) {
         self.start_bar = start;
         self.end_bar = end.max(start + 1.0);
-        self.price_invalidated = true;
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
         self.width = w.max(1);
         self.height = h.max(1);
-        self.price_invalidated = true;
     }
 
-    /// Auto-fit price range to visible bars with LWC scaleMargins.
-    ///
-    /// LWC PriceScale uses scaleMargins { top: 0.2, bottom: 0.1 } by default,
-    /// meaning the data occupies the inner 70% of the chart height, with 20%
-    /// padding above and 10% below.
     pub fn auto_fit_price(&mut self, bars: &[crate::core::data::Bar]) {
         if bars.is_empty() { return; }
         let start = (self.start_bar.floor() as usize).min(bars.len().saturating_sub(1));
@@ -82,18 +66,9 @@ impl Viewport {
             hi = hi.max(bar.high);
         }
 
-        let raw_range = (hi - lo) as f64;
-        let internal_frac = 1.0 - self.scale_margin_top - self.scale_margin_bottom;
-        if internal_frac <= 0.0 { return; }
-
-        let full_range = if raw_range > 0.0 {
-            raw_range / internal_frac
-        } else {
-            // Degenerate single price — extend by 10 units (LWC behavior)
-            10.0 / internal_frac
-        };
-        self.price_min = lo as f64 - full_range * self.scale_margin_bottom;
-        self.price_max = self.price_min + full_range;
+        let pad = (hi - lo) * 0.05;
+        self.price_min = (lo - pad) as f64;
+        self.price_max = (hi + pad) as f64;
     }
 
     // --- Coordinate conversion helpers ---
@@ -125,7 +100,6 @@ impl Viewport {
     pub fn pan(&mut self, delta_bars: f64) {
         self.start_bar += delta_bars;
         self.end_bar += delta_bars;
-        self.price_invalidated = true;
     }
 
     pub fn pan_clamped(&mut self, delta_bars: f64, data_len: usize) {
@@ -137,23 +111,6 @@ impl Viewport {
         let new_start = (self.start_bar + delta_bars).clamp(lo, hi);
         self.start_bar = new_start;
         self.end_bar = new_start + span;
-        self.price_invalidated = true;
-    }
-
-    /// Clamp viewport so it doesn't scroll too far past data boundaries.
-    /// Allows half a screen of whitespace on each side.
-    pub fn clamp_to_data(&mut self, data_len: usize) {
-        let span = self.end_bar - self.start_bar;
-        let half = span * 0.5;
-        let lo = -half;
-        let hi = data_len as f64 + half - span;
-        if self.start_bar < lo {
-            self.start_bar = lo;
-            self.end_bar = lo + span;
-        } else if self.start_bar > hi {
-            self.start_bar = hi;
-            self.end_bar = hi + span;
-        }
     }
 
     pub fn zoom(&mut self, focal_bar: f64, factor: f64) {
@@ -166,6 +123,5 @@ impl Viewport {
             self.start_bar = mid - 2.5;
             self.end_bar = mid + 2.5;
         }
-        self.price_invalidated = true;
     }
 }

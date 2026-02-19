@@ -37,25 +37,28 @@
       color: #4a9eff;
       border-color: #4a9eff44;
     }
-    .controls {
-      display: flex;
-      gap: 6px;
-      margin-left: auto;
-      align-items: center;
-    }
-    .controls button {
-      padding: 4px 11px;
-      background: #2a2a30;
-      color: #ccc;
-      border: 1px solid #3a3a40;
+    .toggle-btn {
+      font-size: 11px;
+      padding: 3px 10px;
       border-radius: 4px;
+      background: #222228;
+      color: #aaa;
+      border: 1px solid #3a3a44;
       cursor: pointer;
-      font-size: 12px;
-      transition: background 0.15s;
+      transition: background 0.15s, color 0.15s;
     }
-    .controls button:hover { background: #3a3a42; }
-    .controls button.active { background: #1a3a2a; color: #1abc9c; border-color: #1abc9c55; }
-    .sep { width: 1px; height: 18px; background: #2a2a30; }
+    .toggle-btn:hover { background: #2a2a34; color: #ddd; }
+    .toggle-btn:disabled { opacity: 0.4; cursor: default; }
+    .toggle-btn.active {
+      background: #1a3a2a;
+      color: #1abc9c;
+      border-color: #1abc9c44;
+    }
+    .toggle-group {
+      display: flex;
+      gap: 4px;
+      margin-left: auto;
+    }
     /* The container — RayCore creates canvases inside it */
     #chart-container {
       flex: 1;
@@ -101,13 +104,7 @@
   <header>
     <h1>RayCharts Core</h1>
     <span id="renderer-badge">…</span>
-    <div class="controls">
-      <button id="btn-zoom-in">+ Zoom</button>
-      <button id="btn-zoom-out">- Zoom</button>
-      <button id="btn-pan-left">Pan Left</button>
-      <button id="btn-pan-right">Pan Right</button>
-      <button id="btn-reset">Reset</button>
-    </div>
+    <div class="toggle-group" id="toggle-group"></div>
   </header>
 
   <div id="chart-container">
@@ -116,12 +113,13 @@
   </div>
 
   <script type="module">
-    import init, { RayCore } from '../pkg/raycore_wasm.js?v=2';
+    import init, { RayCore } from '../pkg/raycore_wasm.js';
 
     const errorBanner = document.getElementById('error-banner');
     const loading     = document.getElementById('loading');
     const hud         = document.getElementById('hud');
     const badge       = document.getElementById('renderer-badge');
+    const toggleGroup = document.getElementById('toggle-group');
     const container   = document.getElementById('chart-container');
 
     function showError(msg) {
@@ -131,34 +129,81 @@
     }
 
     let core = null;
-    let rafId = null;
+    let rafId = 0;
+    let currentRenderer = null;
+
+    function updateBadge(rName) {
+      badge.textContent = rName === 'webgpu' ? 'WebGPU' : 'Canvas 2D';
+      badge.className = rName === 'webgpu' ? 'webgpu' : 'canvas2d';
+    }
+
+    function updateToggleButtons(active) {
+      toggleGroup.querySelectorAll('.toggle-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.renderer === active);
+      });
+    }
+
+    async function createChart(renderer) {
+      // Tear down previous instance
+      if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+      if (core) { core.dispose(); core.free(); core = null; }
+
+      // Clear container DOM (RayCore appends its own elements)
+      // Keep #loading and #hud
+      const keep = new Set(['loading', 'hud']);
+      Array.from(container.children).forEach(el => {
+        if (!keep.has(el.id)) el.remove();
+      });
+
+      loading.textContent = 'Switching to ' + renderer + '…';
+      loading.style.display = 'flex';
+      errorBanner.style.display = 'none';
+
+      try {
+        core = await RayCore.create_with('chart-container', renderer);
+        currentRenderer = core.renderer_name();
+        updateBadge(currentRenderer);
+        updateToggleButtons(currentRenderer);
+
+        core.demo_mode();
+        loading.style.display = 'none';
+        hud.textContent = currentRenderer + ' | 600 bars | dpr=' + (window.devicePixelRatio||1).toFixed(1);
+
+        function frame() {
+          rafId = requestAnimationFrame(frame);
+          try { core.render(); } catch(e) {
+            console.error('Render error:', e);
+          }
+        }
+        rafId = requestAnimationFrame(frame);
+      } catch(e) {
+        console.error(e);
+        showError('Init failed (' + renderer + '): ' + (e.message || e));
+      }
+    }
 
     async function boot() {
       try {
         await init();
 
-        loading.textContent = 'Initializing…';
-        core = await RayCore.create('chart-container');
-
-        const rName = core.renderer_name();
-        badge.textContent = rName === 'webgpu' ? 'WebGPU' : 'Canvas 2D';
-        badge.className = rName;
-
-        // Load built-in demo data (600 bars generated in Rust)
-        core.demo_mode();
-
-        loading.style.display = 'none';
-        hud.textContent = rName + ' | 600 bars | dpr=' + (window.devicePixelRatio||1).toFixed(1);
-
-        // ── Render loop ────────────────────────────────────────────
-        function frame() {
-          rafId = requestAnimationFrame(frame);
-          try { core.render(); } catch(e) {
-            console.error('Render error:', e);
-            cancelAnimationFrame(rafId); rafId = null;
-          }
+        // Build toggle buttons from supported renderers
+        const renderers = RayCore.get_supported_renderers();
+        const labels = { canvas2d: 'Canvas 2D', webgpu: 'WebGPU' };
+        for (const r of renderers) {
+          const btn = document.createElement('button');
+          btn.className = 'toggle-btn';
+          btn.dataset.renderer = r;
+          btn.textContent = labels[r] || r;
+          btn.addEventListener('click', () => {
+            if (currentRenderer === r) return;
+            createChart(r);
+          });
+          toggleGroup.appendChild(btn);
         }
-        rafId = requestAnimationFrame(frame);
+
+        // Start with the best available renderer
+        const preferred = renderers.includes('webgpu') ? 'webgpu' : 'canvas2d';
+        await createChart(preferred);
 
       } catch(e) {
         console.error(e);
@@ -166,52 +211,6 @@
       }
     }
 
-    // ── Resize ──────────────────────────────────────────────────────
-    new ResizeObserver(() => core?.resize()).observe(container);
-
-    // ── Pointer events → WASM ───────────────────────────────────────
-    container.addEventListener('pointermove', e => {
-      if (!core) return;
-      const r = container.getBoundingClientRect();
-      core.pointer_move(e.clientX - r.left, e.clientY - r.top);
-      if (core.is_dragging()) container.style.cursor = 'grabbing';
-    });
-
-    container.addEventListener('pointerdown', e => {
-      if (!core) return;
-      const r = container.getBoundingClientRect();
-      core.pointer_down(e.clientX - r.left, e.clientY - r.top);
-      container.setPointerCapture(e.pointerId);
-    });
-
-    container.addEventListener('pointerup', e => {
-      if (!core) return;
-      core.pointer_up();
-      container.releasePointerCapture(e.pointerId);
-      container.style.cursor = '';
-    });
-
-    container.addEventListener('pointerleave', () => {
-      core?.pointer_leave();
-      container.style.cursor = '';
-    });
-
-    container.addEventListener('wheel', e => {
-      e.preventDefault();
-      if (!core) return;
-      const r = container.getBoundingClientRect();
-      core.wheel(e.clientX - r.left, e.clientY - r.top, e.deltaY);
-    }, { passive: false });
-
-    // ── Toolbar buttons ─────────────────────────────────────────────
-    const midBar = () => { const r = core.visible_range(); return (r[0]+r[1])/2; };
-    document.getElementById('btn-zoom-in'   ).onclick = () => core?.zoom(midBar(), 0.8);
-    document.getElementById('btn-zoom-out'  ).onclick = () => core?.zoom(midBar(), 1.25);
-    document.getElementById('btn-pan-left'  ).onclick = () => core?.pan(-15);
-    document.getElementById('btn-pan-right' ).onclick = () => core?.pan(15);
-    document.getElementById('btn-reset'     ).onclick = () => core?.zoom_to_range(BigInt(0), BigInt(600));
-
-    // ── Boot ─────────────────────────────────────────────────────────
     boot();
   </script>
 </body>

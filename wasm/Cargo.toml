@@ -23,6 +23,7 @@ web-sys = { version = "0.3", features = [
     "Document",
     "Element",
     "HtmlCanvasElement",
+    "HtmlDivElement",
     "HtmlElement",
     "CssStyleDeclaration",
     "CanvasRenderingContext2d",
@@ -34,9 +35,14 @@ web-sys = { version = "0.3", features = [
     "Performance",
     "MouseEvent",
     "WheelEvent",
+    "PointerEvent",
     "EventTarget",
     "EventListener",
     "AddEventListenerOptions",
+    "ResizeObserver",
+    "ResizeObserverEntry",
+    "DomRectReadOnly",
+    "DomRect",
 ] }
 log = "0.4"
 console_log = "1.0"
