@@ -77,6 +77,26 @@ impl ChartInner {
     fn on_pane_pointer_move(&mut self, x: f64, y: f64) {
         let (pw, ph) = self.layout.pane_css_size();
         let dpr = self.engine.dpr;
+
+        // Pre-compute logical coords from viewport (before any mutable drawing borrow)
+        let bar = self.engine.viewport.pixel_to_bar(x, pw);
+        let price = self.engine.viewport.pixel_to_price(y, ph);
+
+        // Drawing tool: update preview or drag
+        {
+            let drawings = &mut self.engine.drawings;
+            if drawings.is_creating() {
+                drawings.update_creation_preview(bar, price);
+                // Still fall through so crosshair updates
+            } else if let Some(id) = drawings.selected_id {
+                if matches!(drawings.get(id).map(|d| d.state()),
+                    Some(raycore::core::drawings::types::DrawingState::Dragging { .. })) {
+                    drawings.update_drag(id, bar, price);
+                    return; // don't move chart while dragging drawing
+                }
+            }
+        }
+
         let Self { interaction, engine, .. } = self;
         interaction.pane_pointer_move(
             x, y, pw, ph,
@@ -86,13 +106,89 @@ impl ChartInner {
     }
 
     fn on_pointer_down(&mut self, x: f64, y: f64, zone: HitZone) {
-        let (_, pane_css_h) = self.layout.pane_css_size();
+        let (pw, ph) = self.layout.pane_css_size();
+
+        if zone == HitZone::Chart {
+            let bar = self.engine.viewport.pixel_to_bar(x, pw);
+            let price = self.engine.viewport.pixel_to_price(y, ph);
+            let drawings = &mut self.engine.drawings;
+
+            if drawings.is_tool_active() {
+                // Start creating a new drawing
+                if !drawings.is_creating() {
+                    drawings.start_creating(bar, price);
+                } else {
+                    // Multi-step tools: place next anchor on click
+                    drawings.finalize_creation_step(bar, price);
+                }
+                return; // don't pan/zoom while drawing
+            } else {
+                // No tool active: check if user clicked on an existing drawing
+                let hit = drawings.hit_test(x, y, &self.engine.viewport, pw, ph);
+                if let Some((id, result)) = hit {
+                    use raycore::core::drawings::types::HitPart;
+                    let anchor_idx = match result.part {
+                        HitPart::Anchor(i) => Some(i),
+                        _ => None,
+                    };
+                    drawings.select(id);
+                    drawings.start_drag(id, anchor_idx, bar, price);
+                    return; // don't pan while starting a drawing drag
+                } else {
+                    // Click on empty space: deselect
+                    drawings.deselect_all();
+                }
+            }
+        }
+
         let Self { interaction, engine, .. } = self;
-        interaction.pointer_down(x, y, zone, &engine.viewport, pane_css_h);
+        interaction.pointer_down(x, y, zone, &engine.viewport, ph);
     }
 
     fn on_pointer_up(&mut self) {
         let now_ms = js_sys::Date::now();
+        let (pw, ph) = self.layout.pane_css_size();
+
+        // If a drawing was being created (drag-to-create: release = place second anchor)
+        {
+            let drawings = &mut self.engine.drawings;
+            if drawings.is_creating() {
+                // Read the preview anchor position first (immutable borrow scope)
+                let anchor_pos: Option<(f64, f64)> = {
+                    drawings.all().iter()
+                        .find(|d| matches!(d.state(), raycore::core::drawings::types::DrawingState::Creating { .. }))
+                        .and_then(|d| {
+                            let anchors = d.anchors();
+                            if anchors.len() >= 2 {
+                                Some((anchors[1].point.bar_index, anchors[1].point.price))
+                            } else if !anchors.is_empty() {
+                                Some((anchors[0].point.bar_index, anchors[0].point.price))
+                            } else {
+                                None
+                            }
+                        })
+                };
+                // Now finalize with the stored position (mutable borrow)
+                if let Some((bar, price)) = anchor_pos {
+                    drawings.finalize_creation_step(bar, price);
+                }
+                return;
+            }
+        }
+
+        // End any drawing drag
+        {
+            let drawings = &mut self.engine.drawings;
+            if let Some(id) = drawings.selected_id {
+                if matches!(drawings.get(id).map(|d| d.state()),
+                    Some(raycore::core::drawings::types::DrawingState::Dragging { .. })) {
+                    drawings.end_drag(id);
+                    return;
+                }
+            }
+        }
+
+        let _ = (pw, ph); // suppress unused warning
         let Self { interaction, engine, .. } = self;
         interaction.pointer_up(&mut engine.viewport, &engine.bars, now_ms);
     }
@@ -1058,6 +1154,44 @@ impl RayCore {
         };
     }
 
+    // ── Drawing tools ─────────────────────────────────────────────────────────
+
+    /// Set active drawing tool: "none", "trend_line", "rectangle", "fibonacci", "scale".
+    pub fn set_drawing_tool(&mut self, tool: &str) {
+        let mut s = self.inner.borrow_mut();
+        s.engine.drawings.active_tool = match tool {
+            "trend_line" => raycore::DrawingTool::TrendLine,
+            "rectangle" => raycore::DrawingTool::Rectangle,
+            "fibonacci" => raycore::DrawingTool::Fibonacci,
+            "scale" => raycore::DrawingTool::Scale,
+            _ => raycore::DrawingTool::None,
+        };
+    }
+
+    /// Remove the currently selected drawing (e.g. on Delete key).
+    pub fn remove_selected_drawing(&mut self) {
+        self.inner.borrow_mut().engine.drawings.remove_selected();
+    }
+
+    /// Cancel the drawing currently being created (e.g. on Escape key).
+    pub fn cancel_drawing(&mut self) {
+        self.inner.borrow_mut().engine.drawings.cancel_creation();
+    }
+
+    /// Remove all drawings.
+    pub fn clear_drawings(&mut self) {
+        let mut s = self.inner.borrow_mut();
+        while s.engine.drawings.len() > 0 {
+            let id = s.engine.drawings.all()[0].id();
+            s.engine.drawings.remove(id);
+        }
+    }
+
+    /// Get the number of drawings.
+    pub fn drawing_count(&self) -> usize {
+        self.inner.borrow().engine.drawings.len()
+    }
+
     // ── Render ───────────────────────────────────────────────────────────────
 
     /// Render one frame. Call from requestAnimationFrame.
@@ -1127,8 +1261,17 @@ impl RayCore {
             log::warn!("render error: {}", e);
         }
 
-        // 6. Overlay — crosshair lines + watermark on pane top canvas
-        s.overlay.render(&s.engine.crosshair, &s.engine.style);
+        // 5. Generate drawing geometry (base = Idle/Selected, top = Creating/Dragging)
+        let (mut all_drawings, top_drawings) = s.engine.drawings.generate_all_geometry(
+            &s.engine.viewport, pane_css_w, pane_css_h, dpr,
+        );
+        // Merge: render all drawings on the overlay canvas (base layer first, then top)
+        // This matches LWC's z-ordering: idle drawings render below crosshair,
+        // active drawings render above crosshair (handled inside render_with_drawings).
+        all_drawings.extend(top_drawings);
+
+        // 6. Overlay — drawings + crosshair lines on pane top canvas
+        s.overlay.render_with_drawings(&s.engine.crosshair, &s.engine.style, &all_drawings);
 
         // 7. Price axis — base (ticks + labels) + top (crosshair label)
         s.price_axis_renderer.render_base(&s.engine.style, &y_ticks, pane_ph);

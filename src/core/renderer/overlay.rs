@@ -9,6 +9,7 @@ use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, CanvasRenderingContext2d};
 use crate::core::renderer::traits::{ChartStyle, CrosshairState};
 use crate::core::renderer::rgba_str as rgba;
+use crate::core::drawings::types::DrawingGeometry;
 
 pub struct OverlayRenderer {
     canvas: HtmlCanvasElement,
@@ -42,17 +43,89 @@ impl OverlayRenderer {
         self.ctx.set_image_smoothing_enabled(false);
     }
 
-    /// Render crosshair lines + watermark on the pane's top canvas.
-    /// The canvas is sized to the pane (chart area) only — no axis regions.
+    /// Render crosshair lines + active drawings on the pane's top canvas.
     pub fn render(
         &self,
         crosshair: &CrosshairState,
         style: &ChartStyle,
     ) {
+        self.render_with_drawings(crosshair, style, &[]);
+    }
+
+    /// Render crosshair + top-layer drawing geometry on the overlay canvas.
+    pub fn render_with_drawings(
+        &self,
+        crosshair: &CrosshairState,
+        style: &ChartStyle,
+        top_drawings: &[DrawingGeometry],
+    ) {
         let pw = self.pw as f64;
         let ph = self.ph as f64;
         self.ctx.clear_rect(0.0, 0.0, pw, ph);
+
+        // Draw active/hovered drawings BELOW crosshair
+        for geom in top_drawings {
+            self.draw_geometry(geom);
+        }
+
         self.draw_crosshair(crosshair, style, pw, ph);
+    }
+
+    /// Draw a DrawingGeometry (lines, rects, text, anchor circles) on the overlay.
+    fn draw_geometry(&self, geom: &DrawingGeometry) {
+        // Filled rects
+        for r in &geom.rects {
+            if r.w <= 0.0 || r.h <= 0.0 { continue; }
+            self.ctx.set_fill_style_str(&rgba(&[r.r, r.g, r.b, r.a]));
+            self.ctx.fill_rect(r.x as f64, r.y as f64, r.w as f64, r.h as f64);
+        }
+
+        // Lines
+        for l in &geom.lines {
+            self.ctx.set_stroke_style_str(&rgba(&[l.r, l.g, l.b, l.a]));
+            self.ctx.set_line_width(l.width as f64);
+            self.ctx.set_line_cap("round");
+
+            if l.dash > 0.0 && l.gap > 0.0 {
+                let _ = self.ctx.set_line_dash(&js_sys::Array::of2(
+                    &JsValue::from(l.dash as f64),
+                    &JsValue::from(l.gap as f64),
+                ));
+            } else {
+                let _ = self.ctx.set_line_dash(&js_sys::Array::new());
+            }
+
+            self.ctx.begin_path();
+            self.ctx.move_to(l.x0 as f64, l.y0 as f64);
+            self.ctx.line_to(l.x1 as f64, l.y1 as f64);
+            self.ctx.stroke();
+        }
+        let _ = self.ctx.set_line_dash(&js_sys::Array::new());
+
+        // Text labels (in physical pixel coords)
+        for t in &geom.texts {
+            let font = format!("{}px {}", t.font_size, "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif");
+            self.ctx.set_font(&font);
+            self.ctx.set_fill_style_str(&rgba(&[t.r, t.g, t.b, t.a]));
+            self.ctx.set_text_align("center");
+            self.ctx.set_text_baseline("middle");
+            let _ = self.ctx.fill_text(&t.text, t.x as f64, t.y as f64);
+        }
+
+        // Anchor circles
+        for a in &geom.anchors {
+            // Fill
+            self.ctx.set_fill_style_str(&rgba(&a.fill));
+            self.ctx.begin_path();
+            let _ = self.ctx.arc(a.cx, a.cy, a.radius, 0.0, std::f64::consts::TAU);
+            self.ctx.fill();
+            // Border
+            self.ctx.set_stroke_style_str(&rgba(&a.border));
+            self.ctx.set_line_width(a.border_width);
+            self.ctx.begin_path();
+            let _ = self.ctx.arc(a.cx, a.cy, a.radius, 0.0, std::f64::consts::TAU);
+            self.ctx.stroke();
+        }
     }
 
     fn draw_crosshair(

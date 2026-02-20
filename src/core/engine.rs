@@ -11,6 +11,7 @@
 use crate::core::data::{Bar, BarArray};
 use crate::core::viewport::Viewport;
 use crate::core::renderer::traits::{Renderer, RendererBackend, RenderContext, ChartStyle, CrosshairState};
+use crate::core::drawings::DrawingManager;
 
 /// The main chart engine. Owns everything needed to render the pane.
 pub struct ChartEngine {
@@ -19,6 +20,7 @@ pub struct ChartEngine {
     pub bars: BarArray,
     pub style: ChartStyle,
     pub crosshair: CrosshairState,
+    pub drawings: DrawingManager,
     pub dpr: f64,
 }
 
@@ -30,6 +32,7 @@ impl ChartEngine {
         let bars = BarArray::new();
         let style = ChartStyle::default();
         let crosshair = CrosshairState::default();
+        let drawings = DrawingManager::new();
 
         Self {
             renderer,
@@ -37,6 +40,7 @@ impl ChartEngine {
             bars,
             style,
             crosshair,
+            drawings,
             dpr,
         }
     }
