@@ -23,7 +23,7 @@
 //!   wheel deltaY  → zoom price
 //!   dbl-click     → reset price
 
-use crate::core::data::Bar;
+use crate::core::data::BarArray;
 use crate::core::viewport::Viewport;
 use crate::core::renderer::traits::{CrosshairState, CrosshairMode};
 
@@ -72,6 +72,14 @@ pub struct InteractionHandler {
     scroll_price_start_min: f64,
     scroll_price_start_max: f64,
 
+    // ── Kinetic scrolling (momentum) ──
+    pub velocity_x: f64,
+    pub velocity_y: f64,
+    pub last_move_time: f64,
+    pub last_move_x: f64,
+    pub last_move_y: f64,
+    pub is_gliding: bool,
+
     // ── Current hover zone (for cursor hints) ──
     current_zone: HitZone,
 }
@@ -97,6 +105,12 @@ impl InteractionHandler {
             scroll_price_start_y: 0.0,
             scroll_price_start_min: 0.0,
             scroll_price_start_max: 0.0,
+            velocity_x: 0.0,
+            velocity_y: 0.0,
+            last_move_time: 0.0,
+            last_move_x: 0.0,
+            last_move_y: 0.0,
+            is_gliding: false,
             current_zone: HitZone::None,
         }
     }
@@ -133,11 +147,12 @@ impl InteractionHandler {
         pane_css_h: f64,
         viewport: &mut Viewport,
         crosshair: &mut CrosshairState,
-        bars: &[Bar],
+        bars: &BarArray,
         dpr: f64,
     ) {
         let pane_phys_w = pane_css_w * dpr;
         let pane_phys_h = pane_css_h * dpr;
+        let now = js_sys::Date::now();
 
         // Update crosshair
         if !self.pressed || self.press_zone == HitZone::Chart {
@@ -152,7 +167,7 @@ impl InteractionHandler {
             match crosshair.mode {
                 CrosshairMode::Magnet => {
                     if let Some(idx) = crosshair.bar_index {
-                        let close_price = bars[idx].close as f64;
+                        let close_price = bars.closes.value(idx) as f64;
                         let price_frac = (close_price - viewport.price_min)
                             / (viewport.price_max - viewport.price_min);
                         crosshair.y = (1.0 - price_frac) * pane_css_h;
@@ -176,6 +191,18 @@ impl InteractionHandler {
                 self.drag_active = true;
             }
             if self.drag_active && pane_css_w > 0.0 {
+                // Update velocity
+                let dt = now - self.last_move_time;
+                if dt > 0.0 && dt < 100.0 {
+                    let vx = (x - self.last_move_x) / dt;
+                    let vy = (y - self.last_move_y) / dt;
+                    self.velocity_x = self.velocity_x * 0.5 + vx * 0.5;
+                    self.velocity_y = self.velocity_y * 0.5 + vy * 0.5;
+                }
+                self.last_move_time = now;
+                self.last_move_x = x;
+                self.last_move_y = y;
+
                 // Time scroll: same as before
                 let bar_span = viewport.end_bar - viewport.start_bar;
                 let dx_bars = (self.scroll_start_x - x) / pane_css_w * bar_span;
@@ -213,7 +240,7 @@ impl InteractionHandler {
         x: f64,
         pane_css_w: f64,
         viewport: &mut Viewport,
-        bars: &[Bar],
+        bars: &BarArray,
     ) {
         if self.pressed && self.press_zone == HitZone::TimeAxis {
             let manhattan = (x - self.press_x).abs();
@@ -288,6 +315,14 @@ impl InteractionHandler {
         self.press_y = y;
         self.drag_active = false;
         self.press_zone = zone;
+        
+        // Reset gliding state
+        self.velocity_x = 0.0;
+        self.velocity_y = 0.0;
+        self.last_move_time = js_sys::Date::now();
+        self.last_move_x = x;
+        self.last_move_y = y;
+        self.is_gliding = false;
 
         match zone {
             HitZone::Chart => {
@@ -318,11 +353,25 @@ impl InteractionHandler {
     pub fn pointer_up(
         &mut self,
         viewport: &mut Viewport,
-        bars: &[Bar],
+        bars: &BarArray,
         now_ms: f64,
     ) {
         let was_click = self.pressed && !self.drag_active;
         let zone = self.press_zone;
+
+        // If we were dragging on the chart, start gliding if velocity is high enough
+        if self.pressed && self.drag_active && zone == HitZone::Chart {
+            let dt = now_ms - self.last_move_time;
+            if dt < 50.0 && (self.velocity_x.abs() > 0.1 || self.velocity_y.abs() > 0.1) {
+                self.is_gliding = true;
+            } else {
+                self.velocity_x = 0.0;
+                self.velocity_y = 0.0;
+            }
+        } else {
+            self.velocity_x = 0.0;
+            self.velocity_y = 0.0;
+        }
 
         self.pressed = false;
         self.drag_active = false;
@@ -373,7 +422,7 @@ impl InteractionHandler {
         delta_mode: u32,
         pane_css_w: f64,
         viewport: &mut Viewport,
-        bars: &[Bar],
+        bars: &BarArray,
     ) {
         if pane_css_w <= 0.0 { return; }
 
@@ -426,7 +475,7 @@ impl InteractionHandler {
         delta_mode: u32,
         pane_css_w: f64,
         viewport: &mut Viewport,
-        bars: &[Bar],
+        bars: &BarArray,
     ) {
         self.pane_wheel(x, 0.0, delta_y, delta_mode, pane_css_w, viewport, bars);
     }
@@ -478,4 +527,62 @@ impl InteractionHandler {
             }
         }
     }
+
+    /// Process kinetic scrolling deceleration on each frame.
+    /// Needs to be called before rendering. Returns true if gliding is still active.
+    pub fn update_gliding(
+        &mut self,
+        pane_css_w: f64,
+        pane_css_h: f64,
+        viewport: &mut Viewport,
+        bars: &BarArray,
+    ) -> bool {
+        if !self.is_gliding {
+            return false;
+        }
+        
+        let now = js_sys::Date::now();
+        let dt = now - self.last_move_time;
+        if dt <= 0.0 {
+            return true;
+        }
+        
+        // Apply velocity
+        let dx = self.velocity_x * dt;
+        let dy = self.velocity_y * dt;
+        
+        if pane_css_w > 0.0 {
+            // Apply time scroll
+            let bar_span = viewport.end_bar - viewport.start_bar;
+            let dx_bars = -dx / pane_css_w * bar_span;
+            viewport.pan_clamped(dx_bars, bars.len());
+        }
+        
+        if viewport.price_locked && pane_css_h > 1.0 {
+            // Apply price scroll
+            let price_range = viewport.price_max - viewport.price_min;
+            if price_range > 0.0 {
+                let price_per_px = price_range / (pane_css_h - 1.0);
+                let price_delta = dy * price_per_px;
+                viewport.price_min += price_delta;
+                viewport.price_max += price_delta;
+            }
+        } else if !viewport.price_locked {
+            viewport.auto_fit_price(bars);
+        }
+        
+        // Decelerate (friction)
+        let friction = (0.95f64).powf(dt / 16.0); // assuming target 60fps (16ms per frame)
+        self.velocity_x *= friction;
+        self.velocity_y *= friction;
+        self.last_move_time = now;
+        
+        // Stop gliding if velocity is negligible
+        if self.velocity_x.abs() < 0.01 && self.velocity_y.abs() < 0.01 {
+            self.is_gliding = false;
+        }
+        
+        self.is_gliding
+    }
 }
+

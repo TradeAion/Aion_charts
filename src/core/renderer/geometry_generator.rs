@@ -13,7 +13,6 @@
 //! All candle sizing uses LWC-matching algorithms from series.rs.
 //! Tick computation is in tick_marks.rs (shared with axis renderers).
 
-use crate::core::data::Bar;
 use crate::core::viewport::Viewport;
 use crate::core::renderer::traits::{ChartStyle, TickMark};
 use crate::core::renderer::series::CandleSizing;
@@ -23,7 +22,7 @@ use crate::core::renderer::draw_list::{DrawList, ColoredRect};
 /// Order: background → grid lines → volume → candles.
 /// `pane_w` and `pane_h` are in physical pixels (chart area only, no axes).
 pub fn generate(
-    bars: &[Bar],
+    bars: &crate::core::data::BarArray,
     viewport: &Viewport,
     style: &ChartStyle,
     pane_w: f64,
@@ -99,7 +98,7 @@ pub fn generate_grid_rects(
 
 /// Generate candle rects (wicks, borders, body fills).
 pub fn generate_candle_rects(
-    bars: &[Bar],
+    bars: &crate::core::data::BarArray,
     viewport: &Viewport,
     style: &ChartStyle,
     pane_w: f64,
@@ -116,7 +115,7 @@ pub fn generate_candle_rects(
 
 /// Generate volume bar rects.
 pub fn generate_volume_rects(
-    bars: &[Bar],
+    bars: &crate::core::data::BarArray,
     viewport: &Viewport,
     style: &ChartStyle,
     pane_w: f64,
@@ -170,7 +169,7 @@ fn push_inner_border(
 // ── Candle generation (3-pass LWC order: wicks → borders → body fill) ────────
 
 fn generate_candles_into(
-    bars: &[Bar],
+    bars: &crate::core::data::BarArray,
     vp: &Viewport,
     style: &ChartStyle,
     chart_w: f64,
@@ -188,7 +187,7 @@ fn generate_candles_into(
     // ── Pass 1: Wicks ────────────────────────────────────────────────────
     let mut prev_edge: Option<f64> = None;
     for i in start..end {
-        let b = &bars[i];
+        let b = bars.get(i);
         let bull = b.close >= b.open;
         let (wr, wg, wb, wa) = if bull {
             color4(&style.wick_bullish_color)
@@ -230,7 +229,7 @@ fn generate_candles_into(
     // ── Pass 2: Borders ──────────────────────────────────────────────────
     prev_edge = None;
     for i in start..end {
-        let b = &bars[i];
+        let b = bars.get(i);
         let bull = b.close >= b.open;
         let (br, bg, bb, ba) = if bull {
             color4(&style.wick_bullish_color)
@@ -271,7 +270,7 @@ fn generate_candles_into(
     // ── Pass 3: Body fill ────────────────────────────────────────────────
     if sizing.draw_body {
         for i in start..end {
-            let b = &bars[i];
+            let b = bars.get(i);
             let bull = b.close >= b.open;
             let (cr, cg, cb, ca) = if bull {
                 color4(&style.bullish_color)
@@ -304,7 +303,7 @@ fn generate_candles_into(
 // ── Volume generation ────────────────────────────────────────────────────────
 
 fn generate_volume_into(
-    bars: &[Bar],
+    bars: &crate::core::data::BarArray,
     vp: &Viewport,
     style: &ChartStyle,
     chart_w: f64,
@@ -317,14 +316,16 @@ fn generate_volume_into(
     let end = ((vp.end_bar.ceil() as usize) + 1).min(bars.len());
     if start >= end { return; }
 
-    let visible = &bars[start..end];
-    let max_vol = visible.iter().map(|b| b.volume).fold(0.0f32, f32::max);
+    let mut max_vol = 0.0f32;
+    for i in start..end {
+        max_vol = max_vol.max(bars.volumes.value(i));
+    }
     if max_vol <= 0.0 { return; }
 
     let half_bar = (sizing.bar_width * 0.5).floor();
 
     for i in start..end {
-        let b = &bars[i];
+        let b = bars.get(i);
         let (cr, cg, cb, ca) = if b.is_bullish() {
             color4(&style.bullish_volume_color)
         } else {

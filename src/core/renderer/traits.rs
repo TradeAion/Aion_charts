@@ -10,7 +10,7 @@
 //! Each `draw_*` method creates a short-lived RenderPass that drops
 //! immediately, avoiding self-referential borrows.
 
-use crate::core::data::Bar;
+use crate::core::data::BarArray;
 use crate::core::viewport::Viewport;
 
 /// Style configuration for the chart — colors, sizes, etc.
@@ -161,7 +161,7 @@ pub struct CrosshairState {
 /// Information about the current render frame, passed to the renderer.
 /// The renderer's canvas is sized to the pane (chart area) only.
 pub struct RenderContext<'a> {
-    pub bars: &'a [Bar],
+    pub bars: &'a BarArray,
     pub viewport: &'a Viewport,
     pub style: &'a ChartStyle,
     pub crosshair: &'a CrosshairState,

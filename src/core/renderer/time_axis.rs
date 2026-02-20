@@ -10,7 +10,6 @@
 
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, CanvasRenderingContext2d};
-use crate::core::data::Bar;
 use crate::core::renderer::traits::{ChartStyle, CrosshairState, TickMark};
 use crate::core::viewport::Viewport;
 use crate::core::formatters::format_crosshair_time;
@@ -113,7 +112,7 @@ impl TimeAxisRenderer {
     pub fn render_top(
         &self,
         crosshair: &CrosshairState,
-        bars: &[Bar],
+        bars: &crate::core::data::BarArray,
         vp: &Viewport,
         style: &ChartStyle,
         pane_css_w: f64,
@@ -133,8 +132,8 @@ impl TimeAxisRenderer {
         // Bar index at crosshair X
         let bar_f = vp.start_bar + (mx / pane_w) * (vp.end_bar - vp.start_bar);
         let bar_i = bar_f.round() as usize;
-        let bar_lbl = if bar_i < bars.len() && bars[bar_i].timestamp > 0 {
-            format_crosshair_time(bars[bar_i].timestamp)
+        let bar_lbl = if bar_i < bars.len() && bars.timestamps.value(bar_i) > 0 {
+            format_crosshair_time(bars.timestamps.value(bar_i))
         } else {
             format!("{}", bar_i)
         };

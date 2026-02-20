@@ -56,7 +56,7 @@ impl ChartEngine {
         self.viewport.set_range((len as f64) - visible, len as f64);
 
         if !self.viewport.price_locked {
-            self.viewport.auto_fit_price(self.bars.as_slice());
+            self.viewport.auto_fit_price(&self.bars);
         }
     }
 
@@ -71,7 +71,7 @@ impl ChartEngine {
     pub fn zoom_to_range(&mut self, start: u64, end: u64) {
         self.viewport.set_range(start as f64, end as f64);
         if !self.viewport.price_locked {
-            self.viewport.auto_fit_price(self.bars.as_slice());
+            self.viewport.auto_fit_price(&self.bars);
         }
     }
 
@@ -85,12 +85,12 @@ impl ChartEngine {
         x_ticks: &[crate::core::renderer::traits::TickMark],
     ) -> Result<(), String> {
         if self.viewport.price_invalidated && !self.viewport.price_locked {
-            self.viewport.auto_fit_price(self.bars.as_slice());
+            self.viewport.auto_fit_price(&self.bars);
             self.viewport.price_invalidated = false;
         }
 
         let ctx = RenderContext {
-            bars: self.bars.as_slice(),
+            bars: &self.bars,
             viewport: &self.viewport,
             style: &self.style,
             crosshair: &self.crosshair,

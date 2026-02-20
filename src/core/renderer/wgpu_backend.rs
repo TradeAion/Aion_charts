@@ -14,7 +14,6 @@
 //!   24 verts/instance (upper wick + lower wick + border + body fill).
 
 use bytemuck::{Pod, Zeroable};
-use crate::core::data::Bar;
 use crate::core::viewport::Viewport;
 use crate::core::renderer::wgpu_context::GpuContext;
 use crate::core::renderer::pipeline_manager::{PipelineManager, RectViewportUniform};
@@ -317,7 +316,7 @@ impl WgpuRenderer {
     /// Build CandleInstance array from visible bars. Maps f64 world coords
     /// to f32 pixel coords relative to viewport origin.
     fn build_candle_instances(
-        bars: &[Bar],
+        bars: &crate::core::data::BarArray,
         viewport: &Viewport,
         pane_w: f64,
         candle_h: f64,
@@ -331,7 +330,7 @@ impl WgpuRenderer {
 
         let mut instances = Vec::with_capacity(end - start);
         for i in start..end {
-            let b = &bars[i];
+            let b = bars.get(i);
             // f64 world → f32 pixel, relative to viewport origin
             let center_x = ((i as f64 + 0.5 - viewport.start_bar) / bar_range * pane_w).round() as f32;
             let open_y = (candle_h * (1.0 - (b.open as f64 - viewport.price_min) / price_range)).round() as f32;

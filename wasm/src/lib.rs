@@ -81,7 +81,7 @@ impl ChartInner {
         interaction.pane_pointer_move(
             x, y, pw, ph,
             &mut engine.viewport, &mut engine.crosshair,
-            engine.bars.as_slice(), dpr,
+            &engine.bars, dpr,
         );
     }
 
@@ -94,13 +94,13 @@ impl ChartInner {
     fn on_pointer_up(&mut self) {
         let now_ms = js_sys::Date::now();
         let Self { interaction, engine, .. } = self;
-        interaction.pointer_up(&mut engine.viewport, engine.bars.as_slice(), now_ms);
+        interaction.pointer_up(&mut engine.viewport, &engine.bars, now_ms);
     }
 
     fn on_pane_wheel(&mut self, x: f64, dx: f64, dy: f64, dm: u32) {
         let (pw, _) = self.layout.pane_css_size();
         let Self { interaction, engine, .. } = self;
-        interaction.pane_wheel(x, dx, dy, dm, pw, &mut engine.viewport, engine.bars.as_slice());
+        interaction.pane_wheel(x, dx, dy, dm, pw, &mut engine.viewport, &engine.bars);
     }
 
     fn on_price_axis_move(&mut self, y: f64) {
@@ -117,13 +117,13 @@ impl ChartInner {
     fn on_time_axis_move(&mut self, x: f64) {
         let (pw, _) = self.layout.pane_css_size();
         let Self { interaction, engine, .. } = self;
-        interaction.time_axis_pointer_move(x, pw, &mut engine.viewport, engine.bars.as_slice());
+        interaction.time_axis_pointer_move(x, pw, &mut engine.viewport, &engine.bars);
     }
 
     fn on_time_axis_wheel(&mut self, x: f64, dy: f64, dm: u32) {
         let (pw, _) = self.layout.pane_css_size();
         let Self { interaction, engine, .. } = self;
-        interaction.time_axis_wheel(x, dy, dm, pw, &mut engine.viewport, engine.bars.as_slice());
+        interaction.time_axis_wheel(x, dy, dm, pw, &mut engine.viewport, &engine.bars);
     }
 
     fn cursor_css(&self) -> &'static str {
@@ -859,8 +859,18 @@ impl RayCore {
         let dpr = s.engine.dpr;
         let style = s.engine.style.clone();
 
-        // Get pane dimensions (chart area only)
         let (pane_css_w, pane_css_h) = s.layout.pane_css_size();
+
+        {
+            let ChartInner { ref mut interaction, ref mut engine, .. } = *s;
+            interaction.update_gliding(
+                pane_css_w,
+                pane_css_h,
+                &mut engine.viewport,
+                &engine.bars,
+            );
+        }
+
         let pane_pw = (pane_css_w * dpr).round();
         let pane_ph = (pane_css_h * dpr).round();
 
@@ -869,7 +879,7 @@ impl RayCore {
         // 1. Compute tick marks (single source of truth)
         let y_ticks = tick_marks::compute_y_ticks(&s.engine.viewport, pane_ph, dpr);
         let x_ticks = tick_marks::compute_x_ticks(
-            &s.engine.viewport, s.engine.bars.as_slice(), pane_pw, dpr,
+            &s.engine.viewport, &s.engine.bars, pane_pw, dpr,
         );
 
         // 2. Measure price axis width from tick labels
@@ -898,7 +908,7 @@ impl RayCore {
         // 8. Time axis — base (ticks + labels) + top (crosshair label)
         s.time_axis_renderer.render_base(&style, &x_ticks, pane_pw);
         s.time_axis_renderer.render_top(
-            &s.engine.crosshair, s.engine.bars.as_slice(),
+            &s.engine.crosshair, &s.engine.bars,
             &s.engine.viewport, &style, pane_css_w,
         );
 

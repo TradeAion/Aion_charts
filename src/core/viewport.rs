@@ -69,7 +69,7 @@ impl Viewport {
     /// LWC PriceScale uses scaleMargins { top: 0.2, bottom: 0.1 } by default,
     /// meaning the data occupies the inner 70% of the chart height, with 20%
     /// padding above and 10% below.
-    pub fn auto_fit_price(&mut self, bars: &[crate::core::data::Bar]) {
+    pub fn auto_fit_price(&mut self, bars: &crate::core::data::BarArray) {
         if bars.is_empty() { return; }
         let start = (self.start_bar.floor() as usize).min(bars.len().saturating_sub(1));
         let end = (self.end_bar.ceil() as usize).min(bars.len());
@@ -77,7 +77,8 @@ impl Viewport {
 
         let mut lo = f32::MAX;
         let mut hi = f32::MIN;
-        for bar in &bars[start..end] {
+        for i in start..end {
+            let bar = bars.get(i);
             lo = lo.min(bar.low);
             hi = hi.max(bar.high);
         }
