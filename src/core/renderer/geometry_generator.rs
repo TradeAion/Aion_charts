@@ -46,8 +46,8 @@ pub fn generate(
 
     let sizing = CandleSizing::compute_from_pane(pane_w, viewport, dpr);
 
-    // Volume occupies the bottom 15% of pane
-    let vol_h = pane_h * 0.15;
+    // Volume occupies the bottom portion of pane (configured via viewport)
+    let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
 
     generate_volume_into(bars, viewport, style, pane_w, candle_h, vol_h, &sizing, &mut dl.rects);
@@ -106,7 +106,7 @@ pub fn generate_candle_rects(
     dpr: f64,
 ) -> Vec<ColoredRect> {
     let sizing = CandleSizing::compute_from_pane(pane_w, viewport, dpr);
-    let vol_h = pane_h * 0.15;
+    let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
     let mut rects = Vec::with_capacity(bars.len() * 6);
     generate_candles_into(bars, viewport, style, pane_w, candle_h, &sizing, &mut rects);
@@ -123,7 +123,7 @@ pub fn generate_volume_rects(
     dpr: f64,
 ) -> Vec<ColoredRect> {
     let sizing = CandleSizing::compute_from_pane(pane_w, viewport, dpr);
-    let vol_h = pane_h * 0.15;
+    let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
     let mut rects = Vec::with_capacity(bars.len());
     generate_volume_into(bars, viewport, style, pane_w, candle_h, vol_h, &sizing, &mut rects);

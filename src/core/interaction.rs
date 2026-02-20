@@ -334,7 +334,8 @@ impl InteractionHandler {
         dpr: f64,
     ) {
         let pane_phys_w = pane_css_w * dpr;
-        let pane_phys_h = pane_css_h * dpr;
+        let _pane_phys_h = pane_css_h * dpr;
+        let candle_phys_h = pane_css_h * viewport.candle_height_frac() * dpr;
         let now = js_sys::Date::now();
 
         // ── TOUCH: tracking mode (long-press activated) ──
@@ -346,37 +347,30 @@ impl InteractionHandler {
             crosshair.active = true;
             crosshair.x = cx;
 
-            let bar_f = viewport.pixel_to_bar(cx * dpr, pane_phys_w);
-            let snapped_idx = bar_f.round().max(0.0) as usize;
-            let snapped_idx = snapped_idx.min(bars.len().saturating_sub(1));
-            crosshair.bar_index = if snapped_idx < bars.len() { Some(snapped_idx) } else { None };
+            crosshair.bar_index = viewport.bar_index_at_pixel(cx * dpr, pane_phys_w, bars.len());
 
-            // Only magnet-snap when magnet mode is enabled
-            if crosshair.mode == CrosshairMode::Magnet {
-                if let Some(idx) = crosshair.bar_index {
-                    // Snap X to bar center
-                    let bar_center_frac = (idx as f64 - viewport.start_bar)
-                        / (viewport.end_bar - viewport.start_bar);
-                    crosshair.x = (bar_center_frac * pane_css_w).clamp(0.0, pane_css_w);
-
-                    // Snap Y to close price
-                    let close_price = bars.closes.value(idx) as f64;
-                    let price_range = viewport.price_max - viewport.price_min;
-                    if price_range > 0.0 {
-                        let price_frac = (close_price - viewport.price_min) / price_range;
-                        crosshair.y = ((1.0 - price_frac) * pane_css_h).clamp(0.0, pane_css_h);
+            // Magnet snap modes
+            match crosshair.mode {
+                CrosshairMode::Magnet | CrosshairMode::MagnetOHLC => {
+                    if let Some(idx) = crosshair.bar_index {
+                        crosshair.x = viewport.bar_center_css(idx, pane_css_w);
+                        let snap_price = magnet_snap_price(
+                            bars, idx, crosshair.mode,
+                            crosshair.y, viewport, pane_css_h,
+                        );
+                        crosshair.y = viewport.price_to_css_y(snap_price, pane_css_h).clamp(0.0, pane_css_h);
+                        crosshair.price = snap_price;
+                    } else {
+                        let cy = (self.track_crosshair_init_y + (y - self.track_start_y)).clamp(0.0, pane_css_h);
+                        crosshair.y = cy;
+                        crosshair.price = viewport.pixel_to_price(cy * dpr, candle_phys_h);
                     }
-                    crosshair.price = close_price;
-                } else {
+                }
+                CrosshairMode::Normal => {
                     let cy = (self.track_crosshair_init_y + (y - self.track_start_y)).clamp(0.0, pane_css_h);
                     crosshair.y = cy;
-                    crosshair.price = viewport.pixel_to_price(cy * dpr, pane_phys_h);
+                    crosshair.price = viewport.pixel_to_price(cy * dpr, candle_phys_h);
                 }
-            } else {
-                // Normal mode: free crosshair Y follows finger
-                let cy = (self.track_crosshair_init_y + (y - self.track_start_y)).clamp(0.0, pane_css_h);
-                crosshair.y = cy;
-                crosshair.price = viewport.pixel_to_price(cy * dpr, pane_phys_h);
             }
             // NO panning in tracking mode — return early
             return;
@@ -392,35 +386,27 @@ impl InteractionHandler {
             crosshair.active = true;
             crosshair.x = x.clamp(0.0, pane_css_w);
 
-            let bar_f = viewport.pixel_to_bar(crosshair.x * dpr, pane_phys_w);
-            let snapped_idx = bar_f.round().max(0.0) as usize;
-            let snapped_idx = snapped_idx.min(bars.len().saturating_sub(1));
-            crosshair.bar_index = if snapped_idx < bars.len() { Some(snapped_idx) } else { None };
+            crosshair.bar_index = viewport.bar_index_at_pixel(crosshair.x * dpr, pane_phys_w, bars.len());
 
             match crosshair.mode {
-                CrosshairMode::Magnet => {
+                CrosshairMode::Magnet | CrosshairMode::MagnetOHLC => {
                     if let Some(idx) = crosshair.bar_index {
-                        // Snap X to bar center (LWC magnet behavior)
-                        let bar_center_frac = (idx as f64 - viewport.start_bar)
-                            / (viewport.end_bar - viewport.start_bar);
-                        crosshair.x = (bar_center_frac * pane_css_w).clamp(0.0, pane_css_w);
-
-                        // Snap Y to close price
-                        let close_price = bars.closes.value(idx) as f64;
-                        let price_range = viewport.price_max - viewport.price_min;
-                        if price_range > 0.0 {
-                            let price_frac = (close_price - viewport.price_min) / price_range;
-                            crosshair.y = ((1.0 - price_frac) * pane_css_h).clamp(0.0, pane_css_h);
-                        }
-                        crosshair.price = close_price;
+                        crosshair.x = viewport.bar_center_css(idx, pane_css_w);
+                        let cursor_y = y.clamp(0.0, pane_css_h);
+                        let snap_price = magnet_snap_price(
+                            bars, idx, crosshair.mode,
+                            cursor_y, viewport, pane_css_h,
+                        );
+                        crosshair.y = viewport.price_to_css_y(snap_price, pane_css_h).clamp(0.0, pane_css_h);
+                        crosshair.price = snap_price;
                     } else {
                         crosshair.y = y.clamp(0.0, pane_css_h);
-                        crosshair.price = viewport.pixel_to_price(crosshair.y * dpr, pane_phys_h);
+                        crosshair.price = viewport.pixel_to_price(crosshair.y * dpr, candle_phys_h);
                     }
                 }
                 CrosshairMode::Normal => {
                     crosshair.y = y.clamp(0.0, pane_css_h);
-                    crosshair.price = viewport.pixel_to_price(crosshair.y * dpr, pane_phys_h);
+                    crosshair.price = viewport.pixel_to_price(crosshair.y * dpr, candle_phys_h);
                 }
             }
         }
@@ -804,5 +790,46 @@ impl InteractionHandler {
         }
         
         self.is_gliding
+    }
+}
+
+/// Compute the magnet-snap price for a given bar and crosshair mode.
+///
+/// - `Magnet`: always snaps to close price (LWC behavior).
+/// - `MagnetOHLC`: snaps to the O/H/L/C value whose CSS Y is nearest
+///   to `cursor_css_y` (matching LWC's `magnet.ts` algorithm).
+/// - `Normal`: should not be called — returns close as fallback.
+fn magnet_snap_price(
+    bars: &BarArray,
+    idx: usize,
+    mode: CrosshairMode,
+    cursor_css_y: f64,
+    viewport: &Viewport,
+    pane_css_h: f64,
+) -> f64 {
+    let close = bars.closes.value(idx) as f64;
+
+    match mode {
+        CrosshairMode::MagnetOHLC => {
+            let open = bars.opens.value(idx) as f64;
+            let high = bars.highs.value(idx) as f64;
+            let low = bars.lows.value(idx) as f64;
+
+            // Convert each OHLC price to CSS Y and find nearest to cursor
+            let candidates = [open, high, low, close];
+            let mut best_price = close;
+            let mut best_dist = f64::MAX;
+            for &price in &candidates {
+                let py = viewport.price_to_css_y(price, pane_css_h);
+                let dist = (py - cursor_css_y).abs();
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_price = price;
+                }
+            }
+            best_price
+        }
+        // Magnet (close only) or Normal fallback
+        _ => close,
     }
 }

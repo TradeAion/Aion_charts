@@ -423,8 +423,16 @@ impl ChartRenderer for WgpuRenderer {
     fn is_valid(&self) -> bool { true }
 
     fn begin_frame(&mut self, _ctx: &RenderContext) -> Result<(), String> {
-        let output = self.gpu.surface.get_current_texture()
-            .map_err(|e| format!("Surface error: {:?}", e))?;
+        let output = match self.gpu.surface.get_current_texture() {
+            Ok(tex) => tex,
+            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                // Reconfigure surface and retry once
+                self.gpu.surface.configure(&self.gpu.device, &self.gpu.config);
+                self.gpu.surface.get_current_texture()
+                    .map_err(|e| format!("Surface error after reconfigure: {:?}", e))?
+            }
+            Err(e) => return Err(format!("Surface error: {:?}", e)),
+        };
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let encoder = self.gpu.device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor { label: Some("raycore_encoder") }
@@ -452,7 +460,7 @@ impl ChartRenderer for WgpuRenderer {
     fn draw_candles(&mut self, ctx: &RenderContext) -> Result<(), String> {
         let pane_w = ctx.viewport.width as f64;
         let pane_h = ctx.viewport.height as f64;
-        let vol_h = pane_h * 0.15;
+        let vol_h = pane_h * ctx.viewport.volume_height_ratio as f64;
         let candle_h = pane_h - vol_h;
 
         let sizing = CandleSizing::compute_from_pane(pane_w, ctx.viewport, ctx.dpr);

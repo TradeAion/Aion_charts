@@ -11,6 +11,7 @@
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, CanvasRenderingContext2d};
 use crate::core::renderer::traits::{ChartStyle, CrosshairState, TickMark};
+use crate::core::renderer::rgba_str as rgba;
 use crate::core::viewport::Viewport;
 use crate::core::formatters::format_crosshair_time;
 
@@ -22,17 +23,6 @@ pub struct TimeAxisRenderer {
     pw: u32,
     ph: u32,
     dpr: f64,
-}
-
-#[inline]
-fn rgba(c: &[f32; 4]) -> String {
-    format!(
-        "rgba({},{},{},{})",
-        (c[0] * 255.0) as u8,
-        (c[1] * 255.0) as u8,
-        (c[2] * 255.0) as u8,
-        c[3]
-    )
 }
 
 impl TimeAxisRenderer {
@@ -85,26 +75,31 @@ impl TimeAxisRenderer {
             self.base_ctx.fill_rect(x - tick_offset, 0.0, tick_width, tick_length);
         }
 
-        // Tick labels
-        let font_normal = style.axis_font(dpr);
-        let font_bold = style.axis_font_bold(dpr);
+        // Tick labels — draw in media (CSS) coordinate space for sharp text.
+        self.base_ctx.save();
+        let _ = self.base_ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
+
+        let css_font_normal = format!("{}px {}", style.font_size, style.font_family);
+        let css_font_bold = format!("bold {}px {}", style.font_size, style.font_family);
         self.base_ctx.set_fill_style_str(&rgba(&style.axis_text_color));
         self.base_ctx.set_text_align("center");
         self.base_ctx.set_text_baseline("middle");
 
-        let padding_top = style.time_axis_padding_top() * dpr;
-        let fs = style.font_size as f64 * dpr;
-        let text_y = border_size + tick_length + padding_top + fs / 2.0;
+        let padding_top_css = style.time_axis_padding_top();
+        let fs_css = style.font_size as f64;
+        let text_y_css = (border_size + tick_length) / dpr + padding_top_css + fs_css / 2.0;
 
         for t in ticks {
             if t.pixel < 0.0 || t.pixel > pane_w { continue; }
             if t.major {
-                self.base_ctx.set_font(&font_bold);
+                self.base_ctx.set_font(&css_font_bold);
             } else {
-                self.base_ctx.set_font(&font_normal);
+                self.base_ctx.set_font(&css_font_normal);
             }
-            let _ = self.base_ctx.fill_text(&t.label, t.pixel, text_y);
+            let x_css = t.pixel / dpr;
+            let _ = self.base_ctx.fill_text(&t.label, x_css, text_y_css);
         }
+        self.base_ctx.restore();
     }
 
     /// Render the top layer: crosshair time label.
@@ -129,10 +124,10 @@ impl TimeAxisRenderer {
         let pane_w = pane_css_w * dpr;
         if mx < 0.0 || mx > pane_w { return; }
 
-        // Bar index at crosshair X
-        let bar_f = vp.start_bar + (mx / pane_w) * (vp.end_bar - vp.start_bar);
-        let bar_i = bar_f.round() as usize;
-        let bar_lbl = if bar_i < bars.len() && bars.timestamps.value(bar_i) > 0 {
+        // Bar index at crosshair X — use floor() not round() (matches interaction.rs fix)
+        let bar_idx = vp.bar_index_at_pixel(mx, pane_w, bars.len());
+        let bar_i = bar_idx.unwrap_or(0);
+        let bar_lbl = if bar_idx.is_some() && bars.timestamps.value(bar_i) > 0 {
             format_crosshair_time(bars.timestamps.value(bar_i))
         } else {
             format!("{}", bar_i)
@@ -190,13 +185,18 @@ impl TimeAxisRenderer {
         self.top_ctx.set_fill_style_str(&rgba(&style.crosshair_label_text));
         self.top_ctx.fill_rect(tick_x - tick_off_x, 0.0, tick_w_px, tick_length);
 
-        // Time text
-        let text_y = border_size + tick_length + padding_top + fs / 2.0;
+        // Time text — draw in media (CSS) coordinate space for sharp text.
+        self.top_ctx.save();
+        let _ = self.top_ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
+        let css_font = format!("{}px {}", style.font_size, style.font_family);
+        self.top_ctx.set_font(&css_font);
         self.top_ctx.set_fill_style_str(&rgba(&style.crosshair_label_text));
         self.top_ctx.set_text_align("left");
         self.top_ctx.set_text_baseline("middle");
-        let text_x = lx1 + h_margin;
-        let _ = self.top_ctx.fill_text(&bar_lbl, text_x, text_y);
+        let text_x_css = (lx1 + h_margin) / dpr;
+        let text_y_css = (border_size + tick_length + padding_top + fs / 2.0) / dpr;
+        let _ = self.top_ctx.fill_text(&bar_lbl, text_x_css, text_y_css);
+        self.top_ctx.restore();
     }
 }
 

@@ -11,6 +11,7 @@
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, CanvasRenderingContext2d};
 use crate::core::renderer::traits::{ChartStyle, CrosshairState, TickMark};
+use crate::core::renderer::rgba_str as rgba;
 use crate::core::viewport::Viewport;
 use crate::core::formatters::format_price;
 
@@ -22,17 +23,6 @@ pub struct PriceAxisRenderer {
     pw: u32,
     ph: u32,
     dpr: f64,
-}
-
-#[inline]
-fn rgba(c: &[f32; 4]) -> String {
-    format!(
-        "rgba({},{},{},{})",
-        (c[0] * 255.0) as u8,
-        (c[1] * 255.0) as u8,
-        (c[2] * 255.0) as u8,
-        c[3]
-    )
 }
 
 impl PriceAxisRenderer {
@@ -98,20 +88,27 @@ impl PriceAxisRenderer {
             self.base_ctx.fill_rect(0.0, y - tick_offset, tick_length, tick_height);
         }
 
-        // Tick labels
-        let font = style.axis_font(dpr);
-        self.base_ctx.set_font(&font);
+        // Tick labels — draw in media (CSS) coordinate space for sharp text.
+        // LWC pattern: save → scale(dpr,dpr) → draw text with CSS-px font → restore.
+        // This lets the browser's native text hinting produce sharp glyphs at all DPR.
+        self.base_ctx.save();
+        let _ = self.base_ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
+
+        let css_font = format!("{}px {}", style.font_size, style.font_family);
+        self.base_ctx.set_font(&css_font);
         self.base_ctx.set_fill_style_str(&rgba(&style.axis_text_color));
         self.base_ctx.set_text_align("left");
         self.base_ctx.set_text_baseline("middle");
 
-        let padding_inner = style.price_axis_padding_inner() * dpr;
-        let text_x = tick_length + padding_inner;
+        let padding_inner_css = style.price_axis_padding_inner();
+        let text_x_css = tick_length / dpr + padding_inner_css;
 
         for t in ticks {
             if t.pixel < 0.0 || t.pixel > pane_h { continue; }
-            let _ = self.base_ctx.fill_text(&t.label, text_x, t.pixel);
+            let y_css = t.pixel / dpr;
+            let _ = self.base_ctx.fill_text(&t.label, text_x_css, y_css);
         }
+        self.base_ctx.restore();
     }
 
     /// Render the top layer: crosshair price label.
@@ -135,8 +132,9 @@ impl PriceAxisRenderer {
         let pane_h = pane_css_h * dpr;
         if my < 0.0 || my > pane_h { return; }
 
-        // Price at crosshair Y
-        let price = vp.price_min + (1.0 - my / pane_h) * (vp.price_max - vp.price_min);
+        // Price at crosshair Y — use candle area height (excludes volume zone at bottom)
+        let candle_h = pane_h * (1.0 - vp.volume_height_ratio as f64);
+        let price = vp.price_min + (1.0 - my / candle_h).clamp(0.0, 1.0) * (vp.price_max - vp.price_min);
         let step = (vp.price_max - vp.price_min) / 10.0;
         let price_lbl = format_price(price, step.max(0.0001));
 
@@ -213,15 +211,18 @@ impl PriceAxisRenderer {
         self.top_ctx.set_fill_style_str(&rgba(&style.bg_color));
         self.top_ctx.fill_rect(w - horz_border_bmp, y_top, horz_border_bmp, y_bottom - y_top);
 
-        // Price text — LWC: right-aligned at xInside - tickSize - paddingInner - horzBorder
-        // All in bitmap coords (canvas is sized at bitmap resolution)
-        self.top_ctx.set_font(&font);
+        // Price text — draw in media (CSS) coordinate space for sharp text rendering.
+        self.top_ctx.save();
+        let _ = self.top_ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
+        let css_font = format!("{}px {}", style.font_size, style.font_family);
+        self.top_ctx.set_font(&css_font);
         self.top_ctx.set_fill_style_str(&rgba(&style.crosshair_label_text));
         self.top_ctx.set_text_align("right");
         self.top_ctx.set_text_baseline("middle");
-        let text_x = x_inside - tick_size_bmp - padding_inner - horz_border_bmp;
-        let text_y = (y_top + y_bottom) / 2.0;
-        let _ = self.top_ctx.fill_text(&price_lbl, text_x, text_y);
+        let text_x_css = (x_inside - tick_size_bmp - padding_inner - horz_border_bmp) / dpr;
+        let text_y_css = (y_top + y_bottom) / 2.0 / dpr;
+        let _ = self.top_ctx.fill_text(&price_lbl, text_x_css, text_y_css);
+        self.top_ctx.restore();
     }
 }
 

@@ -8,6 +8,7 @@
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, CanvasRenderingContext2d};
 use crate::core::renderer::traits::{ChartStyle, TickMark};
+use crate::core::renderer::rgba_str as rgba;
 
 pub struct GridRenderer {
     canvas: HtmlCanvasElement,
@@ -19,16 +20,6 @@ pub struct GridRenderer {
 
 #[inline]
 fn snap(v: f64) -> f64 { v.floor() + 0.5 }
-
-fn rgba(c: &[f32; 4]) -> String {
-    format!(
-        "rgba({},{},{},{})",
-        (c[0] * 255.0) as u8,
-        (c[1] * 255.0) as u8,
-        (c[2] * 255.0) as u8,
-        c[3]
-    )
-}
 
 impl GridRenderer {
     pub fn new(canvas: HtmlCanvasElement, dpr: f64) -> Result<Self, String> {
@@ -65,8 +56,29 @@ impl GridRenderer {
         let w = self.pw as f64;
         let h = self.ph as f64;
 
-        // Clear with chart background (no grid lines)
+        // Clear with chart background
         self.ctx.set_fill_style_str(&rgba(&style.bg_color));
         self.ctx.fill_rect(0.0, 0.0, w, h);
+
+        // Grid lines (1 physical pixel wide, major ticks only)
+        self.ctx.set_fill_style_str(&rgba(&style.grid_color));
+
+        // Horizontal grid lines (at price ticks)
+        for t in y_ticks {
+            if !t.major { continue; }
+            let y = snap(t.pixel);
+            if y > 0.0 && y < h {
+                self.ctx.fill_rect(0.0, y, w, 1.0);
+            }
+        }
+
+        // Vertical grid lines (at time ticks)
+        for t in x_ticks {
+            if !t.major { continue; }
+            let x = snap(t.pixel);
+            if x > 0.0 && x < w {
+                self.ctx.fill_rect(x, 0.0, 1.0, h);
+            }
+        }
     }
 }

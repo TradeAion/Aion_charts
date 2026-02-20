@@ -121,6 +121,54 @@ impl Viewport {
         self.price_min + frac * (self.price_max - self.price_min)
     }
 
+    /// Convert a pixel X coordinate to the bar index whose slot contains it.
+    ///
+    /// Bar `i` occupies index range `[i, i+1)` — its center is at `i + 0.5`.
+    /// `pixel_to_bar` returns a float in that range; `.floor()` gives the
+    /// correct integer index.  This matches LWC's `coordinateToIndex` which
+    /// uses `Math.ceil(floatIndex)` with a −0.5 offset (equivalent result).
+    ///
+    /// Returns `None` when the pixel maps outside `0..data_len`.
+    #[inline]
+    pub fn bar_index_at_pixel(&self, x_px: f64, chart_width_px: f64, data_len: usize) -> Option<usize> {
+        let bar_f = self.pixel_to_bar(x_px, chart_width_px);
+        let idx = bar_f.floor() as i64;
+        if idx < 0 || idx >= data_len as i64 {
+            None
+        } else {
+            Some(idx as usize)
+        }
+    }
+
+    /// Compute the CSS-pixel X coordinate of bar `idx`'s center.
+    ///
+    /// This is the inverse of `bar_index_at_pixel` — it maps an integer bar
+    /// index to the center of its slot in CSS-pixel space.
+    #[inline]
+    pub fn bar_center_css(&self, idx: usize, pane_css_w: f64) -> f64 {
+        let frac = (idx as f64 + 0.5 - self.start_bar) / (self.end_bar - self.start_bar);
+        (frac * pane_css_w).clamp(0.0, pane_css_w)
+    }
+
+    /// Fraction of pane height used for the candle area (1.0 − volume_height_ratio).
+    #[inline]
+    pub fn candle_height_frac(&self) -> f64 {
+        1.0 - self.volume_height_ratio as f64
+    }
+
+    /// Convert a price to a CSS-pixel Y coordinate within the pane.
+    ///
+    /// The candle area occupies the top `candle_height_frac()` of the pane;
+    /// volume occupies the bottom.  Y increases downward (0 = top of pane).
+    #[inline]
+    pub fn price_to_css_y(&self, price: f64, pane_css_h: f64) -> f64 {
+        let range = self.price_max - self.price_min;
+        if range <= 0.0 { return 0.0; }
+        let frac = (price - self.price_min) / range;
+        let candle_css_h = pane_css_h * self.candle_height_frac();
+        (1.0 - frac) * candle_css_h
+    }
+
     // --- Pan / Zoom helpers ---
 
     pub fn pan(&mut self, delta_bars: f64) {

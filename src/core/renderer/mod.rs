@@ -14,6 +14,19 @@
 
 pub mod traits;
 pub mod theme;
+
+/// Shared Canvas2D color helper — converts `[f32; 4]` RGBA to CSS string.
+#[cfg(target_arch = "wasm32")]
+#[inline]
+pub fn rgba_str(c: &[f32; 4]) -> String {
+    format!(
+        "rgba({},{},{},{})",
+        (c[0] * 255.0) as u8,
+        (c[1] * 255.0) as u8,
+        (c[2] * 255.0) as u8,
+        c[3]
+    )
+}
 pub mod series;
 pub mod draw_list;
 pub mod tick_marks;

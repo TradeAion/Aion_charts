@@ -127,7 +127,7 @@
     <header>
     <h1>Chart Core</h1>
         <span id="renderer-badge">…</span>
-        <button class="toggle-btn" id="magnet-btn" title="Toggle Magnet Mode (snap to close)">Magnet</button>
+        <button class="toggle-btn" id="crosshair-btn" title="Cycle crosshair: Normal → Magnet → OHLC">Normal</button>
         <div class="toggle-group" id="toggle-group"></div>
     </header>
 
@@ -145,14 +145,18 @@
     const badge       = document.getElementById('renderer-badge');
     const toggleGroup = document.getElementById('toggle-group');
       const container   = document.getElementById('chart-container');
-      const magnetBtn   = document.getElementById('magnet-btn');
+      const crosshairBtn = document.getElementById('crosshair-btn');
+      const crosshairModes = ['normal', 'magnet', 'magnet_ohlc'];
+      const crosshairLabels = { normal: 'Normal', magnet: 'Magnet', magnet_ohlc: 'OHLC' };
 
-      // Magnet mode toggle
-      magnetBtn.addEventListener('click', () => {
-        magnetMode = !magnetMode;
-        magnetBtn.classList.toggle('active', magnetMode);
+      // Crosshair mode cycle
+      crosshairBtn.addEventListener('click', () => {
+        const idx = (crosshairModes.indexOf(crosshairMode) + 1) % crosshairModes.length;
+        crosshairMode = crosshairModes[idx];
+        crosshairBtn.textContent = crosshairLabels[crosshairMode];
+        crosshairBtn.classList.toggle('active', crosshairMode !== 'normal');
         if (core) {
-          core.set_crosshair_mode(magnetMode ? 'magnet' : 'normal');
+          core.set_crosshair_mode(crosshairMode);
         }
       });
 
@@ -165,7 +169,7 @@
       let core = null;
       let rafId = 0;
       let currentRenderer = null;
-      let magnetMode = false;
+      let crosshairMode = 'normal';
 
     function updateBadge(rName) {
       badge.textContent = rName === 'webgpu' ? 'WebGPU' : 'Canvas 2D';
@@ -203,9 +207,9 @@
         core.demo_mode();
           loading.style.display = 'none';
 
-          // Restore magnet mode if active
-          if (magnetMode) {
-            core.set_crosshair_mode('magnet');
+          // Restore crosshair mode
+          if (crosshairMode !== 'normal') {
+            core.set_crosshair_mode(crosshairMode);
           }
 
           hud.textContent = currentRenderer + ' | 600 bars | dpr=' + (window.devicePixelRatio||1).toFixed(1);

@@ -75,12 +75,20 @@ impl BarArray {
         let mut v = Float32Builder::with_capacity(len);
 
         for bar in bars {
+            // Sanitize: replace NaN/Infinity with 0, clamp volume ≥ 0,
+            // ensure high ≥ max(open,close) and low ≤ min(open,close).
+            let open  = if bar.open.is_finite()  { bar.open  } else { 0.0 };
+            let close = if bar.close.is_finite() { bar.close } else { open };
+            let high  = if bar.high.is_finite()  { bar.high.max(open).max(close) } else { open.max(close) };
+            let low   = if bar.low.is_finite()   { bar.low.min(open).min(close)  } else { open.min(close) };
+            let vol   = if bar.volume.is_finite() { bar.volume.max(0.0) } else { 0.0 };
+
             ts.append_value(bar.timestamp);
-            o.append_value(bar.open);
-            h.append_value(bar.high);
-            l.append_value(bar.low);
-            c.append_value(bar.close);
-            v.append_value(bar.volume);
+            o.append_value(open);
+            h.append_value(high);
+            l.append_value(low);
+            c.append_value(close);
+            v.append_value(vol);
         }
 
         self.timestamps = ts.finish();

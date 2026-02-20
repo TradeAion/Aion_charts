@@ -1048,11 +1048,12 @@ impl RayCore {
         vec![s.engine.viewport.start_bar, s.engine.viewport.end_bar]
     }
 
-    /// Set crosshair mode: "normal" or "magnet".
+    /// Set crosshair mode: "normal", "magnet", or "magnet_ohlc".
     pub fn set_crosshair_mode(&mut self, mode: &str) {
         let mut s = self.inner.borrow_mut();
         s.engine.crosshair.mode = match mode {
             "magnet" => raycore::CrosshairMode::Magnet,
+            "magnet_ohlc" => raycore::CrosshairMode::MagnetOHLC,
             _ => raycore::CrosshairMode::Normal,
         };
     }
@@ -1063,8 +1064,31 @@ impl RayCore {
     pub fn render(&mut self) {
         let mut s = self.inner.borrow_mut();
 
+        // Detect DPR changes (browser zoom) that may not trigger ResizeObserver
+        let current_dpr = get_dpr();
+        if (current_dpr - s.engine.dpr).abs() > 0.001 {
+            s.engine.dpr = current_dpr;
+            s.layout.resize_all_canvases(current_dpr);
+            let (pw, ph) = s.layout.pane_css_size();
+            let ppw = (pw * current_dpr).round() as u32;
+            let pph = (ph * current_dpr).round() as u32;
+            s.engine.resize(ppw.max(1), pph.max(1), current_dpr);
+            s.overlay.resize(ppw.max(1), pph.max(1), current_dpr);
+            let (aw, ah) = s.layout.price_axis_css_size();
+            s.price_axis_renderer.resize(
+                (aw * current_dpr).round() as u32,
+                (ah * current_dpr).round() as u32,
+                current_dpr,
+            );
+            let (tw, th) = s.layout.time_axis_css_size();
+            s.time_axis_renderer.resize(
+                (tw * current_dpr).round() as u32,
+                (th * current_dpr).round() as u32,
+                current_dpr,
+            );
+        }
+
         let dpr = s.engine.dpr;
-        let style = s.engine.style.clone();
 
         let (pane_css_w, pane_css_h) = s.layout.pane_css_size();
 
@@ -1090,10 +1114,10 @@ impl RayCore {
         );
 
         // 2. Measure price axis width from tick labels
-        let max_text_w_phys = s.price_axis_renderer.measure_max_tick_width(&style, &y_ticks);
+        let max_text_w_phys = s.price_axis_renderer.measure_max_tick_width(&s.engine.style, &y_ticks);
         let max_text_w_css = max_text_w_phys / dpr;
-        let price_axis_css_w = style.price_axis_width(max_text_w_css);
-        let time_axis_css_h = style.time_axis_height();
+        let price_axis_css_w = s.engine.style.price_axis_width(max_text_w_css);
+        let time_axis_css_h = s.engine.style.time_axis_height();
 
         // 3. Update CSS grid layout (this may cause pane to resize)
         s.layout.update_axis_sizes(price_axis_css_w, time_axis_css_h);
@@ -1104,23 +1128,23 @@ impl RayCore {
         }
 
         // 6. Overlay — crosshair lines + watermark on pane top canvas
-        s.overlay.render(&s.engine.crosshair, &style);
+        s.overlay.render(&s.engine.crosshair, &s.engine.style);
 
         // 7. Price axis — base (ticks + labels) + top (crosshair label)
-        s.price_axis_renderer.render_base(&style, &y_ticks, pane_ph);
+        s.price_axis_renderer.render_base(&s.engine.style, &y_ticks, pane_ph);
         s.price_axis_renderer.render_top(
-            &s.engine.crosshair, &s.engine.viewport, &style, pane_css_h,
+            &s.engine.crosshair, &s.engine.viewport, &s.engine.style, pane_css_h,
         );
 
         // 8. Time axis — base (ticks + labels) + top (crosshair label)
-        s.time_axis_renderer.render_base(&style, &x_ticks, pane_pw);
+        s.time_axis_renderer.render_base(&s.engine.style, &x_ticks, pane_pw);
         s.time_axis_renderer.render_top(
             &s.engine.crosshair, &s.engine.bars,
-            &s.engine.viewport, &style, pane_css_w,
+            &s.engine.viewport, &s.engine.style, pane_css_w,
         );
 
         // 9. Corner stub — background + borders (LWC: PriceAxisStub)
-        Self::render_corner_stub(&s.layout, &style, dpr);
+        Self::render_corner_stub(&s.layout, &s.engine.style, dpr);
     }
 
     /// Render the corner stub (bottom-right intersection of time axis row + price axis column).

@@ -8,6 +8,7 @@
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, CanvasRenderingContext2d};
 use crate::core::renderer::traits::{ChartStyle, CrosshairState};
+use crate::core::renderer::rgba_str as rgba;
 
 pub struct OverlayRenderer {
     canvas: HtmlCanvasElement,
@@ -15,17 +16,6 @@ pub struct OverlayRenderer {
     pw: u32,
     ph: u32,
     dpr: f64,
-}
-
-#[inline]
-fn rgba(c: &[f32; 4]) -> String {
-    format!(
-        "rgba({},{},{},{})",
-        (c[0] * 255.0) as u8,
-        (c[1] * 255.0) as u8,
-        (c[2] * 255.0) as u8,
-        c[3]
-    )
 }
 
 impl OverlayRenderer {

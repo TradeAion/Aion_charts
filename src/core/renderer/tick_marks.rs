@@ -48,7 +48,7 @@ pub fn compute_x_ticks(vp: &Viewport, bars: &crate::core::data::BarArray, chart_
     let mut out = Vec::new();
     let mut v = first;
     while v <= vp.end_bar {
-        let px = (v - vp.start_bar) / count * chart_w;
+        let px = (v + 0.5 - vp.start_bar) / count * chart_w;
         let bar_i = v as usize;
         let (label, major) = if bar_i < bars.len() && bars.timestamps.value(bar_i) > 0 {
             let lbl = format_timestamp(bars.timestamps.value(bar_i));

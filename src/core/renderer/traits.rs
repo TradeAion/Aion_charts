@@ -143,8 +143,10 @@ pub enum CrosshairMode {
     /// Free crosshair — no snap. Lines follow pointer exactly.
     #[default]
     Normal,
-    /// Magnet mode — Y snaps to nearest close price at the hovered bar index.
+    /// Magnet mode — Y snaps to close price at the hovered bar index.
     Magnet,
+    /// Magnet OHLC mode — Y snaps to the nearest of O, H, L, C to the cursor Y.
+    MagnetOHLC,
 }
 
 /// Crosshair state — the position of the crosshair in logical coordinates.
