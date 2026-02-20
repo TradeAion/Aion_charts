@@ -2,9 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Chart Core — Demo</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      touch-action: none;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: none;
+    }
     body {
         background: #171717;
       color: #ccc;
@@ -12,6 +19,7 @@
       display: flex;
       flex-direction: column;
       height: 100vh;
+      height: 100dvh;
       overflow: hidden;
     }
     header {
@@ -65,6 +73,8 @@
       position: relative;
       overflow: hidden;
       min-height: 0;
+      min-height: 200px;
+      touch-action: none;
     }
     #hud {
       position: absolute;
@@ -97,14 +107,28 @@
       letter-spacing: 0.05em;
       z-index: 20;
     }
+
+    /* ── Mobile responsiveness ── */
+    @media (max-width: 600px) {
+      header { padding: 6px 10px; gap: 8px; }
+      header h1 { font-size: 13px; }
+      #renderer-badge { font-size: 10px; padding: 1px 6px; }
+      .toggle-btn { font-size: 10px; padding: 2px 8px; }
+      #hud { font-size: 10px; top: 4px; left: 4px; }
+    }
+    @media (max-height: 400px) {
+      header { padding: 4px 10px; }
+      header h1 { font-size: 12px; }
+    }
   </style>
 </head>
 <body>
   <div id="error-banner"></div>
     <header>
-      <h1>Chart Core</h1>
-      <span id="renderer-badge">…</span>
-      <div class="toggle-group" id="toggle-group"></div>
+    <h1>Chart Core</h1>
+        <span id="renderer-badge">…</span>
+        <button class="toggle-btn" id="magnet-btn" title="Toggle Magnet Mode (snap to close)">Magnet</button>
+        <div class="toggle-group" id="toggle-group"></div>
     </header>
 
   <div id="chart-container">
@@ -113,14 +137,24 @@
   </div>
 
   <script type="module">
-    import init, { RayCore } from '../pkg/raycore_wasm.js';
+    import init, { RayCore } from '../pkg/raycore_wasm.js?v=20260220d';
 
     const errorBanner = document.getElementById('error-banner');
     const loading     = document.getElementById('loading');
     const hud         = document.getElementById('hud');
     const badge       = document.getElementById('renderer-badge');
     const toggleGroup = document.getElementById('toggle-group');
-    const container   = document.getElementById('chart-container');
+      const container   = document.getElementById('chart-container');
+      const magnetBtn   = document.getElementById('magnet-btn');
+
+      // Magnet mode toggle
+      magnetBtn.addEventListener('click', () => {
+        magnetMode = !magnetMode;
+        magnetBtn.classList.toggle('active', magnetMode);
+        if (core) {
+          core.set_crosshair_mode(magnetMode ? 'magnet' : 'normal');
+        }
+      });
 
     function showError(msg) {
       errorBanner.textContent = 'Error: ' + msg;
@@ -128,9 +162,10 @@
       loading.style.display = 'none';
     }
 
-    let core = null;
-    let rafId = 0;
-    let currentRenderer = null;
+      let core = null;
+      let rafId = 0;
+      let currentRenderer = null;
+      let magnetMode = false;
 
     function updateBadge(rName) {
       badge.textContent = rName === 'webgpu' ? 'WebGPU' : 'Canvas 2D';
@@ -166,8 +201,14 @@
         updateToggleButtons(currentRenderer);
 
         core.demo_mode();
-        loading.style.display = 'none';
-        hud.textContent = currentRenderer + ' | 600 bars | dpr=' + (window.devicePixelRatio||1).toFixed(1);
+          loading.style.display = 'none';
+
+          // Restore magnet mode if active
+          if (magnetMode) {
+            core.set_crosshair_mode('magnet');
+          }
+
+          hud.textContent = currentRenderer + ' | 600 bars | dpr=' + (window.devicePixelRatio||1).toFixed(1);
 
         function frame() {
           rafId = requestAnimationFrame(frame);

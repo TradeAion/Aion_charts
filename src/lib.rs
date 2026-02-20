@@ -22,7 +22,7 @@ pub use crate::core::renderer::tick_marks;
 pub use crate::core::renderer::wgpu_context::GpuContext;
 pub use crate::core::renderer::wgpu_backend::{WgpuRenderer, CandleInstance, CandleUniforms};
 pub use crate::core::renderer::pipeline_manager::PipelineManager;
-pub use crate::core::interaction::{InteractionHandler, HitZone};
+pub use crate::core::interaction::{InteractionHandler, HitZone, TouchCrosshairMode};
 pub use crate::core::demo_data::generate_sample_data;
 
 #[cfg(target_arch = "wasm32")]

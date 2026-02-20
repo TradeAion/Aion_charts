@@ -1,4 +1,4 @@
-//! InteractionHandler — LWC-style pointer/wheel state machine.
+//! InteractionHandler — LWC-style pointer/wheel state machine with full touch support.
 //!
 //! Pure Rust, no DOM dependencies. The WASM layer forwards raw pointer events
 //! WITH the zone already determined (since each widget is a separate DOM element).
@@ -14,6 +14,9 @@
 //!   wheel deltaY  → zoom time (proportional, focal-point aware)
 //!   wheel deltaX  → scroll time
 //!   drag          → scroll time + price
+//!   pinch         → zoom X and Y
+//!   long press    → activate crosshair tracking mode
+//!   double tap    → zoom in / reset
 //! ── Time Axis ──
 //!   drag          → scale time (ratio from right edge, like LWC)
 //!   wheel deltaY  → zoom time
@@ -39,13 +42,24 @@ pub enum HitZone {
     None,
 }
 
+/// Touch tracking mode — LWC-style crosshair on touch.
+/// On touch devices crosshair is hidden until user long-presses,
+/// then it tracks the finger. Double-tap hides it again.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TouchCrosshairMode {
+    /// Crosshair hidden (default on touch).
+    Hidden,
+    /// Long-press activated — crosshair tracks finger.
+    Tracking,
+}
+
 /// Interaction state machine.
 pub struct InteractionHandler {
     // ── Press / drag state ──
-    pressed: bool,
+    pub pressed: bool,
     press_x: f64,
     press_y: f64,
-    drag_active: bool,
+    pub drag_active: bool,
     press_zone: HitZone,
 
     // ── Double-click detection ──
@@ -82,6 +96,33 @@ pub struct InteractionHandler {
 
     // ── Current hover zone (for cursor hints) ──
     current_zone: HitZone,
+
+    // ── Touch-specific state ──
+    /// Whether the current interaction is from a touch device.
+    pub is_touch: bool,
+
+    /// Touch crosshair mode — hidden until long-press on touch devices.
+    pub touch_crosshair_mode: TouchCrosshairMode,
+
+    // ── Pinch zoom state ──
+    pub pinch_active: bool,
+    pub pinch_start_distance: f64,
+    pinch_start_bar_span: f64,
+    pinch_start_center_bar: f64,
+    pinch_start_price_range: f64,
+    pinch_start_price_mid: f64,
+    pinch_prev_scale: f64,
+
+    // ── Long-press state ──
+    /// Set to true by WASM layer when long-press timer fires.
+    pub long_press_fired: bool,
+
+    // ── Touch tracking mode (LWC _startTrackPoint) ──
+    /// When in tracking mode, crosshair follows finger relative to initial position.
+    track_start_x: f64,
+    track_start_y: f64,
+    track_crosshair_init_x: f64,
+    track_crosshair_init_y: f64,
 }
 
 impl InteractionHandler {
@@ -112,7 +153,26 @@ impl InteractionHandler {
             last_move_y: 0.0,
             is_gliding: false,
             current_zone: HitZone::None,
+            is_touch: false,
+            touch_crosshair_mode: TouchCrosshairMode::Hidden,
+            pinch_active: false,
+            pinch_start_distance: 0.0,
+            pinch_start_bar_span: 0.0,
+            pinch_start_center_bar: 0.0,
+            pinch_start_price_range: 0.0,
+            pinch_start_price_mid: 0.0,
+            pinch_prev_scale: 1.0,
+            long_press_fired: false,
+            track_start_x: 0.0,
+            track_start_y: 0.0,
+            track_crosshair_init_x: 0.0,
+            track_crosshair_init_y: 0.0,
         }
+    }
+
+    /// Set whether the current device is touch (call from pointermove/pointerdown).
+    pub fn set_touch(&mut self, is_touch: bool) {
+        self.is_touch = is_touch;
     }
 
     /// Called when pointer enters a widget zone.
@@ -120,10 +180,18 @@ impl InteractionHandler {
         self.current_zone = zone;
         match zone {
             HitZone::Chart => {
-                crosshair.active = true;
+                // On touch: crosshair ONLY shows in tracking mode (after long-press).
+                // On mouse: crosshair always shows.
+                if self.is_touch {
+                    crosshair.active = self.touch_crosshair_mode == TouchCrosshairMode::Tracking;
+                } else {
+                    crosshair.active = true;
+                }
             }
             _ => {
-                crosshair.active = false;
+                if !self.is_touch {
+                    crosshair.active = false;
+                }
             }
         }
     }
@@ -133,8 +201,123 @@ impl InteractionHandler {
         if self.current_zone == zone {
             self.current_zone = HitZone::None;
         }
-        if zone == HitZone::Chart {
+        // On touch: keep crosshair state (tracking persists).
+        // On mouse: hide crosshair when leaving chart.
+        if zone == HitZone::Chart && !self.is_touch {
             crosshair.active = false;
+        }
+    }
+
+    // ── Pinch zoom (two-finger) ──
+
+    /// Start a pinch gesture. Called from WASM when 2 touches detected.
+    /// `cx`, `cy` = center of the two touches in CSS coords.
+    /// `distance` = distance between the two touches.
+    pub fn pinch_start(
+        &mut self,
+        cx: f64,
+        _cy: f64,
+        distance: f64,
+        pane_css_w: f64,
+        viewport: &Viewport,
+    ) {
+        self.pinch_active = true;
+        self.pinch_start_distance = distance.max(1.0);
+        self.pinch_start_bar_span = viewport.end_bar - viewport.start_bar;
+        self.pinch_prev_scale = 1.0;
+        self.is_gliding = false;
+        self.velocity_x = 0.0;
+        self.velocity_y = 0.0;
+
+        // Focal bar for zoom
+        let focal_frac = cx.clamp(0.0, pane_css_w) / pane_css_w.max(1.0);
+        self.pinch_start_center_bar = viewport.start_bar + focal_frac * self.pinch_start_bar_span;
+
+        // Price range snapshot
+        self.pinch_start_price_range = viewport.price_max - viewport.price_min;
+        self.pinch_start_price_mid = (viewport.price_min + viewport.price_max) / 2.0;
+    }
+
+    /// Update pinch gesture. Called from WASM on touchmove with 2 touches.
+    /// `scale` = current_distance / start_distance.
+    pub fn pinch_update(
+        &mut self,
+        scale: f64,
+        viewport: &mut Viewport,
+        bars: &BarArray,
+    ) {
+        if !self.pinch_active { return; }
+
+        // LWC: zoomScale = (scale - prevScale) * 5
+        let zoom_scale = (scale - self.pinch_prev_scale) * 5.0;
+        self.pinch_prev_scale = scale;
+
+        if zoom_scale.abs() < 0.0001 { return; }
+
+        // Time zoom — same as LWC zoomTime
+        let factor = 1.0 / (1.0 + zoom_scale / 10.0);
+        viewport.zoom(self.pinch_start_center_bar, factor);
+        viewport.clamp_to_data(bars.len());
+
+        // Price zoom — scale around midpoint
+        if viewport.price_locked {
+            let half = self.pinch_start_price_range / 2.0 / scale.max(0.1);
+            viewport.price_min = self.pinch_start_price_mid - half;
+            viewport.price_max = self.pinch_start_price_mid + half;
+        } else {
+            viewport.auto_fit_price(bars);
+        }
+    }
+
+    /// End pinch gesture.
+    pub fn pinch_end(&mut self) {
+        self.pinch_active = false;
+    }
+
+    // ── Long-press → tracking mode ──
+
+    /// Called by WASM when the long-press timer fires (240ms like LWC).
+    /// Activates crosshair tracking mode.
+    pub fn long_press(
+        &mut self,
+        x: f64,
+        y: f64,
+        crosshair: &mut CrosshairState,
+    ) {
+        self.long_press_fired = true;
+        self.touch_crosshair_mode = TouchCrosshairMode::Tracking;
+        crosshair.active = true;
+
+        // Initialize tracking anchor
+        self.track_start_x = x;
+        self.track_start_y = y;
+        self.track_crosshair_init_x = x;
+        self.track_crosshair_init_y = y;
+
+        // Set crosshair position immediately
+        crosshair.x = x;
+        crosshair.y = y;
+    }
+
+    /// Double-tap on chart in touch mode: toggle crosshair off if tracking,
+    /// otherwise zoom-in / reset.
+    pub fn touch_double_tap(
+        &mut self,
+        crosshair: &mut CrosshairState,
+        viewport: &mut Viewport,
+        bars: &BarArray,
+    ) {
+        if self.touch_crosshair_mode == TouchCrosshairMode::Tracking {
+            // Hide crosshair
+            self.touch_crosshair_mode = TouchCrosshairMode::Hidden;
+            crosshair.active = false;
+        } else {
+            // Reset view (same as mouse double-click on chart)
+            viewport.price_locked = false;
+            let len = bars.len() as f64;
+            let visible = len.min(200.0);
+            viewport.set_range(len - visible, len);
+            viewport.auto_fit_price(bars);
         }
     }
 
@@ -154,8 +337,58 @@ impl InteractionHandler {
         let pane_phys_h = pane_css_h * dpr;
         let now = js_sys::Date::now();
 
-        // Update crosshair
-        if !self.pressed || self.press_zone == HitZone::Chart {
+        // ── TOUCH: tracking mode (long-press activated) ──
+        // Crosshair follows finger; chart does NOT move.
+        if self.is_touch && self.touch_crosshair_mode == TouchCrosshairMode::Tracking && self.pressed {
+            let new_x = self.track_crosshair_init_x + (x - self.track_start_x);
+            let cx = new_x.clamp(0.0, pane_css_w);
+
+            crosshair.active = true;
+            crosshair.x = cx;
+
+            let bar_f = viewport.pixel_to_bar(cx * dpr, pane_phys_w);
+            let snapped_idx = bar_f.round().max(0.0) as usize;
+            let snapped_idx = snapped_idx.min(bars.len().saturating_sub(1));
+            crosshair.bar_index = if snapped_idx < bars.len() { Some(snapped_idx) } else { None };
+
+            // Only magnet-snap when magnet mode is enabled
+            if crosshair.mode == CrosshairMode::Magnet {
+                if let Some(idx) = crosshair.bar_index {
+                    // Snap X to bar center
+                    let bar_center_frac = (idx as f64 - viewport.start_bar)
+                        / (viewport.end_bar - viewport.start_bar);
+                    crosshair.x = (bar_center_frac * pane_css_w).clamp(0.0, pane_css_w);
+
+                    // Snap Y to close price
+                    let close_price = bars.closes.value(idx) as f64;
+                    let price_range = viewport.price_max - viewport.price_min;
+                    if price_range > 0.0 {
+                        let price_frac = (close_price - viewport.price_min) / price_range;
+                        crosshair.y = ((1.0 - price_frac) * pane_css_h).clamp(0.0, pane_css_h);
+                    }
+                    crosshair.price = close_price;
+                } else {
+                    let cy = (self.track_crosshair_init_y + (y - self.track_start_y)).clamp(0.0, pane_css_h);
+                    crosshair.y = cy;
+                    crosshair.price = viewport.pixel_to_price(cy * dpr, pane_phys_h);
+                }
+            } else {
+                // Normal mode: free crosshair Y follows finger
+                let cy = (self.track_crosshair_init_y + (y - self.track_start_y)).clamp(0.0, pane_css_h);
+                crosshair.y = cy;
+                crosshair.price = viewport.pixel_to_price(cy * dpr, pane_phys_h);
+            }
+            // NO panning in tracking mode — return early
+            return;
+        }
+
+        // ── TOUCH: hidden mode → NO crosshair at all ──
+        if self.is_touch && self.touch_crosshair_mode == TouchCrosshairMode::Hidden {
+            crosshair.active = false;
+            // Fall through to drag/pan below
+        }
+        // ── MOUSE: always update crosshair ──
+        else if !self.is_touch {
             crosshair.active = true;
             crosshair.x = x.clamp(0.0, pane_css_w);
 
@@ -167,10 +400,18 @@ impl InteractionHandler {
             match crosshair.mode {
                 CrosshairMode::Magnet => {
                     if let Some(idx) = crosshair.bar_index {
+                        // Snap X to bar center (LWC magnet behavior)
+                        let bar_center_frac = (idx as f64 - viewport.start_bar)
+                            / (viewport.end_bar - viewport.start_bar);
+                        crosshair.x = (bar_center_frac * pane_css_w).clamp(0.0, pane_css_w);
+
+                        // Snap Y to close price
                         let close_price = bars.closes.value(idx) as f64;
-                        let price_frac = (close_price - viewport.price_min)
-                            / (viewport.price_max - viewport.price_min);
-                        crosshair.y = (1.0 - price_frac) * pane_css_h;
+                        let price_range = viewport.price_max - viewport.price_min;
+                        if price_range > 0.0 {
+                            let price_frac = (close_price - viewport.price_min) / price_range;
+                            crosshair.y = ((1.0 - price_frac) * pane_css_h).clamp(0.0, pane_css_h);
+                        }
                         crosshair.price = close_price;
                     } else {
                         crosshair.y = y.clamp(0.0, pane_css_h);
@@ -184,26 +425,30 @@ impl InteractionHandler {
             }
         }
 
-        // Drag → scroll time + price (LWC: scrollTimeTo + scrollPriceTo)
-        if self.pressed && self.press_zone == HitZone::Chart {
+        // ── Drag → scroll/pan (both mouse and touch-hidden mode) ──
+        if self.pressed && self.press_zone == HitZone::Chart && !self.pinch_active {
             let manhattan = (x - self.press_x).abs() + (y - self.press_y).abs();
             if !self.drag_active && manhattan >= CANCEL_CLICK_DISTANCE {
                 self.drag_active = true;
+                // On touch: cancel long-press once drag starts
+                if self.is_touch {
+                    self.long_press_fired = false;
+                }
             }
             if self.drag_active && pane_css_w > 0.0 {
-                // Update velocity
-                let dt = now - self.last_move_time;
-                if dt > 0.0 && dt < 100.0 {
-                    let vx = (x - self.last_move_x) / dt;
-                    let vy = (y - self.last_move_y) / dt;
-                    self.velocity_x = self.velocity_x * 0.5 + vx * 0.5;
-                    self.velocity_y = self.velocity_y * 0.5 + vy * 0.5;
+                // Track velocity (touch-only, used for inertia)
+                if self.is_touch {
+                    let dt = now - self.last_move_time;
+                    if dt > 0.0 && dt < 100.0 {
+                        let vx = (x - self.last_move_x) / dt;
+                        self.velocity_x = self.velocity_x * 0.5 + vx * 0.5;
+                    }
                 }
                 self.last_move_time = now;
                 self.last_move_x = x;
                 self.last_move_y = y;
 
-                // Time scroll: same as before
+                // Time scroll (horizontal only)
                 let bar_span = viewport.end_bar - viewport.start_bar;
                 let dx_bars = (self.scroll_start_x - x) / pane_css_w * bar_span;
                 let new_start = self.scroll_start_bar + dx_bars;
@@ -211,13 +456,8 @@ impl InteractionHandler {
                 viewport.set_range(new_start, new_end);
                 viewport.clamp_to_data(bars.len());
 
-                // Price scroll (LWC: PriceScale.scrollTo)
-                // priceUnitsPerPixel = range.length / (internalHeight - 1)
-                // pixelDelta = y - startY
-                // priceDelta = pixelDelta * priceUnitsPerPixel
-                // range.shift(priceDelta)
+                // Price scroll — both mouse and touch when price is locked
                 if viewport.price_locked {
-                    // When price is locked (user has manually scaled), scroll price too
                     let price_range = self.scroll_price_start_max - self.scroll_price_start_min;
                     if pane_css_h > 1.0 && price_range > 0.0 {
                         let price_per_px = price_range / (pane_css_h - 1.0);
@@ -226,7 +466,7 @@ impl InteractionHandler {
                         viewport.price_min = self.scroll_price_start_min + price_delta;
                         viewport.price_max = self.scroll_price_start_max + price_delta;
                     }
-                } else {
+                } else if !viewport.price_locked {
                     viewport.auto_fit_price(bars);
                 }
             }
@@ -248,8 +488,6 @@ impl InteractionHandler {
                 self.drag_active = true;
             }
             if self.drag_active && pane_css_w > 1.0 {
-                // LWC: newBarSpacing = savedBarSpacing * (width-x) / (width-startX)
-                // visibleBars = width/barSpacing, so newVisibleBars = saved * (width-startX)/(width-x)
                 let start_len = (pane_css_w - self.time_scale_start_x).clamp(1.0, pane_css_w);
                 let current_len = (pane_css_w - x).clamp(1.0, pane_css_w);
                 let ratio = start_len / current_len;
@@ -280,12 +518,6 @@ impl InteractionHandler {
                 self.drag_active = true;
             }
             if self.drag_active && pane_css_h > 1.0 {
-                // LWC PriceScale.scaleTo:
-                //   x = height - localY   (invert Y)
-                //   if x < 0 { x = 0 }
-                //   scaleCoeff = (startPoint + (height-1)*0.2) / (x + (height-1)*0.2)
-                //   scaleCoeff = max(scaleCoeff, 0.1)
-                //   newRange.scaleAroundCenter(scaleCoeff)
                 let h = self.price_scale_height;
                 let inv_y = (h - y).max(0.0);
                 let offset = (h - 1.0) * 0.2;
@@ -315,6 +547,7 @@ impl InteractionHandler {
         self.press_y = y;
         self.drag_active = false;
         self.press_zone = zone;
+        self.long_press_fired = false;
         
         // Reset gliding state
         self.velocity_x = 0.0;
@@ -328,7 +561,6 @@ impl InteractionHandler {
             HitZone::Chart => {
                 self.scroll_start_x = x;
                 self.scroll_start_bar = viewport.start_bar;
-                // LWC: startScrollPrice — save start Y and price snapshot
                 self.scroll_price_start_y = y;
                 self.scroll_price_start_min = viewport.price_min;
                 self.scroll_price_start_max = viewport.price_max;
@@ -338,8 +570,6 @@ impl InteractionHandler {
                 self.time_scale_start_visible_bars = viewport.end_bar - viewport.start_bar;
             }
             HitZone::PriceAxis => {
-                // LWC: PriceScale.startScale(x)
-                // _scaleStartPoint = height - x  (inverted Y)
                 self.price_scale_height = pane_css_h;
                 self.price_scale_start_y_inv = pane_css_h - y;
                 self.price_scale_start_range = viewport.price_max - viewport.price_min;
@@ -359,11 +589,12 @@ impl InteractionHandler {
         let was_click = self.pressed && !self.drag_active;
         let zone = self.press_zone;
 
-        // If we were dragging on the chart, start gliding if velocity is high enough
-        if self.pressed && self.drag_active && zone == HitZone::Chart {
+        // Kinetic scrolling: TOUCH ONLY, horizontal only
+        if self.is_touch && self.pressed && self.drag_active && zone == HitZone::Chart {
             let dt = now_ms - self.last_move_time;
-            if dt < 50.0 && (self.velocity_x.abs() > 0.1 || self.velocity_y.abs() > 0.1) {
+            if dt < 50.0 && self.velocity_x.abs() > 0.1 {
                 self.is_gliding = true;
+                self.velocity_y = 0.0; // horizontal only
             } else {
                 self.velocity_x = 0.0;
                 self.velocity_y = 0.0;
@@ -373,11 +604,14 @@ impl InteractionHandler {
             self.velocity_y = 0.0;
         }
 
+        // If touch tracking mode and user lifts finger — keep crosshair visible
+        // (LWC behavior: crosshair stays until next double-tap or touchStart+exit)
+
         self.pressed = false;
         self.drag_active = false;
 
-        // Double-click detection (LWC: 500ms)
-        if was_click && zone != HitZone::None {
+        // Double-click / double-tap detection (LWC: 500ms)
+        if was_click && zone != HitZone::None && !self.long_press_fired {
             let dt = now_ms - self.last_click_time;
             if dt < 500.0 && self.last_click_zone == zone {
                 match zone {
@@ -394,11 +628,14 @@ impl InteractionHandler {
                         viewport.auto_fit_price(bars);
                     }
                     HitZone::Chart => {
-                        viewport.price_locked = false;
-                        let len = bars.len() as f64;
-                        let visible = len.min(200.0);
-                        viewport.set_range(len - visible, len);
-                        viewport.auto_fit_price(bars);
+                        // For touch: handled separately via touch_double_tap
+                        if !self.is_touch {
+                            viewport.price_locked = false;
+                            let len = bars.len() as f64;
+                            let visible = len.min(200.0);
+                            viewport.set_range(len - visible, len);
+                            viewport.auto_fit_price(bars);
+                        }
                     }
                     _ => {}
                 }
@@ -437,10 +674,7 @@ impl InteractionHandler {
 
         // deltaY → zoom time
         if adj_dy.abs() > 0.001 {
-            // LWC: zoomScale = sign(dy) * min(1, |dy|)
             let zoom_scale = adj_dy.signum() * adj_dy.abs().min(1.0);
-            // LWC: newBarSpacing = barSpacing + scale * (barSpacing / 10)
-            // factor on visible bars = 1 / (1 + scale/10)
             let factor = 1.0 / (1.0 + zoom_scale / 10.0);
 
             let scroll_position = x.clamp(0.0, pane_css_w);
@@ -455,7 +689,6 @@ impl InteractionHandler {
         }
 
         // deltaX → scroll time
-        // LWC: scrollChart(deltaX_css * -80) where shift = pixels / barSpacing
         if adj_dx.abs() > 0.001 {
             let visible_bars = viewport.end_bar - viewport.start_bar;
             let bar_spacing = pane_css_w / visible_bars;
@@ -529,11 +762,11 @@ impl InteractionHandler {
     }
 
     /// Process kinetic scrolling deceleration on each frame.
-    /// Needs to be called before rendering. Returns true if gliding is still active.
+    /// Touch-only, horizontal-only (like LWC). Returns true if gliding is still active.
     pub fn update_gliding(
         &mut self,
         pane_css_w: f64,
-        pane_css_h: f64,
+        _pane_css_h: f64,
         viewport: &mut Viewport,
         bars: &BarArray,
     ) -> bool {
@@ -547,42 +780,29 @@ impl InteractionHandler {
             return true;
         }
         
-        // Apply velocity
+        // Horizontal only — no vertical price drift
         let dx = self.velocity_x * dt;
-        let dy = self.velocity_y * dt;
         
         if pane_css_w > 0.0 {
-            // Apply time scroll
             let bar_span = viewport.end_bar - viewport.start_bar;
             let dx_bars = -dx / pane_css_w * bar_span;
             viewport.pan_clamped(dx_bars, bars.len());
-        }
-        
-        if viewport.price_locked && pane_css_h > 1.0 {
-            // Apply price scroll
-            let price_range = viewport.price_max - viewport.price_min;
-            if price_range > 0.0 {
-                let price_per_px = price_range / (pane_css_h - 1.0);
-                let price_delta = dy * price_per_px;
-                viewport.price_min += price_delta;
-                viewport.price_max += price_delta;
+            if !viewport.price_locked {
+                viewport.auto_fit_price(bars);
             }
-        } else if !viewport.price_locked {
-            viewport.auto_fit_price(bars);
         }
         
         // Decelerate (friction)
-        let friction = (0.95f64).powf(dt / 16.0); // assuming target 60fps (16ms per frame)
+        let friction = (0.95f64).powf(dt / 16.0);
         self.velocity_x *= friction;
-        self.velocity_y *= friction;
         self.last_move_time = now;
         
         // Stop gliding if velocity is negligible
-        if self.velocity_x.abs() < 0.01 && self.velocity_y.abs() < 0.01 {
+        if self.velocity_x.abs() < 0.01 {
             self.is_gliding = false;
+            self.velocity_x = 0.0;
         }
         
         self.is_gliding
     }
 }
-

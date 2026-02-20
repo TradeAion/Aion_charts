@@ -124,7 +124,9 @@ impl WidgetLayout {
              grid-template-rows:1fr auto;\
              width:100%;height:100%;\
              position:absolute;top:0;left:0;\
-             overflow:hidden;"
+             overflow:hidden;\
+             touch-action:none;\
+             -webkit-user-select:none;user-select:none;"
         );
         container.append_child(&grid_wrapper)?;
 
@@ -134,7 +136,9 @@ impl WidgetLayout {
             "position:relative;overflow:hidden;\
              grid-column:1;grid-row:1;\
              min-width:0;min-height:0;\
-             cursor:crosshair;"
+             cursor:crosshair;\
+             touch-action:none;\
+             -webkit-user-select:none;user-select:none;"
         );
         grid_wrapper.append_child(&pane_container)?;
 
@@ -148,7 +152,9 @@ impl WidgetLayout {
             "position:relative;overflow:hidden;\
              grid-column:2;grid-row:1;\
              min-width:0;min-height:0;\
-             cursor:ns-resize;"
+             cursor:ns-resize;\
+             touch-action:none;\
+             -webkit-user-select:none;user-select:none;"
         );
         grid_wrapper.append_child(&price_axis_container)?;
 
@@ -163,7 +169,9 @@ impl WidgetLayout {
             "position:relative;overflow:hidden;\
              grid-column:1;grid-row:2;\
              min-width:0;min-height:0;\
-             cursor:ew-resize;"
+             cursor:ew-resize;\
+             touch-action:none;\
+             -webkit-user-select:none;user-select:none;"
         );
         grid_wrapper.append_child(&time_axis_container)?;
 

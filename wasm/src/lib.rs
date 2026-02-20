@@ -126,6 +126,35 @@ impl ChartInner {
         interaction.time_axis_wheel(x, dy, dm, pw, &mut engine.viewport, &engine.bars);
     }
 
+    fn on_pinch_start(&mut self, cx: f64, _cy: f64, distance: f64) {
+        let (pw, _) = self.layout.pane_css_size();
+        let Self { interaction, engine, .. } = self;
+        interaction.pinch_start(cx, _cy, distance, pw, &engine.viewport);
+    }
+
+    fn on_pinch_update(&mut self, scale: f64) {
+        let Self { interaction, engine, .. } = self;
+        interaction.pinch_update(scale, &mut engine.viewport, &engine.bars);
+    }
+
+    fn on_pinch_end(&mut self) {
+        self.interaction.pinch_end();
+    }
+
+    fn on_long_press(&mut self, x: f64, y: f64) {
+        let Self { interaction, engine, .. } = self;
+        interaction.long_press(x, y, &mut engine.crosshair);
+    }
+
+    fn on_touch_double_tap(&mut self) {
+        let Self { interaction, engine, .. } = self;
+        interaction.touch_double_tap(
+            &mut engine.crosshair,
+            &mut engine.viewport,
+            &engine.bars,
+        );
+    }
+
     fn cursor_css(&self) -> &'static str {
         self.interaction.cursor_hint()
     }
@@ -149,8 +178,13 @@ pub struct RayCore {
     inner: SharedInner,
     _closures: Vec<Closure<dyn FnMut(web_sys::Event)>>,
     _wheel_closures: Vec<Closure<dyn FnMut(web_sys::WheelEvent)>>,
+    _touch_closures: Vec<Closure<dyn FnMut(web_sys::TouchEvent)>>,
     _resize_closure: Option<Closure<dyn FnMut(js_sys::Array)>>,
     _resize_observer: Option<web_sys::ResizeObserver>,
+    /// Long-press timer ID (from setTimeout), shared with closures.
+    _long_press_timer: Rc<RefCell<Option<i32>>>,
+    /// Last touch-tap time for double-tap detection.
+    _last_tap_time: Rc<RefCell<f64>>,
 }
 
 #[wasm_bindgen]
@@ -250,6 +284,11 @@ impl RayCore {
 
         let mut closures: Vec<Closure<dyn FnMut(web_sys::Event)>> = Vec::new();
         let mut wheel_closures: Vec<Closure<dyn FnMut(web_sys::WheelEvent)>> = Vec::new();
+        let mut touch_closures: Vec<Closure<dyn FnMut(web_sys::TouchEvent)>> = Vec::new();
+        let long_press_timer: Rc<RefCell<Option<i32>>> = Rc::new(RefCell::new(None));
+        let last_tap_time: Rc<RefCell<f64>> = Rc::new(RefCell::new(0.0));
+        // Shared closure handle for long-press timeout callback
+        let long_press_cb_handle: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
 
         // ── PANE events (on container div — canvases have pointer-events:none) ──
         let pane_el: web_sys::Element = {
@@ -266,8 +305,10 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let pane_c = pane_container_el.clone();
-            let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
+            let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
+                let pe: web_sys::PointerEvent = e.unchecked_into();
                 let mut s = inner.borrow_mut();
+                s.interaction.set_touch(pe.pointer_type() == "touch");
                 s.on_pointer_enter(HitZone::Chart);
                 let cursor = s.cursor_css();
                 let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
@@ -300,6 +341,9 @@ impl RayCore {
                 let (x, y) = event_css_pos(&pe, &pane_c);
                 let mut s = inner.borrow_mut();
                 
+                // Detect touch on every move (not just pointerdown)
+                s.interaction.set_touch(pe.pointer_type() == "touch");
+                
                 // Ensure zone is set (fixes missing pointerenter on page load)
                 s.on_pointer_enter(HitZone::Chart);
                 s.on_pane_pointer_move(x, y);
@@ -324,14 +368,65 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let pane_c = pane_container_el.clone();
+            let lp_timer = Rc::clone(&long_press_timer);
+            let lp_cb = Rc::clone(&long_press_cb_handle);
+            let last_tap = Rc::clone(&last_tap_time);
             let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                 let pe: web_sys::PointerEvent = e.unchecked_into();
                 let (x, y) = event_css_pos(&pe, &pane_c);
                 let mut s = inner.borrow_mut();
+
+                // Detect touch input
+                let is_touch = pe.pointer_type() == "touch";
+                s.interaction.is_touch = is_touch;
+
                 s.on_pointer_enter(HitZone::Chart);
                 s.on_pointer_down(x, y, HitZone::Chart);
                 let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
                 let _ = html_el.set_pointer_capture(pe.pointer_id());
+
+                // Touch-specific: cancel any existing long-press timer
+                if let Some(tid) = lp_timer.borrow_mut().take() {
+                    let _ = web_sys::window().unwrap().clear_timeout_with_handle(tid);
+                }
+                *lp_cb.borrow_mut() = None;
+
+                if is_touch {
+                    // Double-tap detection (500ms)
+                    let now = js_sys::Date::now();
+                    let last = *last_tap.borrow();
+                    if now - last < 500.0 {
+                        // Double tap
+                        *last_tap.borrow_mut() = 0.0;
+                        s.on_touch_double_tap();
+                        return;
+                    }
+                    *last_tap.borrow_mut() = now;
+
+                    // Start long-press timer (240ms like LWC)
+                    let inner_lp = Rc::clone(&inner);
+                    let lp_timer_inner = Rc::clone(&lp_timer);
+                    let lp_x = x;
+                    let lp_y = y;
+
+                    drop(s); // release borrow before setTimeout callback
+
+                    let timeout_cb = Closure::<dyn FnMut()>::wrap(Box::new(move || {
+                        let mut s = inner_lp.borrow_mut();
+                        if s.interaction.pressed && !s.interaction.drag_active && !s.interaction.pinch_active {
+                            s.on_long_press(lp_x, lp_y);
+                        }
+                        *lp_timer_inner.borrow_mut() = None;
+                    }));
+
+                    let window = web_sys::window().unwrap();
+                    let tid = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                        timeout_cb.as_ref().unchecked_ref(),
+                        240,
+                    ).unwrap_or(0);
+                    *lp_timer.borrow_mut() = Some(tid);
+                    *lp_cb.borrow_mut() = Some(timeout_cb);
+                }
             }));
             pane_el.add_event_listener_with_callback("pointerdown", cb.as_ref().unchecked_ref())?;
             closures.push(cb);
@@ -341,8 +436,17 @@ impl RayCore {
             let inner = Rc::clone(&inner);
             let pane_c = pane_container_el.clone();
             let grid_up = grid_c.clone();
+            let lp_timer = Rc::clone(&long_press_timer);
+            let lp_cb = Rc::clone(&long_press_cb_handle);
             let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                 let pe: web_sys::PointerEvent = e.unchecked_into();
+
+                // Cancel long-press timer
+                if let Some(tid) = lp_timer.borrow_mut().take() {
+                    let _ = web_sys::window().unwrap().clear_timeout_with_handle(tid);
+                }
+                *lp_cb.borrow_mut() = None;
+
                 let mut s = inner.borrow_mut();
                 s.on_pointer_up();
                 let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
@@ -401,6 +505,95 @@ impl RayCore {
             }));
             pane_el.add_event_listener_with_callback("pointercancel", cb.as_ref().unchecked_ref())?;
             closures.push(cb);
+        }
+
+        // ── PANE TOUCH events (for pinch zoom — needs raw TouchEvent for multi-touch) ──
+        // touchstart: detect 2-finger pinch start; cancel long-press if multi-touch
+        {
+            let inner = Rc::clone(&inner);
+            let pane_c = pane_container_el.clone();
+            let lp_timer = Rc::clone(&long_press_timer);
+            let lp_cb = Rc::clone(&long_press_cb_handle);
+            let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::wrap(Box::new(move |e: web_sys::TouchEvent| {
+                e.prevent_default();
+                let touches = e.touches();
+                if touches.length() >= 2 {
+                    // Cancel long-press timer on multi-touch
+                    if let Some(tid) = lp_timer.borrow_mut().take() {
+                        let _ = web_sys::window().unwrap().clear_timeout_with_handle(tid);
+                    }
+                    *lp_cb.borrow_mut() = None;
+
+                    let t0 = touches.get(0).unwrap();
+                    let t1 = touches.get(1).unwrap();
+                    let rect = pane_c.get_bounding_client_rect();
+                    let x0 = t0.client_x() as f64 - rect.left();
+                    let y0 = t0.client_y() as f64 - rect.top();
+                    let x1 = t1.client_x() as f64 - rect.left();
+                    let y1 = t1.client_y() as f64 - rect.top();
+                    let cx = (x0 + x1) / 2.0;
+                    let cy = (y0 + y1) / 2.0;
+                    let dx = x1 - x0;
+                    let dy = y1 - y0;
+                    let distance = (dx * dx + dy * dy).sqrt();
+                    let mut s = inner.borrow_mut();
+                    s.on_pinch_start(cx, cy, distance);
+                }
+            }));
+            let opts = web_sys::AddEventListenerOptions::new();
+            opts.set_passive(false);
+            pane_el.add_event_listener_with_callback_and_add_event_listener_options(
+                "touchstart", cb.as_ref().unchecked_ref(), &opts,
+            )?;
+            touch_closures.push(cb);
+        }
+        // touchmove: update pinch scale
+        {
+            let inner = Rc::clone(&inner);
+            let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::wrap(Box::new(move |e: web_sys::TouchEvent| {
+                e.prevent_default();
+                let touches = e.touches();
+                let s_ref = inner.borrow();
+                let pinch_active = s_ref.interaction.pinch_active;
+                let pinch_start_dist = s_ref.interaction.pinch_start_distance;
+                drop(s_ref);
+
+                if touches.length() >= 2 && pinch_active {
+                    let t0 = touches.get(0).unwrap();
+                    let t1 = touches.get(1).unwrap();
+                    let dx = (t1.client_x() - t0.client_x()) as f64;
+                    let dy = (t1.client_y() - t0.client_y()) as f64;
+                    let distance = (dx * dx + dy * dy).sqrt();
+                    let scale = distance / pinch_start_dist.max(1.0);
+                    let mut s = inner.borrow_mut();
+                    s.on_pinch_update(scale);
+                }
+            }));
+            let opts = web_sys::AddEventListenerOptions::new();
+            opts.set_passive(false);
+            pane_el.add_event_listener_with_callback_and_add_event_listener_options(
+                "touchmove", cb.as_ref().unchecked_ref(), &opts,
+            )?;
+            touch_closures.push(cb);
+        }
+        // touchend: end pinch when fingers lift
+        {
+            let inner = Rc::clone(&inner);
+            let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::wrap(Box::new(move |e: web_sys::TouchEvent| {
+                let touches = e.touches();
+                if touches.length() < 2 {
+                    let mut s = inner.borrow_mut();
+                    if s.interaction.pinch_active {
+                        s.on_pinch_end();
+                    }
+                }
+            }));
+            let opts = web_sys::AddEventListenerOptions::new();
+            opts.set_passive(false);
+            pane_el.add_event_listener_with_callback_and_add_event_listener_options(
+                "touchend", cb.as_ref().unchecked_ref(), &opts,
+            )?;
+            touch_closures.push(cb);
         }
 
         // ── PRICE AXIS events (on container div) ──
@@ -472,6 +665,7 @@ impl RayCore {
                 let pe: web_sys::PointerEvent = e.unchecked_into();
                 let (_x, y) = event_css_pos(&pe, &price_c);
                 let mut s = inner.borrow_mut();
+                s.interaction.is_touch = pe.pointer_type() == "touch";
                 s.on_pointer_enter(HitZone::PriceAxis);
                 s.on_pointer_down(0.0, y, HitZone::PriceAxis);
                 let html_el: &web_sys::HtmlElement = price_c.unchecked_ref();
@@ -614,6 +808,7 @@ impl RayCore {
                 let pe: web_sys::PointerEvent = e.unchecked_into();
                 let (x, _y) = event_css_pos(&pe, &time_c);
                 let mut s = inner.borrow_mut();
+                s.interaction.is_touch = pe.pointer_type() == "touch";
                 s.on_pointer_enter(HitZone::TimeAxis);
                 s.on_pointer_down(x, 0.0, HitZone::TimeAxis);
                 let html_el: &web_sys::HtmlElement = time_c.unchecked_ref();
@@ -747,8 +942,11 @@ impl RayCore {
             inner,
             _closures: closures,
             _wheel_closures: wheel_closures,
+            _touch_closures: touch_closures,
             _resize_closure: Some(resize_closure),
             _resize_observer: Some(resize_observer),
+            _long_press_timer: long_press_timer,
+            _last_tap_time: last_tap_time,
         })
     }
 
@@ -848,6 +1046,15 @@ impl RayCore {
     pub fn visible_range(&self) -> Vec<f64> {
         let s = self.inner.borrow();
         vec![s.engine.viewport.start_bar, s.engine.viewport.end_bar]
+    }
+
+    /// Set crosshair mode: "normal" or "magnet".
+    pub fn set_crosshair_mode(&mut self, mode: &str) {
+        let mut s = self.inner.borrow_mut();
+        s.engine.crosshair.mode = match mode {
+            "magnet" => raycore::CrosshairMode::Magnet,
+            _ => raycore::CrosshairMode::Normal,
+        };
     }
 
     // ── Render ───────────────────────────────────────────────────────────────
