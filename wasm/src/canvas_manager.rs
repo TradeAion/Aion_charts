@@ -266,6 +266,8 @@ impl WidgetLayout {
     }
 
     /// Resize all widget canvases to their container sizes at the given DPR.
+    /// Uses fallback `round(css * dpr)` sizing. Prefer `resize_canvases_exact`
+    /// when device-pixel-content-box sizes are available from ResizeObserver.
     pub fn resize_all_canvases(&self, dpr: f64) {
         // Pane canvases
         let (pw, ph) = self.pane_css_size();
@@ -291,6 +293,26 @@ impl WidgetLayout {
         let sph = (sh * dpr).round() as u32;
         self.corner_stub.set_width(spw.max(1));
         self.corner_stub.set_height(sph.max(1));
+    }
+
+    /// Resize a specific widget's canvases using exact device-pixel sizes
+    /// reported by `ResizeObserver` with `device-pixel-content-box`.
+    /// This avoids the ±1px rounding error from `round(css * dpr)`.
+    pub fn resize_pane_exact(&self, exact_pw: u32, exact_ph: u32) {
+        self.pane.set_size(exact_pw.max(1), exact_ph.max(1));
+    }
+
+    pub fn resize_price_axis_exact(&self, exact_pw: u32, exact_ph: u32) {
+        self.price_axis.set_size(exact_pw.max(1), exact_ph.max(1));
+    }
+
+    pub fn resize_time_axis_exact(&self, exact_pw: u32, exact_ph: u32) {
+        self.time_axis.set_size(exact_pw.max(1), exact_ph.max(1));
+    }
+
+    pub fn resize_corner_stub_exact(&self, exact_pw: u32, exact_ph: u32) {
+        self.corner_stub.set_width(exact_pw.max(1));
+        self.corner_stub.set_height(exact_ph.max(1));
     }
 }
 

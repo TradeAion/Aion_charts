@@ -57,7 +57,7 @@ pub fn parity_fix(bar_width: f64, wick_width: f64) -> f64 {
     bar_width
 }
 
-/// All computed candle sizes in physical pixels for a given bar_spacing and dpr.
+/// All computed candle sizes in physical pixels for a given bar_spacing and pixel ratios.
 #[derive(Debug, Clone, Copy)]
 pub struct CandleSizing {
     pub bar_width: f64,
@@ -65,35 +65,30 @@ pub struct CandleSizing {
     pub border_width: f64,
     pub draw_body: bool,
     pub bar_spacing: f64,
-    pub dpr: f64,
+    /// Horizontal pixel ratio (used for bar widths and x-coordinates).
+    pub h_pixel_ratio: f64,
+    /// Vertical pixel ratio (used for heights and y-coordinates).
+    pub v_pixel_ratio: f64,
 }
 
 impl CandleSizing {
-    /// Compute candle sizing from pane dimensions (no ChartLayout needed).
+    /// Compute candle sizing from pane dimensions.
     /// `pane_w` is the pane width in physical pixels.
-    pub fn compute_from_pane(pane_w: f64, vp: &Viewport, dpr: f64) -> Self {
+    /// `h_ratio` / `v_ratio` are the per-axis pixel ratios from
+    /// `device-pixel-content-box` (or `dpr` as fallback).
+    pub fn compute_from_pane(pane_w: f64, vp: &Viewport, h_ratio: f64, v_ratio: f64) -> Self {
         let visible_bars = vp.end_bar - vp.start_bar;
-        let bar_spacing = pane_w / (visible_bars * dpr);
+        // bar_spacing is in CSS pixels — divide physical width by (bars * h_ratio)
+        let bar_spacing = pane_w / (visible_bars * h_ratio);
 
-        let mut bw = optimal_candlestick_width(bar_spacing, dpr);
-        let mut ww = wick_width(bar_spacing, dpr, bw);
+        // Horizontal sizing uses h_ratio (matches LWC's horizontalPixelRatio)
+        let mut bw = optimal_candlestick_width(bar_spacing, h_ratio);
+        let mut ww = wick_width(bar_spacing, h_ratio, bw);
         bw = parity_fix(bw, ww);
-        let mut bdw = border_width(dpr, bw);
+        let mut bdw = border_width(h_ratio, bw);
 
         // ── High-DPR proportion guard ──
-        // At high browser zoom (DPR 3+), the LWC sizing functions break
-        // down because their floor(dpr) minimums for wick/border grow
-        // linearly while bar_width grows sublinearly. Example at DPR=5:
-        //   wick_width min = 5, border_width min = 5, bar_width = 7
-        //   → body inner = 7 - 2*5 = -3px (gone!)
-        //
-        // Fix: cap wick to ≤ ⌊bar/3⌋ (min 1px), then derive max border
-        // from the remaining width so inner body ≥ 1px.
-        // Do NOT re-run parity_fix after capping — the shader's asymmetric
-        // edges() handles off-center wicks correctly, and parity_fix would
-        // shrink bw by 1, potentially re-breaking proportions.
         ww = ww.min((bw / 3.0).floor().max(1.0));
-        // Max border: leave at least 1px for inner body fill.
         let max_border = ((bw - 1.0) / 2.0).floor().max(0.0);
         bdw = bdw.min(max_border);
 
@@ -105,7 +100,8 @@ impl CandleSizing {
             border_width: bdw,
             draw_body,
             bar_spacing,
-            dpr,
+            h_pixel_ratio: h_ratio,
+            v_pixel_ratio: v_ratio,
         }
     }
 }

@@ -27,7 +27,8 @@ pub fn generate(
     style: &ChartStyle,
     pane_w: f64,
     pane_h: f64,
-    dpr: f64,
+    h_ratio: f64,
+    v_ratio: f64,
     y_ticks: &[TickMark],
     x_ticks: &[TickMark],
 ) -> DrawList {
@@ -44,7 +45,7 @@ pub fn generate(
     let grid = generate_grid_rects(style, y_ticks, x_ticks, pane_w, pane_h);
     dl.rects.extend_from_slice(&grid);
 
-    let sizing = CandleSizing::compute_from_pane(pane_w, viewport, dpr);
+    let sizing = CandleSizing::compute_from_pane(pane_w, viewport, h_ratio, v_ratio);
 
     // Volume occupies the bottom portion of pane (configured via viewport)
     let vol_h = pane_h * viewport.volume_height_ratio as f64;
@@ -103,9 +104,10 @@ pub fn generate_candle_rects(
     style: &ChartStyle,
     pane_w: f64,
     pane_h: f64,
-    dpr: f64,
+    h_ratio: f64,
+    v_ratio: f64,
 ) -> Vec<ColoredRect> {
-    let sizing = CandleSizing::compute_from_pane(pane_w, viewport, dpr);
+    let sizing = CandleSizing::compute_from_pane(pane_w, viewport, h_ratio, v_ratio);
     let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
     let mut rects = Vec::with_capacity(bars.len() * 6);
@@ -120,9 +122,10 @@ pub fn generate_volume_rects(
     style: &ChartStyle,
     pane_w: f64,
     pane_h: f64,
-    dpr: f64,
+    h_ratio: f64,
+    v_ratio: f64,
 ) -> Vec<ColoredRect> {
-    let sizing = CandleSizing::compute_from_pane(pane_w, viewport, dpr);
+    let sizing = CandleSizing::compute_from_pane(pane_w, viewport, h_ratio, v_ratio);
     let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
     let mut rects = Vec::with_capacity(bars.len());
@@ -250,7 +253,7 @@ fn generate_candles_into(
         let w = right - left + 1.0;
         let h = (bottom - top + 1.0).max(1.0);
 
-        if sizing.bar_spacing * sizing.dpr > 2.0 * sizing.border_width {
+        if sizing.bar_spacing * sizing.h_pixel_ratio > 2.0 * sizing.border_width {
             push_inner_border(
                 rects,
                 left as f32, top as f32, w as f32, h as f32,

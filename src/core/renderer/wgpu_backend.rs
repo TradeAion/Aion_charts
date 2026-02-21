@@ -463,7 +463,7 @@ impl ChartRenderer for WgpuRenderer {
         let vol_h = pane_h * ctx.viewport.volume_height_ratio as f64;
         let candle_h = pane_h - vol_h;
 
-        let sizing = CandleSizing::compute_from_pane(pane_w, ctx.viewport, ctx.dpr);
+        let sizing = CandleSizing::compute_from_pane(pane_w, ctx.viewport, ctx.h_pixel_ratio, ctx.v_pixel_ratio);
 
         // Build per-instance pixel-space data on CPU (f64 → f32 conversion)
         let instances = Self::build_candle_instances(
@@ -494,7 +494,8 @@ impl ChartRenderer for WgpuRenderer {
         let pane_w = ctx.viewport.width as f64;
         let pane_h = ctx.viewport.height as f64;
         let vol_rects = geometry_generator::generate_volume_rects(
-            ctx.bars, ctx.viewport, ctx.style, pane_w, pane_h, ctx.dpr,
+            ctx.bars, ctx.viewport, ctx.style, pane_w, pane_h,
+            ctx.h_pixel_ratio, ctx.v_pixel_ratio,
         );
         let count = self.upload_rects(&vol_rects, ctx.viewport.width, ctx.viewport.height);
         self.draw_rect_pass(count);

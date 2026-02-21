@@ -168,6 +168,12 @@ pub struct RenderContext<'a> {
     pub style: &'a ChartStyle,
     pub crosshair: &'a CrosshairState,
     pub dpr: f64,
+    /// Horizontal pixel ratio: `bitmapWidth / cssWidth`.
+    /// When using `device-pixel-content-box` this is the exact per-axis ratio;
+    /// otherwise falls back to `dpr`.
+    pub h_pixel_ratio: f64,
+    /// Vertical pixel ratio: `bitmapHeight / cssHeight`.
+    pub v_pixel_ratio: f64,
     /// Pre-computed tick marks for grid lines (price axis ticks).
     pub y_ticks: &'a [TickMark],
     /// Pre-computed tick marks for grid lines (time axis ticks).

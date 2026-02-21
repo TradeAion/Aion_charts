@@ -14,6 +14,9 @@ use crate::core::drawings::types::DrawingGeometry;
 pub struct OverlayRenderer {
     canvas: HtmlCanvasElement,
     ctx: CanvasRenderingContext2d,
+    /// Reference to the base chart canvas for rendering base-layer drawings.
+    base_canvas: Option<HtmlCanvasElement>,
+    base_ctx: Option<CanvasRenderingContext2d>,
     pw: u32,
     ph: u32,
     dpr: f64,
@@ -31,7 +34,22 @@ impl OverlayRenderer {
         ctx.set_image_smoothing_enabled(false);
         let pw = canvas.width();
         let ph = canvas.height();
-        Ok(Self { canvas, ctx, pw, ph, dpr })
+        Ok(Self { canvas, ctx, base_canvas: None, base_ctx: None, pw, ph, dpr })
+    }
+
+    /// Set the base chart canvas for rendering base-layer drawings.
+    /// Call this after construction to enable drawing on the chart canvas.
+    pub fn set_base_canvas(&mut self, canvas: HtmlCanvasElement) -> Result<(), String> {
+        let ctx = canvas
+            .get_context("2d")
+            .map_err(|e| format!("base canvas get_context('2d') failed: {:?}", e))?
+            .ok_or("base canvas get_context('2d') returned None")?
+            .dyn_into::<CanvasRenderingContext2d>()
+            .map_err(|_| "base canvas context is not CanvasRenderingContext2d")?;
+        ctx.set_image_smoothing_enabled(false);
+        self.base_canvas = Some(canvas);
+        self.base_ctx = Some(ctx);
+        Ok(())
     }
 
     pub fn resize(&mut self, pw: u32, ph: u32, dpr: f64) {
@@ -71,60 +89,78 @@ impl OverlayRenderer {
         self.draw_crosshair(crosshair, style, pw, ph);
     }
 
-    /// Draw a DrawingGeometry (lines, rects, text, anchor circles) on the overlay.
+    /// Draw a DrawingGeometry on the overlay canvas.
     fn draw_geometry(&self, geom: &DrawingGeometry) {
+        Self::draw_geometry_on(&self.ctx, geom);
+    }
+
+    /// Draw a DrawingGeometry (lines, rects, text, anchor circles) on any 2D context.
+    fn draw_geometry_on(ctx: &CanvasRenderingContext2d, geom: &DrawingGeometry) {
         // Filled rects
         for r in &geom.rects {
             if r.w <= 0.0 || r.h <= 0.0 { continue; }
-            self.ctx.set_fill_style_str(&rgba(&[r.r, r.g, r.b, r.a]));
-            self.ctx.fill_rect(r.x as f64, r.y as f64, r.w as f64, r.h as f64);
+            ctx.set_fill_style_str(&rgba(&[r.r, r.g, r.b, r.a]));
+            ctx.fill_rect(r.x as f64, r.y as f64, r.w as f64, r.h as f64);
         }
 
         // Lines
         for l in &geom.lines {
-            self.ctx.set_stroke_style_str(&rgba(&[l.r, l.g, l.b, l.a]));
-            self.ctx.set_line_width(l.width as f64);
-            self.ctx.set_line_cap("round");
+            ctx.set_stroke_style_str(&rgba(&[l.r, l.g, l.b, l.a]));
+            ctx.set_line_width(l.width as f64);
+            ctx.set_line_cap("round");
 
             if l.dash > 0.0 && l.gap > 0.0 {
-                let _ = self.ctx.set_line_dash(&js_sys::Array::of2(
+                let _ = ctx.set_line_dash(&js_sys::Array::of2(
                     &JsValue::from(l.dash as f64),
                     &JsValue::from(l.gap as f64),
                 ));
             } else {
-                let _ = self.ctx.set_line_dash(&js_sys::Array::new());
+                let _ = ctx.set_line_dash(&js_sys::Array::new());
             }
 
-            self.ctx.begin_path();
-            self.ctx.move_to(l.x0 as f64, l.y0 as f64);
-            self.ctx.line_to(l.x1 as f64, l.y1 as f64);
-            self.ctx.stroke();
+            ctx.begin_path();
+            ctx.move_to(l.x0 as f64, l.y0 as f64);
+            ctx.line_to(l.x1 as f64, l.y1 as f64);
+            ctx.stroke();
         }
-        let _ = self.ctx.set_line_dash(&js_sys::Array::new());
+        let _ = ctx.set_line_dash(&js_sys::Array::new());
 
         // Text labels (in physical pixel coords)
         for t in &geom.texts {
             let font = format!("{}px {}", t.font_size, "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif");
-            self.ctx.set_font(&font);
-            self.ctx.set_fill_style_str(&rgba(&[t.r, t.g, t.b, t.a]));
-            self.ctx.set_text_align("center");
-            self.ctx.set_text_baseline("middle");
-            let _ = self.ctx.fill_text(&t.text, t.x as f64, t.y as f64);
+            ctx.set_font(&font);
+            ctx.set_fill_style_str(&rgba(&[t.r, t.g, t.b, t.a]));
+            ctx.set_text_align("center");
+            ctx.set_text_baseline("middle");
+            let _ = ctx.fill_text(&t.text, t.x as f64, t.y as f64);
         }
 
         // Anchor circles
         for a in &geom.anchors {
             // Fill
-            self.ctx.set_fill_style_str(&rgba(&a.fill));
-            self.ctx.begin_path();
-            let _ = self.ctx.arc(a.cx, a.cy, a.radius, 0.0, std::f64::consts::TAU);
-            self.ctx.fill();
+            ctx.set_fill_style_str(&rgba(&a.fill));
+            ctx.begin_path();
+            let _ = ctx.arc(a.cx, a.cy, a.radius, 0.0, std::f64::consts::TAU);
+            ctx.fill();
             // Border
-            self.ctx.set_stroke_style_str(&rgba(&a.border));
-            self.ctx.set_line_width(a.border_width);
-            self.ctx.begin_path();
-            let _ = self.ctx.arc(a.cx, a.cy, a.radius, 0.0, std::f64::consts::TAU);
-            self.ctx.stroke();
+            ctx.set_stroke_style_str(&rgba(&a.border));
+            ctx.set_line_width(a.border_width);
+            ctx.begin_path();
+            let _ = ctx.arc(a.cx, a.cy, a.radius, 0.0, std::f64::consts::TAU);
+            ctx.stroke();
+        }
+    }
+
+    /// Render base-layer drawings on the chart (pane base) canvas.
+    /// These sit above candles but below the crosshair/top canvas.
+    /// Does NOT clear the canvas — call after engine.render() which already drew candles.
+    pub fn render_base_drawings(&self, drawings: &[DrawingGeometry]) {
+        let ctx = match &self.base_ctx {
+            Some(c) => c,
+            None => return, // base canvas not set up
+        };
+        for geom in drawings {
+            Self::draw_geometry_on(ctx, geom);
         }
     }
 

@@ -51,6 +51,23 @@ fn get_dpr() -> f64 {
         .max(1.0)
 }
 
+/// Exact device-pixel sizes for each widget container, reported by
+/// `ResizeObserver` with `device-pixel-content-box`. When available these
+/// replace the lossy `round(css * dpr)` fallback and eliminate ±1px blur.
+#[derive(Debug, Clone, Copy, Default)]
+struct ExactPixelSizes {
+    /// Set to true once the observer has fired at least once.
+    available: bool,
+    pane_pw: u32,
+    pane_ph: u32,
+    price_axis_pw: u32,
+    price_axis_ph: u32,
+    time_axis_pw: u32,
+    time_axis_ph: u32,
+    corner_stub_pw: u32,
+    corner_stub_ph: u32,
+}
+
 /// Internal chart state shared between event closures and the public API.
 struct ChartInner {
     engine: ChartEngine,
@@ -59,6 +76,8 @@ struct ChartInner {
     time_axis_renderer: TimeAxisRenderer,
     layout: WidgetLayout,
     interaction: InteractionHandler,
+    /// Exact pixel sizes from device-pixel-content-box ResizeObserver.
+    exact_sizes: ExactPixelSizes,
 }
 
 /// Helper methods that destructure `self` to satisfy the borrow checker.
@@ -346,9 +365,10 @@ impl RayCore {
             }
         };
 
-        // Pane overlay renderer
-        let overlay = OverlayRenderer::new(layout.pane.top.clone(), dpr)
+        // Pane overlay renderer (also gets reference to base chart canvas for base-layer drawings)
+        let mut overlay = OverlayRenderer::new(layout.pane.top.clone(), dpr)
             .map_err(|e| JsValue::from_str(&e))?;
+        let _ = overlay.set_base_canvas(layout.pane.chart.clone());
 
         // Axis renderers (each with base + top canvas pair)
         let price_axis_renderer = PriceAxisRenderer::new(
@@ -376,6 +396,7 @@ impl RayCore {
             time_axis_renderer,
             layout,
             interaction,
+            exact_sizes: ExactPixelSizes::default(),
         }));
 
         let mut closures: Vec<Closure<dyn FnMut(web_sys::Event)>> = Vec::new();
@@ -996,41 +1017,150 @@ impl RayCore {
             closures.push(cb);
         }
 
-        // ── ResizeObserver on the outer container ──
+        // ── ResizeObserver on widget containers (device-pixel-content-box) ──
+        //
+        // LWC (fancy-canvas) uses ResizeObserver with `device-pixel-content-box`
+        // to get the exact integer device-pixel size of each canvas element.
+        // This eliminates the ±1px rounding error from `round(css * dpr)`
+        // that causes blur at non-integer zoom levels.
+        //
+        // We observe all four widget containers and store their exact sizes.
+        // On each callback we also resize canvases and renderers.
+
         let container_el: web_sys::HtmlElement = {
             let borrow = inner.borrow();
             borrow.layout.container().clone()
         };
+
+        // Grab references to each widget container for the observer
+        let pane_container_for_ro: web_sys::Element = {
+            let borrow = inner.borrow();
+            borrow.layout.pane_container.clone().unchecked_into()
+        };
+        let price_container_for_ro: web_sys::Element = {
+            let borrow = inner.borrow();
+            borrow.layout.price_axis_container.clone().unchecked_into()
+        };
+        let time_container_for_ro: web_sys::Element = {
+            let borrow = inner.borrow();
+            borrow.layout.time_axis_container.clone().unchecked_into()
+        };
+        let corner_container_for_ro: web_sys::Element = {
+            let borrow = inner.borrow();
+            borrow.layout.corner_stub_container.clone().unchecked_into()
+        };
+
         let (resize_closure, resize_observer) = {
             let inner = Rc::clone(&inner);
-            let cb = Closure::<dyn FnMut(js_sys::Array)>::wrap(Box::new(move |_entries: js_sys::Array| {
+            let pane_ref = pane_container_for_ro.clone();
+            let price_ref = price_container_for_ro.clone();
+            let time_ref = time_container_for_ro.clone();
+            let corner_ref = corner_container_for_ro.clone();
+
+            let cb = Closure::<dyn FnMut(js_sys::Array)>::wrap(Box::new(move |entries: js_sys::Array| {
                 let mut s = inner.borrow_mut();
                 let dpr = get_dpr();
                 s.engine.dpr = dpr;
 
-                // Resize all widget canvases
-                s.layout.resize_all_canvases(dpr);
+                // Try to extract exact device-pixel sizes from entries
+                let mut got_exact = false;
+                for i in 0..entries.length() {
+                    let entry: web_sys::ResizeObserverEntry = entries.get(i).unchecked_into();
+                    let target = entry.target();
 
-                // Resize pane engine
-                let (pw, ph) = s.layout.pane_css_size();
-                let ppw = (pw * dpr).round() as u32;
-                let pph = (ph * dpr).round() as u32;
-                s.engine.resize(ppw.max(1), pph.max(1), dpr);
-                s.overlay.resize(ppw.max(1), pph.max(1), dpr);
+                    // Try device-pixel-content-box (returns exact integer device pixels)
+                    let dpsize = js_sys::Reflect::get(
+                        &entry, &JsValue::from_str("devicePixelContentBoxSize")
+                    ).ok();
+                    let (exact_w, exact_h) = if let Some(ref dp) = dpsize {
+                        if !dp.is_undefined() && !dp.is_null() {
+                            let arr: &js_sys::Array = dp.unchecked_ref();
+                            if arr.length() > 0 {
+                                let item = arr.get(0);
+                                let iw = js_sys::Reflect::get(&item, &JsValue::from_str("inlineSize"))
+                                    .ok().and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                let ih = js_sys::Reflect::get(&item, &JsValue::from_str("blockSize"))
+                                    .ok().and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                got_exact = true;
+                                (iw as u32, ih as u32)
+                            } else { (0, 0) }
+                        } else { (0, 0) }
+                    } else { (0, 0) };
 
-                // Resize axis renderers
-                let (aw, ah) = s.layout.price_axis_css_size();
-                let apw = (aw * dpr).round() as u32;
-                let aph = (ah * dpr).round() as u32;
-                s.price_axis_renderer.resize(apw.max(1), aph.max(1), dpr);
+                    if got_exact && exact_w > 0 && exact_h > 0 {
+                        if target == pane_ref {
+                            s.exact_sizes.pane_pw = exact_w;
+                            s.exact_sizes.pane_ph = exact_h;
+                        } else if target == price_ref {
+                            s.exact_sizes.price_axis_pw = exact_w;
+                            s.exact_sizes.price_axis_ph = exact_h;
+                        } else if target == time_ref {
+                            s.exact_sizes.time_axis_pw = exact_w;
+                            s.exact_sizes.time_axis_ph = exact_h;
+                        } else if target == corner_ref {
+                            s.exact_sizes.corner_stub_pw = exact_w;
+                            s.exact_sizes.corner_stub_ph = exact_h;
+                        }
+                        s.exact_sizes.available = true;
+                    }
+                }
 
-                let (tw, th) = s.layout.time_axis_css_size();
-                let tpw = (tw * dpr).round() as u32;
-                let tph = (th * dpr).round() as u32;
-                s.time_axis_renderer.resize(tpw.max(1), tph.max(1), dpr);
+                if s.exact_sizes.available {
+                    // Use exact pixel sizes for canvas bitmap dimensions
+                    let es = s.exact_sizes;
+                    s.layout.resize_pane_exact(es.pane_pw, es.pane_ph);
+                    s.layout.resize_price_axis_exact(es.price_axis_pw, es.price_axis_ph);
+                    s.layout.resize_time_axis_exact(es.time_axis_pw, es.time_axis_ph);
+                    s.layout.resize_corner_stub_exact(es.corner_stub_pw, es.corner_stub_ph);
+
+                    // Compute per-axis pixel ratios
+                    let (pcw, pch) = s.layout.pane_css_size();
+                    let h_ratio = if pcw > 0.0 { es.pane_pw as f64 / pcw } else { dpr };
+                    let v_ratio = if pch > 0.0 { es.pane_ph as f64 / pch } else { dpr };
+                    s.engine.h_pixel_ratio = h_ratio;
+                    s.engine.v_pixel_ratio = v_ratio;
+
+                    s.engine.resize(es.pane_pw.max(1), es.pane_ph.max(1), dpr);
+                    s.overlay.resize(es.pane_pw.max(1), es.pane_ph.max(1), dpr);
+                    s.price_axis_renderer.resize(es.price_axis_pw.max(1), es.price_axis_ph.max(1), dpr);
+                    s.time_axis_renderer.resize(es.time_axis_pw.max(1), es.time_axis_ph.max(1), dpr);
+                } else {
+                    // Fallback: round(css * dpr)
+                    s.layout.resize_all_canvases(dpr);
+                    s.engine.h_pixel_ratio = dpr;
+                    s.engine.v_pixel_ratio = dpr;
+
+                    let (pw, ph) = s.layout.pane_css_size();
+                    let ppw = (pw * dpr).round() as u32;
+                    let pph = (ph * dpr).round() as u32;
+                    s.engine.resize(ppw.max(1), pph.max(1), dpr);
+                    s.overlay.resize(ppw.max(1), pph.max(1), dpr);
+
+                    let (aw, ah) = s.layout.price_axis_css_size();
+                    s.price_axis_renderer.resize(
+                        (aw * dpr).round() as u32, (ah * dpr).round() as u32, dpr,
+                    );
+                    let (tw, th) = s.layout.time_axis_css_size();
+                    s.time_axis_renderer.resize(
+                        (tw * dpr).round() as u32, (th * dpr).round() as u32, dpr,
+                    );
+                }
             }));
             let observer = web_sys::ResizeObserver::new(cb.as_ref().unchecked_ref())?;
+
+            // Try to observe with device-pixel-content-box; fall back to content-box
+            let observe_with_dpcb = js_sys::Function::new_with_args(
+                "observer,element",
+                "try { observer.observe(element, { box: 'device-pixel-content-box' }); return true; } catch(e) { observer.observe(element); return false; }"
+            );
+            let _ = observe_with_dpcb.call2(&JsValue::NULL, observer.as_ref(), &pane_container_for_ro);
+            let _ = observe_with_dpcb.call2(&JsValue::NULL, observer.as_ref(), &price_container_for_ro);
+            let _ = observe_with_dpcb.call2(&JsValue::NULL, observer.as_ref(), &time_container_for_ro);
+            let _ = observe_with_dpcb.call2(&JsValue::NULL, observer.as_ref(), &corner_container_for_ro);
+
+            // Also observe the outer container for general layout changes
             observer.observe(&container_el.clone().unchecked_into());
+
             (cb, observer)
         };
 
@@ -1202,24 +1332,39 @@ impl RayCore {
         let current_dpr = get_dpr();
         if (current_dpr - s.engine.dpr).abs() > 0.001 {
             s.engine.dpr = current_dpr;
-            s.layout.resize_all_canvases(current_dpr);
-            let (pw, ph) = s.layout.pane_css_size();
-            let ppw = (pw * current_dpr).round() as u32;
-            let pph = (ph * current_dpr).round() as u32;
-            s.engine.resize(ppw.max(1), pph.max(1), current_dpr);
-            s.overlay.resize(ppw.max(1), pph.max(1), current_dpr);
-            let (aw, ah) = s.layout.price_axis_css_size();
-            s.price_axis_renderer.resize(
-                (aw * current_dpr).round() as u32,
-                (ah * current_dpr).round() as u32,
-                current_dpr,
-            );
-            let (tw, th) = s.layout.time_axis_css_size();
-            s.time_axis_renderer.resize(
-                (tw * current_dpr).round() as u32,
-                (th * current_dpr).round() as u32,
-                current_dpr,
-            );
+
+            if s.exact_sizes.available {
+                // exact sizes will be refreshed by ResizeObserver callback;
+                // but update pixel ratios with new DPR for this frame
+                let (pcw, pch) = s.layout.pane_css_size();
+                let es = s.exact_sizes;
+                let h_ratio = if pcw > 0.0 { es.pane_pw as f64 / pcw } else { current_dpr };
+                let v_ratio = if pch > 0.0 { es.pane_ph as f64 / pch } else { current_dpr };
+                s.engine.h_pixel_ratio = h_ratio;
+                s.engine.v_pixel_ratio = v_ratio;
+            } else {
+                // Fallback: round(css * dpr)
+                s.engine.h_pixel_ratio = current_dpr;
+                s.engine.v_pixel_ratio = current_dpr;
+                s.layout.resize_all_canvases(current_dpr);
+                let (pw, ph) = s.layout.pane_css_size();
+                let ppw = (pw * current_dpr).round() as u32;
+                let pph = (ph * current_dpr).round() as u32;
+                s.engine.resize(ppw.max(1), pph.max(1), current_dpr);
+                s.overlay.resize(ppw.max(1), pph.max(1), current_dpr);
+                let (aw, ah) = s.layout.price_axis_css_size();
+                s.price_axis_renderer.resize(
+                    (aw * current_dpr).round() as u32,
+                    (ah * current_dpr).round() as u32,
+                    current_dpr,
+                );
+                let (tw, th) = s.layout.time_axis_css_size();
+                s.time_axis_renderer.resize(
+                    (tw * current_dpr).round() as u32,
+                    (th * current_dpr).round() as u32,
+                    current_dpr,
+                );
+            }
         }
 
         let dpr = s.engine.dpr;
@@ -1262,16 +1407,19 @@ impl RayCore {
         }
 
         // 5. Generate drawing geometry (base = Idle/Selected, top = Creating/Dragging)
-        let (mut all_drawings, top_drawings) = s.engine.drawings.generate_all_geometry(
+        //    LWC z-order: base drawings sit BEHIND candles on the chart canvas,
+        //    active/hovered drawings come ABOVE on the top (overlay) canvas.
+        let (base_drawings, top_drawings) = s.engine.drawings.generate_all_geometry(
             &s.engine.viewport, pane_css_w, pane_css_h, dpr,
         );
-        // Merge: render all drawings on the overlay canvas (base layer first, then top)
-        // This matches LWC's z-ordering: idle drawings render below crosshair,
-        // active drawings render above crosshair (handled inside render_with_drawings).
-        all_drawings.extend(top_drawings);
 
-        // 6. Overlay — drawings + crosshair lines on pane top canvas
-        s.overlay.render_with_drawings(&s.engine.crosshair, &s.engine.style, &all_drawings);
+        // 5a. Render base-layer (idle) drawings on the chart canvas AFTER candles.
+        //     This puts them above the candles but below the crosshair/top canvas.
+        //     We use the overlay renderer's draw_geometry via a dedicated method.
+        s.overlay.render_base_drawings(&base_drawings);
+
+        // 6. Overlay — top-layer drawings + crosshair lines on pane top canvas
+        s.overlay.render_with_drawings(&s.engine.crosshair, &s.engine.style, &top_drawings);
 
         // 7. Price axis — base (ticks + labels) + top (crosshair label)
         s.price_axis_renderer.render_base(&s.engine.style, &y_ticks, pane_ph);

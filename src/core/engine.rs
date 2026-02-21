@@ -22,6 +22,11 @@ pub struct ChartEngine {
     pub crosshair: CrosshairState,
     pub drawings: DrawingManager,
     pub dpr: f64,
+    /// Horizontal pixel ratio: exact `bitmapWidth / cssWidth`.
+    /// Set from `device-pixel-content-box` ResizeObserver; falls back to `dpr`.
+    pub h_pixel_ratio: f64,
+    /// Vertical pixel ratio: exact `bitmapHeight / cssHeight`.
+    pub v_pixel_ratio: f64,
 }
 
 impl ChartEngine {
@@ -42,6 +47,8 @@ impl ChartEngine {
             crosshair,
             drawings,
             dpr,
+            h_pixel_ratio: dpr,
+            v_pixel_ratio: dpr,
         }
     }
 
@@ -99,6 +106,8 @@ impl ChartEngine {
             style: &self.style,
             crosshair: &self.crosshair,
             dpr: self.dpr,
+            h_pixel_ratio: self.h_pixel_ratio,
+            v_pixel_ratio: self.v_pixel_ratio,
             y_ticks,
             x_ticks,
         };

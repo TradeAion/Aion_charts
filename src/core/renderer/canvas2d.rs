@@ -100,7 +100,8 @@ impl ChartRenderer for Canvas2DRenderer {
         let pane_w = self.physical_width as f64;
         let pane_h = self.physical_height as f64;
         let candle_rects = geometry_generator::generate_candle_rects(
-            ctx.bars, ctx.viewport, ctx.style, pane_w, pane_h, self.dpr,
+            ctx.bars, ctx.viewport, ctx.style, pane_w, pane_h,
+            ctx.h_pixel_ratio, ctx.v_pixel_ratio,
         );
         self.draw_rects(&candle_rects);
         Ok(())
@@ -110,7 +111,8 @@ impl ChartRenderer for Canvas2DRenderer {
         let pane_w = self.physical_width as f64;
         let pane_h = self.physical_height as f64;
         let vol_rects = geometry_generator::generate_volume_rects(
-            ctx.bars, ctx.viewport, ctx.style, pane_w, pane_h, self.dpr,
+            ctx.bars, ctx.viewport, ctx.style, pane_w, pane_h,
+            ctx.h_pixel_ratio, ctx.v_pixel_ratio,
         );
         self.draw_rects(&vol_rects);
         Ok(())
