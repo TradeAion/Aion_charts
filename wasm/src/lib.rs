@@ -99,7 +99,10 @@ impl ChartInner {
 
         // Pre-compute logical coords from viewport (before any mutable drawing borrow)
         let bar = self.engine.viewport.pixel_to_bar(x, pw);
-        let price = self.engine.viewport.pixel_to_price(y, ph);
+        // Use candle area height for drawing coordinates — matches price_to_css_y().
+        // Candles occupy the top (1 - volume_ratio) of the pane; volume is below.
+        let candle_css_h = ph * self.engine.viewport.candle_height_frac();
+        let price = self.engine.viewport.pixel_to_price(y, candle_css_h);
 
         // Drawing tool: update preview or drag
         {
@@ -129,7 +132,9 @@ impl ChartInner {
 
         if zone == HitZone::Chart {
             let bar = self.engine.viewport.pixel_to_bar(x, pw);
-            let price = self.engine.viewport.pixel_to_price(y, ph);
+            // Use candle area height — consistent with point_to_css / price_to_css_y.
+            let candle_css_h = ph * self.engine.viewport.candle_height_frac();
+            let price = self.engine.viewport.pixel_to_price(y, candle_css_h);
             let drawings = &mut self.engine.drawings;
 
             if drawings.is_tool_active() {
@@ -1407,19 +1412,25 @@ impl RayCore {
         }
 
         // 5. Generate drawing geometry (base = Idle/Selected, top = Creating/Dragging)
-        //    LWC z-order: base drawings sit BEHIND candles on the chart canvas,
-        //    active/hovered drawings come ABOVE on the top (overlay) canvas.
         let (base_drawings, top_drawings) = s.engine.drawings.generate_all_geometry(
             &s.engine.viewport, pane_css_w, pane_css_h, dpr,
         );
 
-        // 5a. Render base-layer (idle) drawings on the chart canvas AFTER candles.
-        //     This puts them above the candles but below the crosshair/top canvas.
-        //     We use the overlay renderer's draw_geometry via a dedicated method.
-        s.overlay.render_base_drawings(&base_drawings);
+        let is_webgpu = s.engine.renderer_name() == "webgpu";
 
-        // 6. Overlay — top-layer drawings + crosshair lines on pane top canvas
-        s.overlay.render_with_drawings(&s.engine.crosshair, &s.engine.style, &top_drawings);
+        if is_webgpu {
+            // WebGPU: the chart canvas is a GPU surface — can't draw 2D on it.
+            // Render ALL drawings on the overlay canvas (like LWC which renders
+            // all primitives on the overlay, not the series canvas).
+            let mut all_drawings = base_drawings;
+            all_drawings.extend(top_drawings);
+            s.overlay.render_with_drawings(&s.engine.crosshair, &s.engine.style, &all_drawings);
+        } else {
+            // Canvas2D: base drawings on chart canvas (above candles, below crosshair),
+            // top drawings + crosshair on the overlay canvas.
+            s.overlay.render_base_drawings(&base_drawings);
+            s.overlay.render_with_drawings(&s.engine.crosshair, &s.engine.style, &top_drawings);
+        }
 
         // 7. Price axis — base (ticks + labels) + top (crosshair label)
         s.price_axis_renderer.render_base(&s.engine.style, &y_ticks, pane_ph);

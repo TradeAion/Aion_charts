@@ -124,18 +124,20 @@ pub trait Drawing: std::fmt::Debug {
 // ── Helper: convert DrawingPoint to CSS pixel coords ────────────────────────
 
 /// Convert a logical DrawingPoint to CSS pixel coordinates.
+///
+/// bar_index is fractional (from `pixel_to_bar`), so NO +0.5 offset is needed.
+/// Y uses the candle area height (matching `price_to_css_y`) which is consistent
+/// with how prices are recorded when candle_height_frac is applied.
 pub fn point_to_css(
     pt: &DrawingPoint,
     vp: &Viewport,
     pane_css_w: f64,
     pane_css_h: f64,
 ) -> (f64, f64) {
-    let _x = vp.bar_center_css(pt.bar_index.round() as usize, pane_css_w);
-    // Use fractional bar for smoother positioning during creation
-    let frac = (pt.bar_index + 0.5 - vp.start_bar) / (vp.end_bar - vp.start_bar);
-    let x_smooth = (frac * pane_css_w).clamp(0.0, pane_css_w);
+    let frac = (pt.bar_index - vp.start_bar) / (vp.end_bar - vp.start_bar);
+    let x = (frac * pane_css_w).clamp(0.0, pane_css_w);
     let y = vp.price_to_css_y(pt.price, pane_css_h);
-    (x_smooth, y)
+    (x, y)
 }
 
 /// Generate standard anchor circles for a drawing.
