@@ -236,6 +236,44 @@ impl WidgetLayout {
         );
     }
 
+    /// Update grid sizing with subpane support.
+    /// `subpane_heights` contains CSS-px heights for each indicator subpane.
+    /// Grid rows: main(1fr) [sep(1px) pane(Npx)]... time_axis(Mpx)
+    pub fn update_axis_sizes_with_subpanes(
+        &self,
+        price_axis_css_w: f64,
+        time_axis_css_h: f64,
+        subpane_heights: &[f64],
+    ) {
+        let _ = self.grid_wrapper.style().set_property(
+            "grid-template-columns",
+            &format!("1fr {}px", price_axis_css_w.round()),
+        );
+
+        // Build rows: "1fr [1px Npx]... Mpx"
+        let mut rows = String::from("1fr ");
+        for h in subpane_heights {
+            rows.push_str(&format!("1px {}px ", h.max(30.0)));
+        }
+        rows.push_str(&format!("{}px", time_axis_css_h.round()));
+
+        let _ = self
+            .grid_wrapper
+            .style()
+            .set_property("grid-template-rows", &rows);
+
+        // Move time axis + corner stub to the correct last row
+        let time_row = 2 + subpane_heights.len() * 2;
+        let _ = self
+            .time_axis_container
+            .style()
+            .set_property("grid-row", &time_row.to_string());
+        let _ = self
+            .corner_stub_container
+            .style()
+            .set_property("grid-row", &time_row.to_string());
+    }
+
     /// Get the pane's actual CSS size (chart area only).
     pub fn pane_css_size(&self) -> (f64, f64) {
         (
