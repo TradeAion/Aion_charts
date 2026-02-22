@@ -2307,11 +2307,19 @@ impl RayCore {
                 let mut s = inner.borrow_mut();
                 s.engine.crosshair.active = true;
                 s.active_subpane_id = Some(pid);
-                s.engine.crosshair.x = x;
 
-                // Update bar_index for time axis label
-                s.engine.crosshair.bar_index =
-                    s.engine.viewport.bar_index_at_pixel(x, pw, s.engine.bars.len());
+                // Get grid-snapped index (can be beyond data_len in empty space)
+                let grid_idx = s.engine.viewport.bar_index_for_crosshair(x, pw);
+                
+                // bar_index is only set if we have actual data at this position
+                s.engine.crosshair.bar_index = grid_idx.filter(|&idx| idx < s.engine.bars.len());
+
+                // X snaps to bar grid (like LWC) - even in empty space
+                if let Some(idx) = grid_idx {
+                    s.engine.crosshair.x = s.engine.viewport.bar_center_css(idx, pw);
+                } else {
+                    s.engine.crosshair.x = x;
+                }
 
                 // Get bar coordinate from main viewport (shared time axis)
                 let bar = s.engine.viewport.pixel_to_bar(x, pw);
