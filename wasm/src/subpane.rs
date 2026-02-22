@@ -1,0 +1,934 @@
+//! SubPane — indicator sub-pane below the main chart.
+//!
+//! Architecture matches the main chart widget structure:
+//!   - Chart area: base canvas (data/grid) + top canvas (crosshair overlay)
+//!   - Price axis: base + top canvases via PriceAxisRenderer (same widget as main)
+//!   - CSS Grid integration with draggable separator
+//!
+//! Each sub-pane shares the time axis with the main chart and has its own
+//! independent price scale (Viewport).
+//!
+//! ## Height Coordination
+//!
+//! Uses `PaneHeightCoordinator` to bridge with raycore's `PaneManager` for:
+//!   - Stretch-factor based proportional height allocation
+//!   - Coordinated separator dragging (resizing one pane affects neighbors)
+//!   - Minimum height enforcement
+//!   - Time axis always visible at bottom
+
+use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+use web_sys::{CanvasRenderingContext2d, Document, HtmlCanvasElement, HtmlDivElement, MouseEvent};
+
+use raycore::core::renderer::tick_marks::compute_y_ticks;
+use raycore::core::renderer::traits::{ChartStyle, CrosshairMode, CrosshairState, TickMark};
+use raycore::core::series::LineDataArray;
+use raycore::core::viewport::Viewport;
+use raycore::{PaneId, PaneManager, PaneOptions, PriceAxisRenderer, ScrollState};
+use std::cell::Cell;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+const MIN_PANE_HEIGHT: f64 = 30.0;
+
+// ── PaneHeightCoordinator ──────────────────────────────────────────────────
+//
+// Bridges raycore's PaneManager with the SubPane DOM-based system.
+// Coordinates heights across all panes using stretch factors.
+
+/// Maps a SubPane ID to its PaneManager PaneId.
+#[derive(Debug, Clone, Copy)]
+pub struct PaneMapping {
+    pub subpane_id: u32,
+    pub pane_id: PaneId,
+}
+
+/// Coordinates pane heights using raycore's PaneManager.
+///
+/// This wrapper:
+/// - Maintains a PaneManager instance for stretch-factor-based heights
+/// - Maps SubPane IDs to PaneManager PaneIds
+/// - Distributes computed heights to SubPane shared_height cells
+pub struct PaneHeightCoordinator {
+    manager: PaneManager,
+    mappings: Vec<PaneMapping>,
+    main_pane_height: Rc<Cell<f64>>,
+}
+
+impl PaneHeightCoordinator {
+    /// Create a new coordinator with given total height.
+    pub fn new(main_pane_height_css: f64) -> Self {
+        let mut manager = PaneManager::new();
+        // Initialize main pane (id=0) with stretch factor 3.0 (dominant)
+        manager.init_main(100, 100); // Physical size doesn't matter for height calc
+
+        let main_pane_height = Rc::new(Cell::new(main_pane_height_css));
+
+        Self {
+            manager,
+            mappings: Vec::new(),
+            main_pane_height,
+        }
+    }
+
+    /// Get the main pane height cell (for syncing with render loop).
+    pub fn main_pane_height(&self) -> Rc<Cell<f64>> {
+        self.main_pane_height.clone()
+    }
+
+    /// Set the total available height and recompute all pane heights.
+    pub fn set_total_height(&mut self, total_height: f64) {
+        self.manager.set_total_height(total_height);
+        self.sync_heights();
+    }
+
+    /// Register a SubPane and return its shared height cell.
+    /// The subpane will be added to PaneManager with indicator stretch factor.
+    pub fn register_subpane(&mut self, subpane_id: u32) -> Rc<Cell<f64>> {
+        // Create indicator pane options (stretch factor 1.0)
+        let options = PaneOptions::indicator();
+        let pane_id = self.manager.add_pane(options, 100, 100);
+
+        self.mappings.push(PaneMapping {
+            subpane_id,
+            pane_id,
+        });
+
+        // Get the computed height from PaneManager
+        let height = self
+            .manager
+            .get(pane_id)
+            .map(|p| p.height_css)
+            .unwrap_or(100.0);
+
+        let height_cell = Rc::new(Cell::new(height));
+
+        // Sync all heights after adding
+        self.sync_heights();
+
+        height_cell
+    }
+
+    /// Unregister a SubPane.
+    pub fn unregister_subpane(&mut self, subpane_id: u32) {
+        if let Some(pos) = self
+            .mappings
+            .iter()
+            .position(|m| m.subpane_id == subpane_id)
+        {
+            let mapping = self.mappings.remove(pos);
+            self.manager.remove_pane(mapping.pane_id);
+            self.sync_heights();
+        }
+    }
+
+    /// Handle separator drag. Returns updated heights for all subpanes.
+    /// `separator_idx` is 0 for the separator between main and first subpane.
+    pub fn drag_separator(&mut self, separator_idx: usize, delta_y: f64) {
+        self.manager.drag_separator(separator_idx, delta_y);
+        self.sync_heights();
+    }
+
+    /// Get the separator index for a subpane (its position in the list).
+    pub fn separator_index(&self, subpane_id: u32) -> Option<usize> {
+        self.mappings
+            .iter()
+            .position(|m| m.subpane_id == subpane_id)
+    }
+
+    /// Get computed height for a subpane.
+    pub fn get_height(&self, subpane_id: u32) -> f64 {
+        self.mappings
+            .iter()
+            .find(|m| m.subpane_id == subpane_id)
+            .and_then(|m| self.manager.get(m.pane_id))
+            .map(|p| p.height_css)
+            .unwrap_or(100.0)
+    }
+
+    /// Get computed heights for all subpanes as (subpane_id, height) pairs.
+    pub fn all_heights(&self) -> Vec<(u32, f64)> {
+        self.mappings
+            .iter()
+            .filter_map(|m| {
+                self.manager
+                    .get(m.pane_id)
+                    .map(|p| (m.subpane_id, p.height_css))
+            })
+            .collect()
+    }
+
+    /// Sync PaneManager computed heights to the main pane height cell.
+    fn sync_heights(&self) {
+        if let Some(main) = self.manager.main() {
+            self.main_pane_height.set(main.height_css);
+        }
+    }
+
+    /// Number of registered subpanes.
+    pub fn len(&self) -> usize {
+        self.mappings.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.mappings.is_empty()
+    }
+}
+
+// ── IndicatorConfig ────────────────────────────────────────────────────────
+
+/// Data-driven configuration for an indicator sub-pane.
+/// Replaces all hardcoded colors, viewport ranges, and reference levels.
+#[derive(Debug, Clone)]
+pub struct IndicatorConfig {
+    /// Default line colors for each output of the indicator.
+    pub colors: Vec<[f32; 4]>,
+    /// Initial price range minimum.
+    pub price_min: f64,
+    /// Initial price range maximum.
+    pub price_max: f64,
+    /// Whether to auto-scale based on visible data.
+    pub auto_scale: bool,
+    /// Reference levels rendered as dashed horizontal lines (e.g. 30/70 for RSI).
+    pub reference_levels: Vec<f64>,
+}
+
+impl IndicatorConfig {
+    /// Create a configuration for a known indicator type.
+    /// Falls back to sensible defaults for unknown types.
+    pub fn for_type(indicator_type: &str) -> Self {
+        match indicator_type {
+            "rsi" => Self {
+                colors: vec![[0.608, 0.349, 0.714, 1.0]], // Purple
+                price_min: 0.0,
+                price_max: 100.0,
+                auto_scale: false,
+                reference_levels: vec![30.0, 70.0],
+            },
+            "stochastic" => Self {
+                colors: vec![
+                    [0.161, 0.384, 1.0, 1.0], // Blue (%K)
+                    [1.0, 0.627, 0.0, 1.0],   // Orange (%D)
+                ],
+                price_min: 0.0,
+                price_max: 100.0,
+                auto_scale: false,
+                reference_levels: vec![20.0, 80.0],
+            },
+            "atr" => Self {
+                colors: vec![[0.9, 0.3, 0.3, 1.0]], // Red
+                price_min: 0.0,
+                price_max: 1000.0,
+                auto_scale: true,
+                reference_levels: vec![],
+            },
+            "macd" => Self {
+                colors: vec![
+                    [0.161, 0.384, 1.0, 1.0], // Blue (MACD line)
+                    [1.0, 0.627, 0.0, 1.0],   // Orange (signal)
+                    [0.5, 0.5, 0.5, 0.6],     // Grey (histogram)
+                ],
+                price_min: -100.0,
+                price_max: 100.0,
+                auto_scale: true,
+                reference_levels: vec![0.0],
+            },
+            "bollinger" => Self {
+                colors: vec![
+                    [0.161, 0.384, 1.0, 1.0], // Blue (middle)
+                    [0.5, 0.5, 0.5, 0.6],     // Grey (upper)
+                    [0.5, 0.5, 0.5, 0.6],     // Grey (lower)
+                ],
+                price_min: 0.0,
+                price_max: 1000.0,
+                auto_scale: true,
+                reference_levels: vec![],
+            },
+            _ => Self {
+                colors: vec![[0.5, 0.5, 0.5, 1.0]],
+                price_min: 0.0,
+                price_max: 1000.0,
+                auto_scale: true,
+                reference_levels: vec![],
+            },
+        }
+    }
+}
+
+// ── SubPane ────────────────────────────────────────────────────────────────
+
+/// A sub-pane for rendering oscillator/indicator data.
+///
+/// Uses the same dual-canvas + PriceAxisRenderer architecture as the main chart.
+pub struct SubPane {
+    pub id: u32,
+    pub study_id: u32,
+    pub indicator_type: String,
+
+    // ── Configuration (replaces all hardcoded values) ──
+    pub config: IndicatorConfig,
+
+    // ── DOM containers ──
+    pub separator: HtmlDivElement,
+    pub chart_container: HtmlDivElement,
+    pub axis_container: HtmlDivElement,
+    drag_overlay: HtmlDivElement,
+    pub grid_row: u32,
+
+    // ── Chart canvases (base = data/grid, top = crosshair overlay) ──
+    chart_base: HtmlCanvasElement,
+    chart_base_ctx: CanvasRenderingContext2d,
+    chart_top: HtmlCanvasElement,
+    chart_top_ctx: CanvasRenderingContext2d,
+
+    // ── Price axis (same widget as main chart) ──
+    pub price_axis: PriceAxisRenderer,
+
+    // ── Shared state (closures <-> render loop) ──
+    pub shared_height: Rc<Cell<f64>>,
+    pub crosshair_y: Rc<Cell<f64>>,
+    pub crosshair_active: Rc<Cell<bool>>,
+
+    // ── State ──
+    pub viewport: Viewport,
+    pub data: Vec<LineDataArray>,
+    pub colors: Vec<[f32; 4]>,
+    pub dpr: f64,
+    /// Scroll state for kinetic/momentum scrolling.
+    pub scroll_state: Rc<RefCell<ScrollState>>,
+    /// Last double-tap time for double-tap detection.
+    pub last_tap_time: Rc<Cell<f64>>,
+    /// Auto-scale mode: when true, price range adjusts to fit visible data.
+    pub auto_scale: bool,
+
+    // ── Event closures (prevent GC) ──
+    _closures: Vec<Closure<dyn FnMut(MouseEvent)>>,
+    pub _interaction_closures: Vec<Closure<dyn FnMut(web_sys::Event)>>,
+    pub _wheel_closures: Vec<Closure<dyn FnMut(web_sys::WheelEvent)>>,
+    pub _touch_closures: Vec<Closure<dyn FnMut(web_sys::TouchEvent)>>,
+}
+
+impl SubPane {
+    /// Create a new sub-pane. Inserts DOM elements into the grid_wrapper.
+    pub fn new(
+        doc: &Document,
+        grid_wrapper: &HtmlDivElement,
+        id: u32,
+        study_id: u32,
+        indicator_type: &str,
+        grid_row: u32,
+        initial_height: f64,
+        dpr: f64,
+        style: &ChartStyle,
+    ) -> Result<Self, JsValue> {
+        let config = IndicatorConfig::for_type(indicator_type);
+        let pane_row = grid_row + 1;
+        let id_str = format!("raycore-subpane-{}", id);
+
+        // Derive separator colors from theme
+        let sep_bg = rgba(&style.axis_border_color);
+
+        // ── Separator ──────────────────────────────────────────────────
+        let separator = doc.create_element("div")?.dyn_into::<HtmlDivElement>()?;
+        separator.set_id(&format!("{}-sep", id_str));
+        separator.style().set_css_text(&format!(
+            "grid-column:1/3;grid-row:{row};\
+             height:1px;background:{bg};\
+             position:relative;z-index:10;",
+            row = grid_row,
+            bg = sep_bg,
+        ));
+        grid_wrapper.append_child(&separator)?;
+
+        let handle = doc.create_element("div")?.dyn_into::<HtmlDivElement>()?;
+        handle.style().set_css_text(
+            "position:absolute;top:-4px;left:0;right:0;height:9px;\
+             cursor:ns-resize;background:transparent;z-index:51;",
+        );
+        separator.append_child(&handle)?;
+
+        let drag_overlay = doc.create_element("div")?.dyn_into::<HtmlDivElement>()?;
+        drag_overlay.style().set_css_text(
+            "position:fixed;display:none;z-index:49;\
+             top:0;left:0;width:100%;height:100%;\
+             cursor:ns-resize;",
+        );
+        doc.body()
+            .ok_or_else(|| JsValue::from_str("no body"))?
+            .append_child(&drag_overlay)?;
+
+        // ── Chart container (grid col 1) ───────────────────────────────
+        let chart_container = doc.create_element("div")?.dyn_into::<HtmlDivElement>()?;
+        chart_container.set_id(&format!("{}-chart", id_str));
+        chart_container.style().set_css_text(&format!(
+            "grid-column:1;grid-row:{row};\
+             position:relative;overflow:hidden;\
+             min-width:0;min-height:0;\
+             cursor:crosshair;\
+             touch-action:none;\
+             -webkit-user-select:none;user-select:none;",
+            row = pane_row,
+        ));
+        grid_wrapper.append_child(&chart_container)?;
+
+        // Base canvas (data lines, grid) - z-index 0
+        let chart_base = create_canvas(doc, &format!("{}-chart-base", id_str), 0)?;
+        chart_container.append_child(&chart_base)?;
+        let chart_base_ctx = get_2d_ctx(&chart_base)?;
+
+        // Top canvas (crosshair overlay) - z-index 1
+        let chart_top = create_canvas(doc, &format!("{}-chart-top", id_str), 1)?;
+        chart_container.append_child(&chart_top)?;
+        let chart_top_ctx = get_2d_ctx(&chart_top)?;
+
+        // ── Price axis container (grid col 2) ──────────────────────────
+        let axis_container = doc.create_element("div")?.dyn_into::<HtmlDivElement>()?;
+        axis_container.set_id(&format!("{}-axis", id_str));
+        axis_container.style().set_css_text(&format!(
+            "grid-column:2;grid-row:{row};\
+             position:relative;overflow:hidden;\
+             min-width:0;min-height:0;\
+             cursor:ns-resize;\
+             touch-action:none;\
+             -webkit-user-select:none;user-select:none;",
+            row = pane_row,
+        ));
+        grid_wrapper.append_child(&axis_container)?;
+
+        // Price axis: base + top canvases (same as main chart)
+        let axis_base = create_canvas(doc, &format!("{}-axis-base", id_str), 0)?;
+        axis_container.append_child(&axis_base)?;
+        let axis_top = create_canvas(doc, &format!("{}-axis-top", id_str), 1)?;
+        axis_container.append_child(&axis_top)?;
+
+        // Create PriceAxisRenderer (same widget as main chart)
+        let price_axis =
+            PriceAxisRenderer::new(axis_base, axis_top, dpr).map_err(|e| JsValue::from_str(&e))?;
+
+        // ── Viewport -- use config-driven ranges ───────────────────────
+        let mut viewport = Viewport::new(100, 100);
+        viewport.volume_height_ratio = 0.0;
+        viewport.price_min = config.price_min;
+        viewport.price_max = config.price_max;
+
+        // ── Shared state ───────────────────────────────────────────────
+        let shared_height = Rc::new(Cell::new(initial_height));
+        let crosshair_y: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+        let crosshair_active: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+
+        // ── Separator drag ─────────────────────────────────────────────
+        let drag_state = Rc::new(RefCell::new(DragState {
+            active: false,
+            start_y: 0.0,
+            start_h: initial_height,
+        }));
+        let mut closures: Vec<Closure<dyn FnMut(MouseEvent)>> = Vec::new();
+
+        // Hover highlight -- use crosshair color from theme
+        let hover_color = rgba(&style.crosshair_color);
+        {
+            let sep = separator.clone();
+            let hc = hover_color.clone();
+            let c = Closure::wrap(Box::new(move |_: MouseEvent| {
+                let _ = sep.style().set_property("background", &hc);
+            }) as Box<dyn FnMut(MouseEvent)>);
+            handle.add_event_listener_with_callback("mouseenter", c.as_ref().unchecked_ref())?;
+            closures.push(c);
+        }
+        {
+            let sep = separator.clone();
+            let ds = drag_state.clone();
+            let sbg = sep_bg.clone();
+            let c = Closure::wrap(Box::new(move |_: MouseEvent| {
+                if !ds.borrow().active {
+                    let _ = sep.style().set_property("background", &sbg);
+                }
+            }) as Box<dyn FnMut(MouseEvent)>);
+            handle.add_event_listener_with_callback("mouseleave", c.as_ref().unchecked_ref())?;
+            closures.push(c);
+        }
+
+        // mousedown -> start drag
+        {
+            let ds = drag_state.clone();
+            let ov = drag_overlay.clone();
+            let sh = shared_height.clone();
+            let c = Closure::wrap(Box::new(move |e: MouseEvent| {
+                let mut state = ds.borrow_mut();
+                state.active = true;
+                state.start_y = e.page_y() as f64;
+                state.start_h = sh.get();
+                let _ = ov.style().set_property("display", "block");
+                e.prevent_default();
+            }) as Box<dyn FnMut(MouseEvent)>);
+            handle.add_event_listener_with_callback("mousedown", c.as_ref().unchecked_ref())?;
+            closures.push(c);
+        }
+
+        // mousemove -> update shared height
+        {
+            let ds = drag_state.clone();
+            let sh = shared_height.clone();
+            let c = Closure::wrap(Box::new(move |e: MouseEvent| {
+                let state = ds.borrow();
+                if !state.active {
+                    return;
+                }
+                let delta = e.page_y() as f64 - state.start_y;
+                let new_h = (state.start_h - delta).max(MIN_PANE_HEIGHT);
+                sh.set(new_h);
+            }) as Box<dyn FnMut(MouseEvent)>);
+            drag_overlay
+                .add_event_listener_with_callback("mousemove", c.as_ref().unchecked_ref())?;
+            closures.push(c);
+        }
+
+        // mouseup -> end drag
+        {
+            let ds = drag_state.clone();
+            let ov = drag_overlay.clone();
+            let sep = separator.clone();
+            let sbg = sep_bg.clone();
+            let c = Closure::wrap(Box::new(move |_: MouseEvent| {
+                ds.borrow_mut().active = false;
+                let _ = ov.style().set_property("display", "none");
+                let _ = sep.style().set_property("background", &sbg);
+            }) as Box<dyn FnMut(MouseEvent)>);
+            drag_overlay.add_event_listener_with_callback("mouseup", c.as_ref().unchecked_ref())?;
+            closures.push(c);
+        }
+
+        // Use config colors as initial colors
+        let colors = config.colors.clone();
+        let auto_scale = config.auto_scale;
+
+        // Initialize scroll state for kinetic scrolling
+        let scroll_state = Rc::new(RefCell::new(ScrollState::new()));
+        let last_tap_time = Rc::new(Cell::new(0.0));
+
+        Ok(Self {
+            id,
+            study_id,
+            indicator_type: indicator_type.to_string(),
+            config,
+            separator,
+            chart_container,
+            axis_container,
+            drag_overlay,
+            grid_row,
+            chart_base,
+            chart_base_ctx,
+            chart_top,
+            chart_top_ctx,
+            price_axis,
+            shared_height,
+            crosshair_y,
+            crosshair_active,
+            viewport,
+            data: Vec::new(),
+            colors,
+            dpr,
+            scroll_state,
+            last_tap_time,
+            auto_scale,
+            _closures: closures,
+            _interaction_closures: Vec::new(),
+            _wheel_closures: Vec::new(),
+            _touch_closures: Vec::new(),
+        })
+    }
+
+    // ── Accessors ──────────────────────────────────────────────────────
+
+    pub fn get_height(&self) -> f64 {
+        self.shared_height.get()
+    }
+
+    /// Set the height directly.
+    pub fn set_height(&self, height: f64) {
+        self.shared_height.set(height.max(MIN_PANE_HEIGHT));
+    }
+
+    /// Get a clone of the shared height cell (for coordinator integration).
+    pub fn shared_height_cell(&self) -> Rc<Cell<f64>> {
+        self.shared_height.clone()
+    }
+
+    /// Get a clone of the scroll state (for event handlers).
+    pub fn scroll_state_cell(&self) -> Rc<RefCell<ScrollState>> {
+        self.scroll_state.clone()
+    }
+
+    /// Get a clone of the last tap time cell (for double-tap detection).
+    pub fn last_tap_time_cell(&self) -> Rc<Cell<f64>> {
+        self.last_tap_time.clone()
+    }
+
+    /// Update kinetic scrolling. Returns the pixel delta if still animating.
+    pub fn update_kinetic(&self, now_ms: f64) -> Option<f64> {
+        let mut scroll = self.scroll_state.borrow_mut();
+        scroll.update_kinetic(now_ms)
+    }
+
+    /// Handle double-tap to reset viewport to default.
+    /// Returns true if this was a double-tap.
+    pub fn check_double_tap(&self, now_ms: f64) -> bool {
+        const DOUBLE_TAP_THRESHOLD_MS: f64 = 300.0;
+
+        let last = self.last_tap_time.get();
+        self.last_tap_time.set(now_ms);
+
+        if now_ms - last < DOUBLE_TAP_THRESHOLD_MS {
+            // This is a double-tap
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Reset the price viewport to default values from config.
+    pub fn reset_price_viewport(&mut self) {
+        self.viewport.price_min = self.config.price_min;
+        self.viewport.price_max = self.config.price_max;
+        if self.auto_scale {
+            self.auto_scale_price();
+        }
+    }
+
+    /// Toggle auto-scale mode.
+    pub fn toggle_auto_scale(&mut self) {
+        self.auto_scale = !self.auto_scale;
+        if self.auto_scale {
+            self.auto_scale_price();
+        }
+    }
+
+    // ── Canvas sizing ──────────────────────────────────────────────────
+
+    pub fn resize(&mut self, dpr: f64) {
+        self.dpr = dpr;
+        resize_canvas(&self.chart_base, dpr);
+        resize_canvas(&self.chart_top, dpr);
+        // Price axis canvases are resized via PriceAxisRenderer
+        let aw = self.axis_container.client_width() as f64;
+        let ah = self.axis_container.client_height() as f64;
+        if aw > 0.0 && ah > 0.0 {
+            let apw = (aw * dpr).round() as u32;
+            let aph = (ah * dpr).round() as u32;
+            self.price_axis.resize(apw.max(1), aph.max(1), dpr);
+        }
+    }
+
+    // ── Data ───────────────────────────────────────────────────────────
+
+    pub fn set_data(&mut self, data: Vec<LineDataArray>, colors: Vec<[f32; 4]>) {
+        self.data = data;
+        if !colors.is_empty() {
+            self.colors = colors;
+        }
+        if self.config.auto_scale {
+            self.auto_scale_price();
+        }
+    }
+
+    fn auto_scale_price(&mut self) {
+        let mut lo = f64::MAX;
+        let mut hi = f64::MIN;
+        for line in &self.data {
+            for &v in &line.values {
+                if v.is_finite() {
+                    lo = lo.min(v as f64);
+                    hi = hi.max(v as f64);
+                }
+            }
+        }
+        if lo < hi {
+            let m = (hi - lo) * 0.1;
+            self.viewport.price_min = lo - m;
+            self.viewport.price_max = hi + m;
+        }
+    }
+
+    // ── High-level Rendering (called from lib.rs render loop) ──────────
+
+    /// Render chart data + grid + reference lines on the BASE canvas,
+    /// then render the price axis base layer.
+    /// This is the main render entry point called each frame.
+    pub fn render(&mut self, main_viewport: &Viewport, style: &ChartStyle) {
+        let dpr = self.dpr;
+        let pw = self.chart_base.width() as f64;
+        let ph = self.chart_base.height() as f64;
+        if pw <= 0.0 || ph <= 0.0 {
+            return;
+        }
+
+        // Compute Y tick marks for this sub-pane's viewport
+        let y_ticks = compute_y_ticks(&self.viewport, ph, dpr);
+
+        // Render chart area (grid, reference lines, data lines)
+        self.render_chart(main_viewport, style, &y_ticks);
+
+        // Render price axis base layer (ticks + labels)
+        self.price_axis.render_base(style, &y_ticks, ph);
+    }
+
+    /// Clear the crosshair overlay canvas. Call before drawing crosshair lines.
+    pub fn clear_crosshair_overlay(&self) {
+        let pw = self.chart_top.width() as f64;
+        let ph = self.chart_top.height() as f64;
+        if pw > 0.0 && ph > 0.0 {
+            self.chart_top_ctx.clear_rect(0.0, 0.0, pw, ph);
+        }
+    }
+
+    /// Render vertical crosshair line (synced from main chart X position).
+    /// Called for every sub-pane when crosshair is active.
+    pub fn render_crosshair_vert(&self, x_css: f64, style: &ChartStyle) {
+        let dpr = self.dpr;
+        let pw = self.chart_top.width() as f64;
+        let ph = self.chart_top.height() as f64;
+        if pw <= 0.0 || ph <= 0.0 {
+            return;
+        }
+
+        // Set crosshair line style
+        self.chart_top_ctx
+            .set_stroke_style_str(&rgba(&style.crosshair_color));
+        self.chart_top_ctx.set_line_width(1.0);
+        let _ = self.chart_top_ctx.set_line_dash(&js_sys::Array::of2(
+            &JsValue::from(4.0),
+            &JsValue::from(3.0),
+        ));
+
+        // Vertical crosshair line
+        let x = (x_css * dpr).round() + 0.5;
+        if x >= 0.0 && x <= pw {
+            self.chart_top_ctx.begin_path();
+            self.chart_top_ctx.move_to(x, 0.0);
+            self.chart_top_ctx.line_to(x, ph);
+            self.chart_top_ctx.stroke();
+        }
+
+        let _ = self.chart_top_ctx.set_line_dash(&js_sys::Array::new());
+    }
+
+    /// Render horizontal crosshair line + price axis label when cursor is in this sub-pane.
+    /// Also clears the crosshair overlay when cursor leaves.
+    pub fn render_crosshair_horiz(&mut self, style: &ChartStyle) {
+        let dpr = self.dpr;
+        let pw = self.chart_top.width() as f64;
+        let ph = self.chart_top.height() as f64;
+        if pw <= 0.0 || ph <= 0.0 {
+            return;
+        }
+
+        // Only draw horizontal line if mouse is in this sub-pane
+        if !self.crosshair_active.get() {
+            // Clear price axis top layer when not active
+            self.price_axis
+                .render_top(&CrosshairState::default(), &self.viewport, style, ph);
+            return;
+        }
+
+        let y_css = self.crosshair_y.get();
+        let y = (y_css * dpr).round() + 0.5;
+
+        // Draw horizontal crosshair on chart top canvas
+        self.chart_top_ctx
+            .set_stroke_style_str(&rgba(&style.crosshair_color));
+        self.chart_top_ctx.set_line_width(1.0);
+        let _ = self.chart_top_ctx.set_line_dash(&js_sys::Array::of2(
+            &JsValue::from(4.0),
+            &JsValue::from(3.0),
+        ));
+
+        if y >= 0.0 && y <= ph {
+            self.chart_top_ctx.begin_path();
+            self.chart_top_ctx.move_to(0.0, y);
+            self.chart_top_ctx.line_to(pw, y);
+            self.chart_top_ctx.stroke();
+        }
+
+        let _ = self.chart_top_ctx.set_line_dash(&js_sys::Array::new());
+
+        // Compute price for the crosshair label
+        let css_h = ph / dpr;
+        let price = self.viewport.pixel_to_price(y_css, css_h);
+
+        // Render price axis top layer with crosshair label
+        let crosshair_state = CrosshairState {
+            active: true,
+            x: 0.0,
+            y: y_css,
+            bar_index: None,
+            price,
+            mode: CrosshairMode::Normal,
+        };
+        self.price_axis
+            .render_top(&crosshair_state, &self.viewport, style, ph);
+    }
+
+    // ── Low-level chart rendering ──────────────────────────────────────
+
+    /// Render chart data on the BASE canvas (grid, reference lines, data lines).
+    fn render_chart(&self, main_viewport: &Viewport, style: &ChartStyle, ticks: &[TickMark]) {
+        let dpr = self.dpr;
+        let pw = self.chart_base.width() as f64;
+        let ph = self.chart_base.height() as f64;
+        if pw <= 0.0 || ph <= 0.0 {
+            return;
+        }
+        let css_w = pw / dpr;
+        let css_h = ph / dpr;
+
+        // Background
+        self.chart_base_ctx
+            .set_fill_style_str(&rgba(&style.bg_color));
+        self.chart_base_ctx.fill_rect(0.0, 0.0, pw, ph);
+
+        // Grid lines at tick positions (using theme grid color)
+        self.chart_base_ctx
+            .set_stroke_style_str(&rgba(&style.grid_color));
+        self.chart_base_ctx.set_line_width(1.0);
+        for t in ticks {
+            let y = t.pixel.round() + 0.5;
+            self.chart_base_ctx.begin_path();
+            self.chart_base_ctx.move_to(0.0, y);
+            self.chart_base_ctx.line_to(pw, y);
+            self.chart_base_ctx.stroke();
+        }
+
+        // Reference lines from config (e.g. RSI 30/70, Stochastic 20/80, MACD 0)
+        if !self.config.reference_levels.is_empty() {
+            let ref_color = [
+                style.grid_color[0],
+                style.grid_color[1],
+                style.grid_color[2],
+                0.6,
+            ];
+            self.chart_base_ctx.set_stroke_style_str(&rgba(&ref_color));
+            self.chart_base_ctx.set_line_width(1.0);
+            let _ = self.chart_base_ctx.set_line_dash(&js_sys::Array::of2(
+                &JsValue::from(4.0 * dpr),
+                &JsValue::from(4.0 * dpr),
+            ));
+            for &level in &self.config.reference_levels {
+                let y = (self.viewport.price_to_css_y(level, css_h) * dpr).round() + 0.5;
+                self.chart_base_ctx.begin_path();
+                self.chart_base_ctx.move_to(0.0, y);
+                self.chart_base_ctx.line_to(pw, y);
+                self.chart_base_ctx.stroke();
+            }
+            let _ = self.chart_base_ctx.set_line_dash(&js_sys::Array::new());
+        }
+
+        // Data lines
+        for (i, line) in self.data.iter().enumerate() {
+            let color = self.colors.get(i).copied().unwrap_or([0.5, 0.5, 0.5, 1.0]);
+            self.draw_data_line(line, &color, main_viewport, css_w, css_h, dpr);
+        }
+    }
+
+    fn draw_data_line(
+        &self,
+        line: &LineDataArray,
+        color: &[f32; 4],
+        main_viewport: &Viewport,
+        css_w: f64,
+        css_h: f64,
+        dpr: f64,
+    ) {
+        if line.values.is_empty() {
+            return;
+        }
+        self.chart_base_ctx.set_stroke_style_str(&rgba(color));
+        self.chart_base_ctx.set_line_width(2.0 * dpr);
+        self.chart_base_ctx.set_line_join("round");
+        self.chart_base_ctx.set_line_cap("round");
+        self.chart_base_ctx.begin_path();
+        let mut started = false;
+        for (i, &value) in line.values.iter().enumerate() {
+            if !value.is_finite() {
+                started = false;
+                continue;
+            }
+            let x = main_viewport.bar_center_css(i, css_w) * dpr;
+            let y = self.viewport.price_to_css_y(value as f64, css_h) * dpr;
+            if !started {
+                self.chart_base_ctx.move_to(x, y);
+                started = true;
+            } else {
+                self.chart_base_ctx.line_to(x, y);
+            }
+        }
+        self.chart_base_ctx.stroke();
+    }
+
+    /// Build a CrosshairState for this sub-pane's price axis.
+    pub fn crosshair_state(&self) -> CrosshairState {
+        CrosshairState {
+            active: self.crosshair_active.get(),
+            x: 0.0,
+            y: self.crosshair_y.get(),
+            bar_index: None,
+            price: 0.0,
+            mode: CrosshairMode::Normal,
+        }
+    }
+
+    /// Remove all DOM elements.
+    pub fn remove(&self) {
+        let _ = self.separator.remove();
+        let _ = self.chart_container.remove();
+        let _ = self.axis_container.remove();
+        let _ = self.drag_overlay.remove();
+    }
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────
+
+struct DragState {
+    active: bool,
+    start_y: f64,
+    start_h: f64,
+}
+
+fn create_canvas(doc: &Document, id: &str, z_index: u32) -> Result<HtmlCanvasElement, JsValue> {
+    let canvas = doc
+        .create_element("canvas")?
+        .dyn_into::<HtmlCanvasElement>()?;
+    canvas.set_id(id);
+    canvas.style().set_css_text(&format!(
+        "position:absolute;top:0;left:0;width:100%;height:100%;\
+         display:block;z-index:{};pointer-events:none;",
+        z_index
+    ));
+    Ok(canvas)
+}
+
+fn get_2d_ctx(canvas: &HtmlCanvasElement) -> Result<CanvasRenderingContext2d, JsValue> {
+    Ok(canvas
+        .get_context("2d")?
+        .ok_or_else(|| JsValue::from_str("no 2d ctx"))?
+        .dyn_into::<CanvasRenderingContext2d>()?)
+}
+
+fn resize_canvas(canvas: &HtmlCanvasElement, dpr: f64) {
+    let w = canvas.client_width() as f64;
+    let h = canvas.client_height() as f64;
+    if w > 0.0 && h > 0.0 {
+        canvas.set_width((w * dpr).round() as u32);
+        canvas.set_height((h * dpr).round() as u32);
+    }
+}
+
+fn rgba(c: &[f32; 4]) -> String {
+    format!(
+        "rgba({},{},{},{})",
+        (c[0] * 255.0) as u8,
+        (c[1] * 255.0) as u8,
+        (c[2] * 255.0) as u8,
+        c[3]
+    )
+}
