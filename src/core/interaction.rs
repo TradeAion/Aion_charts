@@ -27,8 +27,8 @@
 //!   dbl-click     → reset price
 
 use crate::core::data::BarArray;
+use crate::core::renderer::traits::{CrosshairMode, CrosshairState};
 use crate::core::viewport::Viewport;
-use crate::core::renderer::traits::{CrosshairState, CrosshairMode};
 
 /// Manhattan distance threshold before drag starts (LWC: CancelClickManhattanDistance = 5).
 const CANCEL_CLICK_DISTANCE: f64 = 5.0;
@@ -248,19 +248,18 @@ impl InteractionHandler {
 
     /// Update pinch gesture. Called from WASM on touchmove with 2 touches.
     /// `scale` = current_distance / start_distance.
-    pub fn pinch_update(
-        &mut self,
-        scale: f64,
-        viewport: &mut Viewport,
-        bars: &BarArray,
-    ) {
-        if !self.pinch_active { return; }
+    pub fn pinch_update(&mut self, scale: f64, viewport: &mut Viewport, bars: &BarArray) {
+        if !self.pinch_active {
+            return;
+        }
 
         // LWC: zoomScale = (scale - prevScale) * 5
         let zoom_scale = (scale - self.pinch_prev_scale) * 5.0;
         self.pinch_prev_scale = scale;
 
-        if zoom_scale.abs() < 0.0001 { return; }
+        if zoom_scale.abs() < 0.0001 {
+            return;
+        }
 
         // Time zoom — same as LWC zoomTime
         let factor = 1.0 / (1.0 + zoom_scale / 10.0);
@@ -286,12 +285,7 @@ impl InteractionHandler {
 
     /// Called by WASM when the long-press timer fires (240ms like LWC).
     /// Activates crosshair tracking mode.
-    pub fn long_press(
-        &mut self,
-        x: f64,
-        y: f64,
-        crosshair: &mut CrosshairState,
-    ) {
+    pub fn long_press(&mut self, x: f64, y: f64, crosshair: &mut CrosshairState) {
         self.long_press_fired = true;
         self.touch_crosshair_mode = TouchCrosshairMode::Tracking;
         crosshair.active = true;
@@ -348,7 +342,10 @@ impl InteractionHandler {
 
         // ── TOUCH: tracking mode (long-press activated) ──
         // Crosshair follows finger; chart does NOT move.
-        if self.is_touch && self.touch_crosshair_mode == TouchCrosshairMode::Tracking && self.pressed {
+        if self.is_touch
+            && self.touch_crosshair_mode == TouchCrosshairMode::Tracking
+            && self.pressed
+        {
             let new_x = self.track_crosshair_init_x + (x - self.track_start_x);
             let cx = new_x.clamp(0.0, pane_css_w);
 
@@ -357,25 +354,37 @@ impl InteractionHandler {
 
             crosshair.bar_index = viewport.bar_index_at_pixel(cx * dpr, pane_phys_w, bars.len());
 
-            // Magnet snap modes
+            // X line always snaps to bar center (like LWC) - this is NOT mode-dependent
+            if let Some(idx) = crosshair.bar_index {
+                crosshair.x = viewport.bar_center_css(idx, pane_css_w);
+            }
+
+            // Y line behavior depends on mode
             match crosshair.mode {
                 CrosshairMode::Magnet | CrosshairMode::MagnetOHLC => {
                     if let Some(idx) = crosshair.bar_index {
-                        crosshair.x = viewport.bar_center_css(idx, pane_css_w);
                         let snap_price = magnet_snap_price(
-                            bars, idx, crosshair.mode,
-                            crosshair.y, viewport, pane_css_h,
+                            bars,
+                            idx,
+                            crosshair.mode,
+                            crosshair.y,
+                            viewport,
+                            pane_css_h,
                         );
-                        crosshair.y = viewport.price_to_css_y(snap_price, pane_css_h).clamp(0.0, pane_css_h);
+                        crosshair.y = viewport
+                            .price_to_css_y(snap_price, pane_css_h)
+                            .clamp(0.0, pane_css_h);
                         crosshair.price = snap_price;
                     } else {
-                        let cy = (self.track_crosshair_init_y + (y - self.track_start_y)).clamp(0.0, pane_css_h);
+                        let cy = (self.track_crosshair_init_y + (y - self.track_start_y))
+                            .clamp(0.0, pane_css_h);
                         crosshair.y = cy;
                         crosshair.price = viewport.pixel_to_price(cy * dpr, candle_phys_h);
                     }
                 }
                 CrosshairMode::Normal => {
-                    let cy = (self.track_crosshair_init_y + (y - self.track_start_y)).clamp(0.0, pane_css_h);
+                    let cy = (self.track_crosshair_init_y + (y - self.track_start_y))
+                        .clamp(0.0, pane_css_h);
                     crosshair.y = cy;
                     crosshair.price = viewport.pixel_to_price(cy * dpr, candle_phys_h);
                 }
@@ -394,18 +403,30 @@ impl InteractionHandler {
             crosshair.active = true;
             crosshair.x = x.clamp(0.0, pane_css_w);
 
-            crosshair.bar_index = viewport.bar_index_at_pixel(crosshair.x * dpr, pane_phys_w, bars.len());
+            crosshair.bar_index =
+                viewport.bar_index_at_pixel(crosshair.x * dpr, pane_phys_w, bars.len());
 
+            // X line always snaps to bar center (like LWC) - this is NOT mode-dependent
+            if let Some(idx) = crosshair.bar_index {
+                crosshair.x = viewport.bar_center_css(idx, pane_css_w);
+            }
+
+            // Y line behavior depends on mode
             match crosshair.mode {
                 CrosshairMode::Magnet | CrosshairMode::MagnetOHLC => {
                     if let Some(idx) = crosshair.bar_index {
-                        crosshair.x = viewport.bar_center_css(idx, pane_css_w);
                         let cursor_y = y.clamp(0.0, pane_css_h);
                         let snap_price = magnet_snap_price(
-                            bars, idx, crosshair.mode,
-                            cursor_y, viewport, pane_css_h,
+                            bars,
+                            idx,
+                            crosshair.mode,
+                            cursor_y,
+                            viewport,
+                            pane_css_h,
                         );
-                        crosshair.y = viewport.price_to_css_y(snap_price, pane_css_h).clamp(0.0, pane_css_h);
+                        crosshair.y = viewport
+                            .price_to_css_y(snap_price, pane_css_h)
+                            .clamp(0.0, pane_css_h);
                         crosshair.price = snap_price;
                     } else {
                         crosshair.y = y.clamp(0.0, pane_css_h);
@@ -500,12 +521,7 @@ impl InteractionHandler {
 
     /// Pointer move on the PRICE AXIS.
     /// LWC: PriceScale.scaleTo — inverted Y, coefficient formula.
-    pub fn price_axis_pointer_move(
-        &mut self,
-        y: f64,
-        pane_css_h: f64,
-        viewport: &mut Viewport,
-    ) {
+    pub fn price_axis_pointer_move(&mut self, y: f64, pane_css_h: f64, viewport: &mut Viewport) {
         if self.pressed && self.press_zone == HitZone::PriceAxis {
             let manhattan = (y - self.press_y).abs();
             if !self.drag_active && manhattan >= CANCEL_CLICK_DISTANCE {
@@ -515,8 +531,8 @@ impl InteractionHandler {
                 let h = self.price_scale_height;
                 let inv_y = (h - y).max(0.0);
                 let offset = (h - 1.0) * 0.2;
-                let scale_coeff = ((self.price_scale_start_y_inv + offset) / (inv_y + offset))
-                    .max(0.1);
+                let scale_coeff =
+                    ((self.price_scale_start_y_inv + offset) / (inv_y + offset)).max(0.1);
 
                 let half = self.price_scale_start_range * scale_coeff / 2.0;
                 let mid = self.price_scale_start_mid;
@@ -542,7 +558,7 @@ impl InteractionHandler {
         self.drag_active = false;
         self.press_zone = zone;
         self.long_press_fired = false;
-        
+
         // Reset gliding state
         self.velocity_x = 0.0;
         self.velocity_y = 0.0;
@@ -574,12 +590,7 @@ impl InteractionHandler {
     }
 
     /// Pointer up on any widget.
-    pub fn pointer_up(
-        &mut self,
-        viewport: &mut Viewport,
-        bars: &BarArray,
-        now_ms: f64,
-    ) {
+    pub fn pointer_up(&mut self, viewport: &mut Viewport, bars: &BarArray, now_ms: f64) {
         let was_click = self.pressed && !self.drag_active;
         let zone = self.press_zone;
 
@@ -655,12 +666,14 @@ impl InteractionHandler {
         viewport: &mut Viewport,
         bars: &BarArray,
     ) {
-        if pane_css_w <= 0.0 { return; }
+        if pane_css_w <= 0.0 {
+            return;
+        }
 
         let speed_adj = match delta_mode {
-            2 => 120.0,  // DOM_DELTA_PAGE
-            1 => 32.0,   // DOM_DELTA_LINE
-            _ => 1.0,    // DOM_DELTA_PIXEL
+            2 => 120.0, // DOM_DELTA_PAGE
+            1 => 32.0,  // DOM_DELTA_LINE
+            _ => 1.0,   // DOM_DELTA_PIXEL
         };
 
         let adj_dx = speed_adj * delta_x / 100.0;
@@ -673,7 +686,8 @@ impl InteractionHandler {
 
             let scroll_position = x.clamp(0.0, pane_css_w);
             let focal_frac = scroll_position / pane_css_w;
-            let focal_bar = viewport.start_bar + focal_frac * (viewport.end_bar - viewport.start_bar);
+            let focal_bar =
+                viewport.start_bar + focal_frac * (viewport.end_bar - viewport.start_bar);
 
             viewport.zoom(focal_bar, factor);
             viewport.clamp_to_data(bars.len());
@@ -708,12 +722,7 @@ impl InteractionHandler {
     }
 
     /// Wheel event on the price axis — zoom price range.
-    pub fn price_axis_wheel(
-        &mut self,
-        delta_y: f64,
-        delta_mode: u32,
-        viewport: &mut Viewport,
-    ) {
+    pub fn price_axis_wheel(&mut self, delta_y: f64, delta_mode: u32, viewport: &mut Viewport) {
         let speed_adj = match delta_mode {
             2 => 120.0,
             1 => 32.0,
@@ -781,16 +790,16 @@ impl InteractionHandler {
         if !self.is_gliding {
             return false;
         }
-        
+
         let now = js_sys::Date::now();
         let dt = now - self.last_move_time;
         if dt <= 0.0 {
             return true;
         }
-        
+
         // Horizontal only — no vertical price drift
         let dx = self.velocity_x * dt;
-        
+
         if pane_css_w > 0.0 {
             let bar_span = viewport.end_bar - viewport.start_bar;
             let dx_bars = -dx / pane_css_w * bar_span;
@@ -799,18 +808,18 @@ impl InteractionHandler {
                 viewport.auto_fit_price(bars);
             }
         }
-        
+
         // Decelerate (friction)
         let friction = (0.95f64).powf(dt / 16.0);
         self.velocity_x *= friction;
         self.last_move_time = now;
-        
+
         // Stop gliding if velocity is negligible
         if self.velocity_x.abs() < 0.01 {
             self.is_gliding = false;
             self.velocity_x = 0.0;
         }
-        
+
         self.is_gliding
     }
 }
