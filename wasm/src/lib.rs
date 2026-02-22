@@ -15,7 +15,7 @@
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use raycore::{
     Bar, ChartEngine, ChartStyle,
@@ -31,7 +31,9 @@ use raycore::{
 };
 
 mod canvas_manager;
+mod subpane;
 use canvas_manager::WidgetLayout;
+use subpane::{SubPane, IndicatorConfig, PaneHeightCoordinator};
 
 fn init_logging() {
     console_error_panic_hook::set_once();
@@ -82,6 +84,15 @@ struct ChartInner {
     interaction: InteractionHandler,
     /// Exact pixel sizes from device-pixel-content-box ResizeObserver.
     exact_sizes: ExactPixelSizes,
+    /// Sub-panes for indicators (RSI, ATR, etc.)
+    subpanes: Vec<SubPane>,
+    /// Next sub-pane ID
+    next_subpane_id: u32,
+    /// Which sub-pane the cursor is currently over (None = main pane or outside).
+    /// Used for proper crosshair coordination instead of y=-1000 hack.
+    active_subpane_id: Option<u32>,
+    /// Coordinates pane heights using stretch factors (PaneManager bridge).
+    pane_coordinator: PaneHeightCoordinator,
 }
 
 /// Helper methods that destructure `self` to satisfy the borrow checker.
@@ -462,6 +473,9 @@ impl RayCore {
 
         log::info!("RayCore initialized: {}", engine.renderer_name());
 
+        // Initialize pane height coordinator with main pane height
+        let pane_coordinator = PaneHeightCoordinator::new(pane_css_h);
+
         let inner = Rc::new(RefCell::new(ChartInner {
             engine,
             overlay,
@@ -470,6 +484,10 @@ impl RayCore {
             layout,
             interaction,
             exact_sizes: ExactPixelSizes::default(),
+            subpanes: Vec::new(),
+            next_subpane_id: 1,
+            active_subpane_id: None,
+            pane_coordinator,
         }));
 
         let mut closures: Vec<Closure<dyn FnMut(web_sys::Event)>> = Vec::new();
@@ -500,6 +518,8 @@ impl RayCore {
                 let mut s = inner.borrow_mut();
                 s.interaction.set_touch(pe.pointer_type() == "touch");
                 s.on_pointer_enter(HitZone::Chart);
+                // Clear subpane focus — cursor is now in the main pane
+                s.active_subpane_id = None;
                 let cursor = s.cursor_css();
                 let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
                 let _ = html_el.style().set_property("cursor", cursor);
@@ -2094,6 +2114,681 @@ impl RayCore {
         self.inner.borrow().engine.study_count()
     }
 
+    // ── Indicator Sub-Panes ──────────────────────────────────────────────────
+
+    /// Create a new indicator sub-pane below the main chart.
+    /// Returns the pane ID. The indicator type should be one of: "rsi", "stochastic", "atr".
+    /// The study must already be created with `create_study()`.
+    pub fn add_indicator_pane(&mut self, study_id: u32, indicator_type: &str, height_css: f64) -> u32 {
+        let inner_for_events = Rc::clone(&self.inner);
+
+        // ── Phase 1: Create sub-pane, extract DOM refs + shared state ──
+        let creation_result: Option<(u32, web_sys::Element, web_sys::Element, Rc<Cell<f64>>, Rc<Cell<bool>>)> = {
+            let mut s = self.inner.borrow_mut();
+
+            let window = match web_sys::window() {
+                Some(w) => w,
+                None => return 0,
+            };
+            let doc = match window.document() {
+                Some(d) => d,
+                None => return 0,
+            };
+
+            let id = s.next_subpane_id;
+            s.next_subpane_id += 1;
+            let dpr = s.engine.dpr;
+
+            let grid_row = 2 + (s.subpanes.len() as u32 * 2);
+
+            // Use IndicatorConfig for colors
+            let config = IndicatorConfig::for_type(indicator_type);
+
+            // Register with coordinator to get coordinated height
+            s.pane_coordinator.register_subpane(id);
+            
+            // Get total height and update coordinator
+            let (_, total_h) = s.layout.pane_css_size();
+            let subpane_count = s.subpanes.len();
+            // Reserve space: main pane + subpane heights + time axis
+            let time_axis_h = s.engine.style.time_axis_height();
+            let available_h = total_h + (subpane_count as f64 * height_css) + height_css + time_axis_h;
+            s.pane_coordinator.set_total_height(available_h);
+            
+            // Use coordinator's computed height, or fall back to requested height
+            let coordinated_height = s.pane_coordinator.get_height(id);
+            let initial_height = if coordinated_height > 0.0 { coordinated_height } else { height_css };
+
+            let mut subpane = match SubPane::new(
+                &doc,
+                &s.layout.grid_wrapper,
+                id,
+                study_id,
+                indicator_type,
+                grid_row,
+                initial_height,
+                dpr,
+                &s.engine.style,
+            ) {
+                Ok(sp) => sp,
+                Err(e) => {
+                    log::error!("Failed to create sub-pane: {:?}", e);
+                    s.pane_coordinator.unregister_subpane(id);
+                    return 0;
+                }
+            };
+
+            // Populate with current study data using config colors
+            if let Some(study) = s.engine.studies.get_study(raycore::StudyId(study_id)) {
+                let mut data = Vec::new();
+                let mut colors = Vec::new();
+                for i in 0..study.outputs.len() {
+                    if let Some(output) = study.get_output(i) {
+                        data.push(output.data.clone());
+                        colors.push(config.colors.get(i).copied().unwrap_or([0.5, 0.5, 0.5, 1.0]));
+                    }
+                }
+                subpane.set_data(data, colors);
+            }
+
+            subpane.resize(dpr);
+
+            // Extract refs before pushing into vec
+            let chart_el: web_sys::Element = subpane.chart_container.clone().unchecked_into();
+            let axis_el: web_sys::Element = subpane.axis_container.clone().unchecked_into();
+            let crosshair_y_rc = subpane.crosshair_y.clone();
+            let crosshair_active_rc = subpane.crosshair_active.clone();
+
+            s.subpanes.push(subpane);
+
+            log::info!("Created indicator sub-pane: id={}, type={}, height={:.1}", id, indicator_type, initial_height);
+            Some((id, chart_el, axis_el, crosshair_y_rc, crosshair_active_rc))
+        }; // borrow dropped
+
+        let (id, chart_el, axis_el, crosshair_y, crosshair_active) = match creation_result {
+            Some(r) => r,
+            None => return 0,
+        };
+
+        // ── Phase 2: Wire interaction events ──
+        let mut interaction_closures: Vec<Closure<dyn FnMut(web_sys::Event)>> = Vec::new();
+        let mut wheel_closures: Vec<Closure<dyn FnMut(web_sys::WheelEvent)>> = Vec::new();
+        let mut touch_closures: Vec<Closure<dyn FnMut(web_sys::TouchEvent)>> = Vec::new();
+
+        // Shared drag state for chart scroll
+        let sp_drag_active = Rc::new(Cell::new(false));
+        let sp_drag_start_x: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+        let sp_drag_start_start_bar: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+        let sp_drag_start_end_bar: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+
+        // Shared drag state for price axis drag-to-scale
+        let axis_drag_active = Rc::new(Cell::new(false));
+        let axis_drag_start_y: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+        let axis_drag_start_price_min: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+        let axis_drag_start_price_max: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+
+        // Pinch zoom state
+        let sp_pinch_active = Rc::new(Cell::new(false));
+        let sp_pinch_start_dist: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+        let sp_pinch_start_start_bar: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+        let sp_pinch_start_end_bar: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+        let sp_pinch_center_x: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+
+        let pane_id = id;
+
+        // ── chart: pointerenter ──
+        {
+            let inner = Rc::clone(&inner_for_events);
+            let ca = crosshair_active.clone();
+            let pid = pane_id;
+            let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_: web_sys::Event| {
+                log::info!("SubPane {} pointerenter", pid);
+                ca.set(true);
+                let mut s = inner.borrow_mut();
+                s.engine.crosshair.active = true;
+                s.active_subpane_id = Some(pid);
+            }));
+            let _ = chart_el.add_event_listener_with_callback("pointerenter", cb.as_ref().unchecked_ref());
+            interaction_closures.push(cb);
+        }
+
+        // ── chart: pointerleave ──
+        {
+            let inner = Rc::clone(&inner_for_events);
+            let ca = crosshair_active.clone();
+            let drag = sp_drag_active.clone();
+            let pid = pane_id;
+            let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_: web_sys::Event| {
+                log::info!("SubPane {} pointerleave", pid);
+                ca.set(false);
+                if !drag.get() {
+                    let mut s = inner.borrow_mut();
+                    s.engine.crosshair.active = false;
+                    s.active_subpane_id = None;
+                }
+            }));
+            let _ = chart_el.add_event_listener_with_callback("pointerleave", cb.as_ref().unchecked_ref());
+            interaction_closures.push(cb);
+        }
+
+        // ── chart: pointermove ──
+        {
+            let inner = Rc::clone(&inner_for_events);
+            let cy = crosshair_y.clone();
+            let ca = crosshair_active.clone();
+            let chart_c = chart_el.clone();
+            let drag = sp_drag_active.clone();
+            let drag_sx = sp_drag_start_x.clone();
+            let drag_sb = sp_drag_start_start_bar.clone();
+            let drag_eb = sp_drag_start_end_bar.clone();
+            let pid = pane_id;
+            let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
+                let pe: web_sys::PointerEvent = e.unchecked_into();
+                let rect = chart_c.get_bounding_client_rect();
+                let x = pe.client_x() as f64 - rect.left();
+                let y = pe.client_y() as f64 - rect.top();
+                let now_ms = js_sys::Date::now();
+
+                cy.set(y);
+                ca.set(true);
+
+                let mut s = inner.borrow_mut();
+                s.engine.crosshair.active = true;
+                s.active_subpane_id = Some(pid);
+                s.engine.crosshair.x = x;
+                // Don't set crosshair.y here — main pane reads active_subpane_id
+                // to decide whether to draw its own horizontal crosshair
+
+                // Update bar_index for time axis label
+                let (pw, _) = s.layout.pane_css_size();
+                s.engine.crosshair.bar_index =
+                    s.engine.viewport.bar_index_at_pixel(x, pw, s.engine.bars.len());
+
+                // Handle drag scroll
+                if drag.get() {
+                    // Update scroll tracking for kinetic animation
+                    if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == pid) {
+                        sp.scroll_state.borrow_mut().update_drag(x, now_ms);
+                    }
+                    
+                    let delta_x = x - drag_sx.get();
+                    let bar_range = drag_eb.get() - drag_sb.get();
+                    if pw > 0.0 {
+                        let bars_per_px = bar_range / pw;
+                        let delta_bars = -delta_x * bars_per_px;
+                        s.engine.viewport.start_bar = drag_sb.get() + delta_bars;
+                        s.engine.viewport.end_bar = drag_eb.get() + delta_bars;
+                        let bar_len = s.engine.bars.len();
+                        s.engine.viewport.clamp_to_data(bar_len);
+                        if !s.engine.viewport.price_locked {
+                            let bars_ptr = &s.engine.bars as *const raycore::BarArray;
+                            unsafe { s.engine.viewport.auto_fit_price(&*bars_ptr); }
+                        }
+                    }
+                    let html_el: &web_sys::HtmlElement = chart_c.unchecked_ref();
+                    let _ = html_el.style().set_property("cursor", "grabbing");
+                }
+            }));
+            let _ = chart_el.add_event_listener_with_callback("pointermove", cb.as_ref().unchecked_ref());
+            interaction_closures.push(cb);
+        }
+
+        // ── chart: pointerdown ──
+        {
+            let inner = Rc::clone(&inner_for_events);
+            let drag = sp_drag_active.clone();
+            let drag_sx = sp_drag_start_x.clone();
+            let drag_sb = sp_drag_start_start_bar.clone();
+            let drag_eb = sp_drag_start_end_bar.clone();
+            let chart_c = chart_el.clone();
+            let pid = pane_id;
+            let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
+                let pe: web_sys::PointerEvent = e.unchecked_into();
+                if pe.button() == 2 { return; }
+                let rect = chart_c.get_bounding_client_rect();
+                let x = pe.client_x() as f64 - rect.left();
+                let now_ms = js_sys::Date::now();
+
+                drag.set(true);
+                drag_sx.set(x);
+
+                let mut s = inner.borrow_mut();
+                drag_sb.set(s.engine.viewport.start_bar);
+                drag_eb.set(s.engine.viewport.end_bar);
+                
+                // Start scroll tracking for kinetic animation
+                if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == pid) {
+                    sp.scroll_state.borrow_mut().start_drag(x, s.engine.viewport.start_bar, now_ms);
+                }
+                drop(s);
+
+                // Capture pointer for reliable drag across boundaries
+                let html_el: &web_sys::HtmlElement = chart_c.unchecked_ref();
+                let _ = html_el.set_pointer_capture(pe.pointer_id());
+            }));
+            let _ = chart_el.add_event_listener_with_callback("pointerdown", cb.as_ref().unchecked_ref());
+            interaction_closures.push(cb);
+        }
+
+        // ── chart: pointerup ──
+        {
+            let inner = Rc::clone(&inner_for_events);
+            let drag = sp_drag_active.clone();
+            let chart_c = chart_el.clone();
+            let pid = pane_id;
+            let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
+                let pe: web_sys::PointerEvent = e.unchecked_into();
+                let now_ms = js_sys::Date::now();
+                drag.set(false);
+                
+                // End scroll tracking and potentially start kinetic animation
+                {
+                    let s = inner.borrow();
+                    if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == pid) {
+                        sp.scroll_state.borrow_mut().end_drag(now_ms);
+                    }
+                }
+                
+                let html_el: &web_sys::HtmlElement = chart_c.unchecked_ref();
+                let _ = html_el.release_pointer_capture(pe.pointer_id());
+                let _ = html_el.style().set_property("cursor", "crosshair");
+            }));
+            let _ = chart_el.add_event_listener_with_callback("pointerup", cb.as_ref().unchecked_ref());
+            interaction_closures.push(cb);
+        }
+
+        // ── chart: pointercancel ──
+        {
+            let inner = Rc::clone(&inner_for_events);
+            let drag = sp_drag_active.clone();
+            let chart_c = chart_el.clone();
+            let pid = pane_id;
+            let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
+                let pe: web_sys::PointerEvent = e.unchecked_into();
+                drag.set(false);
+                
+                // Cancel scroll tracking (no kinetic animation)
+                {
+                    let s = inner.borrow();
+                    if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == pid) {
+                        sp.scroll_state.borrow_mut().animation.stop();
+                    }
+                }
+                
+                let html_el: &web_sys::HtmlElement = chart_c.unchecked_ref();
+                let _ = html_el.release_pointer_capture(pe.pointer_id());
+                let _ = html_el.style().set_property("cursor", "crosshair");
+            }));
+            let _ = chart_el.add_event_listener_with_callback("pointercancel", cb.as_ref().unchecked_ref());
+            interaction_closures.push(cb);
+        }
+
+        // ── chart: wheel (forward to main chart zoom) ──
+        {
+            let inner = Rc::clone(&inner_for_events);
+            let chart_c = chart_el.clone();
+            let cb = Closure::<dyn FnMut(web_sys::WheelEvent)>::wrap(Box::new(move |e: web_sys::WheelEvent| {
+                e.prevent_default();
+                let rect = chart_c.get_bounding_client_rect();
+                let x = e.client_x() as f64 - rect.left();
+                let mut s = inner.borrow_mut();
+                s.on_pane_wheel(x, e.delta_x(), e.delta_y(), e.delta_mode());
+            }));
+            let opts = web_sys::AddEventListenerOptions::new();
+            opts.set_passive(false);
+            let _ = chart_el.add_event_listener_with_callback_and_add_event_listener_options(
+                "wheel", cb.as_ref().unchecked_ref(), &opts,
+            );
+            wheel_closures.push(cb);
+        }
+
+        // ── chart: contextmenu ──
+        {
+            let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
+                e.prevent_default();
+            }));
+            let _ = chart_el.add_event_listener_with_callback("contextmenu", cb.as_ref().unchecked_ref());
+            interaction_closures.push(cb);
+        }
+
+        // ── chart: touchstart (pinch zoom detection) ──
+        {
+            let inner = Rc::clone(&inner_for_events);
+            let chart_c = chart_el.clone();
+            let pinch = sp_pinch_active.clone();
+            let pinch_dist = sp_pinch_start_dist.clone();
+            let pinch_sb = sp_pinch_start_start_bar.clone();
+            let pinch_eb = sp_pinch_start_end_bar.clone();
+            let pinch_cx = sp_pinch_center_x.clone();
+            let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::wrap(Box::new(move |e: web_sys::TouchEvent| {
+                e.prevent_default();
+                let touches = e.touches();
+                if touches.length() >= 2 {
+                    let t0 = touches.get(0).unwrap();
+                    let t1 = touches.get(1).unwrap();
+                    let rect = chart_c.get_bounding_client_rect();
+                    let x0 = t0.client_x() as f64 - rect.left();
+                    let x1 = t1.client_x() as f64 - rect.left();
+                    let y0 = t0.client_y() as f64 - rect.top();
+                    let y1 = t1.client_y() as f64 - rect.top();
+                    let dx = x1 - x0;
+                    let dy = y1 - y0;
+                    let distance = (dx * dx + dy * dy).sqrt();
+
+                    pinch.set(true);
+                    pinch_dist.set(distance);
+                    pinch_cx.set((x0 + x1) / 2.0);
+
+                    let s = inner.borrow();
+                    pinch_sb.set(s.engine.viewport.start_bar);
+                    pinch_eb.set(s.engine.viewport.end_bar);
+                }
+            }));
+            let opts = web_sys::AddEventListenerOptions::new();
+            opts.set_passive(false);
+            let _ = chart_el.add_event_listener_with_callback_and_add_event_listener_options(
+                "touchstart", cb.as_ref().unchecked_ref(), &opts,
+            );
+            touch_closures.push(cb);
+        }
+
+        // ── chart: touchmove (pinch zoom update) ──
+        {
+            let inner = Rc::clone(&inner_for_events);
+            let pinch = sp_pinch_active.clone();
+            let pinch_dist = sp_pinch_start_dist.clone();
+            let pinch_sb = sp_pinch_start_start_bar.clone();
+            let pinch_eb = sp_pinch_start_end_bar.clone();
+            let pinch_cx = sp_pinch_center_x.clone();
+            let chart_c = chart_el.clone();
+            let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::wrap(Box::new(move |e: web_sys::TouchEvent| {
+                e.prevent_default();
+                let touches = e.touches();
+                if touches.length() >= 2 && pinch.get() {
+                    let t0 = touches.get(0).unwrap();
+                    let t1 = touches.get(1).unwrap();
+                    let dx = (t1.client_x() - t0.client_x()) as f64;
+                    let dy = (t1.client_y() - t0.client_y()) as f64;
+                    let distance = (dx * dx + dy * dy).sqrt();
+                    let scale = distance / pinch_dist.get().max(1.0);
+
+                    // Apply zoom: scale around the pinch center
+                    let rect = chart_c.get_bounding_client_rect();
+                    let css_w = rect.width();
+                    let start = pinch_sb.get();
+                    let end = pinch_eb.get();
+                    let visible = end - start;
+                    let new_visible = visible / scale;
+                    let cx_frac = pinch_cx.get() / css_w;
+                    let new_start = start + (visible - new_visible) * cx_frac;
+                    let new_end = new_start + new_visible;
+
+                    let mut s = inner.borrow_mut();
+                    s.engine.viewport.start_bar = new_start;
+                    s.engine.viewport.end_bar = new_end;
+                    let bar_len = s.engine.bars.len();
+                    s.engine.viewport.clamp_to_data(bar_len);
+                }
+            }));
+            let opts = web_sys::AddEventListenerOptions::new();
+            opts.set_passive(false);
+            let _ = chart_el.add_event_listener_with_callback_and_add_event_listener_options(
+                "touchmove", cb.as_ref().unchecked_ref(), &opts,
+            );
+            touch_closures.push(cb);
+        }
+
+        // ── chart: touchend (end pinch) ──
+        {
+            let pinch = sp_pinch_active.clone();
+            let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::wrap(Box::new(move |e: web_sys::TouchEvent| {
+                let touches = e.touches();
+                if touches.length() < 2 {
+                    pinch.set(false);
+                }
+            }));
+            let opts = web_sys::AddEventListenerOptions::new();
+            opts.set_passive(false);
+            let _ = chart_el.add_event_listener_with_callback_and_add_event_listener_options(
+                "touchend", cb.as_ref().unchecked_ref(), &opts,
+            );
+            touch_closures.push(cb);
+        }
+
+        // ── chart: dblclick (reset viewport to default) ──
+        {
+            let inner = Rc::clone(&inner_for_events);
+            let pid = pane_id;
+            let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
+                let mut s = inner.borrow_mut();
+                if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
+                    sp.reset_price_viewport();
+                    log::info!("SubPane {} viewport reset via double-click", pid);
+                }
+            }));
+            let _ = chart_el.add_event_listener_with_callback("dblclick", cb.as_ref().unchecked_ref());
+            interaction_closures.push(cb);
+        }
+
+        // ── axis: dblclick (toggle auto-scale) ──
+        {
+            let inner = Rc::clone(&inner_for_events);
+            let pid = pane_id;
+            let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
+                let mut s = inner.borrow_mut();
+                if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
+                    sp.toggle_auto_scale();
+                    log::info!("SubPane {} auto-scale toggled: {}", pid, sp.auto_scale);
+                }
+            }));
+            let _ = axis_el.add_event_listener_with_callback("dblclick", cb.as_ref().unchecked_ref());
+            interaction_closures.push(cb);
+        }
+
+        // ── axis: wheel (zoom sub-pane price range) ──
+        {
+            let inner = Rc::clone(&inner_for_events);
+            let pid = pane_id;
+            let cb = Closure::<dyn FnMut(web_sys::WheelEvent)>::wrap(Box::new(move |e: web_sys::WheelEvent| {
+                e.prevent_default();
+                let dy = e.delta_y();
+                let factor = if dy > 0.0 { 1.1 } else { 0.9 };
+                let mut s = inner.borrow_mut();
+                if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
+                    let center = (sp.viewport.price_min + sp.viewport.price_max) / 2.0;
+                    let half = (sp.viewport.price_max - sp.viewport.price_min) / 2.0 * factor;
+                    sp.viewport.price_min = center - half;
+                    sp.viewport.price_max = center + half;
+                }
+            }));
+            let opts = web_sys::AddEventListenerOptions::new();
+            opts.set_passive(false);
+            let _ = axis_el.add_event_listener_with_callback_and_add_event_listener_options(
+                "wheel", cb.as_ref().unchecked_ref(), &opts,
+            );
+            wheel_closures.push(cb);
+        }
+
+        // ── axis: pointerdown (start price axis drag) ──
+        {
+            let inner = Rc::clone(&inner_for_events);
+            let pid = pane_id;
+            let adrag = axis_drag_active.clone();
+            let ady = axis_drag_start_y.clone();
+            let apmin = axis_drag_start_price_min.clone();
+            let apmax = axis_drag_start_price_max.clone();
+            let axis_c = axis_el.clone();
+            let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
+                let pe: web_sys::PointerEvent = e.unchecked_into();
+                let rect = axis_c.get_bounding_client_rect();
+                let y = pe.client_y() as f64 - rect.top();
+                adrag.set(true);
+                ady.set(y);
+                let s = inner.borrow();
+                if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == pid) {
+                    apmin.set(sp.viewport.price_min);
+                    apmax.set(sp.viewport.price_max);
+                }
+                drop(s);
+                let html_el: &web_sys::HtmlElement = axis_c.unchecked_ref();
+                let _ = html_el.set_pointer_capture(pe.pointer_id());
+            }));
+            let _ = axis_el.add_event_listener_with_callback("pointerdown", cb.as_ref().unchecked_ref());
+            interaction_closures.push(cb);
+        }
+
+        // ── axis: pointermove (price axis drag-to-scale) ──
+        {
+            let inner = Rc::clone(&inner_for_events);
+            let pid = pane_id;
+            let adrag = axis_drag_active.clone();
+            let ady = axis_drag_start_y.clone();
+            let apmin = axis_drag_start_price_min.clone();
+            let apmax = axis_drag_start_price_max.clone();
+            let axis_c = axis_el.clone();
+            let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
+                if !adrag.get() { return; }
+                let pe: web_sys::PointerEvent = e.unchecked_into();
+                let rect = axis_c.get_bounding_client_rect();
+                let y = pe.client_y() as f64 - rect.top();
+                let css_h = rect.height();
+                if css_h <= 1.0 { return; }
+
+                let delta_y = y - ady.get();
+                let factor = (1.0 + delta_y / css_h).max(0.1);
+
+                let center = (apmin.get() + apmax.get()) / 2.0;
+                let half = (apmax.get() - apmin.get()) / 2.0 * factor;
+
+                let mut s = inner.borrow_mut();
+                if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
+                    sp.viewport.price_min = center - half;
+                    sp.viewport.price_max = center + half;
+                }
+            }));
+            let _ = axis_el.add_event_listener_with_callback("pointermove", cb.as_ref().unchecked_ref());
+            interaction_closures.push(cb);
+        }
+
+        // ── axis: pointerup ──
+        {
+            let adrag = axis_drag_active.clone();
+            let axis_c = axis_el.clone();
+            let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
+                let pe: web_sys::PointerEvent = e.unchecked_into();
+                adrag.set(false);
+                let html_el: &web_sys::HtmlElement = axis_c.unchecked_ref();
+                let _ = html_el.release_pointer_capture(pe.pointer_id());
+            }));
+            let _ = axis_el.add_event_listener_with_callback("pointerup", cb.as_ref().unchecked_ref());
+            interaction_closures.push(cb);
+        }
+
+        // ── axis: contextmenu ──
+        {
+            let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
+                e.prevent_default();
+            }));
+            let _ = axis_el.add_event_listener_with_callback("contextmenu", cb.as_ref().unchecked_ref());
+            interaction_closures.push(cb);
+        }
+
+        // ── Phase 3: Store closures in sub-pane (prevents GC) ──
+        {
+            let mut s = self.inner.borrow_mut();
+            if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == id) {
+                sp._interaction_closures = interaction_closures;
+                sp._wheel_closures = wheel_closures;
+                sp._touch_closures = touch_closures;
+            }
+        }
+
+        id
+    }
+
+    /// Remove an indicator sub-pane by ID.
+    pub fn remove_indicator_pane(&mut self, pane_id: u32) -> bool {
+        let mut s = self.inner.borrow_mut();
+        if let Some(pos) = s.subpanes.iter().position(|sp| sp.id == pane_id) {
+            let sp = s.subpanes.remove(pos);
+            sp.remove();
+            
+            // Unregister from coordinator
+            s.pane_coordinator.unregister_subpane(pane_id);
+            
+            // Reassign grid rows for remaining subpanes
+            for (i, subpane) in s.subpanes.iter_mut().enumerate() {
+                let sep_row = 2 + (i as u32 * 2);
+                let pane_row = sep_row + 1;
+                subpane.grid_row = sep_row;
+                let _ = subpane.separator.style().set_property("grid-row", &sep_row.to_string());
+                let _ = subpane.chart_container.style().set_property("grid-row", &pane_row.to_string());
+                let _ = subpane.axis_container.style().set_property("grid-row", &pane_row.to_string());
+            }
+            // Grid rows will be corrected on next render frame
+            
+            log::info!("Removed indicator sub-pane: id={}", pane_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Update indicator sub-pane data from a study.
+    pub fn update_indicator_pane(&mut self, pane_id: u32, study_id: u32) {
+        let mut s = self.inner.borrow_mut();
+        
+        let study_data: Option<(Vec<raycore::core::series::LineDataArray>, String)> = {
+            if let Some(study) = s.engine.studies.get_study(raycore::StudyId(study_id)) {
+                let mut data = Vec::new();
+                for i in 0..study.outputs.len() {
+                    if let Some(output) = study.get_output(i) {
+                        data.push(output.data.clone());
+                    }
+                }
+                Some((data, study.study_type.clone()))
+            } else {
+                None
+            }
+        };
+        
+        if let Some((data, indicator_type)) = study_data {
+            if let Some(subpane) = s.subpanes.iter_mut().find(|sp| sp.id == pane_id) {
+                // Use IndicatorConfig for colors instead of hardcoded values
+                let config = IndicatorConfig::for_type(&indicator_type);
+                let colors: Vec<[f32; 4]> = data.iter().enumerate()
+                    .map(|(i, _)| config.colors.get(i).copied().unwrap_or([0.5, 0.5, 0.5, 1.0]))
+                    .collect();
+                
+                subpane.set_data(data, colors);
+            }
+        }
+    }
+
+    /// Drag a separator to resize adjacent panes.
+    /// `separator_idx` is 0 for separator between main and first subpane.
+    /// `delta_y` is positive for moving down, negative for up.
+    /// This uses the PaneManager's coordinated height algorithm.
+    pub fn drag_pane_separator(&mut self, separator_idx: u32, delta_y: f64) {
+        let mut s = self.inner.borrow_mut();
+        
+        // Drag using coordinator (PaneManager)
+        s.pane_coordinator.drag_separator(separator_idx as usize, delta_y);
+        
+        // Sync computed heights back to subpanes
+        let heights = s.pane_coordinator.all_heights();
+        for (subpane_id, height) in heights {
+            if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == subpane_id) {
+                sp.set_height(height);
+            }
+        }
+    }
+    
+    /// Get the number of indicator sub-panes.
+    pub fn indicator_pane_count(&self) -> usize {
+        self.inner.borrow().subpanes.len()
+    }
+
     // ── Real-time data updates ────────────────────────────────────────────
 
     /// Append a single bar to the data array. Used for real-time streaming.
@@ -2182,6 +2877,10 @@ impl RayCore {
                     (th * current_dpr).round() as u32,
                     current_dpr,
                 );
+                // Resize sub-panes
+                for subpane in s.subpanes.iter_mut() {
+                    subpane.resize(current_dpr);
+                }
             }
         }
 
@@ -2190,6 +2889,7 @@ impl RayCore {
 
         let (pane_css_w, pane_css_h) = s.layout.pane_css_size();
 
+        // Update main chart kinetic scrolling
         {
             let ChartInner { ref mut interaction, ref mut engine, .. } = *s;
             interaction.update_gliding(
@@ -2198,6 +2898,32 @@ impl RayCore {
                 &mut engine.viewport,
                 &engine.bars,
             );
+        }
+
+        // Update subpane kinetic scrolling (shares time axis with main chart)
+        // Collect all kinetic deltas first, then apply to viewport
+        {
+            let bar_len = s.engine.bars.len();
+            let pane_css_w_for_kinetic = pane_css_w;
+            
+            // Collect kinetic deltas from all subpanes
+            let mut total_kinetic_delta_px = 0.0;
+            for subpane in s.subpanes.iter() {
+                if let Some(delta_px) = subpane.update_kinetic(anim_time) {
+                    total_kinetic_delta_px += delta_px;
+                }
+            }
+            
+            // Apply accumulated kinetic delta to shared viewport
+            if total_kinetic_delta_px.abs() > 0.001 && pane_css_w_for_kinetic > 0.0 {
+                let bar_range = s.engine.viewport.end_bar - s.engine.viewport.start_bar;
+                let delta_bars = -total_kinetic_delta_px * bar_range / pane_css_w_for_kinetic;
+                s.engine.viewport.pan_clamped(delta_bars, bar_len);
+                if !s.engine.viewport.price_locked {
+                    let bars_ptr = &s.engine.bars as *const raycore::BarArray;
+                    unsafe { s.engine.viewport.auto_fit_price(&*bars_ptr); }
+                }
+            }
         }
 
         let pane_pw = (pane_css_w * dpr).round();
@@ -2214,14 +2940,23 @@ impl RayCore {
         // 2. Measure price axis width from tick labels
         // Destructure to borrow price_axis_renderer mutably while engine is borrowed immutably
         {
-            let ChartInner { ref mut price_axis_renderer, ref engine, ref mut layout, .. } = *s;
+            let ChartInner { ref mut price_axis_renderer, ref engine, ref mut layout, ref subpanes, .. } = *s;
             let max_text_w_phys = price_axis_renderer.measure_max_tick_width(&engine.style, &y_ticks);
             let max_text_w_css = max_text_w_phys / dpr;
             let price_axis_css_w = engine.style.price_axis_width(max_text_w_css);
             let time_axis_css_h = engine.style.time_axis_height();
 
-            // 3. Update CSS grid layout (this may cause pane to resize)
-            layout.update_axis_sizes(price_axis_css_w, time_axis_css_h);
+            // 3. Update CSS grid layout (subpane-aware — keeps time axis visible)
+            if subpanes.is_empty() {
+                layout.update_axis_sizes(price_axis_css_w, time_axis_css_h);
+            } else {
+                let heights: Vec<f64> = subpanes.iter()
+                    .map(|sp| sp.get_height())
+                    .collect();
+                layout.update_axis_sizes_with_subpanes(
+                    price_axis_css_w, time_axis_css_h, &heights,
+                );
+            }
         }
 
         // 4. Engine render — candles + volume on pane chart canvas
@@ -2244,14 +2979,23 @@ impl RayCore {
         let is_webgpu = s.engine.renderer_name() == "webgpu";
 
         // 6. Render overlay, dashed series, price lines, last price lines, drawings, crosshair, markers
-        // Destructure to borrow overlay mutably while engine is borrowed immutably
+        // When cursor is in a subpane, suppress horizontal crosshair in main pane
+        // by creating a modified crosshair state (proper replacement for the y=-1000 hack)
         {
-            let ChartInner { ref mut overlay, ref engine, .. } = *s;
+            let ChartInner { ref mut overlay, ref engine, ref active_subpane_id, .. } = *s;
+            let main_crosshair = if active_subpane_id.is_some() && engine.crosshair.active {
+                // Cursor is in a subpane: keep vertical line, suppress horizontal
+                let mut ch = engine.crosshair;
+                ch.y = -1.0; // Outside valid range so horizontal line won't draw
+                ch
+            } else {
+                engine.crosshair
+            };
             if is_webgpu {
                 let mut all_drawings = base_drawings;
                 all_drawings.extend(top_drawings);
                 // Clear and render base layer first (watermark, legend, drawings, crosshair)
-                overlay.render_with_drawings(&engine.crosshair, &engine.style, &all_drawings, Some(&engine.bars));
+                overlay.render_with_drawings(&main_crosshair, &engine.style, &all_drawings, Some(&engine.bars));
                 // Then render on top of the cleared canvas:
                 overlay.render_dashed_series(
                     &engine.series, &engine.viewport, &bar_ts,
@@ -2274,12 +3018,12 @@ impl RayCore {
                 );
                 // Crosshair marker circles on series (above crosshair lines)
                 overlay.render_crosshair_markers(
-                    &engine.crosshair, &engine.series, &engine.bars, &bar_ts,
+                    &main_crosshair, &engine.series, &engine.bars, &bar_ts,
                     &engine.viewport, &engine.style, pane_css_w, pane_css_h,
                 );
             } else {
                 // Clear and render base layer first
-                overlay.render_with_drawings(&engine.crosshair, &engine.style, &top_drawings, Some(&engine.bars));
+                overlay.render_with_drawings(&main_crosshair, &engine.style, &top_drawings, Some(&engine.bars));
                 // Then render additional elements on top:
                 overlay.render_dashed_series(
                     &engine.series, &engine.viewport, &bar_ts,
@@ -2303,7 +3047,7 @@ impl RayCore {
                 overlay.render_base_drawings(&base_drawings);
                 // Crosshair marker circles on series (above crosshair lines)
                 overlay.render_crosshair_markers(
-                    &engine.crosshair, &engine.series, &engine.bars, &bar_ts,
+                    &main_crosshair, &engine.series, &engine.bars, &bar_ts,
                     &engine.viewport, &engine.style, pane_css_w, pane_css_h,
                 );
             }
@@ -2311,7 +3055,7 @@ impl RayCore {
 
         // 7. Price axis — base (ticks + labels) + last price labels + price line labels + top (crosshair label)
         {
-            let ChartInner { ref mut price_axis_renderer, ref engine, .. } = *s;
+            let ChartInner { ref mut price_axis_renderer, ref engine, ref active_subpane_id, .. } = *s;
             price_axis_renderer.render_base(&engine.style, &y_ticks, pane_ph);
             price_axis_renderer.render_last_price_labels(
                 &engine.series, &engine.bars, &engine.viewport, &engine.style, pane_css_h,
@@ -2319,8 +3063,16 @@ impl RayCore {
             price_axis_renderer.render_price_line_labels(
                 &engine.price_lines, &engine.viewport, &engine.style, pane_css_h,
             );
+            // Suppress price axis crosshair label when cursor is in a subpane
+            let main_ch = if active_subpane_id.is_some() && engine.crosshair.active {
+                let mut ch = engine.crosshair;
+                ch.y = -1.0;
+                ch
+            } else {
+                engine.crosshair
+            };
             price_axis_renderer.render_top(
-                &engine.crosshair, &engine.viewport, &engine.style, pane_css_h,
+                &main_ch, &engine.viewport, &engine.style, pane_css_h,
             );
         }
 
@@ -2341,7 +3093,63 @@ impl RayCore {
             );
         }
 
-        // 9. Corner stub — background + borders (LWC: PriceAxisStub)
+        // 9. Indicator sub-panes — update data from studies and render
+        {
+            // First, collect updated study data for each subpane
+            let study_updates: Vec<(u32, Vec<raycore::core::series::LineDataArray>, String)> = {
+                let ChartInner { ref subpanes, ref engine, .. } = *s;
+                subpanes.iter().filter_map(|subpane| {
+                    if let Some(study) = engine.studies.get_study(raycore::StudyId(subpane.study_id)) {
+                        let mut data = Vec::new();
+                        for i in 0..study.outputs.len() {
+                            if let Some(output) = study.get_output(i) {
+                                data.push(output.data.clone());
+                            }
+                        }
+                        Some((subpane.id, data, subpane.indicator_type.clone()))
+                    } else {
+                        None
+                    }
+                }).collect()
+            };
+            
+            // Update subpane data using IndicatorConfig for colors
+            for (pane_id, data, indicator_type) in study_updates {
+                if let Some(subpane) = s.subpanes.iter_mut().find(|sp| sp.id == pane_id) {
+                    if !data.is_empty() {
+                        let config = IndicatorConfig::for_type(&indicator_type);
+                        let colors: Vec<[f32; 4]> = data.iter().enumerate()
+                            .map(|(i, _)| config.colors.get(i).copied().unwrap_or([0.5, 0.5, 0.5, 1.0]))
+                            .collect();
+                        subpane.set_data(data, colors);
+                    }
+                }
+            }
+            
+            // Resize, render, and draw crosshair
+            let ChartInner { ref mut subpanes, ref engine, active_subpane_id: _, .. } = *s;
+            let crosshair_x = if engine.crosshair.active {
+                Some(engine.crosshair.x)
+            } else {
+                None
+            };
+            for subpane in subpanes.iter_mut() {
+                subpane.resize(dpr);
+                subpane.render(&engine.viewport, &engine.style);
+                
+                // Clear crosshair overlay first
+                subpane.clear_crosshair_overlay();
+                
+                // Vertical crosshair line in every subpane (like LWC)
+                if let Some(x) = crosshair_x {
+                    subpane.render_crosshair_vert(x, &engine.style);
+                }
+                // Horizontal crosshair line + price label (if mouse is in this sub-pane)
+                subpane.render_crosshair_horiz(&engine.style);
+            }
+        }
+
+        // 10. Corner stub — background + borders (LWC: PriceAxisStub)
         Self::render_corner_stub(&s.layout, &s.engine.style, dpr);
     }
 
