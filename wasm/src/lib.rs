@@ -2215,11 +2215,14 @@ impl RayCore {
         let mut wheel_closures: Vec<Closure<dyn FnMut(web_sys::WheelEvent)>> = Vec::new();
         let mut touch_closures: Vec<Closure<dyn FnMut(web_sys::TouchEvent)>> = Vec::new();
 
-        // Shared drag state for chart scroll
+        // Shared drag state for chart scroll (X and Y axis)
         let sp_drag_active = Rc::new(Cell::new(false));
         let sp_drag_start_x: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+        let sp_drag_start_y: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
         let sp_drag_start_start_bar: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
         let sp_drag_start_end_bar: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+        let sp_drag_start_price_min: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+        let sp_drag_start_price_max: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
 
         // Shared drag state for price axis drag-to-scale
         let axis_drag_active = Rc::new(Cell::new(false));
@@ -2282,8 +2285,11 @@ impl RayCore {
             let chart_c = chart_el.clone();
             let drag = sp_drag_active.clone();
             let drag_sx = sp_drag_start_x.clone();
+            let drag_sy = sp_drag_start_y.clone();
             let drag_sb = sp_drag_start_start_bar.clone();
             let drag_eb = sp_drag_start_end_bar.clone();
+            let drag_pmin = sp_drag_start_price_min.clone();
+            let drag_pmax = sp_drag_start_price_max.clone();
             let is_touch = sp_is_touch.clone();
             let pid = pane_id;
             let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
@@ -2291,6 +2297,8 @@ impl RayCore {
                 let rect = chart_c.get_bounding_client_rect();
                 let x = pe.client_x() as f64 - rect.left();
                 let y = pe.client_y() as f64 - rect.top();
+                let pw = rect.width();
+                let ph = rect.height();
                 let now_ms = js_sys::Date::now();
 
                 cy.set(y);
@@ -2304,11 +2312,29 @@ impl RayCore {
                 // to decide whether to draw its own horizontal crosshair
 
                 // Update bar_index for time axis label
-                let (pw, _) = s.layout.pane_css_size();
                 s.engine.crosshair.bar_index =
                     s.engine.viewport.bar_index_at_pixel(x, pw, s.engine.bars.len());
 
-                // Handle drag scroll
+                // Update drawing preview or drag if active
+                let bar = s.engine.viewport.pixel_to_bar(x, pw);
+                if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
+                    let price = sp.viewport.pixel_to_price(y, ph);
+                    
+                    // Update drawing creation preview
+                    if sp.drawings.is_creating() {
+                        sp.drawings.update_creation_preview(bar, price);
+                    }
+                    
+                    // Update drawing drag
+                    if let Some(id) = sp.drawings.selected_id {
+                        if matches!(sp.drawings.get(id).map(|d| d.state()),
+                            Some(raycore::core::drawings::types::DrawingState::Dragging { .. })) {
+                            sp.drawings.update_drag(id, bar, price);
+                        }
+                    }
+                }
+
+                // Handle drag scroll (only if not drawing)
                 if drag.get() {
                     // Update scroll tracking for kinetic animation (touch only)
                     if is_touch.get() {
@@ -2317,6 +2343,7 @@ impl RayCore {
                         }
                     }
                     
+                    // Horizontal drag - scroll time axis (shared with main chart)
                     let delta_x = x - drag_sx.get();
                     let bar_range = drag_eb.get() - drag_sb.get();
                     if pw > 0.0 {
@@ -2331,6 +2358,20 @@ impl RayCore {
                             unsafe { s.engine.viewport.auto_fit_price(&*bars_ptr); }
                         }
                     }
+                    
+                    // Vertical drag - scroll subpane's own price axis
+                    // (subpanes have independent price ranges)
+                    let delta_y = y - drag_sy.get();
+                    let price_range = drag_pmax.get() - drag_pmin.get();
+                    if ph > 1.0 && price_range > 0.0 {
+                        let price_per_px = price_range / (ph - 1.0);
+                        let price_delta = delta_y * price_per_px;
+                        if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
+                            sp.viewport.price_min = drag_pmin.get() + price_delta;
+                            sp.viewport.price_max = drag_pmax.get() + price_delta;
+                        }
+                    }
+                    
                     let html_el: &web_sys::HtmlElement = chart_c.unchecked_ref();
                     let _ = html_el.style().set_property("cursor", "grabbing");
                 }
@@ -2344,8 +2385,11 @@ impl RayCore {
             let inner = Rc::clone(&inner_for_events);
             let drag = sp_drag_active.clone();
             let drag_sx = sp_drag_start_x.clone();
+            let drag_sy = sp_drag_start_y.clone();
             let drag_sb = sp_drag_start_start_bar.clone();
             let drag_eb = sp_drag_start_end_bar.clone();
+            let drag_pmin = sp_drag_start_price_min.clone();
+            let drag_pmax = sp_drag_start_price_max.clone();
             let chart_c = chart_el.clone();
             let is_touch = sp_is_touch.clone();
             let pid = pane_id;
@@ -2354,17 +2398,81 @@ impl RayCore {
                 if pe.button() == 2 { return; }
                 let rect = chart_c.get_bounding_client_rect();
                 let x = pe.client_x() as f64 - rect.left();
+                let y = pe.client_y() as f64 - rect.top();
+                let pw = rect.width();
+                let ph = rect.height();
                 let now_ms = js_sys::Date::now();
 
                 // Detect touch input (same as main chart)
                 is_touch.set(pe.pointer_type() == "touch");
 
+                let mut s = inner.borrow_mut();
+                
+                // Check if drawing tool is active (shared from main chart)
+                let active_tool = s.engine.drawings.active_tool;
+                if active_tool != raycore::DrawingTool::None {
+                    // Convert pixel to bar/price coordinates for this subpane
+                    let bar = s.engine.viewport.pixel_to_bar(x, pw);
+                    if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
+                        let price = sp.viewport.pixel_to_price(y, ph);
+                        
+                        // Set the same tool on this subpane's DrawingManager
+                        sp.drawings.active_tool = active_tool;
+                        
+                        if !sp.drawings.is_creating() {
+                            sp.drawings.start_creating(bar, price);
+                        } else {
+                            // Multi-step tools: place next anchor on click
+                            sp.drawings.finalize_creation_step(bar, price);
+                        }
+                    }
+                    drop(s);
+                    return; // Don't pan while creating drawing
+                }
+                
+                // Check for existing drawing hit-test in this subpane
+                // Pre-compute bar from main viewport
+                let bar = s.engine.viewport.pixel_to_bar(x, pw);
+                if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
+                    let price = sp.viewport.pixel_to_price(y, ph);
+                    let hit = sp.drawings.hit_test(x, y, &sp.viewport, pw, ph);
+                    if let Some((id, result)) = hit {
+                        use raycore::core::drawings::types::HitPart;
+                        let tool = sp.drawings.get(id)
+                            .map(|d| d.tool())
+                            .unwrap_or(raycore::DrawingTool::None);
+                        let anchor_idx = match result.part {
+                            HitPart::Anchor(i) => Some(i),
+                            _ => None,
+                        };
+                        
+                        // Rectangle: body clicks select only (fall through to pan)
+                        // Edge/anchor clicks start drag
+                        if tool == raycore::DrawingTool::Rectangle && result.part == HitPart::Body {
+                            sp.drawings.select(id);
+                        } else {
+                            sp.drawings.select(id);
+                            sp.drawings.start_drag(id, anchor_idx, bar, price);
+                            drop(s);
+                            return; // Don't pan while dragging drawing
+                        }
+                    } else {
+                        // Click on empty space: deselect
+                        sp.drawings.deselect_all();
+                    }
+                }
+
                 drag.set(true);
                 drag_sx.set(x);
-
-                let mut s = inner.borrow_mut();
+                drag_sy.set(y);
                 drag_sb.set(s.engine.viewport.start_bar);
                 drag_eb.set(s.engine.viewport.end_bar);
+                
+                // Capture subpane's price range for vertical dragging
+                if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == pid) {
+                    drag_pmin.set(sp.viewport.price_min);
+                    drag_pmax.set(sp.viewport.price_max);
+                }
                 
                 // Start scroll tracking for kinetic animation (touch only)
                 if is_touch.get() {
@@ -2391,8 +2499,32 @@ impl RayCore {
             let pid = pane_id;
             let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                 let pe: web_sys::PointerEvent = e.unchecked_into();
+                let rect = chart_c.get_bounding_client_rect();
+                let x = pe.client_x() as f64 - rect.left();
+                let y = pe.client_y() as f64 - rect.top();
+                let pw = rect.width();
+                let ph = rect.height();
                 let now_ms = js_sys::Date::now();
                 drag.set(false);
+                
+                // Finalize drawing creation or drag
+                {
+                    let mut s = inner.borrow_mut();
+                    let bar = s.engine.viewport.pixel_to_bar(x, pw);
+                    if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
+                        let price = sp.viewport.pixel_to_price(y, ph);
+                        
+                        // Finalize drawing creation (drag-to-create style)
+                        if sp.drawings.is_creating() {
+                            sp.drawings.finalize_creation_step(bar, price);
+                        }
+                        
+                        // End any drawing drag
+                        if let Some(id) = sp.drawings.selected_id {
+                            sp.drawings.end_drag(id);
+                        }
+                    }
+                }
                 
                 // End scroll tracking and potentially start kinetic animation (TOUCH ONLY)
                 {
@@ -3155,6 +3287,12 @@ impl RayCore {
             for subpane in subpanes.iter_mut() {
                 subpane.resize(dpr);
                 subpane.render(&engine.viewport, &engine.style);
+                
+                // Render drawings for this subpane
+                let (base_drawings, top_drawings) = subpane.generate_drawing_geometry(&engine.viewport);
+                let mut all_drawings = base_drawings;
+                all_drawings.extend(top_drawings);
+                subpane.render_drawings(&all_drawings);
                 
                 // Clear crosshair overlay first
                 subpane.clear_crosshair_overlay();

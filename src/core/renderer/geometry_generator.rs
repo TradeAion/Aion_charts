@@ -13,10 +13,10 @@
 //! All candle sizing uses LWC-matching algorithms from series.rs.
 //! Tick computation is in tick_marks.rs (shared with axis renderers).
 
-use crate::core::viewport::Viewport;
-use crate::core::renderer::traits::{ChartStyle, TickMark};
+use crate::core::renderer::draw_list::{ColoredRect, DrawList};
 use crate::core::renderer::series::CandleSizing;
-use crate::core::renderer::draw_list::{DrawList, ColoredRect};
+use crate::core::renderer::traits::{ChartStyle, TickMark};
+use crate::core::viewport::Viewport;
 
 /// Generate the complete DrawList for one frame (legacy monolithic path).
 /// Order: background → grid lines → volume → candles.
@@ -37,8 +37,14 @@ pub fn generate(
     // Background fill
     let (br, bg, bb, ba) = color4(&style.bg_color);
     dl.rects.push(ColoredRect {
-        x: 0.0, y: 0.0, w: pane_w as f32, h: pane_h as f32,
-        r: br, g: bg, b: bb, a: ba,
+        x: 0.0,
+        y: 0.0,
+        w: pane_w as f32,
+        h: pane_h as f32,
+        r: br,
+        g: bg,
+        b: bb,
+        a: ba,
     });
 
     // Grid lines (as thin rects, 1 physical pixel wide)
@@ -51,8 +57,25 @@ pub fn generate(
     let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
 
-    generate_volume_into(bars, viewport, style, pane_w, candle_h, vol_h, &sizing, &mut dl.rects);
-    generate_candles_into(bars, viewport, style, pane_w, candle_h, &sizing, &mut dl.rects);
+    generate_volume_into(
+        bars,
+        viewport,
+        style,
+        pane_w,
+        candle_h,
+        vol_h,
+        &sizing,
+        &mut dl.rects,
+    );
+    generate_candles_into(
+        bars,
+        viewport,
+        style,
+        pane_w,
+        candle_h,
+        &sizing,
+        &mut dl.rects,
+    );
 
     dl
 }
@@ -71,25 +94,43 @@ pub fn generate_grid_rects(
     let (gr, gg, gb, ga) = color4(&style.grid_color);
 
     // Horizontal grid lines (at price ticks) — major ticks only
+    // Use snap_grid (round) for WebGPU compatibility - avoids subpixel issues
     for t in y_ticks {
-        if !t.major { continue; }
-        let y = snap(t.pixel);
+        if !t.major {
+            continue;
+        }
+        let y = snap_grid(t.pixel);
         if y > 0.0 && y < pane_h {
             rects.push(ColoredRect {
-                x: 0.0, y: y as f32, w: pane_w as f32, h: 1.0,
-                r: gr, g: gg, b: gb, a: ga,
+                x: 0.0,
+                y: y as f32,
+                w: pane_w as f32,
+                h: 1.0,
+                r: gr,
+                g: gg,
+                b: gb,
+                a: ga,
             });
         }
     }
 
     // Vertical grid lines (at time ticks) — major ticks only
+    // Use snap_grid (round) for WebGPU compatibility - avoids subpixel issues
     for t in x_ticks {
-        if !t.major { continue; }
-        let x = snap(t.pixel);
+        if !t.major {
+            continue;
+        }
+        let x = snap_grid(t.pixel);
         if x > 0.0 && x < pane_w {
             rects.push(ColoredRect {
-                x: x as f32, y: 0.0, w: 1.0, h: pane_h as f32,
-                r: gr, g: gg, b: gb, a: ga,
+                x: x as f32,
+                y: 0.0,
+                w: 1.0,
+                h: pane_h as f32,
+                r: gr,
+                g: gg,
+                b: gb,
+                a: ga,
             });
         }
     }
@@ -129,7 +170,9 @@ pub fn generate_volume_rects(
     let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
     let mut rects = Vec::with_capacity(bars.len());
-    generate_volume_into(bars, viewport, style, pane_w, candle_h, vol_h, &sizing, &mut rects);
+    generate_volume_into(
+        bars, viewport, style, pane_w, candle_h, vol_h, &sizing, &mut rects,
+    );
     rects
 }
 
@@ -150,23 +193,74 @@ fn color4(c: &[f32; 4]) -> (f32, f32, f32, f32) {
     (c[0], c[1], c[2], c[3])
 }
 
-fn snap(v: f64) -> f64 { v.floor() + 0.5 }
+/// Snap to pixel center for Canvas2D (floor + 0.5 for crisp 1px lines).
+fn snap(v: f64) -> f64 {
+    v.floor() + 0.5
+}
+
+/// Snap to integer pixel for WebGPU grid lines (round to avoid subpixel issues).
+fn snap_grid(v: f64) -> f64 {
+    v.round()
+}
 
 // ── Inner-border fill (matches LWC fillRectInnerBorder) ──────────────────────
 
 fn push_inner_border(
     rects: &mut Vec<ColoredRect>,
-    x: f32, y: f32, w: f32, h: f32, bw: f32,
-    r: f32, g: f32, b: f32, a: f32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    bw: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
 ) {
     // top edge
-    rects.push(ColoredRect { x: x + bw, y, w: w - bw * 2.0, h: bw, r, g, b, a });
+    rects.push(ColoredRect {
+        x: x + bw,
+        y,
+        w: w - bw * 2.0,
+        h: bw,
+        r,
+        g,
+        b,
+        a,
+    });
     // bottom edge
-    rects.push(ColoredRect { x: x + bw, y: y + h - bw, w: w - bw * 2.0, h: bw, r, g, b, a });
+    rects.push(ColoredRect {
+        x: x + bw,
+        y: y + h - bw,
+        w: w - bw * 2.0,
+        h: bw,
+        r,
+        g,
+        b,
+        a,
+    });
     // left edge
-    rects.push(ColoredRect { x, y, w: bw, h, r, g, b, a });
+    rects.push(ColoredRect {
+        x,
+        y,
+        w: bw,
+        h,
+        r,
+        g,
+        b,
+        a,
+    });
     // right edge
-    rects.push(ColoredRect { x: x + w - bw, y, w: bw, h, r, g, b, a });
+    rects.push(ColoredRect {
+        x: x + w - bw,
+        y,
+        w: bw,
+        h,
+        r,
+        g,
+        b,
+        a,
+    });
 }
 
 // ── Candle generation (3-pass LWC order: wicks → borders → body fill) ────────
@@ -180,9 +274,13 @@ fn generate_candles_into(
     sizing: &CandleSizing,
     rects: &mut Vec<ColoredRect>,
 ) {
-    let start = (vp.start_bar.floor() as usize).saturating_sub(1).min(bars.len());
+    let start = (vp.start_bar.floor() as usize)
+        .saturating_sub(1)
+        .min(bars.len());
     let end = ((vp.end_bar.ceil() as usize) + 1).min(bars.len());
-    if start >= end { return; }
+    if start >= end {
+        return;
+    }
 
     let half_bar = (sizing.bar_width * 0.5).floor();
     let wick_offset = (sizing.wick_width * 0.5).floor();
@@ -213,16 +311,26 @@ fn generate_candles_into(
 
         if body_top > high_y {
             rects.push(ColoredRect {
-                x: left as f32, y: high_y as f32,
-                w: width as f32, h: (body_top - high_y) as f32,
-                r: wr, g: wg, b: wb, a: wa,
+                x: left as f32,
+                y: high_y as f32,
+                w: width as f32,
+                h: (body_top - high_y) as f32,
+                r: wr,
+                g: wg,
+                b: wb,
+                a: wa,
             });
         }
         if low_y > body_bottom + 1.0 {
             rects.push(ColoredRect {
-                x: left as f32, y: (body_bottom + 1.0) as f32,
-                w: width as f32, h: (low_y - body_bottom) as f32,
-                r: wr, g: wg, b: wb, a: wa,
+                x: left as f32,
+                y: (body_bottom + 1.0) as f32,
+                w: width as f32,
+                h: (low_y - body_bottom) as f32,
+                r: wr,
+                g: wg,
+                b: wb,
+                a: wa,
             });
         }
 
@@ -256,14 +364,26 @@ fn generate_candles_into(
         if sizing.bar_spacing * sizing.h_pixel_ratio > 2.0 * sizing.border_width {
             push_inner_border(
                 rects,
-                left as f32, top as f32, w as f32, h as f32,
+                left as f32,
+                top as f32,
+                w as f32,
+                h as f32,
                 sizing.border_width as f32,
-                br, bg, bb, ba,
+                br,
+                bg,
+                bb,
+                ba,
             );
         } else {
             rects.push(ColoredRect {
-                x: left as f32, y: top as f32, w: w as f32, h: h as f32,
-                r: br, g: bg, b: bb, a: ba,
+                x: left as f32,
+                y: top as f32,
+                w: w as f32,
+                h: h as f32,
+                r: br,
+                g: bg,
+                b: bb,
+                a: ba,
             });
         }
 
@@ -292,12 +412,19 @@ fn generate_candles_into(
             let br_x = right - sizing.border_width;
             let bb_y = bottom - sizing.border_width;
 
-            if bt > bb_y { continue; }
+            if bt > bb_y {
+                continue;
+            }
 
             rects.push(ColoredRect {
-                x: bl as f32, y: bt as f32,
-                w: (br_x - bl + 1.0) as f32, h: (bb_y - bt + 1.0) as f32,
-                r: cr, g: cg, b: cb, a: ca,
+                x: bl as f32,
+                y: bt as f32,
+                w: (br_x - bl + 1.0) as f32,
+                h: (bb_y - bt + 1.0) as f32,
+                r: cr,
+                g: cg,
+                b: cb,
+                a: ca,
             });
         }
     }
@@ -315,15 +442,21 @@ fn generate_volume_into(
     sizing: &CandleSizing,
     rects: &mut Vec<ColoredRect>,
 ) {
-    let start = (vp.start_bar.floor() as usize).saturating_sub(1).min(bars.len());
+    let start = (vp.start_bar.floor() as usize)
+        .saturating_sub(1)
+        .min(bars.len());
     let end = ((vp.end_bar.ceil() as usize) + 1).min(bars.len());
-    if start >= end { return; }
+    if start >= end {
+        return;
+    }
 
     let mut max_vol = 0.0f32;
     for i in start..end {
         max_vol = max_vol.max(bars.volumes.value(i));
     }
-    if max_vol <= 0.0 { return; }
+    if max_vol <= 0.0 {
+        return;
+    }
 
     let half_bar = (sizing.bar_width * 0.5).floor();
 
@@ -343,9 +476,14 @@ fn generate_volume_into(
         let left = phys_x - half_bar;
 
         rects.push(ColoredRect {
-            x: left as f32, y: top.floor() as f32,
-            w: sizing.bar_width as f32, h: h.ceil() as f32,
-            r: cr, g: cg, b: cb, a: ca,
+            x: left as f32,
+            y: top.floor() as f32,
+            w: sizing.bar_width as f32,
+            h: h.ceil() as f32,
+            r: cr,
+            g: cg,
+            b: cb,
+            a: ca,
         });
     }
 }

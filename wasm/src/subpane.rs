@@ -20,11 +20,12 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, Document, HtmlCanvasElement, HtmlDivElement, MouseEvent};
 
+use raycore::core::drawings::types::DrawingGeometry;
 use raycore::core::renderer::tick_marks::compute_y_ticks;
 use raycore::core::renderer::traits::{ChartStyle, CrosshairMode, CrosshairState, TickMark};
 use raycore::core::series::LineDataArray;
 use raycore::core::viewport::Viewport;
-use raycore::{PaneId, PaneManager, PaneOptions, PriceAxisRenderer, ScrollState};
+use raycore::{DrawingManager, PaneId, PaneManager, PaneOptions, PriceAxisRenderer, ScrollState};
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -301,6 +302,8 @@ pub struct SubPane {
     pub last_tap_time: Rc<Cell<f64>>,
     /// Auto-scale mode: when true, price range adjusts to fit visible data.
     pub auto_scale: bool,
+    /// Drawing manager for this subpane (independent from main chart).
+    pub drawings: DrawingManager,
 
     // ── Event closures (prevent GC) ──
     _closures: Vec<Closure<dyn FnMut(MouseEvent)>>,
@@ -532,6 +535,7 @@ impl SubPane {
             scroll_state,
             last_tap_time,
             auto_scale,
+            drawings: DrawingManager::new(),
             _closures: closures,
             _interaction_closures: Vec::new(),
             _wheel_closures: Vec::new(),
@@ -863,6 +867,110 @@ impl SubPane {
             }
         }
         self.chart_base_ctx.stroke();
+    }
+
+    /// Generate drawing geometry for this subpane.
+    /// Uses main viewport's time range with subpane's price range.
+    pub fn generate_drawing_geometry(
+        &self,
+        main_viewport: &Viewport,
+    ) -> (Vec<DrawingGeometry>, Vec<DrawingGeometry>) {
+        let dpr = self.dpr;
+        let pw = self.chart_base.width() as f64;
+        let ph = self.chart_base.height() as f64;
+        let css_w = if dpr > 0.0 { pw / dpr } else { 0.0 };
+        let css_h = if dpr > 0.0 { ph / dpr } else { 0.0 };
+
+        // Create a hybrid viewport:
+        // - Time axis (bar range) from main viewport (shared across all panes)
+        // - Price axis (price range) from this subpane's viewport
+        // Use subpane's viewport as base and update time range
+        let mut hybrid_viewport = Viewport::new(pw as u32, ph as u32);
+        hybrid_viewport.start_bar = main_viewport.start_bar;
+        hybrid_viewport.end_bar = main_viewport.end_bar;
+        hybrid_viewport.price_min = self.viewport.price_min;
+        hybrid_viewport.price_max = self.viewport.price_max;
+        hybrid_viewport.volume_height_ratio = 0.0; // Subpanes don't have volume
+
+        self.drawings
+            .generate_all_geometry(&hybrid_viewport, css_w, css_h, dpr, 1.0, 1.0)
+    }
+
+    /// Render drawings on the chart base canvas.
+    /// Call after render_chart() so drawings appear above the data lines.
+    pub fn render_drawings(&self, drawings: &[DrawingGeometry]) {
+        for geom in drawings {
+            self.draw_geometry(geom);
+        }
+    }
+
+    /// Draw a single DrawingGeometry to the chart base canvas.
+    fn draw_geometry(&self, geom: &DrawingGeometry) {
+        let ctx = &self.chart_base_ctx;
+
+        // Filled rects
+        for r in &geom.rects {
+            if r.w <= 0.0 || r.h <= 0.0 {
+                continue;
+            }
+            ctx.set_fill_style_str(&rgba(&[r.r, r.g, r.b, r.a]));
+            ctx.fill_rect(r.x as f64, r.y as f64, r.w as f64, r.h as f64);
+        }
+
+        // Lines
+        for l in &geom.lines {
+            ctx.set_stroke_style_str(&rgba(&[l.r, l.g, l.b, l.a]));
+            ctx.set_line_width(l.width as f64);
+            ctx.set_line_cap("round");
+            ctx.set_line_join("round");
+
+            if l.dash > 0.0 && l.gap > 0.0 {
+                let _ = ctx.set_line_dash(&js_sys::Array::of2(
+                    &JsValue::from(l.dash as f64),
+                    &JsValue::from(l.gap as f64),
+                ));
+            } else {
+                let _ = ctx.set_line_dash(&js_sys::Array::new());
+            }
+
+            // LWC strokeInPixel: add 0.5px offset for odd-width lines
+            let correction = if (l.width as i32) % 2 == 1 { 0.5 } else { 0.0 };
+
+            ctx.begin_path();
+            ctx.move_to(l.x0 as f64 + correction, l.y0 as f64 + correction);
+            ctx.line_to(l.x1 as f64 + correction, l.y1 as f64 + correction);
+            ctx.stroke();
+        }
+        let _ = ctx.set_line_dash(&js_sys::Array::new());
+
+        // Text labels (in physical pixel coords)
+        for t in &geom.texts {
+            let font = format!(
+                "{}px {}",
+                t.font_size,
+                "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif"
+            );
+            ctx.set_font(&font);
+            ctx.set_fill_style_str(&rgba(&[t.r, t.g, t.b, t.a]));
+            ctx.set_text_align("center");
+            ctx.set_text_baseline("middle");
+            let _ = ctx.fill_text(&t.text, t.x as f64, t.y as f64);
+        }
+
+        // Anchor circles
+        for a in &geom.anchors {
+            // Fill
+            ctx.set_fill_style_str(&rgba(&a.fill));
+            ctx.begin_path();
+            let _ = ctx.arc(a.cx, a.cy, a.radius, 0.0, std::f64::consts::TAU);
+            ctx.fill();
+            // Border
+            ctx.set_stroke_style_str(&rgba(&a.border));
+            ctx.set_line_width(a.border_width);
+            ctx.begin_path();
+            let _ = ctx.arc(a.cx, a.cy, a.radius, 0.0, std::f64::consts::TAU);
+            ctx.stroke();
+        }
     }
 
     /// Build a CrosshairState for this sub-pane's price axis.
