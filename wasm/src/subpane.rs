@@ -21,6 +21,7 @@ use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, Document, HtmlCanvasElement, HtmlDivElement, MouseEvent};
 
 use raycore::core::drawings::types::DrawingGeometry;
+use raycore::core::renderer::geometry_generator;
 use raycore::core::renderer::tick_marks::compute_y_ticks;
 use raycore::core::renderer::traits::{ChartStyle, CrosshairMode, CrosshairState, TickMark};
 use raycore::core::series::LineDataArray;
@@ -778,6 +779,7 @@ impl SubPane {
     // ── Low-level chart rendering ──────────────────────────────────────
 
     /// Render chart data on the BASE canvas (grid, reference lines, data lines).
+    /// Uses CENTRALIZED generate_horizontal_grid_rects() for consistent grid rendering.
     fn render_chart(&self, main_viewport: &Viewport, style: &ChartStyle, ticks: &[TickMark]) {
         let dpr = self.dpr;
         let pw = self.chart_base.width() as f64;
@@ -793,8 +795,24 @@ impl SubPane {
             .set_fill_style_str(&rgba(&style.bg_color));
         self.chart_base_ctx.fill_rect(0.0, 0.0, pw, ph);
 
-        // Grid lines disabled
-        // (Previously drew horizontal lines at tick positions)
+        // Grid lines - using CENTRALIZED function (horizontal only for subpanes)
+        let grid_rects = geometry_generator::generate_horizontal_grid_rects(style, ticks, pw, ph);
+        for rect in &grid_rects {
+            let color = format!(
+                "rgba({},{},{},{})",
+                (rect.r * 255.0) as u8,
+                (rect.g * 255.0) as u8,
+                (rect.b * 255.0) as u8,
+                rect.a
+            );
+            self.chart_base_ctx.set_fill_style_str(&color);
+            self.chart_base_ctx.fill_rect(
+                rect.x as f64,
+                rect.y as f64,
+                rect.w as f64,
+                rect.h as f64,
+            );
+        }
 
         // Reference lines from config (e.g. RSI 30/70, Stochastic 20/80, MACD 0)
         if !self.config.reference_levels.is_empty() {

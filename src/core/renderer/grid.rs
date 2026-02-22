@@ -1,10 +1,11 @@
 //! GridRenderer — draws grid lines on the pane's base (grid) canvas.
 //!
-//! Uses pre-computed tick marks from tick_marks.rs (single source of truth).
-//! Canvas is sized to the pane (chart area) only — no axis regions.
+//! NOW USES CENTRALIZED generate_grid_rects() from geometry_generator.rs.
+//! This ensures consistent grid rendering across all renderers.
 
 #![cfg(target_arch = "wasm32")]
 
+use crate::core::renderer::geometry_generator;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::traits::{ChartStyle, TickMark};
 use wasm_bindgen::prelude::*;
@@ -15,12 +16,8 @@ pub struct GridRenderer {
     ctx: CanvasRenderingContext2d,
     pw: u32,
     ph: u32,
+    #[allow(dead_code)]
     dpr: f64,
-}
-
-#[inline]
-fn snap(v: f64) -> f64 {
-    v.floor() + 0.5
 }
 
 impl GridRenderer {
@@ -53,15 +50,31 @@ impl GridRenderer {
         self.ctx.set_image_smoothing_enabled(false);
     }
 
-    /// Render grid lines using pre-computed ticks.
-    /// The canvas is sized to the pane only (chart_w x chart_h in physical px).
-    /// Grid lines are currently disabled - only clears background.
-    pub fn render(&self, style: &ChartStyle, _y_ticks: &[TickMark], _x_ticks: &[TickMark]) {
+    /// Render grid lines using the CENTRALIZED generate_grid_rects().
+    /// This ensures consistent grid appearance across all renderers.
+    pub fn render(&self, style: &ChartStyle, y_ticks: &[TickMark], x_ticks: &[TickMark]) {
         let w = self.pw as f64;
         let h = self.ph as f64;
 
-        // Clear with chart background only - grid lines disabled
+        // Clear with chart background
         self.ctx.set_fill_style_str(&rgba(&style.bg_color));
         self.ctx.fill_rect(0.0, 0.0, w, h);
+
+        // Use centralized grid rect generation
+        let grid_rects = geometry_generator::generate_grid_rects(style, y_ticks, x_ticks, w, h);
+
+        // Draw grid rects
+        for rect in &grid_rects {
+            let color = format!(
+                "rgba({},{},{},{})",
+                (rect.r * 255.0) as u8,
+                (rect.g * 255.0) as u8,
+                (rect.b * 255.0) as u8,
+                rect.a
+            );
+            self.ctx.set_fill_style_str(&color);
+            self.ctx
+                .fill_rect(rect.x as f64, rect.y as f64, rect.w as f64, rect.h as f64);
+        }
     }
 }

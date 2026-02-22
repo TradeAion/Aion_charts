@@ -83,16 +83,92 @@ pub fn generate(
 // ── Public per-element generators ────────────────────────────────────────────
 
 /// Generate grid line rects (horizontal at price ticks, vertical at time ticks).
-/// Grid lines are currently disabled - returns empty vector.
+/// This is the SINGLE SOURCE OF TRUTH for grid line generation.
+/// All renderers (Canvas2D, WebGPU, subpanes) should use this function.
 pub fn generate_grid_rects(
-    _style: &ChartStyle,
-    _y_ticks: &[TickMark],
-    _x_ticks: &[TickMark],
-    _pane_w: f64,
-    _pane_h: f64,
+    style: &ChartStyle,
+    y_ticks: &[TickMark],
+    x_ticks: &[TickMark],
+    pane_w: f64,
+    pane_h: f64,
 ) -> Vec<ColoredRect> {
-    // Grid lines disabled
-    Vec::new()
+    let mut rects = Vec::with_capacity(y_ticks.len() + x_ticks.len());
+    let (gr, gg, gb, ga) = color4(&style.grid_color);
+
+    // Horizontal grid lines (at price ticks) — major ticks only
+    for t in y_ticks {
+        if !t.major {
+            continue;
+        }
+        let y = t.pixel.round();
+        if y > 0.0 && y < pane_h {
+            rects.push(ColoredRect {
+                x: 0.0,
+                y: y as f32,
+                w: pane_w as f32,
+                h: 1.0,
+                r: gr,
+                g: gg,
+                b: gb,
+                a: ga,
+            });
+        }
+    }
+
+    // Vertical grid lines (at time ticks) — major ticks only
+    for t in x_ticks {
+        if !t.major {
+            continue;
+        }
+        let x = t.pixel.round();
+        if x > 0.0 && x < pane_w {
+            rects.push(ColoredRect {
+                x: x as f32,
+                y: 0.0,
+                w: 1.0,
+                h: pane_h as f32,
+                r: gr,
+                g: gg,
+                b: gb,
+                a: ga,
+            });
+        }
+    }
+
+    rects
+}
+
+/// Generate horizontal grid lines only (for subpanes that don't need vertical lines).
+/// Uses the same styling as generate_grid_rects for consistency.
+pub fn generate_horizontal_grid_rects(
+    style: &ChartStyle,
+    y_ticks: &[TickMark],
+    pane_w: f64,
+    pane_h: f64,
+) -> Vec<ColoredRect> {
+    let mut rects = Vec::with_capacity(y_ticks.len());
+    let (gr, gg, gb, ga) = color4(&style.grid_color);
+
+    for t in y_ticks {
+        if !t.major {
+            continue;
+        }
+        let y = t.pixel.round();
+        if y > 0.0 && y < pane_h {
+            rects.push(ColoredRect {
+                x: 0.0,
+                y: y as f32,
+                w: pane_w as f32,
+                h: 1.0,
+                r: gr,
+                g: gg,
+                b: gb,
+                a: ga,
+            });
+        }
+    }
+
+    rects
 }
 
 /// Generate candle rects (wicks, borders, body fills).
