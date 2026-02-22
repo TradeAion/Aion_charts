@@ -1,7 +1,7 @@
 //! Drawing trait — the interface all drawing tools implement.
 
-use crate::core::viewport::Viewport;
 use super::types::*;
+use crate::core::viewport::Viewport;
 
 /// Unique ID counter for drawings.
 static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -89,7 +89,9 @@ pub trait Drawing: std::fmt::Debug {
             self.set_state(DrawingState::Idle);
             true
         } else {
-            self.set_state(DrawingState::Creating { step: next_step as u8 });
+            self.set_state(DrawingState::Creating {
+                step: next_step as u8,
+            });
             false
         }
     }
@@ -101,7 +103,7 @@ pub trait Drawing: std::fmt::Debug {
             _ => return,
         };
         let anchors = self.anchors_mut(); // borrow after state read
-        // Ensure we have enough anchors for the preview
+                                          // Ensure we have enough anchors for the preview
         while anchors.len() <= step {
             anchors.push(AnchorPoint::new(bar_index, price));
         }
@@ -173,17 +175,27 @@ pub fn generate_anchor_circles(
     v_pixel_ratio: f64,
     color: &[f32; 4],
 ) -> Vec<AnchorCircle> {
-    anchors.iter().map(|a| {
-        let (bx, by) = point_to_bitmap(&a.point, vp, pane_css_w, pane_css_h, h_pixel_ratio, v_pixel_ratio);
-        // Use average ratio for radius so circles stay round
-        let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
-        AnchorCircle {
-            cx: bx,
-            cy: by,
-            radius: (a.hit_radius * avg_ratio).round(),
-            fill: [1.0, 1.0, 1.0, 1.0], // white fill
-            border: *color,
-            border_width: (1.0 * avg_ratio).floor().max(1.0),
-        }
-    }).collect()
+    anchors
+        .iter()
+        .map(|a| {
+            let (bx, by) = point_to_bitmap(
+                &a.point,
+                vp,
+                pane_css_w,
+                pane_css_h,
+                h_pixel_ratio,
+                v_pixel_ratio,
+            );
+            // Use average ratio for radius so circles stay round
+            let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
+            AnchorCircle {
+                cx: bx,
+                cy: by,
+                radius: (a.hit_radius * avg_ratio).round(),
+                fill: [1.0, 1.0, 1.0, 1.0], // white fill
+                border: *color,
+                border_width: (1.0 * avg_ratio).floor().max(1.0),
+            }
+        })
+        .collect()
 }

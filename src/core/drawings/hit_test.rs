@@ -3,11 +3,7 @@
 //! All functions operate in CSS pixel coordinates.
 
 /// Distance from point (px, py) to line segment (x0,y0)→(x1,y1) in CSS px.
-pub fn point_to_segment_distance(
-    px: f64, py: f64,
-    x0: f64, y0: f64,
-    x1: f64, y1: f64,
-) -> f64 {
+pub fn point_to_segment_distance(px: f64, py: f64, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
     let dx = x1 - x0;
     let dy = y1 - y0;
     let len_sq = dx * dx + dy * dy;
@@ -29,11 +25,7 @@ pub fn point_to_segment_distance(
 
 /// Check if point (px, py) is inside axis-aligned rectangle defined by two corners.
 /// Corners can be in any order (will be min/max'd).
-pub fn point_in_rect(
-    px: f64, py: f64,
-    x0: f64, y0: f64,
-    x1: f64, y1: f64,
-) -> bool {
+pub fn point_in_rect(px: f64, py: f64, x0: f64, y0: f64, x1: f64, y1: f64) -> bool {
     let min_x = x0.min(x1);
     let max_x = x0.max(x1);
     let min_y = y0.min(y1);
@@ -43,30 +35,23 @@ pub fn point_in_rect(
 
 /// Distance from point to the nearest edge of an axis-aligned rectangle.
 /// Returns 0.0 if the point is inside the rect.
-pub fn point_to_rect_edge_distance(
-    px: f64, py: f64,
-    x0: f64, y0: f64,
-    x1: f64, y1: f64,
-) -> f64 {
+pub fn point_to_rect_edge_distance(px: f64, py: f64, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
     let min_x = x0.min(x1);
     let max_x = x0.max(x1);
     let min_y = y0.min(y1);
     let max_y = y0.max(y1);
 
     // Distance to each edge segment
-    let top    = point_to_segment_distance(px, py, min_x, min_y, max_x, min_y);
+    let top = point_to_segment_distance(px, py, min_x, min_y, max_x, min_y);
     let bottom = point_to_segment_distance(px, py, min_x, max_y, max_x, max_y);
-    let left   = point_to_segment_distance(px, py, min_x, min_y, min_x, max_y);
-    let right  = point_to_segment_distance(px, py, max_x, min_y, max_x, max_y);
+    let left = point_to_segment_distance(px, py, min_x, min_y, min_x, max_y);
+    let right = point_to_segment_distance(px, py, max_x, min_y, max_x, max_y);
 
     top.min(bottom).min(left).min(right)
 }
 
 /// Distance from point to a circle center.
-pub fn point_to_circle_distance(
-    px: f64, py: f64,
-    cx: f64, cy: f64,
-) -> f64 {
+pub fn point_to_circle_distance(px: f64, py: f64, cx: f64, cy: f64) -> f64 {
     ((px - cx).powi(2) + (py - cy).powi(2)).sqrt()
 }
 

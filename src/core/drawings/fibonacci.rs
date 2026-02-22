@@ -1,20 +1,20 @@
 //! Fibonacci Retracement drawing — 2-anchor with horizontal level lines.
 
-use crate::core::viewport::Viewport;
-use crate::core::renderer::draw_list::{ColoredLine, ColoredRect, DrawText};
-use super::types::*;
-use super::drawing::{Drawing, next_drawing_id, point_to_css, generate_anchor_circles};
+use super::drawing::{generate_anchor_circles, next_drawing_id, point_to_css, Drawing};
 use super::hit_test;
+use super::types::*;
+use crate::core::renderer::draw_list::{ColoredLine, ColoredRect, DrawText};
+use crate::core::viewport::Viewport;
 
 /// Standard Fibonacci retracement levels.
 const FIB_LEVELS: &[(f64, &str)] = &[
-    (0.0,   "0%"),
+    (0.0, "0%"),
     (0.236, "23.6%"),
     (0.382, "38.2%"),
-    (0.5,   "50%"),
+    (0.5, "50%"),
     (0.618, "61.8%"),
     (0.786, "78.6%"),
-    (1.0,   "100%"),
+    (1.0, "100%"),
 ];
 
 #[derive(Debug)]
@@ -54,22 +54,38 @@ impl FibonacciDrawing {
 }
 
 impl Drawing for FibonacciDrawing {
-    fn id(&self) -> u64 { self.id }
-    fn tool(&self) -> DrawingTool { DrawingTool::Fibonacci }
-    fn state(&self) -> DrawingState { self.state }
-    fn set_state(&mut self, state: DrawingState) { self.state = state; }
-    fn style(&self) -> &DrawingStyle { &self.style }
-    fn style_mut(&mut self) -> &mut DrawingStyle { &mut self.style }
-    fn anchors(&self) -> &[AnchorPoint] { &self.anchors }
-    fn anchors_mut(&mut self) -> &mut Vec<AnchorPoint> { &mut self.anchors }
-    fn required_anchors(&self) -> usize { 2 }
+    fn id(&self) -> u64 {
+        self.id
+    }
+    fn tool(&self) -> DrawingTool {
+        DrawingTool::Fibonacci
+    }
+    fn state(&self) -> DrawingState {
+        self.state
+    }
+    fn set_state(&mut self, state: DrawingState) {
+        self.state = state;
+    }
+    fn style(&self) -> &DrawingStyle {
+        &self.style
+    }
+    fn style_mut(&mut self) -> &mut DrawingStyle {
+        &mut self.style
+    }
+    fn anchors(&self) -> &[AnchorPoint] {
+        &self.anchors
+    }
+    fn anchors_mut(&mut self) -> &mut Vec<AnchorPoint> {
+        &mut self.anchors
+    }
+    fn required_anchors(&self) -> usize {
+        2
+    }
 
-    fn hit_test(
-        &self,
-        cx: f64, cy: f64,
-        vp: &Viewport, pw: f64, ph: f64,
-    ) -> HitResult {
-        if self.anchors.len() < 2 { return HitResult::miss(); }
+    fn hit_test(&self, cx: f64, cy: f64, vp: &Viewport, pw: f64, ph: f64) -> HitResult {
+        if self.anchors.len() < 2 {
+            return HitResult::miss();
+        }
 
         // Check anchors first
         for (i, a) in self.anchors.iter().enumerate() {
@@ -104,12 +120,18 @@ impl Drawing for FibonacciDrawing {
 
     fn generate_geometry(
         &self,
-        vp: &Viewport, pw: f64, ph: f64, _dpr: f64,
-        h_pixel_ratio: f64, v_pixel_ratio: f64,
+        vp: &Viewport,
+        pw: f64,
+        ph: f64,
+        _dpr: f64,
+        h_pixel_ratio: f64,
+        v_pixel_ratio: f64,
         show_anchors: bool,
     ) -> DrawingGeometry {
         let mut geom = DrawingGeometry::new();
-        if self.anchors.len() < 2 { return geom; }
+        if self.anchors.len() < 2 {
+            return geom;
+        }
 
         let c = &self.style.color;
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
@@ -124,10 +146,15 @@ impl Drawing for FibonacciDrawing {
 
             // Level line
             geom.lines.push(ColoredLine {
-                x0: 0.0, y0: y,
-                x1: pane_phys_w, y1: y,
+                x0: 0.0,
+                y0: y,
+                x1: pane_phys_w,
+                y1: y,
                 width: lw,
-                r: c[0], g: c[1], b: c[2], a: c[3],
+                r: c[0],
+                g: c[1],
+                b: c[2],
+                a: c[3],
                 dash: (6.0 * avg_ratio) as f32,
                 gap: (4.0 * avg_ratio) as f32,
             });
@@ -140,8 +167,13 @@ impl Drawing for FibonacciDrawing {
                     let ry = y.min(next_y);
                     let rh = (y - next_y).abs();
                     geom.rects.push(ColoredRect {
-                        x: 0.0, y: ry, w: pane_phys_w, h: rh,
-                        r: fc[0], g: fc[1], b: fc[2],
+                        x: 0.0,
+                        y: ry,
+                        w: pane_phys_w,
+                        h: rh,
+                        r: fc[0],
+                        g: fc[1],
+                        b: fc[2],
                         a: fc[3] * if i % 2 == 0 { 1.0 } else { 0.5 },
                     });
                 }
@@ -154,12 +186,16 @@ impl Drawing for FibonacciDrawing {
                 x: pane_phys_w - (5.0 * h_pixel_ratio) as f32,
                 y: y - fs * 0.3,
                 font_size: fs,
-                r: c[0], g: c[1], b: c[2], a: c[3],
+                r: c[0],
+                g: c[1],
+                b: c[2],
+                a: c[3],
             });
         }
 
         if show_anchors {
-            geom.anchors = generate_anchor_circles(&self.anchors, vp, pw, ph, h_pixel_ratio, v_pixel_ratio, c);
+            geom.anchors =
+                generate_anchor_circles(&self.anchors, vp, pw, ph, h_pixel_ratio, v_pixel_ratio, c);
         }
 
         geom

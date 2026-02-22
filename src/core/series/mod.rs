@@ -5,9 +5,21 @@
 
 pub mod line_data;
 pub mod line_options;
+pub mod area_options;
+pub mod histogram_options;
+pub mod histogram_data;
+pub mod bar_options;
+pub mod bar_data;
+pub mod baseline_options;
 
 pub use line_data::{LinePoint, LineDataArray};
 pub use line_options::{LineSeriesOptions, LineStyle};
+pub use area_options::AreaSeriesOptions;
+pub use histogram_options::HistogramSeriesOptions;
+pub use histogram_data::{HistogramPoint, HistogramDataArray};
+pub use bar_options::BarSeriesOptions;
+pub use bar_data::{OhlcPoint, OhlcDataArray};
+pub use baseline_options::BaselineSeriesOptions;
 
 // ── Series ID ───────────────────────────────────────────────────────────────
 
@@ -25,6 +37,14 @@ pub enum SeriesType {
     Candlestick,
     /// Single-value line series (SMA, EMA, or any indicator).
     Line,
+    /// Area series — line with gradient fill below (or above).
+    Area,
+    /// Histogram series — vertical bars from a base value.
+    Histogram,
+    /// Bar (OHLC) series — traditional open-high-low-close bars with ticks.
+    Bar,
+    /// Baseline series — line with two-tone fill above/below a base value.
+    Baseline,
 }
 
 // ── Series ──────────────────────────────────────────────────────────────────
@@ -33,10 +53,22 @@ pub enum SeriesType {
 pub struct Series {
     id: SeriesId,
     series_type: SeriesType,
-    /// Line data (only used when series_type == Line).
+    /// Line data (used when series_type == Line or Area).
     pub line_data: LineDataArray,
-    /// Line rendering options.
+    /// Line rendering options (used when series_type == Line).
     pub line_options: LineSeriesOptions,
+    /// Area rendering options (used when series_type == Area).
+    pub area_options: AreaSeriesOptions,
+    /// Histogram rendering options (used when series_type == Histogram).
+    pub histogram_options: HistogramSeriesOptions,
+    /// Histogram data (used when series_type == Histogram).
+    pub histogram_data: HistogramDataArray,
+    /// Bar (OHLC) rendering options (used when series_type == Bar).
+    pub bar_options: BarSeriesOptions,
+    /// Bar (OHLC) data (used when series_type == Bar).
+    pub bar_data: OhlcDataArray,
+    /// Baseline rendering options (used when series_type == Baseline).
+    pub baseline_options: BaselineSeriesOptions,
 }
 
 impl Series {
@@ -46,6 +78,72 @@ impl Series {
             series_type: SeriesType::Line,
             line_data: LineDataArray::new(),
             line_options: options,
+            area_options: AreaSeriesOptions::default(),
+            histogram_options: HistogramSeriesOptions::default(),
+            histogram_data: HistogramDataArray::new(),
+            bar_options: BarSeriesOptions::default(),
+            bar_data: OhlcDataArray::new(),
+            baseline_options: BaselineSeriesOptions::default(),
+        }
+    }
+
+    pub fn new_area(id: SeriesId, options: AreaSeriesOptions) -> Self {
+        Self {
+            id,
+            series_type: SeriesType::Area,
+            line_data: LineDataArray::new(),
+            line_options: LineSeriesOptions::default(),
+            area_options: options,
+            histogram_options: HistogramSeriesOptions::default(),
+            histogram_data: HistogramDataArray::new(),
+            bar_options: BarSeriesOptions::default(),
+            bar_data: OhlcDataArray::new(),
+            baseline_options: BaselineSeriesOptions::default(),
+        }
+    }
+
+    pub fn new_histogram(id: SeriesId, options: HistogramSeriesOptions) -> Self {
+        Self {
+            id,
+            series_type: SeriesType::Histogram,
+            line_data: LineDataArray::new(),
+            line_options: LineSeriesOptions::default(),
+            area_options: AreaSeriesOptions::default(),
+            histogram_options: options,
+            histogram_data: HistogramDataArray::new(),
+            bar_options: BarSeriesOptions::default(),
+            bar_data: OhlcDataArray::new(),
+            baseline_options: BaselineSeriesOptions::default(),
+        }
+    }
+
+    pub fn new_bar(id: SeriesId, options: BarSeriesOptions) -> Self {
+        Self {
+            id,
+            series_type: SeriesType::Bar,
+            line_data: LineDataArray::new(),
+            line_options: LineSeriesOptions::default(),
+            area_options: AreaSeriesOptions::default(),
+            histogram_options: HistogramSeriesOptions::default(),
+            histogram_data: HistogramDataArray::new(),
+            bar_options: options,
+            bar_data: OhlcDataArray::new(),
+            baseline_options: BaselineSeriesOptions::default(),
+        }
+    }
+
+    pub fn new_baseline(id: SeriesId, options: BaselineSeriesOptions) -> Self {
+        Self {
+            id,
+            series_type: SeriesType::Baseline,
+            line_data: LineDataArray::new(),
+            line_options: LineSeriesOptions::default(),
+            area_options: AreaSeriesOptions::default(),
+            histogram_options: HistogramSeriesOptions::default(),
+            histogram_data: HistogramDataArray::new(),
+            bar_options: BarSeriesOptions::default(),
+            bar_data: OhlcDataArray::new(),
+            baseline_options: options,
         }
     }
 
@@ -82,6 +180,38 @@ impl SeriesCollection {
         let id = SeriesId(self.next_id);
         self.next_id += 1;
         self.series.push(Series::new_line(id, options));
+        id
+    }
+
+    /// Add a new area series. Returns the assigned SeriesId.
+    pub fn add_area(&mut self, options: AreaSeriesOptions) -> SeriesId {
+        let id = SeriesId(self.next_id);
+        self.next_id += 1;
+        self.series.push(Series::new_area(id, options));
+        id
+    }
+
+    /// Add a new histogram series. Returns the assigned SeriesId.
+    pub fn add_histogram(&mut self, options: HistogramSeriesOptions) -> SeriesId {
+        let id = SeriesId(self.next_id);
+        self.next_id += 1;
+        self.series.push(Series::new_histogram(id, options));
+        id
+    }
+
+    /// Add a new bar (OHLC) series. Returns the assigned SeriesId.
+    pub fn add_bar(&mut self, options: BarSeriesOptions) -> SeriesId {
+        let id = SeriesId(self.next_id);
+        self.next_id += 1;
+        self.series.push(Series::new_bar(id, options));
+        id
+    }
+
+    /// Add a new baseline series. Returns the assigned SeriesId.
+    pub fn add_baseline(&mut self, options: BaselineSeriesOptions) -> SeriesId {
+        let id = SeriesId(self.next_id);
+        self.next_id += 1;
+        self.series.push(Series::new_baseline(id, options));
         id
     }
 

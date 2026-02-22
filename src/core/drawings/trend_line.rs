@@ -1,10 +1,12 @@
 //! Trend Line drawing — 2-anchor line segment.
 
-use crate::core::viewport::Viewport;
-use crate::core::renderer::draw_list::ColoredLine;
-use super::types::*;
-use super::drawing::{Drawing, next_drawing_id, point_to_css, point_to_bitmap, generate_anchor_circles};
+use super::drawing::{
+    generate_anchor_circles, next_drawing_id, point_to_bitmap, point_to_css, Drawing,
+};
 use super::hit_test;
+use super::types::*;
+use crate::core::renderer::draw_list::ColoredLine;
+use crate::core::viewport::Viewport;
 
 #[derive(Debug)]
 pub struct TrendLineDrawing {
@@ -36,22 +38,38 @@ impl TrendLineDrawing {
 }
 
 impl Drawing for TrendLineDrawing {
-    fn id(&self) -> u64 { self.id }
-    fn tool(&self) -> DrawingTool { DrawingTool::TrendLine }
-    fn state(&self) -> DrawingState { self.state }
-    fn set_state(&mut self, state: DrawingState) { self.state = state; }
-    fn style(&self) -> &DrawingStyle { &self.style }
-    fn style_mut(&mut self) -> &mut DrawingStyle { &mut self.style }
-    fn anchors(&self) -> &[AnchorPoint] { &self.anchors }
-    fn anchors_mut(&mut self) -> &mut Vec<AnchorPoint> { &mut self.anchors }
-    fn required_anchors(&self) -> usize { 2 }
+    fn id(&self) -> u64 {
+        self.id
+    }
+    fn tool(&self) -> DrawingTool {
+        DrawingTool::TrendLine
+    }
+    fn state(&self) -> DrawingState {
+        self.state
+    }
+    fn set_state(&mut self, state: DrawingState) {
+        self.state = state;
+    }
+    fn style(&self) -> &DrawingStyle {
+        &self.style
+    }
+    fn style_mut(&mut self) -> &mut DrawingStyle {
+        &mut self.style
+    }
+    fn anchors(&self) -> &[AnchorPoint] {
+        &self.anchors
+    }
+    fn anchors_mut(&mut self) -> &mut Vec<AnchorPoint> {
+        &mut self.anchors
+    }
+    fn required_anchors(&self) -> usize {
+        2
+    }
 
-    fn hit_test(
-        &self,
-        cx: f64, cy: f64,
-        vp: &Viewport, pw: f64, ph: f64,
-    ) -> HitResult {
-        if self.anchors.len() < 2 { return HitResult::miss(); }
+    fn hit_test(&self, cx: f64, cy: f64, vp: &Viewport, pw: f64, ph: f64) -> HitResult {
+        if self.anchors.len() < 2 {
+            return HitResult::miss();
+        }
 
         let (x0, y0) = point_to_css(&self.anchors[0].point, vp, pw, ph);
         let (x1, y1) = point_to_css(&self.anchors[1].point, vp, pw, ph);
@@ -76,15 +94,35 @@ impl Drawing for TrendLineDrawing {
 
     fn generate_geometry(
         &self,
-        vp: &Viewport, pw: f64, ph: f64, _dpr: f64,
-        h_pixel_ratio: f64, v_pixel_ratio: f64,
+        vp: &Viewport,
+        pw: f64,
+        ph: f64,
+        _dpr: f64,
+        h_pixel_ratio: f64,
+        v_pixel_ratio: f64,
         show_anchors: bool,
     ) -> DrawingGeometry {
         let mut geom = DrawingGeometry::new();
-        if self.anchors.len() < 2 { return geom; }
+        if self.anchors.len() < 2 {
+            return geom;
+        }
 
-        let (bx0, by0) = point_to_bitmap(&self.anchors[0].point, vp, pw, ph, h_pixel_ratio, v_pixel_ratio);
-        let (bx1, by1) = point_to_bitmap(&self.anchors[1].point, vp, pw, ph, h_pixel_ratio, v_pixel_ratio);
+        let (bx0, by0) = point_to_bitmap(
+            &self.anchors[0].point,
+            vp,
+            pw,
+            ph,
+            h_pixel_ratio,
+            v_pixel_ratio,
+        );
+        let (bx1, by1) = point_to_bitmap(
+            &self.anchors[1].point,
+            vp,
+            pw,
+            ph,
+            h_pixel_ratio,
+            v_pixel_ratio,
+        );
 
         let c = &self.style.color;
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
@@ -96,13 +134,17 @@ impl Drawing for TrendLineDrawing {
             x1: bx1 as f32,
             y1: by1 as f32,
             width: line_w as f32,
-            r: c[0], g: c[1], b: c[2], a: c[3],
+            r: c[0],
+            g: c[1],
+            b: c[2],
+            a: c[3],
             dash: self.style.dash.map_or(0.0, |d| (d[0] * avg_ratio) as f32),
             gap: self.style.dash.map_or(0.0, |d| (d[1] * avg_ratio) as f32),
         });
 
         if show_anchors {
-            geom.anchors = generate_anchor_circles(&self.anchors, vp, pw, ph, h_pixel_ratio, v_pixel_ratio, c);
+            geom.anchors =
+                generate_anchor_circles(&self.anchors, vp, pw, ph, h_pixel_ratio, v_pixel_ratio, c);
         }
 
         geom

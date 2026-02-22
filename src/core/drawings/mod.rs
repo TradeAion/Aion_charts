@@ -7,17 +7,17 @@
 //! - `trend_line.rs`, `rectangle.rs`, `fibonacci.rs`, `scale.rs`: concrete tools
 //! - `DrawingManager` (this file): owns all drawings, dispatches hit-tests, manages active tool
 
-pub mod types;
 pub mod drawing;
-pub mod hit_test;
-pub mod trend_line;
-pub mod rectangle;
 pub mod fibonacci;
+pub mod hit_test;
+pub mod rectangle;
 pub mod scale;
+pub mod trend_line;
+pub mod types;
 
 use crate::core::viewport::Viewport;
-use types::*;
 use drawing::Drawing;
+use types::*;
 
 /// Manages all drawings on the chart.
 pub struct DrawingManager {
@@ -49,14 +49,29 @@ impl DrawingManager {
     /// Remove a drawing by ID.
     pub fn remove(&mut self, id: u64) {
         self.drawings.retain(|d| d.id() != id);
-        if self.selected_id == Some(id) { self.selected_id = None; }
-        if self.creating_id == Some(id) { self.creating_id = None; }
+        if self.selected_id == Some(id) {
+            self.selected_id = None;
+        }
+        if self.creating_id == Some(id) {
+            self.creating_id = None;
+        }
     }
 
     /// Remove the currently selected drawing.
     pub fn remove_selected(&mut self) {
         if let Some(id) = self.selected_id.take() {
             self.remove(id);
+        }
+    }
+
+    /// Remove all scale drawings from the chart.
+    pub fn remove_all_scale(&mut self) {
+        self.drawings.retain(|d| d.tool() != DrawingTool::Scale);
+        // Clear selection if it pointed to a scale drawing that was removed
+        if let Some(id) = self.selected_id {
+            if self.get(id).is_none() {
+                self.selected_id = None;
+            }
         }
     }
 
@@ -127,7 +142,9 @@ impl DrawingManager {
             if result.is_hit() {
                 match &best {
                     Some((_, prev)) if prev.distance <= result.distance => {}
-                    _ => { best = Some((d.id(), result)); }
+                    _ => {
+                        best = Some((d.id(), result));
+                    }
                 }
             }
         }
@@ -139,7 +156,9 @@ impl DrawingManager {
     /// Returns the ID of the new drawing, or None if no tool is active.
     pub fn start_creating(&mut self, bar_index: f64, price: f64) -> Option<u64> {
         let tool = self.active_tool;
-        if tool == DrawingTool::None { return None; }
+        if tool == DrawingTool::None {
+            return None;
+        }
 
         self.deselect_all();
 
@@ -182,12 +201,20 @@ impl DrawingManager {
         };
 
         if complete {
+            let tool = self
+                .drawings
+                .iter()
+                .find(|d| d.id() == id)
+                .map(|d| d.tool());
             self.creating_id = None;
             self.selected_id = Some(id);
             if let Some(d) = self.drawings.iter_mut().find(|d| d.id() == id) {
                 d.set_state(DrawingState::Selected);
             }
-            self.active_tool = DrawingTool::None;
+            // Scale tool is hold-only: keep it active so user can immediately create another
+            if tool != Some(DrawingTool::Scale) {
+                self.active_tool = DrawingTool::None;
+            }
         }
         complete
     }
@@ -214,7 +241,11 @@ impl DrawingManager {
     pub fn update_drag(&mut self, id: u64, bar_index: f64, price: f64) {
         if let Some(d) = self.get_mut(id) {
             match d.state() {
-                DrawingState::Dragging { anchor_index, start_bar, start_price } => {
+                DrawingState::Dragging {
+                    anchor_index,
+                    start_bar,
+                    start_price,
+                } => {
                     if let Some(ai) = anchor_index {
                         // Move single anchor
                         d.move_anchor(ai, bar_index, price);
@@ -257,9 +288,22 @@ impl DrawingManager {
         let mut top = Vec::new();
 
         for d in &self.drawings {
-            let show_anchors = matches!(d.state(), DrawingState::Selected | DrawingState::Dragging { .. });
-            let geom = d.generate_geometry(vp, pane_css_w, pane_css_h, dpr, h_pixel_ratio, v_pixel_ratio, show_anchors);
-            if geom.is_empty() { continue; }
+            let show_anchors = matches!(
+                d.state(),
+                DrawingState::Selected | DrawingState::Dragging { .. }
+            );
+            let geom = d.generate_geometry(
+                vp,
+                pane_css_w,
+                pane_css_h,
+                dpr,
+                h_pixel_ratio,
+                v_pixel_ratio,
+                show_anchors,
+            );
+            if geom.is_empty() {
+                continue;
+            }
 
             match d.z_order() {
                 ZOrder::Top => top.push(geom),

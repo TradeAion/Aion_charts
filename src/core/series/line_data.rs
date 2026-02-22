@@ -11,6 +11,7 @@ pub struct LinePoint {
 }
 
 /// Columnar storage for line series data.
+#[derive(Debug, Clone)]
 pub struct LineDataArray {
     pub timestamps: Vec<u64>,
     pub values: Vec<f32>,

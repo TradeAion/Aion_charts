@@ -192,7 +192,12 @@
     <button class="toggle-btn" id="draw-scale" title="Price Range / Scale">Scale</button>
     <button class="toggle-btn" id="draw-clear" title="Clear all drawings">Clear</button>
     <span style="color:#444;margin:0 4px">|</span>
-    <button class="toggle-btn" id="sma-toggle" title="Toggle SMA-20 line overlay">SMA-20</button>
+    <button class="toggle-btn" id="sma-toggle" title="Toggle SMA-20 study">SMA-20</button>
+    <button class="toggle-btn" id="ema-toggle" title="Toggle EMA-20 study">EMA-20</button>
+    <button class="toggle-btn" id="rsi-toggle" title="Toggle RSI-14 study">RSI-14</button>
+    <button class="toggle-btn" id="macd-toggle" title="Toggle MACD study">MACD</button>
+    <span style="color:#444;margin:0 4px">|</span>
+    <button class="toggle-btn" id="stream-toggle" title="Start/stop real-time bar simulation">▶ Live</button>
     <div class="toggle-group" id="toggle-group"></div>
   </header>
 
@@ -202,7 +207,7 @@
   </div>
 
   <script type="module">
-    import init, { RayCore } from '../pkg/raycore_wasm.js?v=20260222e';
+    import init, { RayCore } from '../pkg/raycore_wasm.js?v=20250615a';
 
     const errorBanner = document.getElementById('error-banner');
     const loading = document.getElementById('loading');
@@ -242,6 +247,16 @@
       if (e.key === 'Escape') {
         core.cancel_drawing();
         core.set_drawing_tool('none');
+        activeDrawTool = 'none';
+        for (const [bid, _] of Object.entries(drawBtns)) {
+          document.getElementById(bid).classList.remove('active');
+        }
+      }
+    });
+
+    // Right-click: sync toolbar state (scale tool exits on right-click via WASM)
+    document.addEventListener('contextmenu', () => {
+      if (activeDrawTool === 'scale') {
         activeDrawTool = 'none';
         for (const [bid, _] of Object.entries(drawBtns)) {
           document.getElementById(bid).classList.remove('active');
@@ -314,91 +329,155 @@
 
         hud.textContent = currentRenderer + ' | 600 bars | dpr=' + (window.devicePixelRatio || 1).toFixed(1);
 
-        // ── SMA-20 line series overlay ──────────────────
-        const SMA_PERIOD = 20;
+        // ── Studies & Overlays ──────────────────────────────────────────────
         const numBars = 600;
-        // Replicate the exact LCG from demo_data.rs so we can compute close prices
         const nowMs = Date.now();
         const intervalMs = 60000;
         const startMs = nowMs - numBars * intervalMs;
 
-        // LCG constants matching Rust: seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)
-        function lcgNext(seed) {
-          // Use BigInt for exact 64-bit wrapping arithmetic
-          const a = 6364136223846793005n;
-          const c = 1442695040888963407n;
-          const mask = (1n << 64n) - 1n;
-          return (seed * a + c) & mask;
-        }
-        function lcgF64(seed) {
-          // (seed >> 11) / (1 << 53)
-          return Number(seed >> 11n) / Number(1n << 53n);
-        }
+        // ── Study management ────────────────────────────────────────────────
+        // Track study IDs and their line series overlays
+        const studies = {
+          sma: { id: null, seriesId: null, visible: false, btn: document.getElementById('sma-toggle') },
+          ema: { id: null, seriesId: null, visible: false, btn: document.getElementById('ema-toggle') },
+          rsi: { id: null, seriesId: null, visible: false, btn: document.getElementById('rsi-toggle') },
+          macd: { id: null, seriesIds: [], visible: false, btn: document.getElementById('macd-toggle') },
+        };
 
-        function generateDemoCloses() {
-          const closes = new Float32Array(numBars);
-          let price = 42000.0;
-          // Seed matching Rust: 12345 ^ (n * 67890)
-          let seed = BigInt(12345) ^ (BigInt(numBars) * BigInt(67890));
-          // Make sure seed is unsigned 64-bit
-          const mask = (1n << 64n) - 1n;
-          seed = seed & mask;
+        // Study line colors
+        const studyColors = {
+          sma:  { r: 0.161, g: 0.384, b: 1.0,   a: 1.0 },  // #2962FF blue
+          ema:  { r: 1.0,   g: 0.627, b: 0.0,   a: 1.0 },  // #FFA000 amber
+          rsi:  { r: 0.608, g: 0.349, b: 0.714, a: 1.0 },  // #9B59B6 purple
+          macd_line:   { r: 0.161, g: 0.384, b: 1.0,   a: 1.0 },  // blue
+          macd_signal: { r: 1.0,   g: 0.627, b: 0.0,   a: 1.0 },  // amber
+          macd_hist:   { r: 0.18,  g: 0.8,   b: 0.44,  a: 0.6 },  // green
+        };
 
-          for (let i = 0; i < numBars; i++) {
-            seed = lcgNext(seed);
-            const r1 = lcgF64(seed);
-            seed = lcgNext(seed);
-            // skip r2
-            seed = lcgNext(seed);
-            // skip r3
-            seed = lcgNext(seed);
-            // skip r4
+        function createStudyAndOverlay(type) {
+          const study = studies[type];
+          if (study.id !== null) return; // already created
 
-            const change = (r1 - 0.48) * price * 0.012;
-            const c = price + change;
-            closes[i] = c;
-            price = c;
+          // Create the study via WASM API
+          study.id = core.create_study(type);
+          if (study.id === 0) {
+            console.warn(`Failed to create study: ${type}`);
+            study.id = null;
+            return;
           }
-          return closes;
-        }
 
-        let smaSeriesId = null;
-        const smaBtn = document.getElementById('sma-toggle');
-        let smaVisible = false;
+          // Get study output and create line series overlay(s)
+          if (type === 'macd') {
+            // MACD has 3 outputs: MACD line, Signal line, Histogram
+            for (let outIdx = 0; outIdx < 3; outIdx++) {
+              const output = core.get_study_output(study.id, outIdx);
+              if (!output) continue;
 
-        function addSmaOverlay() {
-          if (smaSeriesId !== null) return;
-          // Add SMA line: TradingView blue (#2962FF), 2px width
-          smaSeriesId = core.add_line_series(0.161, 0.384, 1.0, 1.0, 2.0);
+              let seriesId;
+              if (outIdx === 0) {
+                // MACD line
+                const c = studyColors.macd_line;
+                seriesId = core.add_line_series(c.r, c.g, c.b, c.a, 2.0);
+              } else if (outIdx === 1) {
+                // Signal line
+                const c = studyColors.macd_signal;
+                seriesId = core.add_line_series(c.r, c.g, c.b, c.a, 1.5);
+              } else {
+                // Histogram — use histogram series
+                const c = studyColors.macd_hist;
+                seriesId = core.add_histogram_series(c.r, c.g, c.b, c.a, 0.0);
+              }
 
-          const closes = generateDemoCloses();
-          // Compute SMA-20
-          const smaCount = numBars - SMA_PERIOD + 1;
-          const values = new Float32Array(smaCount);
-          const timestamps = new BigUint64Array(smaCount);
-
-          for (let i = 0; i < smaCount; i++) {
-            let sum = 0;
-            for (let j = 0; j < SMA_PERIOD; j++) {
-              sum += closes[i + j];
+              // Set data from study output
+              if (outIdx < 2) {
+                core.set_series_data(seriesId, output.values, output.timestamps);
+              } else {
+                // Histogram data
+                core.set_histogram_data(seriesId, output.values, output.timestamps,
+                  new Float32Array(0), new Float32Array(0), new Float32Array(0), new Float32Array(0));
+              }
+              study.seriesIds.push(seriesId);
             }
-            values[i] = sum / SMA_PERIOD;
-            // SMA value is aligned to the last bar in the window
-            timestamps[i] = BigInt(startMs + (i + SMA_PERIOD - 1) * intervalMs);
+          } else {
+            // Single-output studies (SMA, EMA, RSI)
+            const output = core.get_study_output(study.id, 0);
+            if (!output) {
+              console.warn(`No output for study ${type}`);
+              return;
+            }
+
+            const c = studyColors[type];
+            study.seriesId = core.add_line_series(c.r, c.g, c.b, c.a, 2.0);
+            core.set_series_data(study.seriesId, output.values, output.timestamps);
           }
 
-          core.set_series_data(smaSeriesId, values, timestamps);
-          smaVisible = true;
-          smaBtn.classList.add('active');
+          study.visible = true;
+          study.btn.classList.add('active');
         }
 
-        smaBtn.addEventListener('click', () => {
-          if (smaSeriesId === null) {
-            addSmaOverlay();
+        function toggleStudy(type) {
+          const study = studies[type];
+          if (study.id === null) {
+            createStudyAndOverlay(type);
           } else {
-            smaVisible = !smaVisible;
-            core.set_series_visible(smaSeriesId, smaVisible);
-            smaBtn.classList.toggle('active', smaVisible);
+            study.visible = !study.visible;
+            if (type === 'macd') {
+              for (const sid of study.seriesIds) {
+                core.set_series_visible(sid, study.visible);
+              }
+            } else {
+              core.set_series_visible(study.seriesId, study.visible);
+            }
+            study.btn.classList.toggle('active', study.visible);
+          }
+        }
+
+        // Wire up study buttons
+        studies.sma.btn.addEventListener('click', () => toggleStudy('sma'));
+        studies.ema.btn.addEventListener('click', () => toggleStudy('ema'));
+        studies.rsi.btn.addEventListener('click', () => toggleStudy('rsi'));
+        studies.macd.btn.addEventListener('click', () => toggleStudy('macd'));
+
+        // ── Real-time streaming simulation ──────────────────────────────────
+        let streamInterval = null;
+        let lastBarTs = BigInt(startMs + (numBars - 1) * intervalMs);
+        let lastClose = 42000.0; // approximate starting price
+        const streamBtn = document.getElementById('stream-toggle');
+
+        function simulateTick() {
+          // Random walk for price
+          const change = (Math.random() - 0.48) * lastClose * 0.003;
+          const newClose = lastClose + change;
+          const newHigh = Math.max(newClose, lastClose) + Math.abs(change) * 0.5;
+          const newLow = Math.min(newClose, lastClose) - Math.abs(change) * 0.5;
+          const volume = 100 + Math.random() * 500;
+
+          // Every 3 seconds, start a new bar; otherwise update the last bar
+          const now = BigInt(Date.now());
+          const elapsed = Number(now - lastBarTs);
+
+          if (elapsed >= 3000) {
+            // New bar
+            lastBarTs = now;
+            core.append_bar(now, newClose, newHigh, newLow, newClose, volume);
+          } else {
+            // Update current bar
+            core.update_last_bar(lastBarTs, lastClose, newHigh, newLow, newClose, volume);
+          }
+
+          lastClose = newClose;
+        }
+
+        streamBtn.addEventListener('click', () => {
+          if (streamInterval) {
+            clearInterval(streamInterval);
+            streamInterval = null;
+            streamBtn.textContent = '▶ Live';
+            streamBtn.classList.remove('active');
+          } else {
+            streamInterval = setInterval(simulateTick, 200);
+            streamBtn.textContent = '⏸ Live';
+            streamBtn.classList.add('active');
           }
         });
 

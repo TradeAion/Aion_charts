@@ -24,7 +24,7 @@ use raycore::{
     PriceAxisRenderer, TimeAxisRenderer,
     InteractionHandler, HitZone,
     generate_sample_data, tick_marks,
-    LinePoint, LineSeriesOptions, SeriesId,
+    LinePoint, LineSeriesOptions, AreaSeriesOptions, HistogramSeriesOptions, BarSeriesOptions, BaselineSeriesOptions, SeriesId,
 };
 
 mod canvas_manager;
@@ -105,6 +105,9 @@ impl ChartInner {
         let candle_css_h = ph * self.engine.viewport.candle_height_frac();
         let price = self.engine.viewport.pixel_to_price(y, candle_css_h);
 
+        let mut is_drawing_drag = false;
+        let mut hover_cursor: Option<&'static str> = None;
+
         // Drawing tool: update preview or drag
         {
             let drawings = &mut self.engine.drawings;
@@ -115,9 +118,33 @@ impl ChartInner {
                 if matches!(drawings.get(id).map(|d| d.state()),
                     Some(raycore::core::drawings::types::DrawingState::Dragging { .. })) {
                     drawings.update_drag(id, bar, price);
-                    return; // don't move chart while dragging drawing
+                    is_drawing_drag = true;
                 }
             }
+
+            // Hover hit-test for cursor feedback (not during drag/creation, no tool active)
+            if !is_drawing_drag && !drawings.is_creating()
+                && drawings.active_tool == raycore::DrawingTool::None
+            {
+                if let Some((hit_id, result)) = drawings.hit_test(x, y, &self.engine.viewport, pw, ph) {
+                    use raycore::core::drawings::types::cursor_for_drawing_hit;
+                    let tool = drawings.get(hit_id)
+                        .map(|d| d.tool())
+                        .unwrap_or(raycore::DrawingTool::None);
+                    hover_cursor = Some(cursor_for_drawing_hit(tool, result.part, None));
+                }
+            }
+        }
+
+        // Update hover cursor only when not in a drawing drag
+        if !self.interaction.drawing_drag_active {
+            self.interaction.set_drawing_cursor(hover_cursor);
+        }
+
+        if is_drawing_drag {
+            // Suppress crosshair while dragging a drawing
+            self.engine.crosshair.active = false;
+            return; // don't move chart while dragging drawing
         }
 
         let Self { interaction, engine, .. } = self;
@@ -136,33 +163,60 @@ impl ChartInner {
             // Use candle area height — consistent with point_to_css / price_to_css_y.
             let candle_css_h = ph * self.engine.viewport.candle_height_frac();
             let price = self.engine.viewport.pixel_to_price(y, candle_css_h);
-            let drawings = &mut self.engine.drawings;
 
-            if drawings.is_tool_active() {
-                // Start creating a new drawing
-                if !drawings.is_creating() {
-                    drawings.start_creating(bar, price);
+            let mut should_return = false;
+            let mut drag_cursor: Option<&'static str> = None;
+
+            {
+                let drawings = &mut self.engine.drawings;
+
+                if drawings.is_tool_active() {
+                    // Start creating a new drawing
+                    if !drawings.is_creating() {
+                        drawings.start_creating(bar, price);
+                    } else {
+                        // Multi-step tools: place next anchor on click
+                        drawings.finalize_creation_step(bar, price);
+                    }
+                    should_return = true;
                 } else {
-                    // Multi-step tools: place next anchor on click
-                    drawings.finalize_creation_step(bar, price);
+                    // No tool active: check if user clicked on an existing drawing
+                    let hit = drawings.hit_test(x, y, &self.engine.viewport, pw, ph);
+                    if let Some((id, result)) = hit {
+                        use raycore::core::drawings::types::{HitPart, cursor_for_drawing_hit};
+                        let tool = drawings.get(id)
+                            .map(|d| d.tool())
+                            .unwrap_or(raycore::DrawingTool::None);
+                        let anchor_idx = match result.part {
+                            HitPart::Anchor(i) => Some(i),
+                            _ => None,
+                        };
+
+                        // Rectangle: body clicks select only and fall through to
+                        // chart pan. Edge clicks move the whole rectangle.
+                        // Anchor clicks resize (move single anchor).
+                        if tool == raycore::DrawingTool::Rectangle && result.part == HitPart::Body {
+                            drawings.select(id);
+                            // Don't start drag — fall through to chart pan
+                        } else {
+                            drawings.select(id);
+                            drawings.start_drag(id, anchor_idx, bar, price);
+                            drag_cursor = Some(cursor_for_drawing_hit(tool, result.part, anchor_idx));
+                            should_return = true;
+                        }
+                    } else {
+                        // Click on empty space: deselect
+                        drawings.deselect_all();
+                    }
                 }
-                return; // don't pan/zoom while drawing
-            } else {
-                // No tool active: check if user clicked on an existing drawing
-                let hit = drawings.hit_test(x, y, &self.engine.viewport, pw, ph);
-                if let Some((id, result)) = hit {
-                    use raycore::core::drawings::types::HitPart;
-                    let anchor_idx = match result.part {
-                        HitPart::Anchor(i) => Some(i),
-                        _ => None,
-                    };
-                    drawings.select(id);
-                    drawings.start_drag(id, anchor_idx, bar, price);
-                    return; // don't pan while starting a drawing drag
-                } else {
-                    // Click on empty space: deselect
-                    drawings.deselect_all();
+            }
+
+            if should_return {
+                if let Some(cursor) = drag_cursor {
+                    self.interaction.drawing_drag_active = true;
+                    self.interaction.set_drawing_cursor(Some(cursor));
                 }
+                return; // don't pan while drawing tool / drawing drag
             }
         }
 
@@ -202,15 +256,25 @@ impl ChartInner {
         }
 
         // End any drawing drag
+        let mut ended_drag = false;
         {
             let drawings = &mut self.engine.drawings;
             if let Some(id) = drawings.selected_id {
                 if matches!(drawings.get(id).map(|d| d.state()),
                     Some(raycore::core::drawings::types::DrawingState::Dragging { .. })) {
                     drawings.end_drag(id);
-                    return;
+                    ended_drag = true;
                 }
             }
+        }
+        if ended_drag {
+            self.interaction.drawing_drag_active = false;
+            self.interaction.set_drawing_cursor(None);
+            // Restore crosshair for mouse (touch handled by tracking mode)
+            if !self.interaction.is_touch {
+                self.engine.crosshair.active = true;
+            }
+            return;
         }
 
         let _ = (pw, ph); // suppress unused warning
@@ -472,7 +536,7 @@ impl RayCore {
                 s.on_pane_pointer_move(x, y);
                 
                 let cursor = s.cursor_css();
-                let is_dragging = s.interaction.is_dragging();
+                let is_dragging = s.interaction.is_dragging() || s.interaction.drawing_drag_active;
                 
                 let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
                 let _ = html_el.style().set_property("cursor", cursor);
@@ -496,6 +560,10 @@ impl RayCore {
             let last_tap = Rc::clone(&last_tap_time);
             let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                 let pe: web_sys::PointerEvent = e.unchecked_into();
+
+                // Ignore right-click (button 2) — handled by contextmenu
+                if pe.button() == 2 { return; }
+
                 let (x, y) = event_css_pos(&pe, &pane_c);
                 let mut s = inner.borrow_mut();
 
@@ -602,10 +670,18 @@ impl RayCore {
             )?;
             wheel_closures.push(cb);
         }
-        // pane: contextmenu
+        // pane: contextmenu — remove all scale drawings and exit scale mode on right-click
         {
+            let inner = Rc::clone(&inner);
             let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                 e.prevent_default();
+                let mut s = inner.borrow_mut();
+                s.engine.drawings.remove_all_scale();
+                // Also exit scale drawing mode if active
+                if s.engine.drawings.active_tool == raycore::DrawingTool::Scale {
+                    s.engine.drawings.cancel_creation();
+                    s.engine.drawings.active_tool = raycore::DrawingTool::None;
+                }
             }));
             pane_el.add_event_listener_with_callback("contextmenu", cb.as_ref().unchecked_ref())?;
             closures.push(cb);
@@ -1323,6 +1399,11 @@ impl RayCore {
         }
     }
 
+    /// Remove all scale (measurement) drawings.
+    pub fn remove_all_scale_drawings(&mut self) {
+        self.inner.borrow_mut().engine.drawings.remove_all_scale();
+    }
+
     /// Get the number of drawings.
     pub fn drawing_count(&self) -> usize {
         self.inner.borrow().engine.drawings.len()
@@ -1346,6 +1427,167 @@ impl RayCore {
         opts.line_width = line_width as f64;
         let id = self.inner.borrow_mut().engine.add_line_series(opts);
         log::info!("add_line_series: id={}", id.0);
+        id.0
+    }
+
+    /// Add a new area series overlay. Returns the series ID.
+    ///
+    /// `line_color_*`: RGBA for the line stroke.
+    /// `top_color_*`: RGBA for the fill at the line (top of gradient).
+    /// `bottom_color_*`: RGBA for the fill at the base (bottom of gradient).
+    pub fn add_area_series(
+        &mut self,
+        line_color_r: f32,
+        line_color_g: f32,
+        line_color_b: f32,
+        line_color_a: f32,
+        top_color_r: f32,
+        top_color_g: f32,
+        top_color_b: f32,
+        top_color_a: f32,
+        bottom_color_r: f32,
+        bottom_color_g: f32,
+        bottom_color_b: f32,
+        bottom_color_a: f32,
+        line_width: f32,
+    ) -> u32 {
+        let mut opts = AreaSeriesOptions::default();
+        opts.line_color = [line_color_r, line_color_g, line_color_b, line_color_a];
+        opts.top_color = [top_color_r, top_color_g, top_color_b, top_color_a];
+        opts.bottom_color = [bottom_color_r, bottom_color_g, bottom_color_b, bottom_color_a];
+        opts.line_width = line_width as f64;
+        let id = self.inner.borrow_mut().engine.add_area_series(opts);
+        log::info!("add_area_series: id={}", id.0);
+        id.0
+    }
+
+    /// Add a new histogram series overlay. Returns the series ID.
+    ///
+    /// `color_*`: RGBA for the default bar color.
+    /// `base`: the base value (bars extend from base to data value).
+    pub fn add_histogram_series(
+        &mut self,
+        color_r: f32,
+        color_g: f32,
+        color_b: f32,
+        color_a: f32,
+        base: f64,
+    ) -> u32 {
+        let mut opts = HistogramSeriesOptions::default();
+        opts.color = [color_r, color_g, color_b, color_a];
+        opts.base = base;
+        let id = self.inner.borrow_mut().engine.add_histogram_series(opts);
+        log::info!("add_histogram_series: id={}", id.0);
+        id.0
+    }
+
+    /// Set data for a histogram series. `values` and `timestamps` must be same length.
+    /// Per-bar colors are optional — pass empty arrays to use the series default color.
+    pub fn set_histogram_data(
+        &mut self,
+        id: u32,
+        values: &[f32],
+        timestamps: &[u64],
+        colors_r: &[f32],
+        colors_g: &[f32],
+        colors_b: &[f32],
+        colors_a: &[f32],
+    ) {
+        let count = values.len().min(timestamps.len());
+        let has_colors = colors_r.len() >= count
+            && colors_g.len() >= count
+            && colors_b.len() >= count
+            && colors_a.len() >= count;
+
+        let mut s = self.inner.borrow_mut();
+        if has_colors {
+            // Build per-bar color array
+            let mut colors = Vec::with_capacity(count);
+            for i in 0..count {
+                colors.push([colors_r[i], colors_g[i], colors_b[i], colors_a[i]]);
+            }
+            if let Some(series) = s.engine.series.get_mut(SeriesId(id)) {
+                series.histogram_data.set_from_arrays_with_colors(timestamps, values, &colors);
+            }
+        } else {
+            s.engine.set_histogram_data_arrays(SeriesId(id), timestamps, values);
+        }
+        log::info!("set_histogram_data: id={}, {} points, colors={}", id, count, has_colors);
+    }
+
+    /// Add a new bar (OHLC) series overlay. Returns the series ID.
+    ///
+    /// `up_color_*`: RGBA for bullish bars (close >= open).
+    /// `down_color_*`: RGBA for bearish bars (close < open).
+    /// `open_visible`: whether to show the open tick.
+    /// `thin_bars`: use 1px stems (like LWC thinBars option).
+    pub fn add_bar_series(
+        &mut self,
+        up_color_r: f32,
+        up_color_g: f32,
+        up_color_b: f32,
+        up_color_a: f32,
+        down_color_r: f32,
+        down_color_g: f32,
+        down_color_b: f32,
+        down_color_a: f32,
+        open_visible: bool,
+        thin_bars: bool,
+    ) -> u32 {
+        let mut opts = BarSeriesOptions::default();
+        opts.up_color = [up_color_r, up_color_g, up_color_b, up_color_a];
+        opts.down_color = [down_color_r, down_color_g, down_color_b, down_color_a];
+        opts.open_visible = open_visible;
+        opts.thin_bars = thin_bars;
+        let id = self.inner.borrow_mut().engine.add_bar_series(opts);
+        log::info!("add_bar_series: id={}", id.0);
+        id.0
+    }
+
+    /// Set data for a bar (OHLC) series.
+    /// All arrays must be the same length.
+    pub fn set_bar_series_data(
+        &mut self,
+        id: u32,
+        timestamps: &[u64],
+        open: &[f32],
+        high: &[f32],
+        low: &[f32],
+        close: &[f32],
+    ) {
+        let mut s = self.inner.borrow_mut();
+        s.engine.set_bar_data_arrays(SeriesId(id), timestamps, open, high, low, close);
+        let count = timestamps.len().min(open.len()).min(high.len()).min(low.len()).min(close.len());
+        log::info!("set_bar_series_data: id={}, {} bars", id, count);
+    }
+
+    /// Add a new baseline series overlay. Returns the series ID.
+    ///
+    /// A baseline series renders a line with two-tone fill above/below a base value.
+    /// Above the base: `top_line_color` line + `top_fill_color1`→`top_fill_color2` gradient.
+    /// Below the base: `bottom_line_color` line + `bottom_fill_color1`→`bottom_fill_color2` gradient.
+    pub fn add_baseline_series(
+        &mut self,
+        base_value: f64,
+        top_line_r: f32, top_line_g: f32, top_line_b: f32, top_line_a: f32,
+        bottom_line_r: f32, bottom_line_g: f32, bottom_line_b: f32, bottom_line_a: f32,
+        top_fill1_r: f32, top_fill1_g: f32, top_fill1_b: f32, top_fill1_a: f32,
+        top_fill2_r: f32, top_fill2_g: f32, top_fill2_b: f32, top_fill2_a: f32,
+        bottom_fill1_r: f32, bottom_fill1_g: f32, bottom_fill1_b: f32, bottom_fill1_a: f32,
+        bottom_fill2_r: f32, bottom_fill2_g: f32, bottom_fill2_b: f32, bottom_fill2_a: f32,
+        line_width: f32,
+    ) -> u32 {
+        let mut opts = BaselineSeriesOptions::default();
+        opts.base_value = base_value;
+        opts.top_line_color = [top_line_r, top_line_g, top_line_b, top_line_a];
+        opts.bottom_line_color = [bottom_line_r, bottom_line_g, bottom_line_b, bottom_line_a];
+        opts.top_fill_color1 = [top_fill1_r, top_fill1_g, top_fill1_b, top_fill1_a];
+        opts.top_fill_color2 = [top_fill2_r, top_fill2_g, top_fill2_b, top_fill2_a];
+        opts.bottom_fill_color1 = [bottom_fill1_r, bottom_fill1_g, bottom_fill1_b, bottom_fill1_a];
+        opts.bottom_fill_color2 = [bottom_fill2_r, bottom_fill2_g, bottom_fill2_b, bottom_fill2_a];
+        opts.line_width = line_width as f64;
+        let id = self.inner.borrow_mut().engine.add_baseline_series(opts);
+        log::info!("add_baseline_series: id={}, base_value={}", id.0, base_value);
         id.0
     }
 
@@ -1377,6 +1619,131 @@ impl RayCore {
     /// Get the number of overlay series.
     pub fn series_count(&self) -> usize {
         self.inner.borrow().engine.series.len()
+    }
+
+    // ── Study API ─────────────────────────────────────────────────────────
+
+    /// Create a new study instance. Returns the study ID, or 0 if the type is unknown.
+    ///
+    /// Supported types: "sma", "ema", "rsi", "macd".
+    pub fn create_study(&mut self, study_type: &str) -> u32 {
+        let mut s = self.inner.borrow_mut();
+        match s.engine.create_study(study_type) {
+            Some(id) => {
+                // If we have bar data, run initial calculation
+                // We need to split the borrow: collect bar data pointer via raw parts
+                // to avoid simultaneous mutable+immutable borrow on engine.
+                let bar_len = s.engine.bars.len();
+                if bar_len > 0 {
+                    // Safe: update_studies only reads bars, doesn't modify engine.bars
+                    let bars_ptr = &s.engine.bars as *const raycore::BarArray;
+                    unsafe { s.engine.studies.update_studies(&*bars_ptr); }
+                }
+                log::info!("create_study: type='{}', id={}", study_type, id.0);
+                id.0
+            }
+            None => {
+                log::warn!("create_study: unknown type '{}'", study_type);
+                0
+            }
+        }
+    }
+
+    /// Remove a study by ID.
+    pub fn remove_study(&mut self, id: u32) -> bool {
+        let removed = self.inner.borrow_mut().engine.remove_study(raycore::StudyId(id));
+        log::info!("remove_study: id={}, removed={}", id, removed);
+        removed
+    }
+
+    /// Set a study parameter (e.g., "period" for SMA/EMA, "fast_period" for MACD).
+    /// The study will be recalculated on the next render.
+    pub fn set_study_parameter(&mut self, id: u32, key: &str, value: f64) {
+        let mut s = self.inner.borrow_mut();
+        s.engine.set_study_parameter(raycore::StudyId(id), key, value);
+        // Recalculate immediately if we have data
+        let bar_len = s.engine.bars.len();
+        if bar_len > 0 {
+            let bars_ptr = &s.engine.bars as *const raycore::BarArray;
+            unsafe { s.engine.studies.update_studies(&*bars_ptr); }
+        }
+        log::info!("set_study_parameter: id={}, {}={}", id, key, value);
+    }
+
+    /// Get study output data as a JS object { timestamps: BigUint64Array, values: Float32Array }.
+    /// Returns null if the study or output index doesn't exist.
+    pub fn get_study_output(&self, id: u32, output_index: u32) -> JsValue {
+        let s = self.inner.borrow();
+        if let Some(study) = s.engine.studies.get_study(raycore::StudyId(id)) {
+            if let Some(output) = study.get_output(output_index as usize) {
+                let obj = js_sys::Object::new();
+                let ts_arr = js_sys::BigUint64Array::new_with_length(output.data.timestamps.len() as u32);
+                let val_arr = js_sys::Float32Array::new_with_length(output.data.values.len() as u32);
+                // Copy data
+                for i in 0..output.data.timestamps.len() {
+                    ts_arr.set_index(i as u32, output.data.timestamps[i]);
+                }
+                for i in 0..output.data.values.len() {
+                    val_arr.set_index(i as u32, output.data.values[i]);
+                }
+                let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("timestamps"), &ts_arr);
+                let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("values"), &val_arr);
+                let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("name"), &JsValue::from_str(&output.name));
+                return obj.into();
+            }
+        }
+        JsValue::NULL
+    }
+
+    /// Get the number of studies.
+    pub fn study_count(&self) -> usize {
+        self.inner.borrow().engine.study_count()
+    }
+
+    // ── Real-time data updates ────────────────────────────────────────────
+
+    /// Append a single bar to the data array. Used for real-time streaming.
+    pub fn append_bar(
+        &mut self,
+        timestamp: u64,
+        open: f32,
+        high: f32,
+        low: f32,
+        close: f32,
+        volume: f32,
+    ) {
+        let bar = Bar {
+            timestamp,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            _pad: 0.0,
+        };
+        self.inner.borrow_mut().engine.append_bar(bar);
+    }
+
+    /// Update the last bar in the data array. Used for real-time tick updates.
+    pub fn update_last_bar(
+        &mut self,
+        timestamp: u64,
+        open: f32,
+        high: f32,
+        low: f32,
+        close: f32,
+        volume: f32,
+    ) {
+        let bar = Bar {
+            timestamp,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            _pad: 0.0,
+        };
+        self.inner.borrow_mut().engine.update_bar(bar);
     }
 
     // ── Render ───────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@
 //! Coordinates are stored in logical space (bar_index + price) so drawings
 //! survive scroll, zoom, price auto-fit, and window resize.
 
-use crate::core::renderer::draw_list::{ColoredRect, ColoredLine, DrawText};
+use crate::core::renderer::draw_list::{ColoredLine, ColoredRect, DrawText};
 
 // ── Logical coordinate ──────────────────────────────────────────────────────
 
@@ -77,8 +77,59 @@ pub enum HitPart {
     Anchor(usize),
     /// Hit the drawing body (line, rect fill, etc.)
     Body,
+    /// Hit an edge of the drawing (e.g. rectangle border, distinct from interior).
+    Edge,
     /// No hit.
     None,
+}
+
+/// Determine the CSS cursor string for a drawing hit result.
+///
+/// For rectangles:
+///   - Anchor corners → resize cursors (nwse-resize / nesw-resize)
+///   - Edge → pointer
+///   - Body (interior) → default (pass-through to pan)
+///
+/// For trend lines / fib / scale:
+///   - Anchor → grab/move
+///   - Body → move
+pub fn cursor_for_drawing_hit(
+    tool: DrawingTool,
+    part: HitPart,
+    anchor_index: Option<usize>,
+) -> &'static str {
+    match part {
+        HitPart::None => "crosshair",
+        HitPart::Anchor(idx) => {
+            match tool {
+                DrawingTool::Rectangle => {
+                    // 4-corner rectangle: TL=0, TR=1, BR=2, BL=3
+                    match idx {
+                        0 => "nwse-resize", // top-left
+                        1 => "nesw-resize", // top-right
+                        2 => "nwse-resize", // bottom-right
+                        3 => "nesw-resize", // bottom-left
+                        _ => "move",
+                    }
+                }
+                _ => "grab", // trend line, fib, scale anchors
+            }
+        }
+        HitPart::Edge => {
+            match tool {
+                DrawingTool::Rectangle => "move", // edge drag moves the whole rectangle
+                _ => "pointer",
+            }
+        }
+        HitPart::Body => {
+            match tool {
+                // Rectangle body: pass through to pan (crosshair = normal chart cursor)
+                DrawingTool::Rectangle => "crosshair",
+                // Other drawings: move cursor on body
+                _ => "move",
+            }
+        }
+    }
 }
 
 /// Full hit-test result.
@@ -91,7 +142,10 @@ pub struct HitResult {
 
 impl HitResult {
     pub fn miss() -> Self {
-        Self { part: HitPart::None, distance: f64::MAX }
+        Self {
+            part: HitPart::None,
+            distance: f64::MAX,
+        }
     }
 
     pub fn hit(part: HitPart, distance: f64) -> Self {
@@ -183,7 +237,10 @@ impl DrawingGeometry {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.lines.is_empty() && self.rects.is_empty() && self.texts.is_empty() && self.anchors.is_empty()
+        self.lines.is_empty()
+            && self.rects.is_empty()
+            && self.texts.is_empty()
+            && self.anchors.is_empty()
     }
 }
 

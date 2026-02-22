@@ -1,0 +1,167 @@
+# RayCore Feature Audit — Gap Analysis vs LWC
+
+## What RayCore Has Today
+
+| Area | Implemented |
+|---|---|
+| **Series** | Candlestick (OHLCV) only |
+| **Volume** | Volume bars below candles |
+| **Axes** | Price axis (right), Time axis (bottom), corner stub |
+| **Grid** | Horizontal + vertical grid lines |
+| **Crosshair** | Normal, Magnet, MagnetOHLC modes |
+| **Interaction** | Pan, Zoom (wheel), Pinch zoom, Long-press, Touch tracking, Kinetic glide |
+| **Drawings** | Trend line, Rectangle, Fibonacci retracement, Scale tool |
+| **Data** | Apache Arrow columnar storage, LTTB downsampling, NaN/Inf sanitization |
+| **Rendering** | WebGPU (primary) + Canvas2D (fallback), multi-canvas z-ordering, DPR-aware |
+| **Formatters** | Basic price/time formatting |
+
+---
+
+## Missing Features (by priority)
+
+### 🔴 Critical — Series Types
+
+LWC ships **7 series types**. RayCore only has candlestick.
+
+| Series | LWC | RayCore | Notes |
+|---|---|---|---|
+| Candlestick | ✅ | ✅ | Done |
+| **Line** | ✅ | ❌ | Essential for overlays, indicators, price lines |
+| **Area** | ✅ | ❌ | Line with gradient fill — very common |
+| **Bar (OHLC)** | ✅ | ❌ | Traditional OHLC bars (no body, just ticks) |
+| **Histogram** | ✅ | ❌ | Needed for MACD, volume profile overlays |
+| **Baseline** | ✅ | ❌ | Area above/below a base price (P&L view) |
+| **Custom Series** | ✅ | ❌ | Plugin API for user-defined series types |
+
+---
+
+### 🔴 Critical — Multi-Series & Multi-Pane
+
+| Feature | LWC | RayCore | Impact |
+|---|---|---|---|
+| **Multiple series on one pane** | ✅ | ❌ | Can't overlay MA/EMA on candles |
+| **Multi-pane (stacked)** | ✅ | ❌ | Can't show RSI/MACD in separate panes |
+| **Series API** (`addSeries`, `removeSeries`) | ✅ | ❌ | No dynamic series management |
+
+---
+
+### 🔴 Critical — Studies / Indicators
+
+| Feature | LWC | RayCore | Impact |
+|---|---|---|---|
+| **Indicator framework** | Plugin-based | Stub only | `studies/` module is empty |
+| **Built-in indicators** (SMA, EMA, etc.) | Via plugins | ❌ | No indicators at all |
+| **Indicator output rendering** | Line/Histogram/Area | ❌ | Blocked on missing series types |
+
+---
+
+### 🟡 Important — Price Scale Features
+
+| Feature | LWC | RayCore |
+|---|---|---|
+| **Logarithmic scale** | ✅ | ❌ |
+| **Percentage scale** | ✅ | ❌ |
+| **Indexed-to-100 scale** | ✅ | ❌ |
+| **Multiple price scales** (left + right) | ✅ | ❌ |
+| **Price scale inversion** | ✅ | ❌ |
+| **Auto-scale margins** (configurable) | ✅ | Hardcoded |
+| **Custom price formatters** | ✅ | Basic only |
+
+---
+
+### 🟡 Important — Data Layer
+
+| Feature | LWC | RayCore |
+|---|---|---|
+| **Streaming / real-time updates** ([update()](file:///c:/Users/devra/Downloads/raycharts_core/src/core/interaction.rs#241-271)) | ✅ | ❌ — [set_data()](file:///c:/Users/devra/Downloads/raycharts_core/src/core/engine.rs#60-73) replaces all |
+| **Incremental append** | ✅ | ❌ |
+| **Data validation & merging** | ✅ | Basic sanitization |
+| **Time-ordered enforcement** | ✅ | ❌ |
+| **Whitespace bars** | ✅ | ❌ |
+| **Business days calendar** | ✅ | ❌ |
+
+---
+
+### 🟡 Important — Price Lines & Markers
+
+| Feature | LWC | RayCore |
+|---|---|---|
+| **Horizontal price lines** (`createPriceLine`) | ✅ | ❌ |
+| **Series markers** (arrows, circles on bars) | ✅ | ❌ |
+| **Last price animation** (blinking dot) | ✅ | ❌ |
+| **Series base line** (horizontal reference) | ✅ | ❌ |
+
+---
+
+### 🟡 Important — Time Scale
+
+| Feature | LWC | RayCore |
+|---|---|---|
+| **Time scale API** (programmatic scroll/zoom) | ✅ | Limited |
+| **Visible range events** | ✅ | ❌ |
+| **Time-weighted spacing** | ✅ | ❌ |
+| **Right offset (whitespace)** | ✅ | ❌ |
+| **Seconds / tick-level timestamps** | ✅ | ❌ |
+| **Custom tick mark formatting** | ✅ | Partial |
+
+---
+
+### 🟢 Nice-to-Have — UI & Visual
+
+| Feature | LWC | RayCore |
+|---|---|---|
+| **Watermark** (text/logo behind chart) | ✅ | ❌ |
+| **Legend / tooltip** (OHLCV values) | ✅ | ❌ |
+| **Theming API** (runtime theme switching) | ✅ | Hardcoded theme |
+| **Background color / gradient** | Configurable | Hardcoded |
+| **Cursor customization** | ✅ | Basic only |
+
+---
+
+### 🟢 Nice-to-Have — API & Events
+
+| Feature | LWC | RayCore |
+|---|---|---|
+| **Click/crosshair-move callbacks** | ✅ | ❌ |
+| **Subscribe/unsubscribe event system** | ✅ | ❌ |
+| **Screenshot / `takeScreenshot()`** | ✅ | ❌ |
+| **`fitContent()` / `scrollToPosition()`** | ✅ | [zoom_to_range](file:///c:/Users/devra/Downloads/raycharts_core/src/core/engine.rs#81-88) only |
+| **Resize API** | ✅ | Auto via ResizeObserver |
+| **Options API** (`applyOptions`)** | ✅ | ❌ |
+
+---
+
+### 🟢 Nice-to-Have — Drawing Tools
+
+| Feature | LWC | RayCore |
+|---|---|---|
+| **Horizontal line** | Plugin | ❌ |
+| **Vertical line** | Plugin | ❌ |
+| **Ray / extended line** | Plugin | ❌ |
+| **Parallel channel** | Plugin | ❌ |
+| **Text annotation** | Plugin | ❌ |
+| **Drawing persistence (save/load)** | Plugin | ❌ |
+
+---
+
+## Suggested Implementation Order
+
+```mermaid
+graph TD
+    A[1. Line Series] --> B[2. Area Series]
+    A --> C[3. Histogram Series]
+    B --> D[4. Multi-Series Support]
+    C --> D
+    D --> E[5. Indicator Framework]
+    E --> F[6. Built-in Indicators<br>SMA, EMA, RSI, MACD]
+    D --> G[7. Multi-Pane]
+    G --> F
+    
+    H[8. Real-time Updates] --> I[9. Price Lines & Markers]
+    
+    J[10. Log / % Scale] --> K[11. Event System]
+    K --> L[12. Full API Surface]
+```
+
+> [!IMPORTANT]
+> **Line series** is the single biggest blocker — it unlocks overlays, indicators, price lines, and most advanced features. This should be the #1 priority.

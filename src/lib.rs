@@ -29,6 +29,15 @@ pub use crate::core::demo_data::generate_sample_data;
 pub use crate::core::series::{
     SeriesId, SeriesCollection, Series, SeriesType,
     LinePoint, LineDataArray, LineSeriesOptions, LineStyle,
+    AreaSeriesOptions,
+    HistogramSeriesOptions, HistogramPoint, HistogramDataArray,
+    BarSeriesOptions, OhlcPoint, OhlcDataArray,
+    BaselineSeriesOptions,
+};
+pub use crate::core::studies::manager::{StudyManager, StudyId, StudyInput, Study, StudyOutput, StudyCalculator};
+pub use crate::core::studies::built_in::{
+    SmaCalculator, EmaCalculator, RsiCalculator, MacdCalculator,
+    register_built_in_studies,
 };
 
 #[cfg(target_arch = "wasm32")]

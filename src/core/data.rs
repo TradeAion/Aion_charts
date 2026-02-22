@@ -123,6 +123,110 @@ impl BarArray {
         self.len == 0
     }
 
+    /// Append a single bar to the end of the array.
+    pub fn append(&mut self, bar: Bar) {
+        // Sanitize
+        let open  = if bar.open.is_finite()  { bar.open  } else { 0.0 };
+        let close = if bar.close.is_finite() { bar.close } else { open };
+        let high  = if bar.high.is_finite()  { bar.high.max(open).max(close) } else { open.max(close) };
+        let low   = if bar.low.is_finite()   { bar.low.min(open).min(close)  } else { open.min(close) };
+        let vol   = if bar.volume.is_finite() { bar.volume.max(0.0) } else { 0.0 };
+
+        // Rebuild arrays with the new bar appended
+        let new_len = self.len + 1;
+        let mut ts = UInt64Builder::with_capacity(new_len);
+        let mut o = Float32Builder::with_capacity(new_len);
+        let mut h = Float32Builder::with_capacity(new_len);
+        let mut l = Float32Builder::with_capacity(new_len);
+        let mut c = Float32Builder::with_capacity(new_len);
+        let mut v = Float32Builder::with_capacity(new_len);
+
+        // Copy existing data
+        for i in 0..self.len {
+            ts.append_value(self.timestamps.value(i));
+            o.append_value(self.opens.value(i));
+            h.append_value(self.highs.value(i));
+            l.append_value(self.lows.value(i));
+            c.append_value(self.closes.value(i));
+            v.append_value(self.volumes.value(i));
+        }
+
+        // Append new bar
+        ts.append_value(bar.timestamp);
+        o.append_value(open);
+        h.append_value(high);
+        l.append_value(low);
+        c.append_value(close);
+        v.append_value(vol);
+
+        self.timestamps = ts.finish();
+        self.opens = o.finish();
+        self.highs = h.finish();
+        self.lows = l.finish();
+        self.closes = c.finish();
+        self.volumes = v.finish();
+        self.len = new_len;
+    }
+
+    /// Update the last bar in the array. No-op if the array is empty.
+    pub fn update_last(&mut self, bar: Bar) {
+        if self.len == 0 {
+            return;
+        }
+
+        // Sanitize
+        let open  = if bar.open.is_finite()  { bar.open  } else { 0.0 };
+        let close = if bar.close.is_finite() { bar.close } else { open };
+        let high  = if bar.high.is_finite()  { bar.high.max(open).max(close) } else { open.max(close) };
+        let low   = if bar.low.is_finite()   { bar.low.min(open).min(close)  } else { open.min(close) };
+        let vol   = if bar.volume.is_finite() { bar.volume.max(0.0) } else { 0.0 };
+
+        // Rebuild arrays with the last bar replaced
+        let mut ts = UInt64Builder::with_capacity(self.len);
+        let mut o = Float32Builder::with_capacity(self.len);
+        let mut h = Float32Builder::with_capacity(self.len);
+        let mut l = Float32Builder::with_capacity(self.len);
+        let mut c = Float32Builder::with_capacity(self.len);
+        let mut v = Float32Builder::with_capacity(self.len);
+
+        // Copy all but last
+        for i in 0..self.len - 1 {
+            ts.append_value(self.timestamps.value(i));
+            o.append_value(self.opens.value(i));
+            h.append_value(self.highs.value(i));
+            l.append_value(self.lows.value(i));
+            c.append_value(self.closes.value(i));
+            v.append_value(self.volumes.value(i));
+        }
+
+        // Write updated last bar
+        ts.append_value(bar.timestamp);
+        o.append_value(open);
+        h.append_value(high);
+        l.append_value(low);
+        c.append_value(close);
+        v.append_value(vol);
+
+        self.timestamps = ts.finish();
+        self.opens = o.finish();
+        self.highs = h.finish();
+        self.lows = l.finish();
+        self.closes = c.finish();
+        self.volumes = v.finish();
+    }
+
+    /// Access timestamp at index.
+    #[inline]
+    pub fn timestamp(&self, i: usize) -> u64 {
+        self.timestamps.value(i)
+    }
+
+    /// Access close price at index.
+    #[inline]
+    pub fn close(&self, i: usize) -> f32 {
+        self.closes.value(i)
+    }
+
     /// Retrieve an LTTB downsampled version of this array.
     pub fn downsample_lttb(&self, threshold: usize) -> BarArray {
         let len = self.len;

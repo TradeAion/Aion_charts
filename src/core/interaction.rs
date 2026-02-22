@@ -97,6 +97,12 @@ pub struct InteractionHandler {
     // ── Current hover zone (for cursor hints) ──
     current_zone: HitZone,
 
+    // ── Drawing-aware cursor override ──
+    /// When set, overrides the normal zone-based cursor (e.g. resize on anchor hover).
+    pub drawing_cursor: Option<&'static str>,
+    /// True while a drawing drag is in progress — suppresses crosshair + pan.
+    pub drawing_drag_active: bool,
+
     // ── Touch-specific state ──
     /// Whether the current interaction is from a touch device.
     pub is_touch: bool,
@@ -153,6 +159,8 @@ impl InteractionHandler {
             last_move_y: 0.0,
             is_gliding: false,
             current_zone: HitZone::None,
+            drawing_cursor: None,
+            drawing_drag_active: false,
             is_touch: false,
             touch_crosshair_mode: TouchCrosshairMode::Hidden,
             pinch_active: false,
@@ -728,8 +736,19 @@ impl InteractionHandler {
         self.drag_active
     }
 
+    /// Set the drawing-aware cursor override (called from WASM hover hit-test).
+    pub fn set_drawing_cursor(&mut self, cursor: Option<&'static str>) {
+        self.drawing_cursor = cursor;
+    }
+
     /// Get the current cursor style hint.
+    /// Priority: drawing drag → drawing hover cursor → zone-based default.
     pub fn cursor_hint(&self) -> &'static str {
+        // Drawing drag in progress — use the drag cursor
+        if self.drawing_drag_active {
+            return self.drawing_cursor.unwrap_or("grabbing");
+        }
+
         if self.drag_active {
             match self.press_zone {
                 HitZone::Chart => "grabbing",
@@ -737,6 +756,9 @@ impl InteractionHandler {
                 HitZone::PriceAxis => "ns-resize",
                 _ => "default",
             }
+        } else if let Some(dc) = self.drawing_cursor {
+            // Hovering over a drawing — show context-sensitive cursor
+            dc
         } else {
             match self.current_zone {
                 HitZone::Chart => "crosshair",
