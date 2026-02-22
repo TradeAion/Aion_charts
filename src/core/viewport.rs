@@ -336,6 +336,22 @@ impl Viewport {
         }
     }
 
+    /// Convert a pixel X coordinate to a bar index for crosshair snapping.
+    ///
+    /// Like LWC: the crosshair can go into empty space (beyond data), but still
+    /// snaps to the bar grid. Returns the grid-snapped index which may be >= data_len.
+    /// Returns `None` only if the index would be negative.
+    #[inline]
+    pub fn bar_index_for_crosshair(&self, x_px: f64, chart_width_px: f64) -> Option<usize> {
+        let bar_f = self.pixel_to_bar(x_px, chart_width_px);
+        let idx = bar_f.floor() as i64;
+        if idx < 0 {
+            None
+        } else {
+            Some(idx as usize)
+        }
+    }
+
     /// Compute the CSS-pixel X coordinate of bar `idx`'s center.
     ///
     /// This is the inverse of `bar_index_at_pixel` — it maps an integer bar

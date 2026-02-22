@@ -350,18 +350,24 @@ impl InteractionHandler {
             let cx = new_x.clamp(0.0, pane_css_w);
 
             crosshair.active = true;
-            crosshair.x = cx;
 
-            crosshair.bar_index = viewport.bar_index_at_pixel(cx * dpr, pane_phys_w, bars.len());
+            // Get grid-snapped index (can be beyond data_len in empty space)
+            let grid_idx = viewport.bar_index_for_crosshair(cx * dpr, pane_phys_w);
 
-            // X line always snaps to bar center (like LWC) - this is NOT mode-dependent
-            if let Some(idx) = crosshair.bar_index {
+            // bar_index is only set if we have actual data at this position
+            crosshair.bar_index = grid_idx.filter(|&idx| idx < bars.len());
+
+            // X line always snaps to bar grid (like LWC) - even in empty space
+            if let Some(idx) = grid_idx {
                 crosshair.x = viewport.bar_center_css(idx, pane_css_w);
+            } else {
+                crosshair.x = cx;
             }
 
             // Y line behavior depends on mode
             match crosshair.mode {
                 CrosshairMode::MagnetOHLC => {
+                    // Only snap Y if we have actual bar data
                     if let Some(idx) = crosshair.bar_index {
                         let snap_price =
                             magnet_snap_price(bars, idx, crosshair.y, viewport, pane_css_h);
@@ -395,19 +401,25 @@ impl InteractionHandler {
         // ── MOUSE: always update crosshair ──
         else if !self.is_touch {
             crosshair.active = true;
-            crosshair.x = x.clamp(0.0, pane_css_w);
+            let cx = x.clamp(0.0, pane_css_w);
 
-            crosshair.bar_index =
-                viewport.bar_index_at_pixel(crosshair.x * dpr, pane_phys_w, bars.len());
+            // Get grid-snapped index (can be beyond data_len in empty space)
+            let grid_idx = viewport.bar_index_for_crosshair(cx * dpr, pane_phys_w);
 
-            // X line always snaps to bar center (like LWC) - this is NOT mode-dependent
-            if let Some(idx) = crosshair.bar_index {
+            // bar_index is only set if we have actual data at this position
+            crosshair.bar_index = grid_idx.filter(|&idx| idx < bars.len());
+
+            // X line always snaps to bar grid (like LWC) - even in empty space
+            if let Some(idx) = grid_idx {
                 crosshair.x = viewport.bar_center_css(idx, pane_css_w);
+            } else {
+                crosshair.x = cx;
             }
 
             // Y line behavior depends on mode
             match crosshair.mode {
                 CrosshairMode::MagnetOHLC => {
+                    // Only snap Y if we have actual bar data
                     if let Some(idx) = crosshair.bar_index {
                         let cursor_y = y.clamp(0.0, pane_css_h);
                         let snap_price =
