@@ -14,3 +14,6 @@ pub mod engine;
 pub mod price_line;
 pub mod markers;
 pub mod pane;
+pub mod invalidate_mask;
+pub mod kinetic_animation;
+pub mod crosshair;

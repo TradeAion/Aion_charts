@@ -42,6 +42,9 @@ pub use crate::core::studies::built_in::{
 pub use crate::core::price_line::{PriceLineId, PriceLineOptions, PriceLine, PriceLineManager, PriceLineHit};
 pub use crate::core::markers::{MarkerShape, MarkerPosition, SeriesMarker, SeriesMarkers, MarkerManager};
 pub use crate::core::pane::{PaneId, PaneOptions, Pane, PaneManager};
+pub use crate::core::invalidate_mask::{InvalidateMask, InvalidationLevel, PaneInvalidation};
+pub use crate::core::kinetic_animation::{KineticAnimation, ScrollState};
+pub use crate::core::crosshair::{Crosshair as GlobalCrosshair, CrosshairMode as GlobalCrosshairMode, CrosshairPaneView};
 
 #[cfg(target_arch = "wasm32")]
 pub use crate::core::renderer::canvas2d::Canvas2DRenderer;
