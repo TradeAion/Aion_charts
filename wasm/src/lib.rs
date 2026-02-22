@@ -28,6 +28,7 @@ use raycore::{
     AreaSeriesOptions, HistogramSeriesOptions, BarSeriesOptions, BaselineSeriesOptions, SeriesId,
     PriceLineOptions,
     SeriesMarker, MarkerShape, MarkerPosition,
+    Viewport,
 };
 
 mod canvas_manager;
@@ -2308,15 +2309,15 @@ impl RayCore {
                 s.engine.crosshair.active = true;
                 s.active_subpane_id = Some(pid);
                 s.engine.crosshair.x = x;
-                // Don't set crosshair.y here — main pane reads active_subpane_id
-                // to decide whether to draw its own horizontal crosshair
 
                 // Update bar_index for time axis label
                 s.engine.crosshair.bar_index =
                     s.engine.viewport.bar_index_at_pixel(x, pw, s.engine.bars.len());
 
-                // Update drawing preview or drag if active
+                // Get bar coordinate from main viewport (shared time axis)
                 let bar = s.engine.viewport.pixel_to_bar(x, pw);
+                
+                // Update drawing preview or drag if active
                 if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
                     let price = sp.viewport.pixel_to_price(y, ph);
                     
@@ -2334,7 +2335,7 @@ impl RayCore {
                     }
                 }
 
-                // Handle drag scroll (only if not drawing)
+                // Handle drag scroll (only if not in drawing mode)
                 if drag.get() {
                     // Update scroll tracking for kinetic animation (touch only)
                     if is_touch.get() {
@@ -2353,23 +2354,26 @@ impl RayCore {
                         s.engine.viewport.end_bar = drag_eb.get() + delta_bars;
                         let bar_len = s.engine.bars.len();
                         s.engine.viewport.clamp_to_data(bar_len);
+                        // Main chart auto-fits if not locked
                         if !s.engine.viewport.price_locked {
                             let bars_ptr = &s.engine.bars as *const raycore::BarArray;
                             unsafe { s.engine.viewport.auto_fit_price(&*bars_ptr); }
                         }
                     }
                     
-                    // Vertical drag - scroll subpane's own price axis
-                    // (subpanes have independent price ranges)
-                    let delta_y = y - drag_sy.get();
-                    let price_range = drag_pmax.get() - drag_pmin.get();
-                    if ph > 1.0 && price_range > 0.0 {
-                        let price_per_px = price_range / (ph - 1.0);
-                        let price_delta = delta_y * price_per_px;
-                        if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
-                            sp.viewport.price_min = drag_pmin.get() + price_delta;
-                            sp.viewport.price_max = drag_pmax.get() + price_delta;
+                    // Vertical drag - ONLY if subpane price is locked (same as main chart)
+                    if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
+                        if sp.viewport.price_locked {
+                            let delta_y = y - drag_sy.get();
+                            let price_range = drag_pmax.get() - drag_pmin.get();
+                            if ph > 1.0 && price_range > 0.0 {
+                                let price_per_px = price_range / (ph - 1.0);
+                                let price_delta = delta_y * price_per_px;
+                                sp.viewport.price_min = drag_pmin.get() + price_delta;
+                                sp.viewport.price_max = drag_pmax.get() + price_delta;
+                            }
                         }
+                        // If not locked, auto-scale would happen in render (for indicators with data)
                     }
                     
                     let html_el: &web_sys::HtmlElement = chart_c.unchecked_ref();
@@ -2408,11 +2412,12 @@ impl RayCore {
 
                 let mut s = inner.borrow_mut();
                 
+                // Get bar coordinate from main viewport (shared time axis)
+                let bar = s.engine.viewport.pixel_to_bar(x, pw);
+                
                 // Check if drawing tool is active (shared from main chart)
                 let active_tool = s.engine.drawings.active_tool;
                 if active_tool != raycore::DrawingTool::None {
-                    // Convert pixel to bar/price coordinates for this subpane
-                    let bar = s.engine.viewport.pixel_to_bar(x, pw);
                     if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
                         let price = sp.viewport.pixel_to_price(y, ph);
                         
@@ -2430,12 +2435,23 @@ impl RayCore {
                     return; // Don't pan while creating drawing
                 }
                 
+                // Pre-read main viewport values for hybrid viewport
+                let main_start_bar = s.engine.viewport.start_bar;
+                let main_end_bar = s.engine.viewport.end_bar;
+                
                 // Check for existing drawing hit-test in this subpane
-                // Pre-compute bar from main viewport
-                let bar = s.engine.viewport.pixel_to_bar(x, pw);
                 if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
                     let price = sp.viewport.pixel_to_price(y, ph);
-                    let hit = sp.drawings.hit_test(x, y, &sp.viewport, pw, ph);
+                    
+                    // Create hybrid viewport for hit-test (main time + subpane price)
+                    let mut hybrid_vp = Viewport::new(pw as u32, ph as u32);
+                    hybrid_vp.start_bar = main_start_bar;
+                    hybrid_vp.end_bar = main_end_bar;
+                    hybrid_vp.price_min = sp.viewport.price_min;
+                    hybrid_vp.price_max = sp.viewport.price_max;
+                    hybrid_vp.volume_height_ratio = 0.0;
+                    
+                    let hit = sp.drawings.hit_test(x, y, &hybrid_vp, pw, ph);
                     if let Some((id, result)) = hit {
                         use raycore::core::drawings::types::HitPart;
                         let tool = sp.drawings.get(id)
@@ -2750,6 +2766,8 @@ impl RayCore {
                     let half = (sp.viewport.price_max - sp.viewport.price_min) / 2.0 * factor;
                     sp.viewport.price_min = center - half;
                     sp.viewport.price_max = center + half;
+                    // Lock price axis after manual zoom (same as main chart)
+                    sp.viewport.price_locked = true;
                 }
             }));
             let opts = web_sys::AddEventListenerOptions::new();
@@ -2815,6 +2833,8 @@ impl RayCore {
                 if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
                     sp.viewport.price_min = center - half;
                     sp.viewport.price_max = center + half;
+                    // Lock price axis after manual scaling (same as main chart)
+                    sp.viewport.price_locked = true;
                 }
             }));
             let _ = axis_el.add_event_listener_with_callback("pointermove", cb.as_ref().unchecked_ref());

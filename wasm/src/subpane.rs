@@ -600,10 +600,12 @@ impl SubPane {
         }
     }
 
-    /// Toggle auto-scale mode.
+    /// Toggle auto-scale mode and unlock price axis.
     pub fn toggle_auto_scale(&mut self) {
         self.auto_scale = !self.auto_scale;
+        // Also unlock price axis when enabling auto-scale (same as main chart)
         if self.auto_scale {
+            self.viewport.price_locked = false;
             self.auto_scale_price();
         }
     }
