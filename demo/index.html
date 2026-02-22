@@ -201,6 +201,10 @@
     <button class="toggle-btn" id="atr-toggle" title="Toggle ATR-14">ATR</button>
     <button class="toggle-btn" id="vwap-toggle" title="Toggle VWAP">VWAP</button>
     <span style="color:#444;margin:0 4px">|</span>
+    <button class="toggle-btn" id="rsi-pane-btn" title="Add/remove RSI in sub-pane">RSI Pane</button>
+    <button class="toggle-btn" id="stoch-pane-btn" title="Add/remove Stochastic in sub-pane">Stoch Pane</button>
+    <button class="toggle-btn" id="atr-pane-btn" title="Add/remove ATR in sub-pane">ATR Pane</button>
+    <span style="color:#444;margin:0 4px">|</span>
     <button class="toggle-btn" id="stream-toggle" title="Start/stop real-time bar simulation">▶ Live</button>
     <span style="color:#444;margin:0 4px">|</span>
     <button class="toggle-btn" id="priceline-toggle" title="Add/remove custom price line">PriceLine</button>
@@ -219,7 +223,7 @@
   </div>
 
   <script type="module">
-    import init, { RayCore } from '../pkg/raycore_wasm.js?v=20260222b';
+    import init, { RayCore } from './pkg/raycore_wasm.js?v=20260223a';
 
     const errorBanner = document.getElementById('error-banner');
     const loading = document.getElementById('loading');
@@ -496,6 +500,51 @@
         studies.stochastic.btn.addEventListener('click', () => toggleStudy('stochastic'));
         studies.atr.btn.addEventListener('click', () => toggleStudy('atr'));
         studies.vwap.btn.addEventListener('click', () => toggleStudy('vwap'));
+
+        // ── Indicator Sub-Panes ─────────────────────────────────────────────
+        // Track sub-panes for oscillators (RSI, Stochastic, ATR)
+        const indicatorPanes = {
+          rsi: { studyId: null, paneId: null, btn: document.getElementById('rsi-pane-btn') },
+          stochastic: { studyId: null, paneId: null, btn: document.getElementById('stoch-pane-btn') },
+          atr: { studyId: null, paneId: null, btn: document.getElementById('atr-pane-btn') },
+        };
+
+        function toggleIndicatorPane(type) {
+          const pane = indicatorPanes[type];
+          if (pane.paneId !== null) {
+            // Remove the pane
+            core.remove_indicator_pane(pane.paneId);
+            if (pane.studyId !== null) {
+              core.remove_study(pane.studyId);
+              pane.studyId = null;
+            }
+            pane.paneId = null;
+            pane.btn.classList.remove('active');
+          } else {
+            // Create the study first
+            pane.studyId = core.create_study(type);
+            if (pane.studyId === 0) {
+              console.warn(`Failed to create study: ${type}`);
+              pane.studyId = null;
+              return;
+            }
+            // Create the indicator pane (120px height for oscillators)
+            pane.paneId = core.add_indicator_pane(pane.studyId, type, 120);
+            if (pane.paneId === 0) {
+              console.warn(`Failed to create indicator pane: ${type}`);
+              core.remove_study(pane.studyId);
+              pane.studyId = null;
+              pane.paneId = null;
+              return;
+            }
+            pane.btn.classList.add('active');
+          }
+        }
+
+        // Wire up indicator pane buttons
+        indicatorPanes.rsi.btn.addEventListener('click', () => toggleIndicatorPane('rsi'));
+        indicatorPanes.stochastic.btn.addEventListener('click', () => toggleIndicatorPane('stochastic'));
+        indicatorPanes.atr.btn.addEventListener('click', () => toggleIndicatorPane('atr'));
 
         // ── Real-time streaming simulation ──────────────────────────────────
         let streamInterval = null;
