@@ -138,39 +138,6 @@ pub fn generate_grid_rects(
     rects
 }
 
-/// Generate horizontal grid lines only (for subpanes that don't need vertical lines).
-/// Uses the same styling as generate_grid_rects for consistency.
-pub fn generate_horizontal_grid_rects(
-    style: &ChartStyle,
-    y_ticks: &[TickMark],
-    pane_w: f64,
-    pane_h: f64,
-) -> Vec<ColoredRect> {
-    let mut rects = Vec::with_capacity(y_ticks.len());
-    let (gr, gg, gb, ga) = color4(&style.grid_color);
-
-    for t in y_ticks {
-        if !t.major {
-            continue;
-        }
-        let y = t.pixel.round();
-        if y > 0.0 && y < pane_h {
-            rects.push(ColoredRect {
-                x: 0.0,
-                y: y as f32,
-                w: pane_w as f32,
-                h: 1.0,
-                r: gr,
-                g: gg,
-                b: gb,
-                a: ga,
-            });
-        }
-    }
-
-    rects
-}
-
 /// Generate candle rects (wicks, borders, body fills).
 pub fn generate_candle_rects(
     bars: &crate::core::data::BarArray,

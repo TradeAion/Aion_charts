@@ -3306,7 +3306,7 @@ impl RayCore {
             };
             for subpane in subpanes.iter_mut() {
                 subpane.resize(dpr);
-                subpane.render(&engine.viewport, &engine.style);
+                subpane.render(&engine.viewport, &engine.style, &x_ticks);
                 
                 // Render drawings for this subpane
                 let (base_drawings, top_drawings) = subpane.generate_drawing_geometry(&engine.viewport);

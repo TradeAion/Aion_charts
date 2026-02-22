@@ -662,7 +662,9 @@ impl SubPane {
     /// Render chart data + grid + reference lines on the BASE canvas,
     /// then render the price axis base layer.
     /// This is the main render entry point called each frame.
-    pub fn render(&mut self, main_viewport: &Viewport, style: &ChartStyle) {
+    ///
+    /// `x_ticks` are passed from the main chart for consistent vertical grid lines.
+    pub fn render(&mut self, main_viewport: &Viewport, style: &ChartStyle, x_ticks: &[TickMark]) {
         let dpr = self.dpr;
         let pw = self.chart_base.width() as f64;
         let ph = self.chart_base.height() as f64;
@@ -674,7 +676,7 @@ impl SubPane {
         let y_ticks = compute_y_ticks(&self.viewport, ph, dpr);
 
         // Render chart area (grid, reference lines, data lines)
-        self.render_chart(main_viewport, style, &y_ticks);
+        self.render_chart(main_viewport, style, &y_ticks, x_ticks);
 
         // Render price axis base layer (ticks + labels)
         self.price_axis.render_base(style, &y_ticks, ph);
@@ -779,8 +781,14 @@ impl SubPane {
     // ── Low-level chart rendering ──────────────────────────────────────
 
     /// Render chart data on the BASE canvas (grid, reference lines, data lines).
-    /// Uses CENTRALIZED generate_horizontal_grid_rects() for consistent grid rendering.
-    fn render_chart(&self, main_viewport: &Viewport, style: &ChartStyle, ticks: &[TickMark]) {
+    /// Uses CENTRALIZED generate_grid_rects() for consistent grid rendering.
+    fn render_chart(
+        &self,
+        main_viewport: &Viewport,
+        style: &ChartStyle,
+        y_ticks: &[TickMark],
+        x_ticks: &[TickMark],
+    ) {
         let dpr = self.dpr;
         let pw = self.chart_base.width() as f64;
         let ph = self.chart_base.height() as f64;
@@ -795,8 +803,8 @@ impl SubPane {
             .set_fill_style_str(&rgba(&style.bg_color));
         self.chart_base_ctx.fill_rect(0.0, 0.0, pw, ph);
 
-        // Grid lines - using CENTRALIZED function (horizontal only for subpanes)
-        let grid_rects = geometry_generator::generate_horizontal_grid_rects(style, ticks, pw, ph);
+        // Grid lines - using CENTRALIZED function (both horizontal and vertical)
+        let grid_rects = geometry_generator::generate_grid_rects(style, y_ticks, x_ticks, pw, ph);
         for rect in &grid_rects {
             let color = format!(
                 "rgba({},{},{},{})",
