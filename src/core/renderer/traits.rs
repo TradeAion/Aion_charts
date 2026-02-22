@@ -12,6 +12,7 @@
 
 use crate::core::data::BarArray;
 use crate::core::viewport::Viewport;
+use crate::core::series::SeriesCollection;
 
 /// Style configuration for the chart — colors, sizes, etc.
 /// Shared between all renderers so the chart looks identical regardless of backend.
@@ -178,6 +179,8 @@ pub struct RenderContext<'a> {
     pub y_ticks: &'a [TickMark],
     /// Pre-computed tick marks for grid lines (time axis ticks).
     pub x_ticks: &'a [TickMark],
+    /// Overlay series (line, area, etc.) — renderers iterate these in draw_lines().
+    pub series: &'a SeriesCollection,
 }
 
 /// Tick mark for axis rendering.

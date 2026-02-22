@@ -31,6 +31,7 @@ pub mod series;
 pub mod draw_list;
 pub mod tick_marks;
 pub mod geometry_generator;
+pub mod line_generator;
 pub mod wgpu_context;
 pub mod pipeline_manager;
 pub mod wgpu_backend;

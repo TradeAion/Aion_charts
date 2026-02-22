@@ -26,6 +26,10 @@ pub use crate::core::interaction::{InteractionHandler, HitZone, TouchCrosshairMo
 pub use crate::core::drawings::DrawingManager;
 pub use crate::core::drawings::types::DrawingTool;
 pub use crate::core::demo_data::generate_sample_data;
+pub use crate::core::series::{
+    SeriesId, SeriesCollection, Series, SeriesType,
+    LinePoint, LineDataArray, LineSeriesOptions, LineStyle,
+};
 
 #[cfg(target_arch = "wasm32")]
 pub use crate::core::renderer::canvas2d::Canvas2DRenderer;

@@ -502,8 +502,24 @@ impl ChartRenderer for WgpuRenderer {
         Ok(())
     }
 
-    fn draw_lines(&mut self, _ctx: &RenderContext) -> Result<(), String> {
-        // TODO: indicator lines — future pipeline
+    fn draw_lines(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        let pane_w = ctx.viewport.width as f64;
+        let pane_h = ctx.viewport.height as f64;
+
+        // Build timestamps slice for bar-index lookup
+        let ts: Vec<u64> = (0..ctx.bars.len())
+            .map(|i| ctx.bars.timestamps.value(i))
+            .collect();
+
+        let line_rects = crate::core::renderer::line_generator::generate_all_line_rects(
+            ctx.series, ctx.viewport, &ts, pane_w, pane_h,
+            ctx.h_pixel_ratio, ctx.v_pixel_ratio,
+        );
+
+        if !line_rects.is_empty() {
+            let count = self.upload_rects(&line_rects, ctx.viewport.width, ctx.viewport.height);
+            self.draw_rect_pass(count);
+        }
         Ok(())
     }
 

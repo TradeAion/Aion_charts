@@ -12,6 +12,7 @@ use crate::core::data::{Bar, BarArray};
 use crate::core::viewport::Viewport;
 use crate::core::renderer::traits::{Renderer, RendererBackend, RenderContext, ChartStyle, CrosshairState};
 use crate::core::drawings::DrawingManager;
+use crate::core::series::{SeriesId, SeriesCollection, LineSeriesOptions, LinePoint};
 
 /// The main chart engine. Owns everything needed to render the pane.
 pub struct ChartEngine {
@@ -21,6 +22,7 @@ pub struct ChartEngine {
     pub style: ChartStyle,
     pub crosshair: CrosshairState,
     pub drawings: DrawingManager,
+    pub series: SeriesCollection,
     pub dpr: f64,
     /// Horizontal pixel ratio: exact `bitmapWidth / cssWidth`.
     /// Set from `device-pixel-content-box` ResizeObserver; falls back to `dpr`.
@@ -38,6 +40,7 @@ impl ChartEngine {
         let style = ChartStyle::default();
         let crosshair = CrosshairState::default();
         let drawings = DrawingManager::new();
+        let series = SeriesCollection::new();
 
         Self {
             renderer,
@@ -46,6 +49,7 @@ impl ChartEngine {
             style,
             crosshair,
             drawings,
+            series,
             dpr,
             h_pixel_ratio: dpr,
             v_pixel_ratio: dpr,
@@ -86,6 +90,32 @@ impl ChartEngine {
         }
     }
 
+    // ── Series management ────────────────────────────────────────────────
+
+    /// Add a new line series overlay. Returns its unique ID.
+    pub fn add_line_series(&mut self, options: LineSeriesOptions) -> SeriesId {
+        self.series.add_line(options)
+    }
+
+    /// Set data points for a line series.
+    pub fn set_series_data(&mut self, id: SeriesId, data: Vec<LinePoint>) {
+        if let Some(s) = self.series.get_mut(id) {
+            s.line_data.set(data);
+        }
+    }
+
+    /// Remove a series by ID.
+    pub fn remove_series(&mut self, id: SeriesId) -> bool {
+        self.series.remove(id)
+    }
+
+    /// Set visibility of a series.
+    pub fn set_series_visible(&mut self, id: SeriesId, visible: bool) {
+        if let Some(s) = self.series.get_mut(id) {
+            s.line_options.visible = visible;
+        }
+    }
+
     /// Main render — called once per frame.
     /// Only renders the pane (candles + volume). Axes are rendered separately.
     /// `y_ticks` and `x_ticks` are pre-computed by the WASM layer so
@@ -110,6 +140,7 @@ impl ChartEngine {
             v_pixel_ratio: self.v_pixel_ratio,
             y_ticks,
             x_ticks,
+            series: &self.series,
         };
 
         self.renderer.render_frame(&ctx)

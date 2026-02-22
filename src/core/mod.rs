@@ -9,4 +9,5 @@ pub mod demo_data;
 pub mod studies;
 pub mod drawings;
 pub mod events;
+pub mod series;
 pub mod engine;

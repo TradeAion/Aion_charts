@@ -118,9 +118,13 @@ impl OverlayRenderer {
                 let _ = ctx.set_line_dash(&js_sys::Array::new());
             }
 
+            // LWC strokeInPixel: add 0.5px offset for odd-width lines
+            // to snap to pixel center and prevent blurry sub-pixel rendering
+            let correction = if (l.width as i32) % 2 == 1 { 0.5 } else { 0.0 };
+
             ctx.begin_path();
-            ctx.move_to(l.x0 as f64, l.y0 as f64);
-            ctx.line_to(l.x1 as f64, l.y1 as f64);
+            ctx.move_to(l.x0 as f64 + correction, l.y0 as f64 + correction);
+            ctx.line_to(l.x1 as f64 + correction, l.y1 as f64 + correction);
             ctx.stroke();
         }
         let _ = ctx.set_line_dash(&js_sys::Array::new());

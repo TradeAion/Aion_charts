@@ -1,19 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Chart Core — Demo</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body {
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
       touch-action: none;
       -webkit-overflow-scrolling: touch;
       overscroll-behavior: none;
     }
+
     body {
-        background: #171717;
+      background: #171717;
       color: #ccc;
       font-family: system-ui, -apple-system, sans-serif;
       display: flex;
@@ -22,6 +30,7 @@
       height: 100dvh;
       overflow: hidden;
     }
+
     header {
       padding: 8px 16px;
       background: #16161a;
@@ -31,7 +40,13 @@
       gap: 14px;
       flex-shrink: 0;
     }
-    header h1 { font-size: 15px; color: #e0e0e0; font-weight: 600; }
+
+    header h1 {
+      font-size: 15px;
+      color: #e0e0e0;
+      font-weight: 600;
+    }
+
     #renderer-badge {
       font-size: 11px;
       padding: 2px 8px;
@@ -40,11 +55,13 @@
       color: #1abc9c;
       border: 1px solid #1abc9c44;
     }
+
     #renderer-badge.canvas2d {
       background: #1a2a3a;
       color: #4a9eff;
       border-color: #4a9eff44;
     }
+
     .toggle-btn {
       font-size: 11px;
       padding: 3px 10px;
@@ -55,18 +72,29 @@
       cursor: pointer;
       transition: background 0.15s, color 0.15s;
     }
-    .toggle-btn:hover { background: #2a2a34; color: #ddd; }
-    .toggle-btn:disabled { opacity: 0.4; cursor: default; }
+
+    .toggle-btn:hover {
+      background: #2a2a34;
+      color: #ddd;
+    }
+
+    .toggle-btn:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+
     .toggle-btn.active {
       background: #1a3a2a;
       color: #1abc9c;
       border-color: #1abc9c44;
     }
+
     .toggle-group {
       display: flex;
       gap: 4px;
       margin-left: auto;
     }
+
     /* The container — RayCore creates canvases inside it */
     #chart-container {
       flex: 1;
@@ -76,6 +104,7 @@
       min-height: 200px;
       touch-action: none;
     }
+
     #hud {
       position: absolute;
       top: 8px;
@@ -86,6 +115,7 @@
       line-height: 1.6;
       z-index: 10;
     }
+
     #error-banner {
       display: none;
       background: #2a1010;
@@ -95,13 +125,14 @@
       border-bottom: 1px solid #5a2020;
       flex-shrink: 0;
     }
+
     #loading {
       position: absolute;
       inset: 0;
       display: flex;
       align-items: center;
       justify-content: center;
-        background: #171717dd;
+      background: #171717dd;
       font-size: 14px;
       color: #666;
       letter-spacing: 0.05em;
@@ -110,32 +141,60 @@
 
     /* ── Mobile responsiveness ── */
     @media (max-width: 600px) {
-      header { padding: 6px 10px; gap: 8px; }
-      header h1 { font-size: 13px; }
-      #renderer-badge { font-size: 10px; padding: 1px 6px; }
-      .toggle-btn { font-size: 10px; padding: 2px 8px; }
-      #hud { font-size: 10px; top: 4px; left: 4px; }
+      header {
+        padding: 6px 10px;
+        gap: 8px;
+      }
+
+      header h1 {
+        font-size: 13px;
+      }
+
+      #renderer-badge {
+        font-size: 10px;
+        padding: 1px 6px;
+      }
+
+      .toggle-btn {
+        font-size: 10px;
+        padding: 2px 8px;
+      }
+
+      #hud {
+        font-size: 10px;
+        top: 4px;
+        left: 4px;
+      }
     }
+
     @media (max-height: 400px) {
-      header { padding: 4px 10px; }
-      header h1 { font-size: 12px; }
+      header {
+        padding: 4px 10px;
+      }
+
+      header h1 {
+        font-size: 12px;
+      }
     }
   </style>
 </head>
+
 <body>
   <div id="error-banner"></div>
-    <header>
+  <header>
     <h1>Chart Core</h1>
-        <span id="renderer-badge">…</span>
-        <button class="toggle-btn" id="crosshair-btn" title="Cycle crosshair: Normal → Magnet → OHLC">Normal</button>
-        <span style="color:#444;margin:0 4px">|</span>
-        <button class="toggle-btn" id="draw-trendline" title="Trend Line">Line</button>
-        <button class="toggle-btn" id="draw-rectangle" title="Rectangle">Rect</button>
-        <button class="toggle-btn" id="draw-fibonacci" title="Fibonacci Retracement">Fib</button>
-        <button class="toggle-btn" id="draw-scale" title="Price Range / Scale">Scale</button>
-        <button class="toggle-btn" id="draw-clear" title="Clear all drawings">Clear</button>
-        <div class="toggle-group" id="toggle-group"></div>
-    </header>
+    <span id="renderer-badge">…</span>
+    <button class="toggle-btn" id="crosshair-btn" title="Cycle crosshair: Normal → Magnet → OHLC">Normal</button>
+    <span style="color:#444;margin:0 4px">|</span>
+    <button class="toggle-btn" id="draw-trendline" title="Trend Line">Line</button>
+    <button class="toggle-btn" id="draw-rectangle" title="Rectangle">Rect</button>
+    <button class="toggle-btn" id="draw-fibonacci" title="Fibonacci Retracement">Fib</button>
+    <button class="toggle-btn" id="draw-scale" title="Price Range / Scale">Scale</button>
+    <button class="toggle-btn" id="draw-clear" title="Clear all drawings">Clear</button>
+    <span style="color:#444;margin:0 4px">|</span>
+    <button class="toggle-btn" id="sma-toggle" title="Toggle SMA-20 line overlay">SMA-20</button>
+    <div class="toggle-group" id="toggle-group"></div>
+  </header>
 
   <div id="chart-container">
     <div id="loading">Initializing…</div>
@@ -143,63 +202,63 @@
   </div>
 
   <script type="module">
-import init, { RayCore } from '../pkg/raycore_wasm.js?v=20260222b';
+    import init, { RayCore } from '../pkg/raycore_wasm.js?v=20260222e';
 
     const errorBanner = document.getElementById('error-banner');
-    const loading     = document.getElementById('loading');
-    const hud         = document.getElementById('hud');
-    const badge       = document.getElementById('renderer-badge');
+    const loading = document.getElementById('loading');
+    const hud = document.getElementById('hud');
+    const badge = document.getElementById('renderer-badge');
     const toggleGroup = document.getElementById('toggle-group');
-      const container   = document.getElementById('chart-container');
-      const crosshairBtn = document.getElementById('crosshair-btn');
-      const crosshairModes = ['normal', 'magnet', 'magnet_ohlc'];
-      const crosshairLabels = { normal: 'Normal', magnet: 'Magnet', magnet_ohlc: 'OHLC' };
+    const container = document.getElementById('chart-container');
+    const crosshairBtn = document.getElementById('crosshair-btn');
+    const crosshairModes = ['normal', 'magnet', 'magnet_ohlc'];
+    const crosshairLabels = { normal: 'Normal', magnet: 'Magnet', magnet_ohlc: 'OHLC' };
 
-      // Drawing tool buttons
-      const drawBtns = {
-        'draw-trendline': 'trend_line',
-        'draw-rectangle': 'rectangle',
-        'draw-fibonacci': 'fibonacci',
-        'draw-scale': 'scale',
-      };
-      let activeDrawTool = 'none';
-      for (const [btnId, tool] of Object.entries(drawBtns)) {
-        document.getElementById(btnId).addEventListener('click', () => {
-          const newTool = activeDrawTool === tool ? 'none' : tool;
-          activeDrawTool = newTool;
-          for (const [bid, _] of Object.entries(drawBtns)) {
-            document.getElementById(bid).classList.toggle('active', drawBtns[bid] === newTool);
-          }
-          if (core) core.set_drawing_tool(newTool);
-        });
+    // Drawing tool buttons
+    const drawBtns = {
+      'draw-trendline': 'trend_line',
+      'draw-rectangle': 'rectangle',
+      'draw-fibonacci': 'fibonacci',
+      'draw-scale': 'scale',
+    };
+    let activeDrawTool = 'none';
+    for (const [btnId, tool] of Object.entries(drawBtns)) {
+      document.getElementById(btnId).addEventListener('click', () => {
+        const newTool = activeDrawTool === tool ? 'none' : tool;
+        activeDrawTool = newTool;
+        for (const [bid, _] of Object.entries(drawBtns)) {
+          document.getElementById(bid).classList.toggle('active', drawBtns[bid] === newTool);
+        }
+        if (core) core.set_drawing_tool(newTool);
+      });
+    }
+    document.getElementById('draw-clear').addEventListener('click', () => {
+      if (core) core.clear_drawings();
+    });
+    // Keyboard: Delete removes selected, Escape cancels creation
+    document.addEventListener('keydown', (e) => {
+      if (!core) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') core.remove_selected_drawing();
+      if (e.key === 'Escape') {
+        core.cancel_drawing();
+        core.set_drawing_tool('none');
+        activeDrawTool = 'none';
+        for (const [bid, _] of Object.entries(drawBtns)) {
+          document.getElementById(bid).classList.remove('active');
+        }
       }
-      document.getElementById('draw-clear').addEventListener('click', () => {
-        if (core) core.clear_drawings();
-      });
-      // Keyboard: Delete removes selected, Escape cancels creation
-      document.addEventListener('keydown', (e) => {
-        if (!core) return;
-        if (e.key === 'Delete' || e.key === 'Backspace') core.remove_selected_drawing();
-        if (e.key === 'Escape') {
-          core.cancel_drawing();
-          core.set_drawing_tool('none');
-          activeDrawTool = 'none';
-          for (const [bid, _] of Object.entries(drawBtns)) {
-            document.getElementById(bid).classList.remove('active');
-          }
-        }
-      });
+    });
 
-      // Crosshair mode cycle
-      crosshairBtn.addEventListener('click', () => {
-        const idx = (crosshairModes.indexOf(crosshairMode) + 1) % crosshairModes.length;
-        crosshairMode = crosshairModes[idx];
-        crosshairBtn.textContent = crosshairLabels[crosshairMode];
-        crosshairBtn.classList.toggle('active', crosshairMode !== 'normal');
-        if (core) {
-          core.set_crosshair_mode(crosshairMode);
-        }
-      });
+    // Crosshair mode cycle
+    crosshairBtn.addEventListener('click', () => {
+      const idx = (crosshairModes.indexOf(crosshairMode) + 1) % crosshairModes.length;
+      crosshairMode = crosshairModes[idx];
+      crosshairBtn.textContent = crosshairLabels[crosshairMode];
+      crosshairBtn.classList.toggle('active', crosshairMode !== 'normal');
+      if (core) {
+        core.set_crosshair_mode(crosshairMode);
+      }
+    });
 
     function showError(msg) {
       errorBanner.textContent = 'Error: ' + msg;
@@ -207,10 +266,10 @@ import init, { RayCore } from '../pkg/raycore_wasm.js?v=20260222b';
       loading.style.display = 'none';
     }
 
-      let core = null;
-      let rafId = 0;
-      let currentRenderer = null;
-      let crosshairMode = 'normal';
+    let core = null;
+    let rafId = 0;
+    let currentRenderer = null;
+    let crosshairMode = 'normal';
 
     function updateBadge(rName) {
       badge.textContent = rName === 'webgpu' ? 'WebGPU' : 'Canvas 2D';
@@ -246,23 +305,111 @@ import init, { RayCore } from '../pkg/raycore_wasm.js?v=20260222b';
         updateToggleButtons(currentRenderer);
 
         core.demo_mode();
-          loading.style.display = 'none';
+        loading.style.display = 'none';
 
-          // Restore crosshair mode
-          if (crosshairMode !== 'normal') {
-            core.set_crosshair_mode(crosshairMode);
+        // Restore crosshair mode
+        if (crosshairMode !== 'normal') {
+          core.set_crosshair_mode(crosshairMode);
+        }
+
+        hud.textContent = currentRenderer + ' | 600 bars | dpr=' + (window.devicePixelRatio || 1).toFixed(1);
+
+        // ── SMA-20 line series overlay ──────────────────
+        const SMA_PERIOD = 20;
+        const numBars = 600;
+        // Replicate the exact LCG from demo_data.rs so we can compute close prices
+        const nowMs = Date.now();
+        const intervalMs = 60000;
+        const startMs = nowMs - numBars * intervalMs;
+
+        // LCG constants matching Rust: seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)
+        function lcgNext(seed) {
+          // Use BigInt for exact 64-bit wrapping arithmetic
+          const a = 6364136223846793005n;
+          const c = 1442695040888963407n;
+          const mask = (1n << 64n) - 1n;
+          return (seed * a + c) & mask;
+        }
+        function lcgF64(seed) {
+          // (seed >> 11) / (1 << 53)
+          return Number(seed >> 11n) / Number(1n << 53n);
+        }
+
+        function generateDemoCloses() {
+          const closes = new Float32Array(numBars);
+          let price = 42000.0;
+          // Seed matching Rust: 12345 ^ (n * 67890)
+          let seed = BigInt(12345) ^ (BigInt(numBars) * BigInt(67890));
+          // Make sure seed is unsigned 64-bit
+          const mask = (1n << 64n) - 1n;
+          seed = seed & mask;
+
+          for (let i = 0; i < numBars; i++) {
+            seed = lcgNext(seed);
+            const r1 = lcgF64(seed);
+            seed = lcgNext(seed);
+            // skip r2
+            seed = lcgNext(seed);
+            // skip r3
+            seed = lcgNext(seed);
+            // skip r4
+
+            const change = (r1 - 0.48) * price * 0.012;
+            const c = price + change;
+            closes[i] = c;
+            price = c;
+          }
+          return closes;
+        }
+
+        let smaSeriesId = null;
+        const smaBtn = document.getElementById('sma-toggle');
+        let smaVisible = false;
+
+        function addSmaOverlay() {
+          if (smaSeriesId !== null) return;
+          // Add SMA line: TradingView blue (#2962FF), 2px width
+          smaSeriesId = core.add_line_series(0.161, 0.384, 1.0, 1.0, 2.0);
+
+          const closes = generateDemoCloses();
+          // Compute SMA-20
+          const smaCount = numBars - SMA_PERIOD + 1;
+          const values = new Float32Array(smaCount);
+          const timestamps = new BigUint64Array(smaCount);
+
+          for (let i = 0; i < smaCount; i++) {
+            let sum = 0;
+            for (let j = 0; j < SMA_PERIOD; j++) {
+              sum += closes[i + j];
+            }
+            values[i] = sum / SMA_PERIOD;
+            // SMA value is aligned to the last bar in the window
+            timestamps[i] = BigInt(startMs + (i + SMA_PERIOD - 1) * intervalMs);
           }
 
-          hud.textContent = currentRenderer + ' | 600 bars | dpr=' + (window.devicePixelRatio||1).toFixed(1);
+          core.set_series_data(smaSeriesId, values, timestamps);
+          smaVisible = true;
+          smaBtn.classList.add('active');
+        }
+
+        smaBtn.addEventListener('click', () => {
+          if (smaSeriesId === null) {
+            addSmaOverlay();
+          } else {
+            smaVisible = !smaVisible;
+            core.set_series_visible(smaSeriesId, smaVisible);
+            smaBtn.classList.toggle('active', smaVisible);
+          }
+        });
 
         function frame() {
           rafId = requestAnimationFrame(frame);
-          try { core.render(); } catch(e) {
+          try { core.render(); } catch (e) {
             console.error('Render error:', e);
           }
         }
         rafId = requestAnimationFrame(frame);
-      } catch(e) {
+      } catch (e) {
         console.error(e);
         showError('Init failed (' + renderer + '): ' + (e.message || e));
       }
@@ -291,7 +438,7 @@ import init, { RayCore } from '../pkg/raycore_wasm.js?v=20260222b';
         const preferred = renderers.includes('webgpu') ? 'webgpu' : 'canvas2d';
         await createChart(preferred);
 
-      } catch(e) {
+      } catch (e) {
         console.error(e);
         showError('Init failed: ' + (e.message || e));
       }
@@ -300,4 +447,5 @@ import init, { RayCore } from '../pkg/raycore_wasm.js?v=20260222b';
     boot();
   </script>
 </body>
+
 </html>

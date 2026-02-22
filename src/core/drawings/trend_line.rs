@@ -3,7 +3,7 @@
 use crate::core::viewport::Viewport;
 use crate::core::renderer::draw_list::ColoredLine;
 use super::types::*;
-use super::drawing::{Drawing, next_drawing_id, point_to_css, generate_anchor_circles};
+use super::drawing::{Drawing, next_drawing_id, point_to_css, point_to_bitmap, generate_anchor_circles};
 use super::hit_test;
 
 #[derive(Debug)]
@@ -76,29 +76,33 @@ impl Drawing for TrendLineDrawing {
 
     fn generate_geometry(
         &self,
-        vp: &Viewport, pw: f64, ph: f64, dpr: f64,
+        vp: &Viewport, pw: f64, ph: f64, _dpr: f64,
+        h_pixel_ratio: f64, v_pixel_ratio: f64,
         show_anchors: bool,
     ) -> DrawingGeometry {
         let mut geom = DrawingGeometry::new();
         if self.anchors.len() < 2 { return geom; }
 
-        let (x0, y0) = point_to_css(&self.anchors[0].point, vp, pw, ph);
-        let (x1, y1) = point_to_css(&self.anchors[1].point, vp, pw, ph);
+        let (bx0, by0) = point_to_bitmap(&self.anchors[0].point, vp, pw, ph, h_pixel_ratio, v_pixel_ratio);
+        let (bx1, by1) = point_to_bitmap(&self.anchors[1].point, vp, pw, ph, h_pixel_ratio, v_pixel_ratio);
 
         let c = &self.style.color;
+        let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
+        let line_w = (self.style.line_width * avg_ratio).floor().max(1.0);
+
         geom.lines.push(ColoredLine {
-            x0: (x0 * dpr) as f32,
-            y0: (y0 * dpr) as f32,
-            x1: (x1 * dpr) as f32,
-            y1: (y1 * dpr) as f32,
-            width: (self.style.line_width * dpr) as f32,
+            x0: bx0 as f32,
+            y0: by0 as f32,
+            x1: bx1 as f32,
+            y1: by1 as f32,
+            width: line_w as f32,
             r: c[0], g: c[1], b: c[2], a: c[3],
-            dash: self.style.dash.map_or(0.0, |d| (d[0] * dpr) as f32),
-            gap: self.style.dash.map_or(0.0, |d| (d[1] * dpr) as f32),
+            dash: self.style.dash.map_or(0.0, |d| (d[0] * avg_ratio) as f32),
+            gap: self.style.dash.map_or(0.0, |d| (d[1] * avg_ratio) as f32),
         });
 
         if show_anchors {
-            geom.anchors = generate_anchor_circles(&self.anchors, vp, pw, ph, dpr, c);
+            geom.anchors = generate_anchor_circles(&self.anchors, vp, pw, ph, h_pixel_ratio, v_pixel_ratio, c);
         }
 
         geom

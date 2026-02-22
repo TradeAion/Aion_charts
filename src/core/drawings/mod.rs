@@ -250,13 +250,15 @@ impl DrawingManager {
         pane_css_w: f64,
         pane_css_h: f64,
         dpr: f64,
+        h_pixel_ratio: f64,
+        v_pixel_ratio: f64,
     ) -> (Vec<DrawingGeometry>, Vec<DrawingGeometry>) {
         let mut base = Vec::new();
         let mut top = Vec::new();
 
         for d in &self.drawings {
             let show_anchors = matches!(d.state(), DrawingState::Selected | DrawingState::Dragging { .. });
-            let geom = d.generate_geometry(vp, pane_css_w, pane_css_h, dpr, show_anchors);
+            let geom = d.generate_geometry(vp, pane_css_w, pane_css_h, dpr, h_pixel_ratio, v_pixel_ratio, show_anchors);
             if geom.is_empty() { continue; }
 
             match d.z_order() {

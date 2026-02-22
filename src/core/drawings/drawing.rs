@@ -46,12 +46,16 @@ pub trait Drawing: std::fmt::Debug {
 
     /// Generate pixel-space geometry for rendering.
     /// `show_anchors`: true when Selected or Dragging (render anchor circles).
+    /// `h_pixel_ratio` / `v_pixel_ratio`: separate horizontal/vertical ratios
+    /// for bitmap-accurate coordinate conversion (from device-pixel-content-box).
     fn generate_geometry(
         &self,
         vp: &Viewport,
         pane_css_w: f64,
         pane_css_h: f64,
         dpr: f64,
+        h_pixel_ratio: f64,
+        v_pixel_ratio: f64,
         show_anchors: bool,
     ) -> DrawingGeometry;
 
@@ -121,7 +125,7 @@ pub trait Drawing: std::fmt::Debug {
     }
 }
 
-// ── Helper: convert DrawingPoint to CSS pixel coords ────────────────────────
+// ── Helper: convert DrawingPoint to bitmap pixel coords ─────────────────────
 
 /// Convert a logical DrawingPoint to CSS pixel coordinates.
 ///
@@ -135,29 +139,51 @@ pub fn point_to_css(
     pane_css_h: f64,
 ) -> (f64, f64) {
     let frac = (pt.bar_index - vp.start_bar) / (vp.end_bar - vp.start_bar);
-    let x = (frac * pane_css_w).clamp(0.0, pane_css_w);
+    let x = frac * pane_css_w;
     let y = vp.price_to_css_y(pt.price, pane_css_h);
     (x, y)
 }
 
+/// Convert a logical DrawingPoint to bitmap (physical pixel) coordinates.
+///
+/// Uses separate horizontal/vertical pixel ratios (from device-pixel-content-box)
+/// and rounds to nearest pixel for crisp rendering, matching LWC's approach.
+pub fn point_to_bitmap(
+    pt: &DrawingPoint,
+    vp: &Viewport,
+    pane_css_w: f64,
+    pane_css_h: f64,
+    h_pixel_ratio: f64,
+    v_pixel_ratio: f64,
+) -> (f64, f64) {
+    let (cx, cy) = point_to_css(pt, vp, pane_css_w, pane_css_h);
+    let bx = (cx * h_pixel_ratio).round();
+    let by = (cy * v_pixel_ratio).round();
+    (bx, by)
+}
+
 /// Generate standard anchor circles for a drawing.
+/// Uses separate h/v pixel ratios for bitmap-accurate placement.
 pub fn generate_anchor_circles(
     anchors: &[AnchorPoint],
     vp: &Viewport,
     pane_css_w: f64,
     pane_css_h: f64,
-    dpr: f64,
+    h_pixel_ratio: f64,
+    v_pixel_ratio: f64,
     color: &[f32; 4],
 ) -> Vec<AnchorCircle> {
     anchors.iter().map(|a| {
-        let (cx, cy) = point_to_css(&a.point, vp, pane_css_w, pane_css_h);
+        let (bx, by) = point_to_bitmap(&a.point, vp, pane_css_w, pane_css_h, h_pixel_ratio, v_pixel_ratio);
+        // Use average ratio for radius so circles stay round
+        let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         AnchorCircle {
-            cx: cx * dpr,
-            cy: cy * dpr,
-            radius: (a.hit_radius * dpr).round(),
+            cx: bx,
+            cy: by,
+            radius: (a.hit_radius * avg_ratio).round(),
             fill: [1.0, 1.0, 1.0, 1.0], // white fill
             border: *color,
-            border_width: (1.0 * dpr).floor().max(1.0),
+            border_width: (1.0 * avg_ratio).floor().max(1.0),
         }
     }).collect()
 }

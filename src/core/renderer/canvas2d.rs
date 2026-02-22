@@ -118,8 +118,20 @@ impl ChartRenderer for Canvas2DRenderer {
         Ok(())
     }
 
-    fn draw_lines(&mut self, _ctx: &RenderContext) -> Result<(), String> {
-        // TODO: indicator lines (SMA, EMA) — not yet implemented
+    fn draw_lines(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        let pane_w = self.physical_width as f64;
+        let pane_h = self.physical_height as f64;
+
+        // Build timestamps slice for bar-index lookup
+        let ts: Vec<u64> = (0..ctx.bars.len())
+            .map(|i| ctx.bars.timestamps.value(i))
+            .collect();
+
+        let line_rects = crate::core::renderer::line_generator::generate_all_line_rects(
+            ctx.series, ctx.viewport, &ts, pane_w, pane_h,
+            ctx.h_pixel_ratio, ctx.v_pixel_ratio,
+        );
+        self.draw_rects(&line_rects);
         Ok(())
     }
 

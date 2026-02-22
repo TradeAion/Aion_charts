@@ -104,21 +104,23 @@ impl Drawing for FibonacciDrawing {
 
     fn generate_geometry(
         &self,
-        vp: &Viewport, pw: f64, ph: f64, dpr: f64,
+        vp: &Viewport, pw: f64, ph: f64, _dpr: f64,
+        h_pixel_ratio: f64, v_pixel_ratio: f64,
         show_anchors: bool,
     ) -> DrawingGeometry {
         let mut geom = DrawingGeometry::new();
         if self.anchors.len() < 2 { return geom; }
 
         let c = &self.style.color;
-        let lw = (self.style.line_width * dpr) as f32;
-        let pane_phys_w = (pw * dpr) as f32;
-        let fs = (self.style.font_size * dpr) as f32;
+        let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
+        let lw = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
+        let pane_phys_w = (pw * h_pixel_ratio).round() as f32;
+        let fs = (self.style.font_size * avg_ratio) as f32;
 
         // Draw each fib level line across full pane width
         for (i, &(level, label_text)) in FIB_LEVELS.iter().enumerate() {
             let price = self.level_price(level);
-            let y = (vp.price_to_css_y(price, ph) * dpr) as f32;
+            let y = (vp.price_to_css_y(price, ph) * v_pixel_ratio).round() as f32;
 
             // Level line
             geom.lines.push(ColoredLine {
@@ -126,15 +128,15 @@ impl Drawing for FibonacciDrawing {
                 x1: pane_phys_w, y1: y,
                 width: lw,
                 r: c[0], g: c[1], b: c[2], a: c[3],
-                dash: (6.0 * dpr) as f32,
-                gap: (4.0 * dpr) as f32,
+                dash: (6.0 * avg_ratio) as f32,
+                gap: (4.0 * avg_ratio) as f32,
             });
 
             // Fill zone between this level and the next
             if let Some(&(next_level, _)) = FIB_LEVELS.get(i + 1) {
                 if let Some(fc) = self.style.fill_color {
                     let next_price = self.level_price(next_level);
-                    let next_y = (vp.price_to_css_y(next_price, ph) * dpr) as f32;
+                    let next_y = (vp.price_to_css_y(next_price, ph) * v_pixel_ratio).round() as f32;
                     let ry = y.min(next_y);
                     let rh = (y - next_y).abs();
                     geom.rects.push(ColoredRect {
@@ -149,7 +151,7 @@ impl Drawing for FibonacciDrawing {
             let price_label = format!("{} ({:.2})", label_text, price);
             geom.texts.push(DrawText {
                 text: price_label,
-                x: pane_phys_w - (5.0 * dpr) as f32,
+                x: pane_phys_w - (5.0 * h_pixel_ratio) as f32,
                 y: y - fs * 0.3,
                 font_size: fs,
                 r: c[0], g: c[1], b: c[2], a: c[3],
@@ -157,7 +159,7 @@ impl Drawing for FibonacciDrawing {
         }
 
         if show_anchors {
-            geom.anchors = generate_anchor_circles(&self.anchors, vp, pw, ph, dpr, c);
+            geom.anchors = generate_anchor_circles(&self.anchors, vp, pw, ph, h_pixel_ratio, v_pixel_ratio, c);
         }
 
         geom

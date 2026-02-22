@@ -24,6 +24,7 @@ use raycore::{
     PriceAxisRenderer, TimeAxisRenderer,
     InteractionHandler, HitZone,
     generate_sample_data, tick_marks,
+    LinePoint, LineSeriesOptions, SeriesId,
 };
 
 mod canvas_manager;
@@ -1327,6 +1328,57 @@ impl RayCore {
         self.inner.borrow().engine.drawings.len()
     }
 
+    // ── Series overlay API ────────────────────────────────────────────────────
+
+    /// Add a new line series overlay. Returns the series ID.
+    ///
+    /// Default color is TradingView blue (#2962FF). Use RGBA [0.0–1.0].
+    pub fn add_line_series(
+        &mut self,
+        color_r: f32,
+        color_g: f32,
+        color_b: f32,
+        color_a: f32,
+        line_width: f32,
+    ) -> u32 {
+        let mut opts = LineSeriesOptions::default();
+        opts.color = [color_r, color_g, color_b, color_a];
+        opts.line_width = line_width as f64;
+        let id = self.inner.borrow_mut().engine.add_line_series(opts);
+        log::info!("add_line_series: id={}", id.0);
+        id.0
+    }
+
+    /// Set data for a line series. `values` and `timestamps` must be same length.
+    pub fn set_series_data(&mut self, id: u32, values: &[f32], timestamps: &[u64]) {
+        let count = values.len().min(timestamps.len());
+        let data: Vec<LinePoint> = (0..count)
+            .map(|i| LinePoint {
+                timestamp: timestamps[i],
+                value: values[i],
+            })
+            .collect();
+        self.inner.borrow_mut().engine.set_series_data(SeriesId(id), data);
+        log::info!("set_series_data: id={}, {} points", id, count);
+    }
+
+    /// Remove a series by ID.
+    pub fn remove_series(&mut self, id: u32) -> bool {
+        let removed = self.inner.borrow_mut().engine.remove_series(SeriesId(id));
+        log::info!("remove_series: id={}, removed={}", id, removed);
+        removed
+    }
+
+    /// Show or hide a series.
+    pub fn set_series_visible(&mut self, id: u32, visible: bool) {
+        self.inner.borrow_mut().engine.set_series_visible(SeriesId(id), visible);
+    }
+
+    /// Get the number of overlay series.
+    pub fn series_count(&self) -> usize {
+        self.inner.borrow().engine.series.len()
+    }
+
     // ── Render ───────────────────────────────────────────────────────────────
 
     /// Render one frame. Call from requestAnimationFrame.
@@ -1414,6 +1466,7 @@ impl RayCore {
         // 5. Generate drawing geometry (base = Idle/Selected, top = Creating/Dragging)
         let (base_drawings, top_drawings) = s.engine.drawings.generate_all_geometry(
             &s.engine.viewport, pane_css_w, pane_css_h, dpr,
+            s.engine.h_pixel_ratio, s.engine.v_pixel_ratio,
         );
 
         let is_webgpu = s.engine.renderer_name() == "webgpu";
