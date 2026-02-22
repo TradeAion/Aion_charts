@@ -2234,6 +2234,9 @@ impl RayCore {
         let sp_pinch_start_end_bar: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
         let sp_pinch_center_x: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
 
+        // Touch detection for kinetic scrolling (only enable on touch devices, like main chart)
+        let sp_is_touch = Rc::new(Cell::new(false));
+
         let pane_id = id;
 
         // ── chart: pointerenter ──
@@ -2281,6 +2284,7 @@ impl RayCore {
             let drag_sx = sp_drag_start_x.clone();
             let drag_sb = sp_drag_start_start_bar.clone();
             let drag_eb = sp_drag_start_end_bar.clone();
+            let is_touch = sp_is_touch.clone();
             let pid = pane_id;
             let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                 let pe: web_sys::PointerEvent = e.unchecked_into();
@@ -2306,9 +2310,11 @@ impl RayCore {
 
                 // Handle drag scroll
                 if drag.get() {
-                    // Update scroll tracking for kinetic animation
-                    if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == pid) {
-                        sp.scroll_state.borrow_mut().update_drag(x, now_ms);
+                    // Update scroll tracking for kinetic animation (touch only)
+                    if is_touch.get() {
+                        if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == pid) {
+                            sp.scroll_state.borrow_mut().update_drag(x, now_ms);
+                        }
                     }
                     
                     let delta_x = x - drag_sx.get();
@@ -2341,6 +2347,7 @@ impl RayCore {
             let drag_sb = sp_drag_start_start_bar.clone();
             let drag_eb = sp_drag_start_end_bar.clone();
             let chart_c = chart_el.clone();
+            let is_touch = sp_is_touch.clone();
             let pid = pane_id;
             let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                 let pe: web_sys::PointerEvent = e.unchecked_into();
@@ -2349,6 +2356,9 @@ impl RayCore {
                 let x = pe.client_x() as f64 - rect.left();
                 let now_ms = js_sys::Date::now();
 
+                // Detect touch input (same as main chart)
+                is_touch.set(pe.pointer_type() == "touch");
+
                 drag.set(true);
                 drag_sx.set(x);
 
@@ -2356,9 +2366,11 @@ impl RayCore {
                 drag_sb.set(s.engine.viewport.start_bar);
                 drag_eb.set(s.engine.viewport.end_bar);
                 
-                // Start scroll tracking for kinetic animation
-                if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == pid) {
-                    sp.scroll_state.borrow_mut().start_drag(x, s.engine.viewport.start_bar, now_ms);
+                // Start scroll tracking for kinetic animation (touch only)
+                if is_touch.get() {
+                    if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == pid) {
+                        sp.scroll_state.borrow_mut().start_drag(x, s.engine.viewport.start_bar, now_ms);
+                    }
                 }
                 drop(s);
 
@@ -2375,17 +2387,24 @@ impl RayCore {
             let inner = Rc::clone(&inner_for_events);
             let drag = sp_drag_active.clone();
             let chart_c = chart_el.clone();
+            let is_touch = sp_is_touch.clone();
             let pid = pane_id;
             let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                 let pe: web_sys::PointerEvent = e.unchecked_into();
                 let now_ms = js_sys::Date::now();
                 drag.set(false);
                 
-                // End scroll tracking and potentially start kinetic animation
+                // End scroll tracking and potentially start kinetic animation (TOUCH ONLY)
                 {
                     let s = inner.borrow();
                     if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == pid) {
-                        sp.scroll_state.borrow_mut().end_drag(now_ms);
+                        if is_touch.get() {
+                            // Touch: end drag and start kinetic animation
+                            sp.scroll_state.borrow_mut().end_drag(now_ms);
+                        } else {
+                            // Mouse: just stop any animation, no kinetic scrolling
+                            sp.scroll_state.borrow_mut().animation.stop();
+                        }
                     }
                 }
                 
