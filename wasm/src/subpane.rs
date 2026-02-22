@@ -793,17 +793,8 @@ impl SubPane {
             .set_fill_style_str(&rgba(&style.bg_color));
         self.chart_base_ctx.fill_rect(0.0, 0.0, pw, ph);
 
-        // Grid lines at tick positions (using theme grid color)
-        self.chart_base_ctx
-            .set_stroke_style_str(&rgba(&style.grid_color));
-        self.chart_base_ctx.set_line_width(1.0);
-        for t in ticks {
-            let y = t.pixel.round() + 0.5;
-            self.chart_base_ctx.begin_path();
-            self.chart_base_ctx.move_to(0.0, y);
-            self.chart_base_ctx.line_to(pw, y);
-            self.chart_base_ctx.stroke();
-        }
+        // Grid lines disabled
+        // (Previously drew horizontal lines at tick positions)
 
         // Reference lines from config (e.g. RSI 30/70, Stochastic 20/80, MACD 0)
         if !self.config.reference_levels.is_empty() {
