@@ -75,20 +75,18 @@ pub fn compute_x_ticks(
     while v <= vp.end_bar {
         let px = (v + 0.5 - vp.start_bar) / count * chart_w;
         let bar_i = v as usize;
-        let (label, major) = if bar_i < bars.len() && bars.timestamps.value(bar_i) > 0 {
-            let lbl = format_timestamp(bars.timestamps.value(bar_i));
-            // LWC: year and month labels are bold (major)
-            let is_major = lbl.len() == 4 && lbl.chars().all(|c| c.is_ascii_digit())  // "2024"
-                || lbl.len() == 3 && lbl.chars().all(|c| c.is_alphabetic()); // "Jan"
-            (lbl, is_major)
+        let label = if bar_i < bars.len() && bars.timestamps.value(bar_i) > 0 {
+            format_timestamp(bars.timestamps.value(bar_i))
         } else {
-            (format!("{}", v as i64), false)
+            format!("{}", v as i64)
         };
+        // All time ticks are major (same as Y-axis) so grid lines appear at all ticks.
+        // Label boldness for year/month is handled separately in the time axis renderer.
         out.push(TickMark {
             value: v,
             pixel: px,
             label,
-            major,
+            major: true,
         });
         v += step;
     }

@@ -116,16 +116,15 @@ impl TimeAxisRenderer {
             if t.pixel < 0.0 || t.pixel > pane_w {
                 continue;
             }
-            let font_key = if t.major {
+            // LWC: year ("2024") and month ("Jan") labels are bold
+            let is_bold_label = (t.label.len() == 4 && t.label.chars().all(|c| c.is_ascii_digit()))
+                || (t.label.len() == 3 && t.label.chars().all(|c| c.is_alphabetic()));
+            let font_key = if is_bold_label {
                 &css_font_bold
             } else {
                 &css_font_normal
             };
-            if t.major {
-                self.base_ctx.set_font(&css_font_bold);
-            } else {
-                self.base_ctx.set_font(&css_font_normal);
-            }
+            self.base_ctx.set_font(font_key);
             let x_css = t.pixel / dpr;
             let m = self
                 .text_cache
@@ -195,17 +194,19 @@ impl TimeAxisRenderer {
         }
         let lx2 = lx1 + label_w;
 
-        // Label height = borderSize + tickLength + paddingTop + fontSize + paddingBottom (all in physical px)
+        // Label height should match the time axis height exactly (no overflow)
+        // Use the canvas height directly since it's sized to the axis
+        let label_h = h;
+
+        // Compute layout positions for text
         let border_size = (style.axis_border_size as f64 * dpr).max(1.0).floor();
         let tick_length = (style.axis_tick_length as f64 * dpr).round();
         let padding_top = style.time_axis_padding_top() * dpr;
-        let padding_bottom = style.time_axis_padding_bottom() * dpr;
         let fs = style.font_size as f64 * dpr;
-        let label_h = (border_size + tick_length + padding_top + fs + padding_bottom).ceil();
 
         let by1 = 0.0;
-        let by2 = label_h.min(h);
-        let radius = (2.0 * dpr).round();
+        let by2 = label_h;
+        let radius = (2.0 * dpr).round().min(label_h / 4.0); // Clamp radius to avoid overflow
 
         // Rounded rect: top corners square, bottom corners rounded
         self.top_ctx
