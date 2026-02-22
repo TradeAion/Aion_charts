@@ -3,9 +3,9 @@
 //! Manages study instances, incremental calculation, and result caching.
 //! Studies are calculated on-demand and cached until new data arrives.
 
-use std::collections::HashMap;
 use crate::core::data::BarArray;
 use crate::core::series::LineDataArray;
+use std::collections::HashMap;
 
 /// Unique identifier for a study instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -109,7 +109,8 @@ impl StudyManager {
 
     /// Register a built-in study calculator.
     pub fn register_calculator(&mut self, calculator: Box<dyn StudyCalculator>) {
-        self.calculators.insert(calculator.name().to_string(), calculator);
+        self.calculators
+            .insert(calculator.name().to_string(), calculator);
     }
 
     /// Create a new study instance.
@@ -151,6 +152,31 @@ impl StudyManager {
                     study.add_output("MACD".to_string(), true);
                     study.add_output("Signal".to_string(), true);
                     study.add_output("Histogram".to_string(), true);
+                }
+                "bollinger" => {
+                    study.add_input(StudyInput::Close);
+                    study.set_parameter("period".to_string(), 20.0);
+                    study.set_parameter("stddev".to_string(), 2.0);
+                    study.add_output("Middle".to_string(), true);
+                    study.add_output("Upper".to_string(), true);
+                    study.add_output("Lower".to_string(), true);
+                }
+                "stochastic" => {
+                    study.add_input(StudyInput::Close);
+                    study.set_parameter("k_period".to_string(), 14.0);
+                    study.set_parameter("d_period".to_string(), 3.0);
+                    study.set_parameter("slowing".to_string(), 3.0);
+                    study.add_output("%K".to_string(), true);
+                    study.add_output("%D".to_string(), true);
+                }
+                "atr" => {
+                    study.add_input(StudyInput::Close);
+                    study.set_parameter("period".to_string(), 14.0);
+                    study.add_output("ATR".to_string(), true);
+                }
+                "vwap" => {
+                    study.add_input(StudyInput::Close);
+                    study.add_output("VWAP".to_string(), true);
                 }
                 _ => {}
             }

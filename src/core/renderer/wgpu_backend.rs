@@ -13,14 +13,14 @@
 //!   CPU maps f64 world data to f32 pixel coords, shader generates geometry.
 //!   24 verts/instance (upper wick + lower wick + border + body fill).
 
-use bytemuck::{Pod, Zeroable};
-use crate::core::viewport::Viewport;
-use crate::core::renderer::wgpu_context::GpuContext;
-use crate::core::renderer::pipeline_manager::{PipelineManager, RectViewportUniform};
-use crate::core::renderer::traits::{ChartRenderer, RenderContext};
 use crate::core::renderer::draw_list::ColoredRect;
 use crate::core::renderer::geometry_generator;
+use crate::core::renderer::pipeline_manager::{PipelineManager, RectViewportUniform};
 use crate::core::renderer::series::CandleSizing;
+use crate::core::renderer::traits::{ChartRenderer, RenderContext};
+use crate::core::renderer::wgpu_context::GpuContext;
+use crate::core::viewport::Viewport;
+use bytemuck::{Pod, Zeroable};
 
 // ── GPU data types ───────────────────────────────────────────────────────────
 
@@ -132,36 +132,41 @@ impl WgpuRenderer {
 
         // ── Candle pipeline (new) ──
         let candle_bind_group_layout =
-            gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("candle_uniform_bgl"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
+            gpu.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("candle_uniform_bgl"),
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                });
 
         let candle_pipeline_layout =
-            gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("candle_pipeline_layout"),
-                bind_group_layouts: &[&candle_bind_group_layout],
-                immediate_size: 0,
+            gpu.device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("candle_pipeline_layout"),
+                    bind_group_layouts: &[&candle_bind_group_layout],
+                    immediate_size: 0,
+                });
+
+        let candle_shader = gpu
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("candle_shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!("../../../shaders/candles.wgsl").into(),
+                ),
             });
 
-        let candle_shader = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("candle_shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../../shaders/candles.wgsl").into(),
-            ),
-        });
-
-        let candle_pipeline =
-            gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let candle_pipeline = gpu
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("candle_pipeline"),
                 layout: Some(&candle_pipeline_layout),
                 vertex: wgpu::VertexState {
@@ -251,7 +256,9 @@ impl WgpuRenderer {
     /// Upload ColoredRects to the rect instance buffer. Returns count.
     fn upload_rects(&mut self, rects: &[ColoredRect], phys_w: u32, phys_h: u32) -> u32 {
         let count = rects.len() as u32;
-        if count == 0 { return 0; }
+        if count == 0 {
+            return 0;
+        }
 
         // Grow if needed
         if rects.len() > self.rect_capacity {
@@ -264,10 +271,9 @@ impl WgpuRenderer {
             });
         }
 
-        self.gpu.queue.write_buffer(
-            &self.rect_instance_buf, 0,
-            bytemuck::cast_slice(rects),
-        );
+        self.gpu
+            .queue
+            .write_buffer(&self.rect_instance_buf, 0, bytemuck::cast_slice(rects));
 
         let uniform = RectViewportUniform {
             width: phys_w as f32,
@@ -275,35 +281,52 @@ impl WgpuRenderer {
             _pad0: 0.0,
             _pad1: 0.0,
         };
-        self.gpu.queue.write_buffer(&self.rect_uniform_buf, 0, bytemuck::bytes_of(&uniform));
+        self.gpu
+            .queue
+            .write_buffer(&self.rect_uniform_buf, 0, bytemuck::bytes_of(&uniform));
 
         count
     }
 
     /// Issue a render pass that draws rect instances.
     fn draw_rect_pass(&mut self, rect_count: u32) {
-        if rect_count == 0 { return; }
-        let frame = self.frame.as_mut().expect("draw_rect_pass called outside begin/end_frame");
+        if rect_count == 0 {
+            return;
+        }
+        let frame = self
+            .frame
+            .as_mut()
+            .expect("draw_rect_pass called outside begin/end_frame");
         let load_op = if frame.cleared {
             wgpu::LoadOp::Load
         } else {
             frame.cleared = true;
-            wgpu::LoadOp::Clear(wgpu::Color { r: 0.09020, g: 0.09020, b: 0.09020, a: 1.0 })
+            wgpu::LoadOp::Clear(wgpu::Color {
+                r: 0.09020,
+                g: 0.09020,
+                b: 0.09020,
+                a: 1.0,
+            })
         };
         {
-            let mut pass = frame.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("rect_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &frame.view,
-                    resolve_target: None,
-                    ops: wgpu::Operations { load: load_op, store: wgpu::StoreOp::Store },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+            let mut pass = frame
+                .encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("rect_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &frame.view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: load_op,
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
             pass.set_pipeline(&self.rect_pipelines.rect_pipeline);
             pass.set_bind_group(0, &self.rect_bind_group, &[]);
             pass.set_vertex_buffer(0, self.rect_instance_buf.slice(..));
@@ -321,9 +344,13 @@ impl WgpuRenderer {
         pane_w: f64,
         candle_h: f64,
     ) -> Vec<CandleInstance> {
-        let start = (viewport.start_bar.floor() as usize).saturating_sub(1).min(bars.len());
+        let start = (viewport.start_bar.floor() as usize)
+            .saturating_sub(1)
+            .min(bars.len());
         let end = ((viewport.end_bar.ceil() as usize) + 1).min(bars.len());
-        if start >= end { return Vec::new(); }
+        if start >= end {
+            return Vec::new();
+        }
 
         let bar_range = viewport.end_bar - viewport.start_bar;
         let price_range = viewport.price_max - viewport.price_min;
@@ -332,28 +359,36 @@ impl WgpuRenderer {
         for i in start..end {
             let b = bars.get(i);
             // f64 world → f32 pixel, relative to viewport origin
-            let center_x = ((i as f64 + 0.5 - viewport.start_bar) / bar_range * pane_w).round() as f32;
-            let open_y = (candle_h * (1.0 - (b.open as f64 - viewport.price_min) / price_range)).round() as f32;
-            let high_y = (candle_h * (1.0 - (b.high as f64 - viewport.price_min) / price_range)).round() as f32;
-            let low_y = (candle_h * (1.0 - (b.low as f64 - viewport.price_min) / price_range)).round() as f32;
-            let close_y = (candle_h * (1.0 - (b.close as f64 - viewport.price_min) / price_range)).round() as f32;
+            let center_x =
+                ((i as f64 + 0.5 - viewport.start_bar) / bar_range * pane_w).round() as f32;
+            let open_y = (candle_h * (1.0 - (b.open as f64 - viewport.price_min) / price_range))
+                .round() as f32;
+            let high_y = (candle_h * (1.0 - (b.high as f64 - viewport.price_min) / price_range))
+                .round() as f32;
+            let low_y = (candle_h * (1.0 - (b.low as f64 - viewport.price_min) / price_range))
+                .round() as f32;
+            let close_y = (candle_h * (1.0 - (b.close as f64 - viewport.price_min) / price_range))
+                .round() as f32;
             let state = if b.close >= b.open { 1.0f32 } else { 0.0f32 };
 
             instances.push(CandleInstance {
-                center_x, open_y, high_y, low_y, close_y, state,
+                center_x,
+                open_y,
+                high_y,
+                low_y,
+                close_y,
+                state,
             });
         }
         instances
     }
 
     /// Upload candle instances and uniforms. Returns instance count.
-    fn upload_candles(
-        &mut self,
-        instances: &[CandleInstance],
-        uniforms: &CandleUniforms,
-    ) -> u32 {
+    fn upload_candles(&mut self, instances: &[CandleInstance], uniforms: &CandleUniforms) -> u32 {
         let count = instances.len() as u32;
-        if count == 0 { return 0; }
+        if count == 0 {
+            return 0;
+        }
 
         // Grow buffer if needed
         if instances.len() > self.candle_capacity {
@@ -367,41 +402,56 @@ impl WgpuRenderer {
         }
 
         self.gpu.queue.write_buffer(
-            &self.candle_instance_buf, 0,
+            &self.candle_instance_buf,
+            0,
             bytemuck::cast_slice(instances),
         );
-        self.gpu.queue.write_buffer(
-            &self.candle_uniform_buf, 0,
-            bytemuck::bytes_of(uniforms),
-        );
+        self.gpu
+            .queue
+            .write_buffer(&self.candle_uniform_buf, 0, bytemuck::bytes_of(uniforms));
 
         count
     }
 
     /// Issue a render pass that draws candle instances.
     fn draw_candle_pass(&mut self, candle_count: u32) {
-        if candle_count == 0 { return; }
-        let frame = self.frame.as_mut().expect("draw_candle_pass called outside begin/end_frame");
+        if candle_count == 0 {
+            return;
+        }
+        let frame = self
+            .frame
+            .as_mut()
+            .expect("draw_candle_pass called outside begin/end_frame");
         let load_op = if frame.cleared {
             wgpu::LoadOp::Load
         } else {
             frame.cleared = true;
-            wgpu::LoadOp::Clear(wgpu::Color { r: 0.09020, g: 0.09020, b: 0.09020, a: 1.0 })
+            wgpu::LoadOp::Clear(wgpu::Color {
+                r: 0.09020,
+                g: 0.09020,
+                b: 0.09020,
+                a: 1.0,
+            })
         };
         {
-            let mut pass = frame.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("candle_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &frame.view,
-                    resolve_target: None,
-                    ops: wgpu::Operations { load: load_op, store: wgpu::StoreOp::Store },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+            let mut pass = frame
+                .encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("candle_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &frame.view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: load_op,
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
             pass.set_pipeline(&self.candle_pipeline);
             pass.set_bind_group(0, &self.candle_bind_group, &[]);
             pass.set_vertex_buffer(0, self.candle_instance_buf.slice(..));
@@ -414,30 +464,48 @@ impl WgpuRenderer {
 // ── ChartRenderer implementation ─────────────────────────────────────────────
 
 impl ChartRenderer for WgpuRenderer {
-    fn name(&self) -> &str { "webgpu" }
+    fn name(&self) -> &str {
+        "webgpu"
+    }
 
     fn resize(&mut self, physical_width: u32, physical_height: u32, _dpr: f64) {
         self.gpu.resize(physical_width, physical_height);
     }
 
-    fn is_valid(&self) -> bool { true }
+    fn is_valid(&self) -> bool {
+        true
+    }
 
     fn begin_frame(&mut self, _ctx: &RenderContext) -> Result<(), String> {
         let output = match self.gpu.surface.get_current_texture() {
             Ok(tex) => tex,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                 // Reconfigure surface and retry once
-                self.gpu.surface.configure(&self.gpu.device, &self.gpu.config);
-                self.gpu.surface.get_current_texture()
+                self.gpu
+                    .surface
+                    .configure(&self.gpu.device, &self.gpu.config);
+                self.gpu
+                    .surface
+                    .get_current_texture()
                     .map_err(|e| format!("Surface error after reconfigure: {:?}", e))?
             }
             Err(e) => return Err(format!("Surface error: {:?}", e)),
         };
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let encoder = self.gpu.device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor { label: Some("raycore_encoder") }
-        );
-        self.frame = Some(FrameState { output, view, encoder, cleared: false });
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("raycore_encoder"),
+            });
+        self.frame = Some(FrameState {
+            output,
+            view,
+            encoder,
+            cleared: false,
+        });
         Ok(())
     }
 
@@ -445,12 +513,28 @@ impl ChartRenderer for WgpuRenderer {
         let pane_w = ctx.viewport.width as f64;
         let pane_h = ctx.viewport.height as f64;
 
-        // Background fill only — no grid lines
+        // Background fill
         let bg = &ctx.style.bg_color;
-        let rects = vec![ColoredRect {
-            x: 0.0, y: 0.0, w: pane_w as f32, h: pane_h as f32,
-            r: bg[0], g: bg[1], b: bg[2], a: bg[3],
+        let mut rects = vec![ColoredRect {
+            x: 0.0,
+            y: 0.0,
+            w: pane_w as f32,
+            h: pane_h as f32,
+            r: bg[0],
+            g: bg[1],
+            b: bg[2],
+            a: bg[3],
         }];
+
+        // Grid lines (same as Canvas2D path)
+        let grid_rects = geometry_generator::generate_grid_rects(
+            ctx.style,
+            ctx.y_ticks,
+            ctx.x_ticks,
+            pane_w,
+            pane_h,
+        );
+        rects.extend(grid_rects);
 
         let count = self.upload_rects(&rects, ctx.viewport.width, ctx.viewport.height);
         self.draw_rect_pass(count);
@@ -463,12 +547,15 @@ impl ChartRenderer for WgpuRenderer {
         let vol_h = pane_h * ctx.viewport.volume_height_ratio as f64;
         let candle_h = pane_h - vol_h;
 
-        let sizing = CandleSizing::compute_from_pane(pane_w, ctx.viewport, ctx.h_pixel_ratio, ctx.v_pixel_ratio);
+        let sizing = CandleSizing::compute_from_pane(
+            pane_w,
+            ctx.viewport,
+            ctx.h_pixel_ratio,
+            ctx.v_pixel_ratio,
+        );
 
         // Build per-instance pixel-space data on CPU (f64 → f32 conversion)
-        let instances = Self::build_candle_instances(
-            ctx.bars, ctx.viewport, pane_w, candle_h,
-        );
+        let instances = Self::build_candle_instances(ctx.bars, ctx.viewport, pane_w, candle_h);
 
         let uniforms = CandleUniforms {
             width: pane_w as f32,
@@ -494,8 +581,13 @@ impl ChartRenderer for WgpuRenderer {
         let pane_w = ctx.viewport.width as f64;
         let pane_h = ctx.viewport.height as f64;
         let vol_rects = geometry_generator::generate_volume_rects(
-            ctx.bars, ctx.viewport, ctx.style, pane_w, pane_h,
-            ctx.h_pixel_ratio, ctx.v_pixel_ratio,
+            ctx.bars,
+            ctx.viewport,
+            ctx.style,
+            pane_w,
+            pane_h,
+            ctx.h_pixel_ratio,
+            ctx.v_pixel_ratio,
         );
         let count = self.upload_rects(&vol_rects, ctx.viewport.width, ctx.viewport.height);
         self.draw_rect_pass(count);
@@ -512,8 +604,13 @@ impl ChartRenderer for WgpuRenderer {
             .collect();
 
         let line_rects = crate::core::renderer::line_generator::generate_all_line_rects(
-            ctx.series, ctx.viewport, &ts, pane_w, pane_h,
-            ctx.h_pixel_ratio, ctx.v_pixel_ratio,
+            ctx.series,
+            ctx.viewport,
+            &ts,
+            pane_w,
+            pane_h,
+            ctx.h_pixel_ratio,
+            ctx.v_pixel_ratio,
         );
 
         if !line_rects.is_empty() {
@@ -524,17 +621,19 @@ impl ChartRenderer for WgpuRenderer {
     }
 
     fn draw_text(&mut self, _ctx: &RenderContext) -> Result<(), String> {
-        // TODO: texture atlas text rendering
+        // Text is handled by Canvas2D overlay/axis renderers — not GPU-rendered
         Ok(())
     }
 
     fn draw_crosshair(&mut self, _ctx: &RenderContext) -> Result<(), String> {
-        // TODO: crosshair overlay
+        // Crosshair is handled by Canvas2D overlay renderer
         Ok(())
     }
 
     fn end_frame(&mut self) -> Result<(), String> {
-        let frame = self.frame.take()
+        let frame = self
+            .frame
+            .take()
             .ok_or_else(|| "end_frame called without begin_frame".to_string())?;
 
         // If nothing was drawn, issue a clear pass so the surface is valid
@@ -547,7 +646,12 @@ impl ChartRenderer for WgpuRenderer {
                         view: &frame.view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.09020, g: 0.09020, b: 0.09020, a: 1.0 }),
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.09020,
+                                g: 0.09020,
+                                b: 0.09020,
+                                a: 1.0,
+                            }),
                             store: wgpu::StoreOp::Store,
                         },
                         depth_slice: None,
@@ -561,7 +665,9 @@ impl ChartRenderer for WgpuRenderer {
             self.gpu.queue.submit(std::iter::once(encoder.finish()));
             frame.output.present();
         } else {
-            self.gpu.queue.submit(std::iter::once(frame.encoder.finish()));
+            self.gpu
+                .queue
+                .submit(std::iter::once(frame.encoder.finish()));
             frame.output.present();
         }
         Ok(())

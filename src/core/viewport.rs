@@ -4,6 +4,76 @@
 //! With the unified geometry architecture, the Viewport no longer produces
 //! GPU uniform blocks. Instead, GeometryGenerator uses Viewport's coordinate
 //! helpers to compute pixel-space rectangles.
+//!
+//! Supports multiple price scale modes: Normal, Logarithmic, Percentage, IndexedTo100.
+
+/// Price scale mode — determines how prices are mapped to visual coordinates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PriceScaleMode {
+    /// Normal linear price scale.
+    Normal,
+    /// Logarithmic scale — better for assets with large price swings.
+    Logarithmic,
+    /// Percentage scale — shows price change as % from first visible value.
+    Percentage,
+    /// Indexed to 100 — shows price relative to first value, starting at 100.
+    IndexedTo100,
+}
+
+impl Default for PriceScaleMode {
+    fn default() -> Self {
+        Self::Normal
+    }
+}
+
+impl PriceScaleMode {
+    /// Parse from a string (for WASM API).
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "logarithmic" | "log" => Self::Logarithmic,
+            "percentage" | "percent" => Self::Percentage,
+            "indexed_to_100" | "indexedTo100" | "indexed" => Self::IndexedTo100,
+            _ => Self::Normal,
+        }
+    }
+}
+
+/// Adaptive log formula parameters (LWC pattern).
+/// Used to handle negative values and values near zero gracefully.
+#[derive(Debug, Clone, Copy)]
+struct LogFormula {
+    /// Log base adjustment for values near zero.
+    log_base: f64,
+    /// Offset added before taking log.
+    log_offset: f64,
+}
+
+impl LogFormula {
+    /// Create a log formula adapted to the given price range.
+    fn for_range(min: f64, max: f64) -> Self {
+        // LWC uses a complex adaptive formula. Simplified version:
+        // For prices that can go to zero or negative, we need an offset.
+        let min_pos = min.max(1e-10);
+        let log_offset = if min <= 0.0 { 1.0 - min } else { 0.0 };
+        let log_base = 10.0_f64; // standard log10 scale
+        Self {
+            log_base,
+            log_offset,
+        }
+    }
+
+    /// Convert price to log space.
+    #[inline]
+    fn to_log(&self, price: f64) -> f64 {
+        (price + self.log_offset).max(1e-10).ln() / self.log_base.ln()
+    }
+
+    /// Convert log space back to price.
+    #[inline]
+    fn from_log(&self, log_val: f64) -> f64 {
+        self.log_base.powf(log_val) - self.log_offset
+    }
+}
 
 /// Logical viewport state — bar range + price range + screen size.
 pub struct Viewport {
@@ -28,6 +98,12 @@ pub struct Viewport {
     pub scale_margin_bottom: f64,
     /// True when price range needs recalculation (LWC _invalidatedForRange pattern).
     pub price_invalidated: bool,
+    /// Price scale mode (Normal, Logarithmic, Percentage, IndexedTo100).
+    pub price_scale_mode: PriceScaleMode,
+    /// First value for percentage/indexed modes (the reference price).
+    pub first_value: f64,
+    /// Cached log formula for logarithmic mode.
+    log_formula: LogFormula,
 }
 
 impl Viewport {
@@ -44,7 +120,33 @@ impl Viewport {
             scale_margin_top: 0.2,
             scale_margin_bottom: 0.1,
             price_invalidated: true,
+            price_scale_mode: PriceScaleMode::Normal,
+            first_value: 0.0,
+            log_formula: LogFormula {
+                log_base: 10.0,
+                log_offset: 0.0,
+            },
         }
+    }
+
+    /// Set the price scale mode.
+    pub fn set_price_scale_mode(&mut self, mode: PriceScaleMode) {
+        if self.price_scale_mode != mode {
+            self.price_scale_mode = mode;
+            self.price_invalidated = true;
+        }
+    }
+
+    /// Update the first_value reference for percentage/indexed modes.
+    /// Should be called when visible data changes or mode is set.
+    pub fn update_first_value(&mut self, bars: &crate::core::data::BarArray) {
+        if bars.is_empty() {
+            self.first_value = 0.0;
+            return;
+        }
+        // Use the first visible bar's close as reference
+        let start_idx = (self.start_bar.floor() as usize).min(bars.len().saturating_sub(1));
+        self.first_value = bars.closes.value(start_idx) as f64;
     }
 
     #[inline]
@@ -70,10 +172,14 @@ impl Viewport {
     /// meaning the data occupies the inner 70% of the chart height, with 20%
     /// padding above and 10% below.
     pub fn auto_fit_price(&mut self, bars: &crate::core::data::BarArray) {
-        if bars.is_empty() { return; }
+        if bars.is_empty() {
+            return;
+        }
         let start = (self.start_bar.floor() as usize).min(bars.len().saturating_sub(1));
         let end = (self.end_bar.ceil() as usize).min(bars.len());
-        if start >= end { return; }
+        if start >= end {
+            return;
+        }
 
         let mut lo = f32::MAX;
         let mut hi = f32::MIN;
@@ -83,9 +189,46 @@ impl Viewport {
             hi = hi.max(bar.high);
         }
 
-        let raw_range = (hi - lo) as f64;
+        // Update first_value for percentage/indexed modes
+        self.first_value = bars.closes.value(start) as f64;
+
+        // For log mode, update the formula
+        if self.price_scale_mode == PriceScaleMode::Logarithmic {
+            self.log_formula = LogFormula::for_range(lo as f64, hi as f64);
+        }
+
+        // Transform to internal coordinate space based on mode
+        let (internal_lo, internal_hi) = match self.price_scale_mode {
+            PriceScaleMode::Normal => (lo as f64, hi as f64),
+            PriceScaleMode::Logarithmic => (
+                self.log_formula.to_log(lo as f64),
+                self.log_formula.to_log(hi as f64),
+            ),
+            PriceScaleMode::Percentage => {
+                if self.first_value.abs() < 1e-10 {
+                    (0.0, 100.0)
+                } else {
+                    let lo_pct = 100.0 * (lo as f64 - self.first_value) / self.first_value;
+                    let hi_pct = 100.0 * (hi as f64 - self.first_value) / self.first_value;
+                    (lo_pct, hi_pct)
+                }
+            }
+            PriceScaleMode::IndexedTo100 => {
+                if self.first_value.abs() < 1e-10 {
+                    (100.0, 100.0)
+                } else {
+                    let lo_idx = 100.0 * lo as f64 / self.first_value;
+                    let hi_idx = 100.0 * hi as f64 / self.first_value;
+                    (lo_idx, hi_idx)
+                }
+            }
+        };
+
+        let raw_range = internal_hi - internal_lo;
         let internal_frac = 1.0 - self.scale_margin_top - self.scale_margin_bottom;
-        if internal_frac <= 0.0 { return; }
+        if internal_frac <= 0.0 {
+            return;
+        }
 
         let full_range = if raw_range > 0.0 {
             raw_range / internal_frac
@@ -93,7 +236,7 @@ impl Viewport {
             // Degenerate single price — extend by 10 units (LWC behavior)
             10.0 / internal_frac
         };
-        self.price_min = lo as f64 - full_range * self.scale_margin_bottom;
+        self.price_min = internal_lo - full_range * self.scale_margin_bottom;
         self.price_max = self.price_min + full_range;
     }
 
@@ -106,7 +249,54 @@ impl Viewport {
 
     #[inline]
     pub fn price_to_frac(&self, price: f64) -> f64 {
-        (price - self.price_min) / (self.price_max - self.price_min)
+        let internal = self.price_to_internal(price);
+        (internal - self.price_min) / (self.price_max - self.price_min)
+    }
+
+    /// Convert a raw price to internal coordinate space based on scale mode.
+    #[inline]
+    pub fn price_to_internal(&self, price: f64) -> f64 {
+        match self.price_scale_mode {
+            PriceScaleMode::Normal => price,
+            PriceScaleMode::Logarithmic => self.log_formula.to_log(price),
+            PriceScaleMode::Percentage => {
+                if self.first_value.abs() < 1e-10 {
+                    0.0
+                } else {
+                    100.0 * (price - self.first_value) / self.first_value
+                }
+            }
+            PriceScaleMode::IndexedTo100 => {
+                if self.first_value.abs() < 1e-10 {
+                    100.0
+                } else {
+                    100.0 * price / self.first_value
+                }
+            }
+        }
+    }
+
+    /// Convert internal coordinate space back to raw price.
+    #[inline]
+    pub fn internal_to_price(&self, internal: f64) -> f64 {
+        match self.price_scale_mode {
+            PriceScaleMode::Normal => internal,
+            PriceScaleMode::Logarithmic => self.log_formula.from_log(internal),
+            PriceScaleMode::Percentage => {
+                if self.first_value.abs() < 1e-10 {
+                    0.0
+                } else {
+                    self.first_value * (1.0 + internal / 100.0)
+                }
+            }
+            PriceScaleMode::IndexedTo100 => {
+                if self.first_value.abs() < 1e-10 {
+                    0.0
+                } else {
+                    self.first_value * internal / 100.0
+                }
+            }
+        }
     }
 
     #[inline]
@@ -118,7 +308,8 @@ impl Viewport {
     #[inline]
     pub fn pixel_to_price(&self, y_px: f64, chart_height_px: f64) -> f64 {
         let frac = 1.0 - (y_px / chart_height_px);
-        self.price_min + frac * (self.price_max - self.price_min)
+        let internal = self.price_min + frac * (self.price_max - self.price_min);
+        self.internal_to_price(internal)
     }
 
     /// Convert a pixel X coordinate to the bar index whose slot contains it.
@@ -130,7 +321,12 @@ impl Viewport {
     ///
     /// Returns `None` when the pixel maps outside `0..data_len`.
     #[inline]
-    pub fn bar_index_at_pixel(&self, x_px: f64, chart_width_px: f64, data_len: usize) -> Option<usize> {
+    pub fn bar_index_at_pixel(
+        &self,
+        x_px: f64,
+        chart_width_px: f64,
+        data_len: usize,
+    ) -> Option<usize> {
         let bar_f = self.pixel_to_bar(x_px, chart_width_px);
         let idx = bar_f.floor() as i64;
         if idx < 0 || idx >= data_len as i64 {
@@ -160,11 +356,15 @@ impl Viewport {
     ///
     /// The candle area occupies the top `candle_height_frac()` of the pane;
     /// volume occupies the bottom.  Y increases downward (0 = top of pane).
+    /// Handles all price scale modes (Normal, Log, Percentage, IndexedTo100).
     #[inline]
     pub fn price_to_css_y(&self, price: f64, pane_css_h: f64) -> f64 {
         let range = self.price_max - self.price_min;
-        if range <= 0.0 { return 0.0; }
-        let frac = (price - self.price_min) / range;
+        if range <= 0.0 {
+            return 0.0;
+        }
+        let internal = self.price_to_internal(price);
+        let frac = (internal - self.price_min) / range;
         let candle_css_h = pane_css_h * self.candle_height_frac();
         (1.0 - frac) * candle_css_h
     }

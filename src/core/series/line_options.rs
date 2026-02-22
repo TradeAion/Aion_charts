@@ -1,12 +1,22 @@
 //! Line series visual options — color, width, dash style, etc.
 
 /// Line dash style — matches LWC's LineStyle enum.
+///
+/// Dash patterns are width-relative per the LWC specification:
+/// - Solid = no dash
+/// - Dotted = [w, w]
+/// - Dashed = [2w, 2w]
+/// - LargeDashed = [6w, 6w]
+/// - SparseDotted = [w, 4w]
+///
+/// Where `w` = line width in physical pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineStyle {
     Solid,
-    Dashed,
     Dotted,
+    Dashed,
     LargeDashed,
+    SparseDotted,
 }
 
 impl Default for LineStyle {
@@ -16,13 +26,42 @@ impl Default for LineStyle {
 }
 
 impl LineStyle {
-    /// Returns (dash_len, gap_len) in CSS px. (0, 0) = solid.
-    pub fn dash_pattern(&self) -> (f64, f64) {
+    /// Returns (dash_len, gap_len) in physical pixels, scaled by line width.
+    /// (0, 0) = solid (no dash pattern).
+    ///
+    /// LWC dash table (w = line_width in physical px):
+    /// - Solid: (0, 0)
+    /// - Dotted: (w, w)
+    /// - Dashed: (2w, 2w)
+    /// - LargeDashed: (6w, 6w)
+    /// - SparseDotted: (w, 4w)
+    pub fn dash_pattern(&self, line_width: f64) -> (f64, f64) {
+        let w = line_width.max(1.0);
         match self {
             Self::Solid => (0.0, 0.0),
-            Self::Dashed => (6.0, 4.0),
-            Self::Dotted => (1.0, 2.0),
-            Self::LargeDashed => (12.0, 6.0),
+            Self::Dotted => (w, w),
+            Self::Dashed => (2.0 * w, 2.0 * w),
+            Self::LargeDashed => (6.0 * w, 6.0 * w),
+            Self::SparseDotted => (w, 4.0 * w),
+        }
+    }
+
+    /// Whether this style requires Canvas2D strokePath rendering
+    /// (as opposed to rect-based rendering).
+    #[inline]
+    pub fn is_dashed(&self) -> bool {
+        !matches!(self, Self::Solid)
+    }
+
+    /// Parse from a string (for WASM API).
+    /// Accepted values: "solid", "dotted", "dashed", "large_dashed", "sparse_dotted".
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "dotted" => Self::Dotted,
+            "dashed" => Self::Dashed,
+            "large_dashed" | "largeDashed" => Self::LargeDashed,
+            "sparse_dotted" | "sparseDotted" => Self::SparseDotted,
+            _ => Self::Solid,
         }
     }
 }

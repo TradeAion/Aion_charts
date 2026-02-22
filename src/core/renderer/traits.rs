@@ -11,8 +11,8 @@
 //! immediately, avoiding self-referential borrows.
 
 use crate::core::data::BarArray;
-use crate::core::viewport::Viewport;
 use crate::core::series::SeriesCollection;
+use crate::core::viewport::Viewport;
 
 /// Style configuration for the chart — colors, sizes, etc.
 /// Shared between all renderers so the chart looks identical regardless of backend.
@@ -37,6 +37,8 @@ pub struct ChartStyle {
     pub crosshair_label_bg: [f32; 4],
     pub crosshair_label_text: [f32; 4],
     pub watermark_color: [f32; 4],
+    /// Watermark text displayed centered on the pane.
+    pub watermark_text: String,
     /// Font family — LWC default: `-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif`.
     pub font_family: String,
     /// Layout font size in CSS px (LWC default: 11).
@@ -72,7 +74,9 @@ impl ChartStyle {
     }
     /// Price axis label offset (LWC Constants.LabelOffset = 5).
     #[inline]
-    pub fn price_axis_label_offset(&self) -> f64 { 5.0 }
+    pub fn price_axis_label_offset(&self) -> f64 {
+        5.0
+    }
 
     /// Computed optimal price axis width (CSS px) for a given max text width.
     /// LWC: borderSize + tickLength + paddingInner + paddingOuter + LabelOffset + textWidth
@@ -104,31 +108,49 @@ impl ChartStyle {
 
     /// Time axis paddingTop: `3 * fontSize / 12`.
     #[inline]
-    pub fn time_axis_padding_top(&self) -> f64 { 3.0 * self.font_size as f64 / 12.0 }
+    pub fn time_axis_padding_top(&self) -> f64 {
+        3.0 * self.font_size as f64 / 12.0
+    }
     /// Time axis paddingBottom: same.
     #[inline]
-    pub fn time_axis_padding_bottom(&self) -> f64 { 3.0 * self.font_size as f64 / 12.0 }
+    pub fn time_axis_padding_bottom(&self) -> f64 {
+        3.0 * self.font_size as f64 / 12.0
+    }
     /// Time axis paddingHorizontal: `9 * fontSize / 12`.
     #[inline]
-    pub fn time_axis_padding_horizontal(&self) -> f64 { 9.0 * self.font_size as f64 / 12.0 }
+    pub fn time_axis_padding_horizontal(&self) -> f64 {
+        9.0 * self.font_size as f64 / 12.0
+    }
     /// Time axis labelBottomOffset: `4 * fontSize / 12`.
     #[inline]
-    pub fn time_axis_label_bottom_offset(&self) -> f64 { 4.0 * self.font_size as f64 / 12.0 }
+    pub fn time_axis_label_bottom_offset(&self) -> f64 {
+        4.0 * self.font_size as f64 / 12.0
+    }
 
     /// Crosshair label additional padding (LWC: `2/12 * fontSize`).
     #[inline]
-    pub fn crosshair_label_extra_padding(&self) -> f64 { 2.0 / 12.0 * self.font_size as f64 }
+    pub fn crosshair_label_extra_padding(&self) -> f64 {
+        2.0 / 12.0 * self.font_size as f64
+    }
 
     /// Build the CSS font string for the axis: `"11px -apple-system, ..."`.
     #[inline]
     pub fn axis_font(&self, dpr: f64) -> String {
-        format!("{}px {}", (self.font_size as f64 * dpr).round(), self.font_family)
+        format!(
+            "{}px {}",
+            (self.font_size as f64 * dpr).round(),
+            self.font_family
+        )
     }
 
     /// Build bold font string for time-axis bold labels.
     #[inline]
     pub fn axis_font_bold(&self, dpr: f64) -> String {
-        format!("bold {}px {}", (self.font_size as f64 * dpr).round(), self.font_family)
+        format!(
+            "bold {}px {}",
+            (self.font_size as f64 * dpr).round(),
+            self.font_family
+        )
     }
 }
 
@@ -210,7 +232,9 @@ pub struct TickMark {
 pub trait ChartRenderer {
     fn name(&self) -> &str;
     fn resize(&mut self, physical_width: u32, physical_height: u32, dpr: f64);
-    fn is_valid(&self) -> bool { true }
+    fn is_valid(&self) -> bool {
+        true
+    }
 
     /// Acquire surface texture, create TextureView + CommandEncoder.
     /// Store them in `self` for the draw methods to use.

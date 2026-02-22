@@ -24,7 +24,10 @@ use raycore::{
     PriceAxisRenderer, TimeAxisRenderer,
     InteractionHandler, HitZone,
     generate_sample_data, tick_marks,
-    LinePoint, LineSeriesOptions, AreaSeriesOptions, HistogramSeriesOptions, BarSeriesOptions, BaselineSeriesOptions, SeriesId,
+    LinePoint, LineSeriesOptions, LineStyle,
+    AreaSeriesOptions, HistogramSeriesOptions, BarSeriesOptions, BaselineSeriesOptions, SeriesId,
+    PriceLineOptions,
+    SeriesMarker, MarkerShape, MarkerPosition,
 };
 
 mod canvas_manager;
@@ -1390,6 +1393,129 @@ impl RayCore {
         self.inner.borrow_mut().engine.drawings.cancel_creation();
     }
 
+    // ── Keyboard Events ────────────────────────────────────────────────────────
+
+    /// Handle keyboard events. Returns true if the key was handled.
+    ///
+    /// Supported shortcuts:
+    /// - Delete / Backspace: Remove selected drawing
+    /// - Escape: Cancel drawing creation, deselect all
+    /// - Arrow Left/Right: Scroll chart by one bar
+    /// - Arrow Up/Down: Zoom price axis in/out
+    /// - Home: Scroll to first bar
+    /// - End: Scroll to last bar
+    /// - +/=: Zoom in (time axis)
+    /// - -: Zoom out (time axis)
+    /// - 0: Reset zoom to fit all data
+    pub fn on_key_down(&mut self, key: &str, ctrl: bool, shift: bool, _alt: bool) -> bool {
+        let mut s = self.inner.borrow_mut();
+        let bar_count = s.engine.bars.len() as f64;
+        
+        match key {
+            // Delete selected drawing
+            "Delete" | "Backspace" => {
+                s.engine.drawings.remove_selected();
+                true
+            }
+            
+            // Cancel/deselect
+            "Escape" => {
+                s.engine.drawings.cancel_creation();
+                s.engine.drawings.deselect_all();
+                true
+            }
+            
+            // Scroll by bars
+            "ArrowLeft" => {
+                let amount = if ctrl { 10.0 } else if shift { 5.0 } else { 1.0 };
+                s.engine.viewport.start_bar -= amount;
+                s.engine.viewport.end_bar -= amount;
+                // Clamp to valid range
+                if s.engine.viewport.start_bar < 0.0 {
+                    let offset = -s.engine.viewport.start_bar;
+                    s.engine.viewport.start_bar = 0.0;
+                    s.engine.viewport.end_bar += offset;
+                }
+                true
+            }
+            "ArrowRight" => {
+                let amount = if ctrl { 10.0 } else if shift { 5.0 } else { 1.0 };
+                s.engine.viewport.start_bar += amount;
+                s.engine.viewport.end_bar += amount;
+                // Allow scrolling past end for right margin
+                let max_start = bar_count + 50.0; // Some margin
+                if s.engine.viewport.start_bar > max_start {
+                    let offset = s.engine.viewport.start_bar - max_start;
+                    s.engine.viewport.start_bar = max_start;
+                    s.engine.viewport.end_bar -= offset;
+                }
+                true
+            }
+            
+            // Zoom price axis
+            "ArrowUp" => {
+                let factor = if ctrl { 1.2 } else { 1.05 };
+                let mid = (s.engine.viewport.price_max + s.engine.viewport.price_min) / 2.0;
+                let half_range = (s.engine.viewport.price_max - s.engine.viewport.price_min) / 2.0 / factor;
+                s.engine.viewport.price_min = mid - half_range;
+                s.engine.viewport.price_max = mid + half_range;
+                true
+            }
+            "ArrowDown" => {
+                let factor = if ctrl { 1.2 } else { 1.05 };
+                let mid = (s.engine.viewport.price_max + s.engine.viewport.price_min) / 2.0;
+                let half_range = (s.engine.viewport.price_max - s.engine.viewport.price_min) / 2.0 * factor;
+                s.engine.viewport.price_min = mid - half_range;
+                s.engine.viewport.price_max = mid + half_range;
+                true
+            }
+            
+            // Jump to start/end
+            "Home" => {
+                let visible_bars = s.engine.viewport.end_bar - s.engine.viewport.start_bar;
+                s.engine.viewport.start_bar = 0.0;
+                s.engine.viewport.end_bar = visible_bars;
+                true
+            }
+            "End" => {
+                let visible_bars = s.engine.viewport.end_bar - s.engine.viewport.start_bar;
+                s.engine.viewport.end_bar = bar_count - 1.0 + visible_bars * 0.1; // Small right margin
+                s.engine.viewport.start_bar = s.engine.viewport.end_bar - visible_bars;
+                true
+            }
+            
+            // Zoom time axis
+            "+" | "=" => {
+                // Zoom in: reduce visible range
+                let mid = (s.engine.viewport.start_bar + s.engine.viewport.end_bar) / 2.0;
+                let half_range = (s.engine.viewport.end_bar - s.engine.viewport.start_bar) / 2.0 / 1.2;
+                s.engine.viewport.start_bar = mid - half_range;
+                s.engine.viewport.end_bar = mid + half_range;
+                true
+            }
+            "-" | "_" => {
+                // Zoom out: increase visible range
+                let mid = (s.engine.viewport.start_bar + s.engine.viewport.end_bar) / 2.0;
+                let half_range = (s.engine.viewport.end_bar - s.engine.viewport.start_bar) / 2.0 * 1.2;
+                s.engine.viewport.start_bar = (mid - half_range).max(0.0);
+                s.engine.viewport.end_bar = mid + half_range;
+                true
+            }
+            
+            // Reset zoom to fit all data
+            "0" => {
+                s.engine.viewport.start_bar = 0.0;
+                s.engine.viewport.end_bar = bar_count - 1.0 + bar_count * 0.05; // 5% right margin
+                s.engine.viewport.price_min = f64::MAX;
+                s.engine.viewport.price_max = f64::MIN;
+                // Let auto-fit recalculate price range on next render
+                true
+            }
+            
+            _ => false, // Key not handled
+        }
+    }
+
     /// Remove all drawings.
     pub fn clear_drawings(&mut self) {
         let mut s = self.inner.borrow_mut();
@@ -1404,9 +1530,274 @@ impl RayCore {
         self.inner.borrow_mut().engine.drawings.remove_all_scale();
     }
 
+    /// Set watermark text displayed centered on the chart pane.
+    pub fn set_watermark(&mut self, text: &str) {
+        self.inner.borrow_mut().engine.style.watermark_text = text.to_string();
+    }
+
+    // ── Runtime Style Configuration API ────────────────────────────────────────
+
+    /// Set the chart background color (RGBA, 0.0-1.0).
+    pub fn set_background_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        let mut s = self.inner.borrow_mut();
+        s.engine.style.bg_color = [r, g, b, a];
+        s.engine.style.axis_bg_color = [r, g, b, a]; // sync axis bg
+    }
+
+    /// Set the grid line color (RGBA, 0.0-1.0).
+    pub fn set_grid_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        self.inner.borrow_mut().engine.style.grid_color = [r, g, b, a];
+    }
+
+    /// Set the axis border color (RGBA, 0.0-1.0).
+    pub fn set_axis_border_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        self.inner.borrow_mut().engine.style.axis_border_color = [r, g, b, a];
+    }
+
+    /// Set the axis text color (RGBA, 0.0-1.0).
+    pub fn set_axis_text_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        self.inner.borrow_mut().engine.style.axis_text_color = [r, g, b, a];
+    }
+
+    /// Set the crosshair line color (RGBA, 0.0-1.0).
+    pub fn set_crosshair_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        self.inner.borrow_mut().engine.style.crosshair_color = [r, g, b, a];
+    }
+
+    /// Set the crosshair label background color (RGBA, 0.0-1.0).
+    pub fn set_crosshair_label_bg_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        self.inner.borrow_mut().engine.style.crosshair_label_bg = [r, g, b, a];
+    }
+
+    /// Set the crosshair label text color (RGBA, 0.0-1.0).
+    pub fn set_crosshair_label_text_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        self.inner.borrow_mut().engine.style.crosshair_label_text = [r, g, b, a];
+    }
+
+    /// Set bullish (up) candle colors: body fill and wick/border.
+    pub fn set_bullish_color(&mut self, fill_r: f32, fill_g: f32, fill_b: f32, fill_a: f32,
+                              wick_r: f32, wick_g: f32, wick_b: f32, wick_a: f32) {
+        let mut s = self.inner.borrow_mut();
+        s.engine.style.bullish_color = [fill_r, fill_g, fill_b, fill_a];
+        s.engine.style.wick_bullish_color = [wick_r, wick_g, wick_b, wick_a];
+    }
+
+    /// Set bearish (down) candle colors: body fill and wick/border.
+    pub fn set_bearish_color(&mut self, fill_r: f32, fill_g: f32, fill_b: f32, fill_a: f32,
+                              wick_r: f32, wick_g: f32, wick_b: f32, wick_a: f32) {
+        let mut s = self.inner.borrow_mut();
+        s.engine.style.bearish_color = [fill_r, fill_g, fill_b, fill_a];
+        s.engine.style.wick_bearish_color = [wick_r, wick_g, wick_b, wick_a];
+    }
+
+    /// Set volume bar colors: bullish and bearish.
+    pub fn set_volume_colors(&mut self, up_r: f32, up_g: f32, up_b: f32, up_a: f32,
+                              down_r: f32, down_g: f32, down_b: f32, down_a: f32) {
+        let mut s = self.inner.borrow_mut();
+        s.engine.style.bullish_volume_color = [up_r, up_g, up_b, up_a];
+        s.engine.style.bearish_volume_color = [down_r, down_g, down_b, down_a];
+    }
+
+    /// Set the watermark text color (RGBA, 0.0-1.0).
+    pub fn set_watermark_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        self.inner.borrow_mut().engine.style.watermark_color = [r, g, b, a];
+    }
+
+    /// Set the font size for axis labels (in CSS pixels).
+    pub fn set_font_size(&mut self, size: f32) {
+        self.inner.borrow_mut().engine.style.font_size = size;
+    }
+
+    /// Set the font family for axis labels.
+    pub fn set_font_family(&mut self, family: &str) {
+        self.inner.borrow_mut().engine.style.font_family = family.to_string();
+    }
+
+    /// Set the bar width ratio (0.0-1.0, default 0.8).
+    pub fn set_bar_width_ratio(&mut self, ratio: f32) {
+        self.inner.borrow_mut().engine.style.bar_width_ratio = ratio.clamp(0.1, 1.0);
+    }
+
+    /// Set the price scale margins (top and bottom as fractions 0.0-1.0).
+    /// Default is 0.2 top, 0.1 bottom.
+    pub fn set_price_scale_margins(&mut self, top: f64, bottom: f64) {
+        let mut s = self.inner.borrow_mut();
+        s.engine.viewport.scale_margin_top = top.clamp(0.0, 0.5);
+        s.engine.viewport.scale_margin_bottom = bottom.clamp(0.0, 0.5);
+        s.engine.viewport.price_invalidated = true;
+    }
+
+    /// Set the price scale mode.
+    ///
+    /// Accepted values: "normal", "logarithmic" (or "log"), "percentage" (or "percent"),
+    /// "indexed_to_100" (or "indexedTo100", "indexed").
+    pub fn set_price_scale_mode(&mut self, mode: &str) {
+        use raycore::PriceScaleMode;
+        let mode = PriceScaleMode::from_str(mode);
+        self.inner.borrow_mut().engine.viewport.set_price_scale_mode(mode);
+    }
+
     /// Get the number of drawings.
     pub fn drawing_count(&self) -> usize {
         self.inner.borrow().engine.drawings.len()
+    }
+
+    // ── Price Lines API ────────────────────────────────────────────────────────
+
+    /// Create a new price line at the specified price level. Returns the price line ID.
+    ///
+    /// `line_style`: "solid", "dotted", "dashed", "large_dashed", "sparse_dotted".
+    pub fn create_price_line(
+        &mut self,
+        price: f64,
+        color_r: f32,
+        color_g: f32,
+        color_b: f32,
+        color_a: f32,
+        line_width: f32,
+        line_style: &str,
+        draggable: bool,
+    ) -> u32 {
+        let mut opts = PriceLineOptions::default();
+        opts.price = price;
+        opts.color = [color_r, color_g, color_b, color_a];
+        opts.line_width = line_width as f64;
+        opts.line_style = LineStyle::from_str(line_style);
+        opts.draggable = draggable;
+        let id = self.inner.borrow_mut().engine.price_lines.create(opts);
+        log::info!("create_price_line: id={}, price={}", id.0, price);
+        id.0
+    }
+
+    /// Update the price of an existing price line.
+    pub fn set_price_line_price(&mut self, id: u32, price: f64) {
+        use raycore::PriceLineId;
+        if let Some(line) = self.inner.borrow_mut().engine.price_lines.get_mut(PriceLineId(id)) {
+            line.set_price(price);
+        }
+    }
+
+    /// Set whether a price line is visible.
+    pub fn set_price_line_visible(&mut self, id: u32, visible: bool) {
+        use raycore::PriceLineId;
+        if let Some(line) = self.inner.borrow_mut().engine.price_lines.get_mut(PriceLineId(id)) {
+            line.options.visible = visible;
+        }
+    }
+
+    /// Set the label text of a price line. Empty string uses formatted price.
+    pub fn set_price_line_label(&mut self, id: u32, label: &str) {
+        use raycore::PriceLineId;
+        if let Some(line) = self.inner.borrow_mut().engine.price_lines.get_mut(PriceLineId(id)) {
+            line.options.label_text = label.to_string();
+        }
+    }
+
+    /// Remove a price line by ID.
+    pub fn remove_price_line(&mut self, id: u32) -> bool {
+        use raycore::PriceLineId;
+        self.inner.borrow_mut().engine.price_lines.remove(PriceLineId(id))
+    }
+
+    /// Get the number of price lines.
+    pub fn price_line_count(&self) -> usize {
+        self.inner.borrow().engine.price_lines.len()
+    }
+
+    // ── Series Markers API ─────────────────────────────────────────────────────
+
+    /// Add a marker to a series at the specified bar index.
+    ///
+    /// `shape`: "arrow_up", "arrow_down", "circle", "square"
+    /// `position`: "above_bar", "below_bar", "at_price"
+    /// `price`: Used only when position is "at_price"
+    ///
+    /// Returns the marker ID.
+    pub fn add_marker(
+        &mut self,
+        series_id: u32,
+        bar_index: u32,
+        shape: &str,
+        position: &str,
+        price: f64,
+        color_r: f32,
+        color_g: f32,
+        color_b: f32,
+        color_a: f32,
+        size: f32,
+        text: &str,
+    ) -> u32 {
+        let marker = SeriesMarker {
+            bar_index: bar_index as usize,
+            shape: MarkerShape::from_str(shape),
+            position: MarkerPosition::from_str(position),
+            price,
+            color: [color_r, color_g, color_b, color_a],
+            size: size as f64,
+            text: text.to_string(),
+            text_color: [1.0, 1.0, 1.0, 0.9],
+            id: 0, // will be assigned
+        };
+        let id = self.inner.borrow_mut().engine.markers.for_series(series_id).add(marker);
+        log::info!("add_marker: series={}, bar={}, shape={}, id={}", series_id, bar_index, shape, id);
+        id
+    }
+
+    /// Remove a specific marker from a series.
+    pub fn remove_marker(&mut self, series_id: u32, marker_id: u32) -> bool {
+        self.inner.borrow_mut().engine.markers.for_series(series_id).remove(marker_id)
+    }
+
+    /// Clear all markers for a series.
+    pub fn clear_markers(&mut self, series_id: u32) {
+        self.inner.borrow_mut().engine.markers.clear_series(series_id);
+    }
+
+    /// Clear all markers for all series.
+    pub fn clear_all_markers(&mut self) {
+        self.inner.borrow_mut().engine.markers.clear_all();
+    }
+
+    /// Set multiple markers for a series at once (replaces existing).
+    /// `marker_data` is a flat array: [bar_index, shape_idx, position_idx, price, r, g, b, a, size, ...]
+    /// where shape_idx: 0=arrowUp, 1=arrowDown, 2=circle, 3=square
+    /// and position_idx: 0=aboveBar, 1=belowBar, 2=atPrice
+    pub fn set_markers(&mut self, series_id: u32, marker_data: &[f64]) {
+        const STRIDE: usize = 9; // bar_index, shape, position, price, r, g, b, a, size
+        let mut markers = Vec::new();
+
+        for chunk in marker_data.chunks_exact(STRIDE) {
+            let bar_index = chunk[0] as usize;
+            let shape = match chunk[1] as u32 {
+                0 => MarkerShape::ArrowUp,
+                1 => MarkerShape::ArrowDown,
+                2 => MarkerShape::Circle,
+                _ => MarkerShape::Square,
+            };
+            let position = match chunk[2] as u32 {
+                0 => MarkerPosition::AboveBar,
+                1 => MarkerPosition::BelowBar,
+                _ => MarkerPosition::AtPrice,
+            };
+            let price = chunk[3];
+            let color = [chunk[4] as f32, chunk[5] as f32, chunk[6] as f32, chunk[7] as f32];
+            let size = chunk[8];
+
+            markers.push(SeriesMarker {
+                bar_index,
+                shape,
+                position,
+                price,
+                color,
+                size,
+                text: String::new(),
+                text_color: [1.0, 1.0, 1.0, 0.9],
+                id: 0,
+            });
+        }
+
+        self.inner.borrow_mut().engine.markers.for_series(series_id).set(markers);
+        log::info!("set_markers: series={}, count={}", series_id, marker_data.len() / STRIDE);
     }
 
     // ── Series overlay API ────────────────────────────────────────────────────
@@ -1414,6 +1805,7 @@ impl RayCore {
     /// Add a new line series overlay. Returns the series ID.
     ///
     /// Default color is TradingView blue (#2962FF). Use RGBA [0.0–1.0].
+    /// `line_style`: "solid", "dotted", "dashed", "large_dashed", "sparse_dotted".
     pub fn add_line_series(
         &mut self,
         color_r: f32,
@@ -1421,12 +1813,14 @@ impl RayCore {
         color_b: f32,
         color_a: f32,
         line_width: f32,
+        line_style: &str,
     ) -> u32 {
         let mut opts = LineSeriesOptions::default();
         opts.color = [color_r, color_g, color_b, color_a];
         opts.line_width = line_width as f64;
+        opts.line_style = LineStyle::from_str(line_style);
         let id = self.inner.borrow_mut().engine.add_line_series(opts);
-        log::info!("add_line_series: id={}", id.0);
+        log::info!("add_line_series: id={}, style={}", id.0, line_style);
         id.0
     }
 
@@ -1792,6 +2186,7 @@ impl RayCore {
         }
 
         let dpr = s.engine.dpr;
+        let anim_time = js_sys::Date::now(); // For pulsing animations
 
         let (pane_css_w, pane_css_h) = s.layout.pane_css_size();
 
@@ -1817,18 +2212,28 @@ impl RayCore {
         );
 
         // 2. Measure price axis width from tick labels
-        let max_text_w_phys = s.price_axis_renderer.measure_max_tick_width(&s.engine.style, &y_ticks);
-        let max_text_w_css = max_text_w_phys / dpr;
-        let price_axis_css_w = s.engine.style.price_axis_width(max_text_w_css);
-        let time_axis_css_h = s.engine.style.time_axis_height();
+        // Destructure to borrow price_axis_renderer mutably while engine is borrowed immutably
+        {
+            let ChartInner { ref mut price_axis_renderer, ref engine, ref mut layout, .. } = *s;
+            let max_text_w_phys = price_axis_renderer.measure_max_tick_width(&engine.style, &y_ticks);
+            let max_text_w_css = max_text_w_phys / dpr;
+            let price_axis_css_w = engine.style.price_axis_width(max_text_w_css);
+            let time_axis_css_h = engine.style.time_axis_height();
 
-        // 3. Update CSS grid layout (this may cause pane to resize)
-        s.layout.update_axis_sizes(price_axis_css_w, time_axis_css_h);
+            // 3. Update CSS grid layout (this may cause pane to resize)
+            layout.update_axis_sizes(price_axis_css_w, time_axis_css_h);
+        }
 
         // 4. Engine render — candles + volume on pane chart canvas
         if let Err(e) = s.engine.render(&y_ticks, &x_ticks) {
             log::warn!("render error: {}", e);
         }
+
+        // 4b. Dashed line series — rendered via Canvas2D strokePath (not rects).
+        // Build bar timestamps for line_generator point lookup.
+        let bar_ts: Vec<u64> = (0..s.engine.bars.len())
+            .map(|i| s.engine.bars.timestamps.value(i))
+            .collect();
 
         // 5. Generate drawing geometry (base = Idle/Selected, top = Creating/Dragging)
         let (base_drawings, top_drawings) = s.engine.drawings.generate_all_geometry(
@@ -1838,32 +2243,103 @@ impl RayCore {
 
         let is_webgpu = s.engine.renderer_name() == "webgpu";
 
-        if is_webgpu {
-            // WebGPU: the chart canvas is a GPU surface — can't draw 2D on it.
-            // Render ALL drawings on the overlay canvas (like LWC which renders
-            // all primitives on the overlay, not the series canvas).
-            let mut all_drawings = base_drawings;
-            all_drawings.extend(top_drawings);
-            s.overlay.render_with_drawings(&s.engine.crosshair, &s.engine.style, &all_drawings);
-        } else {
-            // Canvas2D: base drawings on chart canvas (above candles, below crosshair),
-            // top drawings + crosshair on the overlay canvas.
-            s.overlay.render_base_drawings(&base_drawings);
-            s.overlay.render_with_drawings(&s.engine.crosshair, &s.engine.style, &top_drawings);
+        // 6. Render overlay, dashed series, price lines, last price lines, drawings, crosshair, markers
+        // Destructure to borrow overlay mutably while engine is borrowed immutably
+        {
+            let ChartInner { ref mut overlay, ref engine, .. } = *s;
+            if is_webgpu {
+                let mut all_drawings = base_drawings;
+                all_drawings.extend(top_drawings);
+                // Clear and render base layer first (watermark, legend, drawings, crosshair)
+                overlay.render_with_drawings(&engine.crosshair, &engine.style, &all_drawings, Some(&engine.bars));
+                // Then render on top of the cleared canvas:
+                overlay.render_dashed_series(
+                    &engine.series, &engine.viewport, &bar_ts,
+                    pane_pw, pane_ph, engine.v_pixel_ratio, true,
+                );
+                // Custom price lines
+                overlay.render_price_lines(
+                    &engine.price_lines, &engine.viewport,
+                    &engine.style, pane_css_w, pane_css_h,
+                );
+                // Last price lines (below crosshair markers, above dashed series)
+                overlay.render_last_price_lines(
+                    &engine.series, &engine.bars, &engine.viewport,
+                    &engine.style, pane_css_w, pane_css_h, anim_time,
+                );
+                // Series markers (arrows, circles, squares at bar indices)
+                overlay.render_markers(
+                    &engine.markers, &engine.bars, &engine.viewport,
+                    &engine.style, pane_css_w, pane_css_h,
+                );
+                // Crosshair marker circles on series (above crosshair lines)
+                overlay.render_crosshair_markers(
+                    &engine.crosshair, &engine.series, &engine.bars, &bar_ts,
+                    &engine.viewport, &engine.style, pane_css_w, pane_css_h,
+                );
+            } else {
+                // Clear and render base layer first
+                overlay.render_with_drawings(&engine.crosshair, &engine.style, &top_drawings, Some(&engine.bars));
+                // Then render additional elements on top:
+                overlay.render_dashed_series(
+                    &engine.series, &engine.viewport, &bar_ts,
+                    pane_pw, pane_ph, engine.v_pixel_ratio, false,
+                );
+                // Custom price lines
+                overlay.render_price_lines(
+                    &engine.price_lines, &engine.viewport,
+                    &engine.style, pane_css_w, pane_css_h,
+                );
+                // Last price lines on overlay canvas
+                overlay.render_last_price_lines(
+                    &engine.series, &engine.bars, &engine.viewport,
+                    &engine.style, pane_css_w, pane_css_h, anim_time,
+                );
+                // Series markers (arrows, circles, squares at bar indices)
+                overlay.render_markers(
+                    &engine.markers, &engine.bars, &engine.viewport,
+                    &engine.style, pane_css_w, pane_css_h,
+                );
+                overlay.render_base_drawings(&base_drawings);
+                // Crosshair marker circles on series (above crosshair lines)
+                overlay.render_crosshair_markers(
+                    &engine.crosshair, &engine.series, &engine.bars, &bar_ts,
+                    &engine.viewport, &engine.style, pane_css_w, pane_css_h,
+                );
+            }
         }
 
-        // 7. Price axis — base (ticks + labels) + top (crosshair label)
-        s.price_axis_renderer.render_base(&s.engine.style, &y_ticks, pane_ph);
-        s.price_axis_renderer.render_top(
-            &s.engine.crosshair, &s.engine.viewport, &s.engine.style, pane_css_h,
-        );
+        // 7. Price axis — base (ticks + labels) + last price labels + price line labels + top (crosshair label)
+        {
+            let ChartInner { ref mut price_axis_renderer, ref engine, .. } = *s;
+            price_axis_renderer.render_base(&engine.style, &y_ticks, pane_ph);
+            price_axis_renderer.render_last_price_labels(
+                &engine.series, &engine.bars, &engine.viewport, &engine.style, pane_css_h,
+            );
+            price_axis_renderer.render_price_line_labels(
+                &engine.price_lines, &engine.viewport, &engine.style, pane_css_h,
+            );
+            price_axis_renderer.render_top(
+                &engine.crosshair, &engine.viewport, &engine.style, pane_css_h,
+            );
+        }
 
-        // 8. Time axis — base (ticks + labels) + top (crosshair label)
-        s.time_axis_renderer.render_base(&s.engine.style, &x_ticks, pane_pw);
-        s.time_axis_renderer.render_top(
-            &s.engine.crosshair, &s.engine.bars,
-            &s.engine.viewport, &s.engine.style, pane_css_w,
-        );
+        // 8. Time axis — base (ticks + labels) + scrollbar + top (crosshair label)
+        {
+            let ChartInner { ref mut time_axis_renderer, ref engine, .. } = *s;
+            time_axis_renderer.render_base(&engine.style, &x_ticks, pane_pw);
+            // Scrollbar indicator at top of time axis
+            time_axis_renderer.render_scrollbar(
+                &engine.style,
+                &engine.viewport,
+                engine.bars.len(),
+                pane_pw,
+            );
+            time_axis_renderer.render_top(
+                &engine.crosshair, &engine.bars,
+                &engine.viewport, &engine.style, pane_css_w,
+            );
+        }
 
         // 9. Corner stub — background + borders (LWC: PriceAxisStub)
         Self::render_corner_stub(&s.layout, &s.engine.style, dpr);

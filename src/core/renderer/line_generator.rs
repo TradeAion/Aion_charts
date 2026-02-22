@@ -7,9 +7,9 @@
 //!
 //! An alternative "diagonal" mode could be added later with anti-aliased lines.
 
-use crate::core::viewport::Viewport;
 use crate::core::renderer::draw_list::ColoredRect;
 use crate::core::series::{Series, SeriesType};
+use crate::core::viewport::Viewport;
 
 // ── Coordinate helpers (same as geometry_generator.rs) ───────────────────────
 
@@ -26,10 +26,7 @@ fn price_to_y(price: f64, vp: &Viewport, candle_h: f64) -> f64 {
 
 /// Map a timestamp to a fractional bar index by binary-searching the bar
 /// timestamps array. Returns None if the timestamp is outside the range.
-fn timestamp_to_bar_index(
-    ts: u64,
-    bar_timestamps: &[u64],
-) -> Option<f64> {
+fn timestamp_to_bar_index(ts: u64, bar_timestamps: &[u64]) -> Option<f64> {
     if bar_timestamps.is_empty() {
         return None;
     }
@@ -75,43 +72,26 @@ fn timestamp_to_bar_index(
     }
 }
 
-/// Generate ColoredRect segments for a single line series.
+/// Generate pixel-space (x, y) points for a line series.
 ///
-/// Uses the "connected horizontal segments" approach: for each data point,
-/// draw a thin horizontal rect from the previous X to the current X at the
-/// current Y, producing a simple stepped/connected line. For smoother
-/// appearance, we draw a diagonal approximation using many small rects.
-pub fn generate_line_rects(
+/// Shared by both rect-based rendering (Solid) and Canvas2D strokePath (dashed).
+/// Returns empty vec if the series has fewer than 2 visible points.
+pub fn generate_line_series_points(
     series: &Series,
     viewport: &Viewport,
     bar_timestamps: &[u64],
     pane_w: f64,
     pane_h: f64,
-    _h_ratio: f64,
-    v_ratio: f64,
-) -> Vec<ColoredRect> {
-    if series.series_type() != SeriesType::Line || !series.line_options.visible {
-        return Vec::new();
-    }
-
+) -> Vec<(f64, f64)> {
     let data = &series.line_data;
     if data.is_empty() {
         return Vec::new();
     }
 
-    let opts = &series.line_options;
-    let color = opts.color;
-    let (cr, cg, cb, ca) = (color[0], color[1], color[2], color[3]);
-
-    // Line width in physical pixels
-    let line_w = (opts.line_width * v_ratio).round().max(1.0);
-    let half_w = (line_w * 0.5).floor();
-
     // Volume area calculation (same as candlestick rendering)
     let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
 
-    // Pre-compute (bar_index, physical_pixel) pairs for visible points
     let mut points: Vec<(f64, f64)> = Vec::with_capacity(data.len());
 
     for i in 0..data.len() {
@@ -150,6 +130,46 @@ pub fn generate_line_rects(
         points.push((px_x, px_y));
     }
 
+    points
+}
+
+/// Generate ColoredRect segments for a single line series (Solid style only).
+///
+/// Uses the "connected horizontal segments" approach: for each data point,
+/// draw a thin horizontal rect from the previous X to the current X at the
+/// current Y, producing a simple stepped/connected line. For smoother
+/// appearance, we draw a diagonal approximation using many small rects.
+///
+/// Dashed line series (Dotted, Dashed, LargeDashed, SparseDotted) are skipped
+/// here — they are rendered via Canvas2D strokePath in the overlay renderer.
+pub fn generate_line_rects(
+    series: &Series,
+    viewport: &Viewport,
+    bar_timestamps: &[u64],
+    pane_w: f64,
+    pane_h: f64,
+    _h_ratio: f64,
+    v_ratio: f64,
+) -> Vec<ColoredRect> {
+    if series.series_type() != SeriesType::Line || !series.line_options.visible {
+        return Vec::new();
+    }
+
+    // Skip dashed line series — they use Canvas2D strokePath rendering
+    if series.line_options.line_style.is_dashed() {
+        return Vec::new();
+    }
+
+    let opts = &series.line_options;
+    let color = opts.color;
+    let (cr, cg, cb, ca) = (color[0], color[1], color[2], color[3]);
+
+    // Line width in physical pixels
+    let line_w = (opts.line_width * v_ratio).round().max(1.0);
+    let half_w = (line_w * 0.5).floor();
+
+    let points = generate_line_series_points(series, viewport, bar_timestamps, pane_w, pane_h);
+
     if points.len() < 2 {
         return Vec::new();
     }
@@ -171,7 +191,10 @@ pub fn generate_line_rects(
                 y: (y0 - half_w) as f32,
                 w: line_w as f32,
                 h: line_w as f32,
-                r: cr, g: cg, b: cb, a: ca,
+                r: cr,
+                g: cg,
+                b: cb,
+                a: ca,
             });
             continue;
         }
@@ -190,7 +213,10 @@ pub fn generate_line_rects(
                 y: (y0 - half_w) as f32,
                 w: h_width as f32,
                 h: line_w as f32,
-                r: cr, g: cg, b: cb, a: ca,
+                r: cr,
+                g: cg,
+                b: cb,
+                a: ca,
             });
         }
 
@@ -204,7 +230,10 @@ pub fn generate_line_rects(
                 y: v_top as f32,
                 w: line_w as f32,
                 h: v_height as f32,
-                r: cr, g: cg, b: cb, a: ca,
+                r: cr,
+                g: cg,
+                b: cb,
+                a: ca,
             });
         }
     }
@@ -328,9 +357,15 @@ pub fn generate_area_fill_rects(
 
         for b in 0..num_bands {
             let band_top = fill_top + b as f64 * band_h;
-            let band_bottom = if b == num_bands - 1 { fill_bottom } else { fill_top + (b + 1) as f64 * band_h };
+            let band_bottom = if b == num_bands - 1 {
+                fill_bottom
+            } else {
+                fill_top + (b + 1) as f64 * band_h
+            };
             let bh = band_bottom - band_top;
-            if bh <= 0.0 { continue; }
+            if bh <= 0.0 {
+                continue;
+            }
 
             // Interpolation factor: 0.0 at the line (y0), 1.0 at the base
             let t = if fill_h > 0.0 {
@@ -364,7 +399,10 @@ pub fn generate_area_fill_rects(
                 y: band_top as f32,
                 w: strip_w as f32,
                 h: bh as f32,
-                r, g, b: b_c, a,
+                r,
+                g,
+                b: b_c,
+                a,
             });
         }
     }
@@ -454,7 +492,10 @@ pub fn generate_area_line_rects(
                 y: (y0 - half_w) as f32,
                 w: line_w as f32,
                 h: line_w as f32,
-                r: cr, g: cg, b: cb, a: ca,
+                r: cr,
+                g: cg,
+                b: cb,
+                a: ca,
             });
             continue;
         }
@@ -468,7 +509,10 @@ pub fn generate_area_line_rects(
                 y: (y0 - half_w) as f32,
                 w: h_width as f32,
                 h: line_w as f32,
-                r: cr, g: cg, b: cb, a: ca,
+                r: cr,
+                g: cg,
+                b: cb,
+                a: ca,
             });
         }
 
@@ -481,7 +525,10 @@ pub fn generate_area_line_rects(
                 y: v_top as f32,
                 w: line_w as f32,
                 h: v_height as f32,
-                r: cr, g: cg, b: cb, a: ca,
+                r: cr,
+                g: cg,
+                b: cb,
+                a: ca,
             });
         }
     }
@@ -611,7 +658,11 @@ pub fn generate_bar_ohlc_rects(
     let visible_bars = (viewport.end_bar - viewport.start_bar).max(1.0);
     let bar_slot_w = pane_w / visible_bars;
     // Stem width: 1px for thin bars, otherwise scale with bar width
-    let stem_w = if opts.thin_bars { 1.0 } else { (bar_slot_w * 0.1).max(1.0).round() };
+    let stem_w = if opts.thin_bars {
+        1.0
+    } else {
+        (bar_slot_w * 0.1).max(1.0).round()
+    };
     // Tick width: ~40% of bar slot on each side
     let tick_w = (bar_slot_w * 0.4).max(2.0).round();
     let tick_h = stem_w; // tick height matches stem width
@@ -636,7 +687,11 @@ pub fn generate_bar_ohlc_rects(
         let close = data.close[i];
 
         let is_bullish = close >= open;
-        let color = if is_bullish { opts.up_color } else { opts.down_color };
+        let color = if is_bullish {
+            opts.up_color
+        } else {
+            opts.down_color
+        };
         let (cr, cg, cb, ca) = (color[0], color[1], color[2], color[3]);
 
         let center_x = bar_to_x(bar_idx + 0.5, viewport, pane_w).round();
@@ -654,7 +709,10 @@ pub fn generate_bar_ohlc_rects(
             y: high_y as f32,
             w: stem_w as f32,
             h: stem_height as f32,
-            r: cr, g: cg, b: cb, a: ca,
+            r: cr,
+            g: cg,
+            b: cb,
+            a: ca,
         });
 
         // 2. Open tick: horizontal line to the left of center
@@ -664,7 +722,10 @@ pub fn generate_bar_ohlc_rects(
                 y: (open_y - half_stem) as f32,
                 w: tick_w as f32,
                 h: tick_h as f32,
-                r: cr, g: cg, b: cb, a: ca,
+                r: cr,
+                g: cg,
+                b: cb,
+                a: ca,
             });
         }
 
@@ -674,7 +735,10 @@ pub fn generate_bar_ohlc_rects(
             y: (close_y - half_stem) as f32,
             w: tick_w as f32,
             h: tick_h as f32,
-            r: cr, g: cg, b: cb, a: ca,
+            r: cr,
+            g: cg,
+            b: cb,
+            a: ca,
         });
     }
 
@@ -783,9 +847,15 @@ pub fn generate_baseline_fill_rects(
                 let band_h = fill_h / num_bands as f64;
                 for b in 0..num_bands {
                     let band_top = fill_top + b as f64 * band_h;
-                    let band_bottom = if b == num_bands - 1 { fill_bottom } else { fill_top + (b + 1) as f64 * band_h };
+                    let band_bottom = if b == num_bands - 1 {
+                        fill_bottom
+                    } else {
+                        fill_top + (b + 1) as f64 * band_h
+                    };
                     let bh = band_bottom - band_top;
-                    if bh <= 0.0 { continue; }
+                    if bh <= 0.0 {
+                        continue;
+                    }
 
                     // t=0 at line (top_fill_color1), t=1 at baseline (top_fill_color2)
                     let t = ((band_top + bh * 0.5 - fill_top) / fill_h) as f32;
@@ -816,9 +886,15 @@ pub fn generate_baseline_fill_rects(
                 let band_h = fill_h / num_bands as f64;
                 for b in 0..num_bands {
                     let band_top = fill_top + b as f64 * band_h;
-                    let band_bottom = if b == num_bands - 1 { fill_bottom } else { fill_top + (b + 1) as f64 * band_h };
+                    let band_bottom = if b == num_bands - 1 {
+                        fill_bottom
+                    } else {
+                        fill_top + (b + 1) as f64 * band_h
+                    };
                     let bh = band_bottom - band_top;
-                    if bh <= 0.0 { continue; }
+                    if bh <= 0.0 {
+                        continue;
+                    }
 
                     // t=0 at baseline (bottom_fill_color1), t=1 at line (bottom_fill_color2)
                     let t = ((band_top + bh * 0.5 - fill_top) / fill_h) as f32;
@@ -922,7 +998,11 @@ pub fn generate_baseline_line_rects(
 
         // Determine segment color based on midpoint relative to baseline
         let mid_y = (y0 + y1) * 0.5;
-        let color = if mid_y <= base_y { top_color } else { bottom_color };
+        let color = if mid_y <= base_y {
+            top_color
+        } else {
+            bottom_color
+        };
         let (cr, cg, cb, ca) = (color[0], color[1], color[2], color[3]);
 
         let dx = x1 - x0;
@@ -934,7 +1014,10 @@ pub fn generate_baseline_line_rects(
                 y: (y0 - half_w) as f32,
                 w: line_w as f32,
                 h: line_w as f32,
-                r: cr, g: cg, b: cb, a: ca,
+                r: cr,
+                g: cg,
+                b: cb,
+                a: ca,
             });
             continue;
         }
@@ -949,7 +1032,10 @@ pub fn generate_baseline_line_rects(
                 y: (y0 - half_w) as f32,
                 w: h_width as f32,
                 h: line_w as f32,
-                r: cr, g: cg, b: cb, a: ca,
+                r: cr,
+                g: cg,
+                b: cb,
+                a: ca,
             });
         }
 
@@ -963,7 +1049,10 @@ pub fn generate_baseline_line_rects(
                 y: v_top as f32,
                 w: line_w as f32,
                 h: v_height as f32,
-                r: cr, g: cg, b: cb, a: ca,
+                r: cr,
+                g: cg,
+                b: cb,
+                a: ca,
             });
         }
     }
@@ -985,31 +1074,87 @@ pub fn generate_all_line_rects(
     for s in series.iter() {
         match s.series_type() {
             SeriesType::Line if s.line_options.visible => {
-                let rects = generate_line_rects(s, viewport, bar_timestamps, pane_w, pane_h, h_ratio, v_ratio);
+                let rects = generate_line_rects(
+                    s,
+                    viewport,
+                    bar_timestamps,
+                    pane_w,
+                    pane_h,
+                    h_ratio,
+                    v_ratio,
+                );
                 all_rects.extend(rects);
             }
             SeriesType::Area if s.area_options.visible => {
                 // Area fill first (behind the line)
-                let fill_rects = generate_area_fill_rects(s, viewport, bar_timestamps, pane_w, pane_h, h_ratio, v_ratio);
+                let fill_rects = generate_area_fill_rects(
+                    s,
+                    viewport,
+                    bar_timestamps,
+                    pane_w,
+                    pane_h,
+                    h_ratio,
+                    v_ratio,
+                );
                 all_rects.extend(fill_rects);
                 // Then the line on top
-                let line_rects = generate_area_line_rects(s, viewport, bar_timestamps, pane_w, pane_h, h_ratio, v_ratio);
+                let line_rects = generate_area_line_rects(
+                    s,
+                    viewport,
+                    bar_timestamps,
+                    pane_w,
+                    pane_h,
+                    h_ratio,
+                    v_ratio,
+                );
                 all_rects.extend(line_rects);
             }
             SeriesType::Histogram if s.histogram_options.visible => {
-                let rects = generate_histogram_rects(s, viewport, bar_timestamps, pane_w, pane_h, h_ratio, v_ratio);
+                let rects = generate_histogram_rects(
+                    s,
+                    viewport,
+                    bar_timestamps,
+                    pane_w,
+                    pane_h,
+                    h_ratio,
+                    v_ratio,
+                );
                 all_rects.extend(rects);
             }
             SeriesType::Bar if s.bar_options.visible => {
-                let rects = generate_bar_ohlc_rects(s, viewport, bar_timestamps, pane_w, pane_h, h_ratio, v_ratio);
+                let rects = generate_bar_ohlc_rects(
+                    s,
+                    viewport,
+                    bar_timestamps,
+                    pane_w,
+                    pane_h,
+                    h_ratio,
+                    v_ratio,
+                );
                 all_rects.extend(rects);
             }
             SeriesType::Baseline if s.baseline_options.visible => {
                 // Fill first (behind the line)
-                let fill_rects = generate_baseline_fill_rects(s, viewport, bar_timestamps, pane_w, pane_h, h_ratio, v_ratio);
+                let fill_rects = generate_baseline_fill_rects(
+                    s,
+                    viewport,
+                    bar_timestamps,
+                    pane_w,
+                    pane_h,
+                    h_ratio,
+                    v_ratio,
+                );
                 all_rects.extend(fill_rects);
                 // Then the two-tone line on top
-                let line_rects = generate_baseline_line_rects(s, viewport, bar_timestamps, pane_w, pane_h, h_ratio, v_ratio);
+                let line_rects = generate_baseline_line_rects(
+                    s,
+                    viewport,
+                    bar_timestamps,
+                    pane_w,
+                    pane_h,
+                    h_ratio,
+                    v_ratio,
+                );
                 all_rects.extend(line_rects);
             }
             _ => {}

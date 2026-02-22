@@ -96,7 +96,7 @@ pub enum HitPart {
 pub fn cursor_for_drawing_hit(
     tool: DrawingTool,
     part: HitPart,
-    anchor_index: Option<usize>,
+    _anchor_index: Option<usize>,
 ) -> &'static str {
     match part {
         HitPart::None => "crosshair",
@@ -112,12 +112,16 @@ pub fn cursor_for_drawing_hit(
                         _ => "move",
                     }
                 }
-                _ => "grab", // trend line, fib, scale anchors
+                DrawingTool::HorizontalLine => "ns-resize", // vertical drag
+                DrawingTool::VerticalLine => "ew-resize",   // horizontal drag
+                _ => "grab",                                // trend line, fib, scale, ray anchors
             }
         }
         HitPart::Edge => {
             match tool {
                 DrawingTool::Rectangle => "move", // edge drag moves the whole rectangle
+                DrawingTool::HorizontalLine => "ns-resize",
+                DrawingTool::VerticalLine => "ew-resize",
                 _ => "pointer",
             }
         }
@@ -125,6 +129,9 @@ pub fn cursor_for_drawing_hit(
             match tool {
                 // Rectangle body: pass through to pan (crosshair = normal chart cursor)
                 DrawingTool::Rectangle => "crosshair",
+                // Horizontal/vertical lines: move cursor
+                DrawingTool::HorizontalLine => "ns-resize",
+                DrawingTool::VerticalLine => "ew-resize",
                 // Other drawings: move cursor on body
                 _ => "move",
             }
@@ -197,6 +204,12 @@ pub enum DrawingTool {
     Rectangle,
     Fibonacci,
     Scale,
+    /// Horizontal line at a price level (single anchor, extends full pane width).
+    HorizontalLine,
+    /// Vertical line at a bar index (single anchor, extends full pane height).
+    VerticalLine,
+    /// Ray / extended line (two anchors, extends to visible edges).
+    Ray,
 }
 
 // ── Z-order ─────────────────────────────────────────────────────────────────

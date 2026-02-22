@@ -8,8 +8,8 @@
 //! - Prices are f32 — sufficient for 7 significant digits; GPU-native.
 //! - Volume is f32 to keep the struct 32-byte aligned (cache-line friendly).
 
+use arrow::array::{Float32Array, Float32Builder, UInt64Array, UInt64Builder};
 use bytemuck::{Pod, Zeroable};
-use arrow::array::{Float32Array, UInt64Array, Float32Builder, UInt64Builder};
 
 /// A single OHLCV bar, 32 bytes, cache-line aligned.
 #[repr(C)]
@@ -32,12 +32,20 @@ impl Bar {
 
     #[inline]
     pub fn body_top(&self) -> f32 {
-        if self.is_bullish() { self.close } else { self.open }
+        if self.is_bullish() {
+            self.close
+        } else {
+            self.open
+        }
     }
 
     #[inline]
     pub fn body_bottom(&self) -> f32 {
-        if self.is_bullish() { self.open } else { self.close }
+        if self.is_bullish() {
+            self.open
+        } else {
+            self.close
+        }
     }
 }
 
@@ -77,11 +85,27 @@ impl BarArray {
         for bar in bars {
             // Sanitize: replace NaN/Infinity with 0, clamp volume ≥ 0,
             // ensure high ≥ max(open,close) and low ≤ min(open,close).
-            let open  = if bar.open.is_finite()  { bar.open  } else { 0.0 };
-            let close = if bar.close.is_finite() { bar.close } else { open };
-            let high  = if bar.high.is_finite()  { bar.high.max(open).max(close) } else { open.max(close) };
-            let low   = if bar.low.is_finite()   { bar.low.min(open).min(close)  } else { open.min(close) };
-            let vol   = if bar.volume.is_finite() { bar.volume.max(0.0) } else { 0.0 };
+            let open = if bar.open.is_finite() { bar.open } else { 0.0 };
+            let close = if bar.close.is_finite() {
+                bar.close
+            } else {
+                open
+            };
+            let high = if bar.high.is_finite() {
+                bar.high.max(open).max(close)
+            } else {
+                open.max(close)
+            };
+            let low = if bar.low.is_finite() {
+                bar.low.min(open).min(close)
+            } else {
+                open.min(close)
+            };
+            let vol = if bar.volume.is_finite() {
+                bar.volume.max(0.0)
+            } else {
+                0.0
+            };
 
             ts.append_value(bar.timestamp);
             o.append_value(open);
@@ -126,11 +150,27 @@ impl BarArray {
     /// Append a single bar to the end of the array.
     pub fn append(&mut self, bar: Bar) {
         // Sanitize
-        let open  = if bar.open.is_finite()  { bar.open  } else { 0.0 };
-        let close = if bar.close.is_finite() { bar.close } else { open };
-        let high  = if bar.high.is_finite()  { bar.high.max(open).max(close) } else { open.max(close) };
-        let low   = if bar.low.is_finite()   { bar.low.min(open).min(close)  } else { open.min(close) };
-        let vol   = if bar.volume.is_finite() { bar.volume.max(0.0) } else { 0.0 };
+        let open = if bar.open.is_finite() { bar.open } else { 0.0 };
+        let close = if bar.close.is_finite() {
+            bar.close
+        } else {
+            open
+        };
+        let high = if bar.high.is_finite() {
+            bar.high.max(open).max(close)
+        } else {
+            open.max(close)
+        };
+        let low = if bar.low.is_finite() {
+            bar.low.min(open).min(close)
+        } else {
+            open.min(close)
+        };
+        let vol = if bar.volume.is_finite() {
+            bar.volume.max(0.0)
+        } else {
+            0.0
+        };
 
         // Rebuild arrays with the new bar appended
         let new_len = self.len + 1;
@@ -175,11 +215,27 @@ impl BarArray {
         }
 
         // Sanitize
-        let open  = if bar.open.is_finite()  { bar.open  } else { 0.0 };
-        let close = if bar.close.is_finite() { bar.close } else { open };
-        let high  = if bar.high.is_finite()  { bar.high.max(open).max(close) } else { open.max(close) };
-        let low   = if bar.low.is_finite()   { bar.low.min(open).min(close)  } else { open.min(close) };
-        let vol   = if bar.volume.is_finite() { bar.volume.max(0.0) } else { 0.0 };
+        let open = if bar.open.is_finite() { bar.open } else { 0.0 };
+        let close = if bar.close.is_finite() {
+            bar.close
+        } else {
+            open
+        };
+        let high = if bar.high.is_finite() {
+            bar.high.max(open).max(close)
+        } else {
+            open.max(close)
+        };
+        let low = if bar.low.is_finite() {
+            bar.low.min(open).min(close)
+        } else {
+            open.min(close)
+        };
+        let vol = if bar.volume.is_finite() {
+            bar.volume.max(0.0)
+        } else {
+            0.0
+        };
 
         // Rebuild arrays with the last bar replaced
         let mut ts = UInt64Builder::with_capacity(self.len);
@@ -221,10 +277,34 @@ impl BarArray {
         self.timestamps.value(i)
     }
 
+    /// Access open price at index.
+    #[inline]
+    pub fn open(&self, i: usize) -> f32 {
+        self.opens.value(i)
+    }
+
+    /// Access high price at index.
+    #[inline]
+    pub fn high(&self, i: usize) -> f32 {
+        self.highs.value(i)
+    }
+
+    /// Access low price at index.
+    #[inline]
+    pub fn low(&self, i: usize) -> f32 {
+        self.lows.value(i)
+    }
+
     /// Access close price at index.
     #[inline]
     pub fn close(&self, i: usize) -> f32 {
         self.closes.value(i)
+    }
+
+    /// Access volume at index.
+    #[inline]
+    pub fn volume(&self, i: usize) -> f32 {
+        self.volumes.value(i)
     }
 
     /// Retrieve an LTTB downsampled version of this array.
@@ -234,7 +314,9 @@ impl BarArray {
             // Just copy if threshold is larger or data is too small
             let mut arr = BarArray::new();
             let mut bars = Vec::with_capacity(len);
-            for i in 0..len { bars.push(self.get(i)); }
+            for i in 0..len {
+                bars.push(self.get(i));
+            }
             arr.set(bars);
             return arr;
         }
@@ -248,7 +330,7 @@ impl BarArray {
         for i in 0..(threshold - 2) {
             let bucket_start = (i as f64 * bucket_size).floor() as usize + 1;
             let bucket_end = ((i + 1) as f64 * bucket_size).floor() as usize + 1;
-            
+
             let next_bucket_start = bucket_end;
             let next_bucket_end = (((i + 2) as f64 * bucket_size).floor() as usize + 1).min(len);
 
@@ -271,10 +353,12 @@ impl BarArray {
             for j in bucket_start..bucket_end {
                 let point_x = j as f64;
                 let point_y = self.closes.value(j) as f64;
-                
-                let area = ((point_a_x - avg_x) * (point_y - point_a_y) -
-                           (point_a_x - point_x) * (avg_y - point_a_y)).abs() * 0.5;
-                           
+
+                let area = ((point_a_x - avg_x) * (point_y - point_a_y)
+                    - (point_a_x - point_x) * (avg_y - point_a_y))
+                    .abs()
+                    * 0.5;
+
                 if area > max_area {
                     max_area = area;
                     max_area_idx = j;

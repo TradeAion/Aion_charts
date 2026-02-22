@@ -1,7 +1,7 @@
 //! MACD (Moving Average Convergence Divergence) study.
 
 use crate::core::data::BarArray;
-use crate::core::studies::manager::{StudyCalculator, Study};
+use crate::core::studies::manager::{Study, StudyCalculator};
 
 /// MACD calculator.
 pub struct MacdCalculator;
@@ -14,7 +14,11 @@ impl StudyCalculator for MacdCalculator {
     fn calculate(&self, study: &mut Study, bars: &BarArray, start_index: usize, end_index: usize) {
         let fast_period = study.parameters.get("fast_period").copied().unwrap_or(12.0) as usize;
         let slow_period = study.parameters.get("slow_period").copied().unwrap_or(26.0) as usize;
-        let signal_period = study.parameters.get("signal_period").copied().unwrap_or(9.0) as usize;
+        let signal_period = study
+            .parameters
+            .get("signal_period")
+            .copied()
+            .unwrap_or(9.0) as usize;
 
         if fast_period == 0 || slow_period == 0 || signal_period == 0 {
             return;

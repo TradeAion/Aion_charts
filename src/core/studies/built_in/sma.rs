@@ -1,7 +1,7 @@
 //! Simple Moving Average (SMA) study.
 
 use crate::core::data::BarArray;
-use crate::core::studies::manager::{StudyCalculator, Study};
+use crate::core::studies::manager::{Study, StudyCalculator};
 
 /// SMA calculator.
 pub struct SmaCalculator;

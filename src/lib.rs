@@ -9,7 +9,7 @@ pub mod core;
 
 // Re-export key public types at crate root.
 pub use crate::core::data::{Bar, BarArray};
-pub use crate::core::viewport::Viewport;
+pub use crate::core::viewport::{Viewport, PriceScaleMode};
 pub use crate::core::engine::ChartEngine;
 pub use crate::core::renderer::traits::{
     ChartRenderer, Renderer, RendererBackend, RenderContext, ChartStyle,
@@ -39,6 +39,9 @@ pub use crate::core::studies::built_in::{
     SmaCalculator, EmaCalculator, RsiCalculator, MacdCalculator,
     register_built_in_studies,
 };
+pub use crate::core::price_line::{PriceLineId, PriceLineOptions, PriceLine, PriceLineManager, PriceLineHit};
+pub use crate::core::markers::{MarkerShape, MarkerPosition, SeriesMarker, SeriesMarkers, MarkerManager};
+pub use crate::core::pane::{PaneId, PaneOptions, Pane, PaneManager};
 
 #[cfg(target_arch = "wasm32")]
 pub use crate::core::renderer::canvas2d::Canvas2DRenderer;

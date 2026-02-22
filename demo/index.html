@@ -192,12 +192,24 @@
     <button class="toggle-btn" id="draw-scale" title="Price Range / Scale">Scale</button>
     <button class="toggle-btn" id="draw-clear" title="Clear all drawings">Clear</button>
     <span style="color:#444;margin:0 4px">|</span>
-    <button class="toggle-btn" id="sma-toggle" title="Toggle SMA-20 study">SMA-20</button>
-    <button class="toggle-btn" id="ema-toggle" title="Toggle EMA-20 study">EMA-20</button>
-    <button class="toggle-btn" id="rsi-toggle" title="Toggle RSI-14 study">RSI-14</button>
+    <button class="toggle-btn" id="sma-toggle" title="Toggle SMA-20 study">SMA</button>
+    <button class="toggle-btn" id="ema-toggle" title="Toggle EMA-20 study">EMA</button>
+    <button class="toggle-btn" id="rsi-toggle" title="Toggle RSI-14 study">RSI</button>
     <button class="toggle-btn" id="macd-toggle" title="Toggle MACD study">MACD</button>
+    <button class="toggle-btn" id="bollinger-toggle" title="Toggle Bollinger Bands">BB</button>
+    <button class="toggle-btn" id="stochastic-toggle" title="Toggle Stochastic %K/%D">Stoch</button>
+    <button class="toggle-btn" id="atr-toggle" title="Toggle ATR-14">ATR</button>
+    <button class="toggle-btn" id="vwap-toggle" title="Toggle VWAP">VWAP</button>
     <span style="color:#444;margin:0 4px">|</span>
     <button class="toggle-btn" id="stream-toggle" title="Start/stop real-time bar simulation">▶ Live</button>
+    <span style="color:#444;margin:0 4px">|</span>
+    <button class="toggle-btn" id="priceline-toggle" title="Add/remove custom price line">PriceLine</button>
+    <button class="toggle-btn" id="markers-toggle" title="Add/remove series markers">Markers</button>
+    <span style="color:#444;margin:0 4px">|</span>
+    <button class="toggle-btn" id="scale-normal" title="Normal price scale">Normal</button>
+    <button class="toggle-btn" id="scale-log" title="Logarithmic price scale">Log</button>
+    <button class="toggle-btn" id="scale-pct" title="Percentage price scale">Pct%</button>
+    <button class="toggle-btn" id="scale-idx" title="Indexed to 100">Idx100</button>
     <div class="toggle-group" id="toggle-group"></div>
   </header>
 
@@ -207,7 +219,7 @@
   </div>
 
   <script type="module">
-    import init, { RayCore } from '../pkg/raycore_wasm.js?v=20250615a';
+    import init, { RayCore } from '../pkg/raycore_wasm.js?v=20260222b';
 
     const errorBanner = document.getElementById('error-banner');
     const loading = document.getElementById('loading');
@@ -240,17 +252,25 @@
     document.getElementById('draw-clear').addEventListener('click', () => {
       if (core) core.clear_drawings();
     });
-    // Keyboard: Delete removes selected, Escape cancels creation
+    // Keyboard: forward to WASM core for handling
     document.addEventListener('keydown', (e) => {
       if (!core) return;
-      if (e.key === 'Delete' || e.key === 'Backspace') core.remove_selected_drawing();
+      
+      // Let WASM handle the key
+      const handled = core.on_key_down(e.key, e.ctrlKey, e.shiftKey, e.altKey);
+      
+      // If Escape, also reset toolbar UI state
       if (e.key === 'Escape') {
-        core.cancel_drawing();
         core.set_drawing_tool('none');
         activeDrawTool = 'none';
         for (const [bid, _] of Object.entries(drawBtns)) {
           document.getElementById(bid).classList.remove('active');
         }
+      }
+      
+      // Prevent default browser behavior for handled keys
+      if (handled) {
+        e.preventDefault();
       }
     });
 
@@ -327,7 +347,8 @@
           core.set_crosshair_mode(crosshairMode);
         }
 
-        hud.textContent = currentRenderer + ' | 600 bars | dpr=' + (window.devicePixelRatio || 1).toFixed(1);
+        hud.innerHTML = currentRenderer + ' | 600 bars | dpr=' + (window.devicePixelRatio || 1).toFixed(1) +
+          '<br><span style="color:#666;font-size:10px">Keys: ←→ scroll | ↑↓ zoom price | +/- zoom time | Home/End jump | 0 fit | Del remove | Esc cancel</span>';
 
         // ── Studies & Overlays ──────────────────────────────────────────────
         const numBars = 600;
@@ -342,6 +363,10 @@
           ema: { id: null, seriesId: null, visible: false, btn: document.getElementById('ema-toggle') },
           rsi: { id: null, seriesId: null, visible: false, btn: document.getElementById('rsi-toggle') },
           macd: { id: null, seriesIds: [], visible: false, btn: document.getElementById('macd-toggle') },
+          bollinger: { id: null, seriesIds: [], visible: false, btn: document.getElementById('bollinger-toggle') },
+          stochastic: { id: null, seriesIds: [], visible: false, btn: document.getElementById('stochastic-toggle') },
+          atr: { id: null, seriesId: null, visible: false, btn: document.getElementById('atr-toggle') },
+          vwap: { id: null, seriesId: null, visible: false, btn: document.getElementById('vwap-toggle') },
         };
 
         // Study line colors
@@ -352,6 +377,13 @@
           macd_line:   { r: 0.161, g: 0.384, b: 1.0,   a: 1.0 },  // blue
           macd_signal: { r: 1.0,   g: 0.627, b: 0.0,   a: 1.0 },  // amber
           macd_hist:   { r: 0.18,  g: 0.8,   b: 0.44,  a: 0.6 },  // green
+          bollinger_mid:   { r: 0.161, g: 0.384, b: 1.0,   a: 1.0 },  // blue
+          bollinger_upper: { r: 0.5,   g: 0.5,   b: 0.5,   a: 0.8 },  // gray
+          bollinger_lower: { r: 0.5,   g: 0.5,   b: 0.5,   a: 0.8 },  // gray
+          stochastic_k: { r: 0.161, g: 0.384, b: 1.0,   a: 1.0 },  // blue
+          stochastic_d: { r: 1.0,   g: 0.627, b: 0.0,   a: 1.0 },  // amber
+          atr:  { r: 0.9,   g: 0.3,   b: 0.3,   a: 1.0 },  // red
+          vwap: { r: 0.18,  g: 0.8,   b: 0.44,  a: 1.0 },  // green
         };
 
         function createStudyAndOverlay(type) {
@@ -377,11 +409,11 @@
               if (outIdx === 0) {
                 // MACD line
                 const c = studyColors.macd_line;
-                seriesId = core.add_line_series(c.r, c.g, c.b, c.a, 2.0);
+                seriesId = core.add_line_series(c.r, c.g, c.b, c.a, 2.0, "solid");
               } else if (outIdx === 1) {
                 // Signal line
                 const c = studyColors.macd_signal;
-                seriesId = core.add_line_series(c.r, c.g, c.b, c.a, 1.5);
+                seriesId = core.add_line_series(c.r, c.g, c.b, c.a, 1.5, "solid");
               } else {
                 // Histogram — use histogram series
                 const c = studyColors.macd_hist;
@@ -398,8 +430,31 @@
               }
               study.seriesIds.push(seriesId);
             }
+          } else if (type === 'bollinger') {
+            // Bollinger Bands has 3 outputs: Middle (SMA), Upper, Lower
+            const colors = [studyColors.bollinger_mid, studyColors.bollinger_upper, studyColors.bollinger_lower];
+            const widths = [2.0, 1.0, 1.0];
+            for (let outIdx = 0; outIdx < 3; outIdx++) {
+              const output = core.get_study_output(study.id, outIdx);
+              if (!output) continue;
+              const c = colors[outIdx];
+              const seriesId = core.add_line_series(c.r, c.g, c.b, c.a, widths[outIdx], "solid");
+              core.set_series_data(seriesId, output.values, output.timestamps);
+              study.seriesIds.push(seriesId);
+            }
+          } else if (type === 'stochastic') {
+            // Stochastic has 2 outputs: %K, %D
+            const colors = [studyColors.stochastic_k, studyColors.stochastic_d];
+            for (let outIdx = 0; outIdx < 2; outIdx++) {
+              const output = core.get_study_output(study.id, outIdx);
+              if (!output) continue;
+              const c = colors[outIdx];
+              const seriesId = core.add_line_series(c.r, c.g, c.b, c.a, 2.0, "solid");
+              core.set_series_data(seriesId, output.values, output.timestamps);
+              study.seriesIds.push(seriesId);
+            }
           } else {
-            // Single-output studies (SMA, EMA, RSI)
+            // Single-output studies (SMA, EMA, RSI, ATR, VWAP)
             const output = core.get_study_output(study.id, 0);
             if (!output) {
               console.warn(`No output for study ${type}`);
@@ -407,7 +462,7 @@
             }
 
             const c = studyColors[type];
-            study.seriesId = core.add_line_series(c.r, c.g, c.b, c.a, 2.0);
+            study.seriesId = core.add_line_series(c.r, c.g, c.b, c.a, 2.0, "solid");
             core.set_series_data(study.seriesId, output.values, output.timestamps);
           }
 
@@ -421,7 +476,7 @@
             createStudyAndOverlay(type);
           } else {
             study.visible = !study.visible;
-            if (type === 'macd') {
+            if (type === 'macd' || type === 'bollinger' || type === 'stochastic') {
               for (const sid of study.seriesIds) {
                 core.set_series_visible(sid, study.visible);
               }
@@ -437,6 +492,10 @@
         studies.ema.btn.addEventListener('click', () => toggleStudy('ema'));
         studies.rsi.btn.addEventListener('click', () => toggleStudy('rsi'));
         studies.macd.btn.addEventListener('click', () => toggleStudy('macd'));
+        studies.bollinger.btn.addEventListener('click', () => toggleStudy('bollinger'));
+        studies.stochastic.btn.addEventListener('click', () => toggleStudy('stochastic'));
+        studies.atr.btn.addEventListener('click', () => toggleStudy('atr'));
+        studies.vwap.btn.addEventListener('click', () => toggleStudy('vwap'));
 
         // ── Real-time streaming simulation ──────────────────────────────────
         let streamInterval = null;
@@ -480,6 +539,102 @@
             streamBtn.classList.add('active');
           }
         });
+
+        // ── Price Lines ─────────────────────────────────────────────────────
+        let priceLineIds = [];
+        const priceLineBtn = document.getElementById('priceline-toggle');
+
+        priceLineBtn.addEventListener('click', () => {
+          if (priceLineIds.length > 0) {
+            // Remove all price lines
+            for (const id of priceLineIds) {
+              core.remove_price_line(id);
+            }
+            priceLineIds = [];
+            priceLineBtn.classList.remove('active');
+          } else {
+            // Add three price lines at different levels
+            // Get approximate price range (assume ~40000-45000 for demo BTC data)
+            const prices = [41000, 42500, 44000];
+            const colors = [
+              [0.18, 0.8, 0.44, 1.0],   // green
+              [1.0, 0.627, 0.0, 1.0],   // amber
+              [0.9, 0.3, 0.3, 1.0],     // red
+            ];
+            const styles = ['dashed', 'dotted', 'large_dashed'];
+
+            for (let i = 0; i < 3; i++) {
+              const id = core.create_price_line(
+                prices[i],
+                colors[i][0], colors[i][1], colors[i][2], colors[i][3],
+                1.5,
+                styles[i],
+                false // not draggable
+              );
+              priceLineIds.push(id);
+            }
+            priceLineBtn.classList.add('active');
+          }
+        });
+
+        // ── Series Markers ──────────────────────────────────────────────────
+        let markersAdded = false;
+        const markersBtn = document.getElementById('markers-toggle');
+
+        markersBtn.addEventListener('click', () => {
+          if (markersAdded) {
+            // Clear all markers (series_id 0 = candlestick data)
+            core.clear_all_markers();
+            markersAdded = false;
+            markersBtn.classList.remove('active');
+          } else {
+            // Add markers at various positions
+            // ArrowUp markers (bullish signals) - at bars 50, 150, 300
+            core.add_marker(0, 50, 'arrow_up', 'below_bar', 0, 0.18, 0.8, 0.44, 1.0, 8, 'Buy');
+            core.add_marker(0, 150, 'arrow_up', 'below_bar', 0, 0.18, 0.8, 0.44, 1.0, 8, '');
+            core.add_marker(0, 300, 'arrow_up', 'below_bar', 0, 0.18, 0.8, 0.44, 1.0, 8, 'Entry');
+
+            // ArrowDown markers (bearish signals) - at bars 100, 250, 400
+            core.add_marker(0, 100, 'arrow_down', 'above_bar', 0, 0.9, 0.3, 0.3, 1.0, 8, 'Sell');
+            core.add_marker(0, 250, 'arrow_down', 'above_bar', 0, 0.9, 0.3, 0.3, 1.0, 8, '');
+            core.add_marker(0, 400, 'arrow_down', 'above_bar', 0, 0.9, 0.3, 0.3, 1.0, 8, 'Exit');
+
+            // Circle markers at specific prices
+            core.add_marker(0, 200, 'circle', 'above_bar', 0, 0.161, 0.384, 1.0, 1.0, 6, '');
+            core.add_marker(0, 350, 'circle', 'below_bar', 0, 1.0, 0.627, 0.0, 1.0, 6, '');
+
+            // Square markers
+            core.add_marker(0, 450, 'square', 'above_bar', 0, 0.608, 0.349, 0.714, 1.0, 5, 'Alert');
+            core.add_marker(0, 500, 'square', 'below_bar', 0, 0.608, 0.349, 0.714, 1.0, 5, '');
+
+            markersAdded = true;
+            markersBtn.classList.add('active');
+          }
+        });
+
+        // ── Price Scale Modes ───────────────────────────────────────────────
+        const scaleButtons = {
+          'scale-normal': 'normal',
+          'scale-log': 'logarithmic',
+          'scale-pct': 'percentage',
+          'scale-idx': 'indexed_to_100',
+        };
+        let activeScaleMode = 'normal';
+
+        function setScaleMode(mode) {
+          activeScaleMode = mode;
+          core.set_price_scale_mode(mode);
+          for (const [btnId, m] of Object.entries(scaleButtons)) {
+            document.getElementById(btnId).classList.toggle('active', m === mode);
+          }
+        }
+
+        // Set up scale mode button handlers
+        for (const [btnId, mode] of Object.entries(scaleButtons)) {
+          document.getElementById(btnId).addEventListener('click', () => setScaleMode(mode));
+        }
+        // Mark Normal as active by default
+        document.getElementById('scale-normal').classList.add('active');
 
         function frame() {
           rafId = requestAnimationFrame(frame);

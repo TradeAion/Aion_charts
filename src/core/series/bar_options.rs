@@ -28,7 +28,7 @@ impl Default for BarSeriesOptions {
         // LWC defaults: up=#26a69a, down=#ef5350
         Self {
             up_color: [0.149, 0.651, 0.604, 1.0],   // #26a69a
-            down_color: [0.937, 0.325, 0.314, 1.0],  // #ef5350
+            down_color: [0.937, 0.325, 0.314, 1.0], // #ef5350
             open_visible: true,
             thin_bars: true,
             visible: true,

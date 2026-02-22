@@ -66,7 +66,8 @@ impl OhlcDataArray {
         low: &[f32],
         close: &[f32],
     ) {
-        let count = timestamps.len()
+        let count = timestamps
+            .len()
             .min(open.len())
             .min(high.len())
             .min(low.len())

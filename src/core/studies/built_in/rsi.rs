@@ -1,7 +1,7 @@
 //! Relative Strength Index (RSI) study.
 
 use crate::core::data::BarArray;
-use crate::core::studies::manager::{StudyCalculator, Study};
+use crate::core::studies::manager::{Study, StudyCalculator};
 
 /// RSI calculator.
 pub struct RsiCalculator;

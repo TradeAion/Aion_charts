@@ -11,3 +11,6 @@ pub mod drawings;
 pub mod events;
 pub mod series;
 pub mod engine;
+pub mod price_line;
+pub mod markers;
+pub mod pane;

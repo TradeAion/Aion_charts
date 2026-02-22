@@ -9,11 +9,18 @@
 //! in the WASM layer.
 
 use crate::core::data::{Bar, BarArray};
-use crate::core::viewport::Viewport;
-use crate::core::renderer::traits::{Renderer, RendererBackend, RenderContext, ChartStyle, CrosshairState};
 use crate::core::drawings::DrawingManager;
-use crate::core::series::{SeriesId, SeriesCollection, LineSeriesOptions, AreaSeriesOptions, HistogramSeriesOptions, BarSeriesOptions, BaselineSeriesOptions, LinePoint, HistogramPoint, OhlcPoint};
-use crate::core::studies::manager::{StudyManager, StudyId};
+use crate::core::markers::MarkerManager;
+use crate::core::price_line::{PriceLineId, PriceLineManager, PriceLineOptions};
+use crate::core::renderer::traits::{
+    ChartStyle, CrosshairState, RenderContext, Renderer, RendererBackend,
+};
+use crate::core::series::{
+    AreaSeriesOptions, BarSeriesOptions, BaselineSeriesOptions, HistogramPoint,
+    HistogramSeriesOptions, LinePoint, LineSeriesOptions, OhlcPoint, SeriesCollection, SeriesId,
+};
+use crate::core::studies::manager::{StudyId, StudyManager};
+use crate::core::viewport::Viewport;
 
 /// The main chart engine. Owns everything needed to render the pane.
 pub struct ChartEngine {
@@ -25,6 +32,8 @@ pub struct ChartEngine {
     pub drawings: DrawingManager,
     pub series: SeriesCollection,
     pub studies: StudyManager,
+    pub price_lines: PriceLineManager,
+    pub markers: MarkerManager,
     pub dpr: f64,
     /// Horizontal pixel ratio: exact `bitmapWidth / cssWidth`.
     /// Set from `device-pixel-content-box` ResizeObserver; falls back to `dpr`.
@@ -44,6 +53,8 @@ impl ChartEngine {
         let drawings = DrawingManager::new();
         let series = SeriesCollection::new();
         let mut studies = StudyManager::new();
+        let price_lines = PriceLineManager::new();
+        let markers = MarkerManager::new();
 
         // Register built-in study calculators
         crate::core::studies::built_in::register_built_in_studies(&mut studies);
@@ -57,6 +68,8 @@ impl ChartEngine {
             drawings,
             series,
             studies,
+            price_lines,
+            markers,
             dpr,
             h_pixel_ratio: dpr,
             v_pixel_ratio: dpr,
@@ -166,7 +179,8 @@ impl ChartEngine {
         close: &[f32],
     ) {
         if let Some(s) = self.series.get_mut(id) {
-            s.bar_data.set_from_arrays(timestamps, open, high, low, close);
+            s.bar_data
+                .set_from_arrays(timestamps, open, high, low, close);
         }
     }
 

@@ -23,9 +23,35 @@ pub fn format_price(v: f64, step: f64) -> String {
     }
 }
 
+/// Format a percentage value with sign prefix (+/−).
+/// Used for Percentage price scale mode.
+pub fn format_percent(v: f64, step: f64) -> String {
+    let d = decimal_precision(step).min(2);
+    if v < 0.0 {
+        format!("\u{2212}{:.prec$}%", v.abs(), prec = d)
+    } else if v > 0.0 {
+        format!("+{:.prec$}%", v, prec = d)
+    } else {
+        format!("{:.prec$}%", v, prec = d)
+    }
+}
+
+/// Format an indexed value (for IndexedTo100 mode).
+/// Shows value without % sign, typically around 100.
+pub fn format_indexed(v: f64, step: f64) -> String {
+    let d = decimal_precision(step).min(2);
+    if v < 0.0 {
+        format!("\u{2212}{:.prec$}", v.abs(), prec = d)
+    } else {
+        format!("{:.prec$}", v, prec = d)
+    }
+}
+
 /// Compute decimal precision from step size (matches LWC _calculateDecimal).
 fn decimal_precision(step: f64) -> usize {
-    if step <= 0.0 { return 2; }
+    if step <= 0.0 {
+        return 2;
+    }
     let mut prec = 0usize;
     let mut s = step;
     while s < 0.9999 && prec < 8 {
@@ -115,19 +141,19 @@ pub fn format_timestamp(ms: u64) -> String {
 #[cfg(target_arch = "wasm32")]
 fn format_month_short(month: u32) -> String {
     match month {
-        1  => "Jan".into(),
-        2  => "Feb".into(),
-        3  => "Mar".into(),
-        4  => "Apr".into(),
-        5  => "May".into(),
-        6  => "Jun".into(),
-        7  => "Jul".into(),
-        8  => "Aug".into(),
-        9  => "Sep".into(),
+        1 => "Jan".into(),
+        2 => "Feb".into(),
+        3 => "Mar".into(),
+        4 => "Apr".into(),
+        5 => "May".into(),
+        6 => "Jun".into(),
+        7 => "Jul".into(),
+        8 => "Aug".into(),
+        9 => "Sep".into(),
         10 => "Oct".into(),
         11 => "Nov".into(),
         12 => "Dec".into(),
-        _  => format!("{}", month),
+        _ => format!("{}", month),
     }
 }
 

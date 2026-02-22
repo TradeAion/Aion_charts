@@ -5,15 +5,19 @@
 //! - `drawing.rs`: Drawing trait all tools implement
 //! - `hit_test.rs`: geometric hit-test math
 //! - `trend_line.rs`, `rectangle.rs`, `fibonacci.rs`, `scale.rs`: concrete tools
+//! - `horizontal_line.rs`, `vertical_line.rs`, `ray.rs`: additional line tools
 //! - `DrawingManager` (this file): owns all drawings, dispatches hit-tests, manages active tool
 
 pub mod drawing;
 pub mod fibonacci;
 pub mod hit_test;
+pub mod horizontal_line;
+pub mod ray;
 pub mod rectangle;
 pub mod scale;
 pub mod trend_line;
 pub mod types;
+pub mod vertical_line;
 
 use crate::core::viewport::Viewport;
 use drawing::Drawing;
@@ -167,6 +171,11 @@ impl DrawingManager {
             DrawingTool::Rectangle => Box::new(rectangle::RectangleDrawing::new(bar_index, price)),
             DrawingTool::Fibonacci => Box::new(fibonacci::FibonacciDrawing::new(bar_index, price)),
             DrawingTool::Scale => Box::new(scale::ScaleDrawing::new(bar_index, price)),
+            // TODO: Implement Drawing trait for these new tools
+            DrawingTool::HorizontalLine | DrawingTool::VerticalLine | DrawingTool::Ray => {
+                // For now, fall back to trend line behavior
+                Box::new(trend_line::TrendLineDrawing::new(bar_index, price))
+            }
             DrawingTool::None => unreachable!(),
         };
 

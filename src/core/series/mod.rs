@@ -3,23 +3,23 @@
 //! Each `Series` owns its data and rendering options. The engine holds
 //! a `SeriesCollection` that renderers iterate over during `draw_lines()`.
 
+pub mod area_options;
+pub mod bar_data;
+pub mod bar_options;
+pub mod baseline_options;
+pub mod histogram_data;
+pub mod histogram_options;
 pub mod line_data;
 pub mod line_options;
-pub mod area_options;
-pub mod histogram_options;
-pub mod histogram_data;
-pub mod bar_options;
-pub mod bar_data;
-pub mod baseline_options;
 
-pub use line_data::{LinePoint, LineDataArray};
-pub use line_options::{LineSeriesOptions, LineStyle};
 pub use area_options::AreaSeriesOptions;
-pub use histogram_options::HistogramSeriesOptions;
-pub use histogram_data::{HistogramPoint, HistogramDataArray};
+pub use bar_data::{OhlcDataArray, OhlcPoint};
 pub use bar_options::BarSeriesOptions;
-pub use bar_data::{OhlcPoint, OhlcDataArray};
 pub use baseline_options::BaselineSeriesOptions;
+pub use histogram_data::{HistogramDataArray, HistogramPoint};
+pub use histogram_options::HistogramSeriesOptions;
+pub use line_data::{LineDataArray, LinePoint};
+pub use line_options::{LineSeriesOptions, LineStyle};
 
 // ── Series ID ───────────────────────────────────────────────────────────────
 
@@ -155,6 +155,59 @@ impl Series {
     #[inline]
     pub fn series_type(&self) -> SeriesType {
         self.series_type
+    }
+
+    /// Get the last data value (close for OHLC, value for line/histogram).
+    /// Returns None if the series has no data.
+    pub fn last_value(&self) -> Option<f64> {
+        match self.series_type {
+            SeriesType::Line | SeriesType::Area | SeriesType::Baseline => {
+                if self.line_data.is_empty() {
+                    None
+                } else {
+                    Some(self.line_data.values[self.line_data.len() - 1] as f64)
+                }
+            }
+            SeriesType::Histogram => {
+                if self.histogram_data.is_empty() {
+                    None
+                } else {
+                    Some(self.histogram_data.values[self.histogram_data.len() - 1] as f64)
+                }
+            }
+            SeriesType::Bar => {
+                if self.bar_data.is_empty() {
+                    None
+                } else {
+                    Some(self.bar_data.close[self.bar_data.len() - 1] as f64)
+                }
+            }
+            SeriesType::Candlestick => None, // Managed by engine.bars
+        }
+    }
+
+    /// Get the primary line color for this series.
+    pub fn series_color(&self) -> [f32; 4] {
+        match self.series_type {
+            SeriesType::Line => self.line_options.color,
+            SeriesType::Area => self.area_options.line_color,
+            SeriesType::Histogram => self.histogram_options.color,
+            SeriesType::Bar => self.bar_options.up_color,
+            SeriesType::Baseline => self.baseline_options.top_line_color,
+            SeriesType::Candlestick => [1.0; 4],
+        }
+    }
+
+    /// Whether this series is visible.
+    pub fn is_visible(&self) -> bool {
+        match self.series_type {
+            SeriesType::Line => self.line_options.visible,
+            SeriesType::Area => self.area_options.visible,
+            SeriesType::Histogram => self.histogram_options.visible,
+            SeriesType::Bar => self.bar_options.visible,
+            SeriesType::Baseline => self.baseline_options.visible,
+            SeriesType::Candlestick => true,
+        }
     }
 }
 

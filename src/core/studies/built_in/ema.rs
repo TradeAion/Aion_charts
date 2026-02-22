@@ -1,7 +1,7 @@
 //! Exponential Moving Average (EMA) study.
 
 use crate::core::data::BarArray;
-use crate::core::studies::manager::{StudyCalculator, Study};
+use crate::core::studies::manager::{Study, StudyCalculator};
 
 /// EMA calculator.
 pub struct EmaCalculator;
