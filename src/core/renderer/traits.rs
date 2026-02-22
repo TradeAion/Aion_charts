@@ -160,14 +160,14 @@ impl Default for ChartStyle {
     }
 }
 
-/// Crosshair mode — matches LWC's CrosshairMode enum.
+/// Crosshair mode.
+/// X line always snaps to bar centers (LWC behavior).
+/// Y line behavior depends on mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CrosshairMode {
-    /// Free crosshair — no snap. Lines follow pointer exactly.
+    /// Normal mode — Y follows cursor exactly.
     #[default]
     Normal,
-    /// Magnet mode — Y snaps to close price at the hovered bar index.
-    Magnet,
     /// Magnet OHLC mode — Y snaps to the nearest of O, H, L, C to the cursor Y.
     MagnetOHLC,
 }

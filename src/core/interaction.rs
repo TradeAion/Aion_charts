@@ -361,16 +361,10 @@ impl InteractionHandler {
 
             // Y line behavior depends on mode
             match crosshair.mode {
-                CrosshairMode::Magnet | CrosshairMode::MagnetOHLC => {
+                CrosshairMode::MagnetOHLC => {
                     if let Some(idx) = crosshair.bar_index {
-                        let snap_price = magnet_snap_price(
-                            bars,
-                            idx,
-                            crosshair.mode,
-                            crosshair.y,
-                            viewport,
-                            pane_css_h,
-                        );
+                        let snap_price =
+                            magnet_snap_price(bars, idx, crosshair.y, viewport, pane_css_h);
                         crosshair.y = viewport
                             .price_to_css_y(snap_price, pane_css_h)
                             .clamp(0.0, pane_css_h);
@@ -413,17 +407,11 @@ impl InteractionHandler {
 
             // Y line behavior depends on mode
             match crosshair.mode {
-                CrosshairMode::Magnet | CrosshairMode::MagnetOHLC => {
+                CrosshairMode::MagnetOHLC => {
                     if let Some(idx) = crosshair.bar_index {
                         let cursor_y = y.clamp(0.0, pane_css_h);
-                        let snap_price = magnet_snap_price(
-                            bars,
-                            idx,
-                            crosshair.mode,
-                            cursor_y,
-                            viewport,
-                            pane_css_h,
-                        );
+                        let snap_price =
+                            magnet_snap_price(bars, idx, cursor_y, viewport, pane_css_h);
                         crosshair.y = viewport
                             .price_to_css_y(snap_price, pane_css_h)
                             .clamp(0.0, pane_css_h);
@@ -824,43 +812,33 @@ impl InteractionHandler {
     }
 }
 
-/// Compute the magnet-snap price for a given bar and crosshair mode.
+/// Compute the magnet-snap price for a given bar (MagnetOHLC mode).
 ///
-/// - `Magnet`: always snaps to close price (LWC behavior).
-/// - `MagnetOHLC`: snaps to the O/H/L/C value whose CSS Y is nearest
-///   to `cursor_css_y` (matching LWC's `magnet.ts` algorithm).
-/// - `Normal`: should not be called — returns close as fallback.
+/// Snaps to the O/H/L/C value whose CSS Y is nearest to `cursor_css_y`
+/// (matching LWC's `magnet.ts` algorithm).
 fn magnet_snap_price(
     bars: &BarArray,
     idx: usize,
-    mode: CrosshairMode,
     cursor_css_y: f64,
     viewport: &Viewport,
     pane_css_h: f64,
 ) -> f64 {
+    let open = bars.opens.value(idx) as f64;
+    let high = bars.highs.value(idx) as f64;
+    let low = bars.lows.value(idx) as f64;
     let close = bars.closes.value(idx) as f64;
 
-    match mode {
-        CrosshairMode::MagnetOHLC => {
-            let open = bars.opens.value(idx) as f64;
-            let high = bars.highs.value(idx) as f64;
-            let low = bars.lows.value(idx) as f64;
-
-            // Convert each OHLC price to CSS Y and find nearest to cursor
-            let candidates = [open, high, low, close];
-            let mut best_price = close;
-            let mut best_dist = f64::MAX;
-            for &price in &candidates {
-                let py = viewport.price_to_css_y(price, pane_css_h);
-                let dist = (py - cursor_css_y).abs();
-                if dist < best_dist {
-                    best_dist = dist;
-                    best_price = price;
-                }
-            }
-            best_price
+    // Convert each OHLC price to CSS Y and find nearest to cursor
+    let candidates = [open, high, low, close];
+    let mut best_price = close;
+    let mut best_dist = f64::MAX;
+    for &price in &candidates {
+        let py = viewport.price_to_css_y(price, pane_css_h);
+        let dist = (py - cursor_css_y).abs();
+        if dist < best_dist {
+            best_dist = dist;
+            best_price = price;
         }
-        // Magnet (close only) or Normal fallback
-        _ => close,
     }
+    best_price
 }

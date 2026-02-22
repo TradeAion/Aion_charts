@@ -184,7 +184,7 @@
   <header>
     <h1>Chart Core</h1>
     <span id="renderer-badge">…</span>
-    <button class="toggle-btn" id="crosshair-btn" title="Cycle crosshair: Normal → Magnet → OHLC">Normal</button>
+    <button class="toggle-btn" id="crosshair-btn" title="Toggle OHLC Magnet mode">OHLC Magnet</button>
     <span style="color:#444;margin:0 4px">|</span>
     <button class="toggle-btn" id="draw-trendline" title="Trend Line">Line</button>
     <button class="toggle-btn" id="draw-rectangle" title="Rectangle">Rect</button>
@@ -223,7 +223,7 @@
   </div>
 
   <script type="module">
-    import init, { RayCore } from './pkg/raycore_wasm.js?v=20260223s';
+    import init, { RayCore } from './pkg/raycore_wasm.js?v=20260223w';
 
     const errorBanner = document.getElementById('error-banner');
     const loading = document.getElementById('loading');
@@ -232,8 +232,7 @@
     const toggleGroup = document.getElementById('toggle-group');
     const container = document.getElementById('chart-container');
     const crosshairBtn = document.getElementById('crosshair-btn');
-    const crosshairModes = ['normal', 'magnet', 'magnet_ohlc'];
-    const crosshairLabels = { normal: 'Normal', magnet: 'Magnet', magnet_ohlc: 'OHLC' };
+    let ohlcMagnetEnabled = false;
 
     // Drawing tool buttons
     const drawBtns = {
@@ -288,14 +287,12 @@
       }
     });
 
-    // Crosshair mode cycle
+    // OHLC Magnet mode toggle
     crosshairBtn.addEventListener('click', () => {
-      const idx = (crosshairModes.indexOf(crosshairMode) + 1) % crosshairModes.length;
-      crosshairMode = crosshairModes[idx];
-      crosshairBtn.textContent = crosshairLabels[crosshairMode];
-      crosshairBtn.classList.toggle('active', crosshairMode !== 'normal');
+      ohlcMagnetEnabled = !ohlcMagnetEnabled;
+      crosshairBtn.classList.toggle('active', ohlcMagnetEnabled);
       if (core) {
-        core.set_crosshair_mode(crosshairMode);
+        core.set_crosshair_mode(ohlcMagnetEnabled ? 'magnet_ohlc' : 'normal');
       }
     });
 
@@ -308,7 +305,6 @@
     let core = null;
     let rafId = 0;
     let currentRenderer = null;
-    let crosshairMode = 'normal';
 
     function updateBadge(rName) {
       badge.textContent = rName === 'webgpu' ? 'WebGPU' : 'Canvas 2D';
@@ -346,9 +342,9 @@
         core.demo_mode();
         loading.style.display = 'none';
 
-        // Restore crosshair mode
-        if (crosshairMode !== 'normal') {
-          core.set_crosshair_mode(crosshairMode);
+        // Restore OHLC magnet mode if it was enabled
+        if (ohlcMagnetEnabled) {
+          core.set_crosshair_mode('magnet_ohlc');
         }
 
         hud.innerHTML = currentRenderer + ' | 600 bars | dpr=' + (window.devicePixelRatio || 1).toFixed(1) +
