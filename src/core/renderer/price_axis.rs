@@ -194,9 +194,10 @@ impl PriceAxisRenderer {
             .measure(&self.top_ctx, &price_lbl, &font)
             .ceil();
         let total_h = fs + padding_top + padding_bottom;
-        let total_w_raw = border_size + padding_inner + padding_outer + text_w + tick_length;
-        // Clamp label width so it never exceeds the price axis canvas width
-        let total_w = total_w_raw.min(w);
+
+        // Label width should match the price axis width exactly (no overflow)
+        // Use the canvas width directly since it's sized to the axis
+        let total_w = w;
 
         // LWC: label height parity must match tick height parity
         let tick_h_bmp = dpr.floor().max(1.0);
@@ -240,7 +241,8 @@ impl PriceAxisRenderer {
         // xTick = xInside - tickSizeBitmap
         let x_tick = x_inside - tick_size_bmp;
 
-        let radius = (2.0 * dpr).round();
+        // Clamp radius to avoid overflow when label fills full width
+        let radius = (2.0 * dpr).round().min(total_h_bmp / 4.0).max(0.0);
 
         // Draw rounded rect — LWC alignRight corners: [radius, 0, 0, radius]
         // = top-left rounded, top-right square, bottom-right square, bottom-left rounded
