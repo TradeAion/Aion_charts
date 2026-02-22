@@ -83,59 +83,16 @@ pub fn generate(
 // ── Public per-element generators ────────────────────────────────────────────
 
 /// Generate grid line rects (horizontal at price ticks, vertical at time ticks).
+/// Grid lines are currently disabled - returns empty vector.
 pub fn generate_grid_rects(
-    style: &ChartStyle,
-    y_ticks: &[TickMark],
-    x_ticks: &[TickMark],
-    pane_w: f64,
-    pane_h: f64,
+    _style: &ChartStyle,
+    _y_ticks: &[TickMark],
+    _x_ticks: &[TickMark],
+    _pane_w: f64,
+    _pane_h: f64,
 ) -> Vec<ColoredRect> {
-    let mut rects = Vec::with_capacity(y_ticks.len() + x_ticks.len());
-    let (gr, gg, gb, ga) = color4(&style.grid_color);
-
-    // Horizontal grid lines (at price ticks) — major ticks only
-    // Use snap_grid (round) for WebGPU compatibility - avoids subpixel issues
-    for t in y_ticks {
-        if !t.major {
-            continue;
-        }
-        let y = snap_grid(t.pixel);
-        if y > 0.0 && y < pane_h {
-            rects.push(ColoredRect {
-                x: 0.0,
-                y: y as f32,
-                w: pane_w as f32,
-                h: 1.0,
-                r: gr,
-                g: gg,
-                b: gb,
-                a: ga,
-            });
-        }
-    }
-
-    // Vertical grid lines (at time ticks) — major ticks only
-    // Use snap_grid (round) for WebGPU compatibility - avoids subpixel issues
-    for t in x_ticks {
-        if !t.major {
-            continue;
-        }
-        let x = snap_grid(t.pixel);
-        if x > 0.0 && x < pane_w {
-            rects.push(ColoredRect {
-                x: x as f32,
-                y: 0.0,
-                w: 1.0,
-                h: pane_h as f32,
-                r: gr,
-                g: gg,
-                b: gb,
-                a: ga,
-            });
-        }
-    }
-
-    rects
+    // Grid lines disabled
+    Vec::new()
 }
 
 /// Generate candle rects (wicks, borders, body fills).
