@@ -1,6 +1,7 @@
 //! Renderer subsystem — unified geometry + dumb renderers.
 //!
 //! Architecture:
+//! - transforms.rs: coordinate conversion utilities (bar↔x, price↔y)
 //! - draw_list.rs: ColoredRect, ColoredLine, DrawText structs
 //! - tick_marks.rs: shared tick computation (single source of truth)
 //! - geometry_generator.rs: single source of truth for candle/volume visual math
@@ -14,6 +15,7 @@
 
 pub mod traits;
 pub mod theme;
+pub mod transforms;
 
 /// Shared Canvas2D color helper — converts `[f32; 4]` RGBA to CSS string.
 #[cfg(target_arch = "wasm32")]

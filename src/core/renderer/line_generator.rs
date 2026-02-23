@@ -8,21 +8,11 @@
 //! An alternative "diagonal" mode could be added later with anti-aliased lines.
 
 use crate::core::renderer::draw_list::ColoredRect;
+use crate::core::renderer::transforms::{bar_to_x, price_to_y};
 use crate::core::series::{Series, SeriesType};
 use crate::core::viewport::Viewport;
 
-// ── Coordinate helpers (same as geometry_generator.rs) ───────────────────────
-
-#[inline]
-fn bar_to_x(bar_idx: f64, vp: &Viewport, chart_w: f64) -> f64 {
-    (bar_idx - vp.start_bar) / (vp.end_bar - vp.start_bar) * chart_w
-}
-
-#[inline]
-fn price_to_y(price: f64, vp: &Viewport, candle_h: f64) -> f64 {
-    let frac = (price - vp.price_min) / (vp.price_max - vp.price_min);
-    candle_h * (1.0 - frac)
-}
+// ── Coordinate helpers imported from transforms.rs ───────────────────────────
 
 /// Map a timestamp to a fractional bar index by binary-searching the bar
 /// timestamps array. Returns None if the timestamp is outside the range.
