@@ -136,6 +136,20 @@ fn sync_widget_sizes(s: &mut ChartInner, dpr: f64, prefer_exact: bool) {
         .resize((tw * dpr).round() as u32, (th * dpr).round() as u32, dpr);
 }
 
+fn with_crosshair_lines_mut<F>(style: &mut ChartStyle, target: &str, mut f: F)
+where
+    F: FnMut(&mut raycore::core::renderer::traits::CrosshairLineStyle),
+{
+    match target {
+        "vert" | "vertical" => f(&mut style.crosshair_vert_line),
+        "horz" | "horizontal" => f(&mut style.crosshair_horz_line),
+        _ => {
+            f(&mut style.crosshair_vert_line);
+            f(&mut style.crosshair_horz_line);
+        }
+    }
+}
+
 #[wasm_bindgen]
 pub struct RayCore {
     inner: SharedInner,
@@ -1223,12 +1237,14 @@ impl RayCore {
         vec![s.engine.viewport.start_bar, s.engine.viewport.end_bar]
     }
 
-    /// Set crosshair mode: "normal" or "magnet_ohlc".
+    /// Set crosshair mode: "normal", "magnet", or "magnet_ohlc".
     pub fn set_crosshair_mode(&mut self, mode: &str) {
         let mut s = self.inner.borrow_mut();
         s.engine.crosshair.mode = match mode {
+            "normal" => raycore::CrosshairMode::Normal,
+            "magnet" => raycore::CrosshairMode::Magnet,
             "magnet_ohlc" => raycore::CrosshairMode::MagnetOHLC,
-            _ => raycore::CrosshairMode::Normal,
+            _ => raycore::CrosshairMode::Magnet,
         };
     }
 
@@ -1440,17 +1456,108 @@ impl RayCore {
 
     /// Set the crosshair line color (RGBA, 0.0-1.0).
     pub fn set_crosshair_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
-        self.inner.borrow_mut().engine.style.crosshair_color = [r, g, b, a];
+        self.set_crosshair_line_color("both", r, g, b, a);
     }
 
     /// Set the crosshair label background color (RGBA, 0.0-1.0).
     pub fn set_crosshair_label_bg_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
-        self.inner.borrow_mut().engine.style.crosshair_label_bg = [r, g, b, a];
+        self.set_crosshair_line_label_bg_color("both", r, g, b, a);
     }
 
     /// Set the crosshair label text color (RGBA, 0.0-1.0).
     pub fn set_crosshair_label_text_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
         self.inner.borrow_mut().engine.style.crosshair_label_text = [r, g, b, a];
+    }
+
+    /// Set crosshair line color.
+    /// `target`: "vert", "horz", or "both".
+    pub fn set_crosshair_line_color(&mut self, target: &str, r: f32, g: f32, b: f32, a: f32) {
+        let mut s = self.inner.borrow_mut();
+        with_crosshair_lines_mut(&mut s.engine.style, target, |line| {
+            line.color = [r, g, b, a];
+        });
+    }
+
+    /// Set crosshair line style.
+    /// `target`: "vert", "horz", or "both".
+    /// `line_style`: "solid", "dotted", "dashed", "large_dashed", "sparse_dotted".
+    pub fn set_crosshair_line_style(&mut self, target: &str, line_style: &str) {
+        let style = LineStyle::from_str(line_style);
+        let mut s = self.inner.borrow_mut();
+        with_crosshair_lines_mut(&mut s.engine.style, target, |line| {
+            line.style = style;
+        });
+    }
+
+    /// Set crosshair line width in CSS pixels.
+    /// `target`: "vert", "horz", or "both".
+    pub fn set_crosshair_line_width(&mut self, target: &str, width: f32) {
+        let width = width.max(1.0) as f64;
+        let mut s = self.inner.borrow_mut();
+        with_crosshair_lines_mut(&mut s.engine.style, target, |line| {
+            line.width = width;
+        });
+    }
+
+    /// Set crosshair line visibility.
+    /// `target`: "vert", "horz", or "both".
+    pub fn set_crosshair_line_visible(&mut self, target: &str, visible: bool) {
+        let mut s = self.inner.borrow_mut();
+        with_crosshair_lines_mut(&mut s.engine.style, target, |line| {
+            line.visible = visible;
+        });
+    }
+
+    /// Set crosshair axis-label visibility.
+    /// `target`: "vert", "horz", or "both".
+    pub fn set_crosshair_label_visible(&mut self, target: &str, visible: bool) {
+        let mut s = self.inner.borrow_mut();
+        with_crosshair_lines_mut(&mut s.engine.style, target, |line| {
+            line.label_visible = visible;
+        });
+    }
+
+    /// Set crosshair label background color.
+    /// `target`: "vert", "horz", or "both".
+    pub fn set_crosshair_line_label_bg_color(
+        &mut self,
+        target: &str,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+    ) {
+        let mut s = self.inner.borrow_mut();
+        with_crosshair_lines_mut(&mut s.engine.style, target, |line| {
+            line.label_bg_color = [r, g, b, a];
+        });
+    }
+
+    /// Set live last-price line style.
+    /// `line_style`: "solid", "dotted", "dashed", "large_dashed", "sparse_dotted".
+    pub fn set_last_price_line_style(&mut self, line_style: &str) {
+        self.inner.borrow_mut().engine.style.last_price_line.style =
+            LineStyle::from_str(line_style);
+    }
+
+    /// Set live last-price line width in CSS pixels.
+    pub fn set_last_price_line_width(&mut self, width: f32) {
+        self.inner.borrow_mut().engine.style.last_price_line.width = width.max(1.0) as f64;
+    }
+
+    /// Set live last-price line visibility.
+    pub fn set_last_price_line_visible(&mut self, visible: bool) {
+        self.inner.borrow_mut().engine.style.last_price_line.visible = visible;
+    }
+
+    /// Set live last-price label visibility on the Y axis.
+    pub fn set_last_price_label_visible(&mut self, visible: bool) {
+        self.inner
+            .borrow_mut()
+            .engine
+            .style
+            .last_price_line
+            .label_visible = visible;
     }
 
     /// Set bullish (up) candle colors: body fill and wick/border.
