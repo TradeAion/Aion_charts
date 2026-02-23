@@ -184,6 +184,12 @@
   <header>
     <h1>Chart Core</h1>
     <span id="renderer-badge">…</span>
+    <span style="color:#444;margin:0 4px">|</span>
+    <button class="toggle-btn active" id="chart-candlestick" title="Candlestick chart">Candle</button>
+    <button class="toggle-btn" id="chart-ohlc" title="OHLC bars">OHLC</button>
+    <button class="toggle-btn" id="chart-line" title="Line chart (close prices)">Line</button>
+    <button class="toggle-btn" id="chart-area" title="Area chart">Area</button>
+    <span style="color:#444;margin:0 4px">|</span>
     <button class="toggle-btn" id="crosshair-btn" title="Toggle OHLC Magnet mode">OHLC Magnet</button>
     <span style="color:#444;margin:0 4px">|</span>
     <button class="toggle-btn" id="draw-trendline" title="Trend Line">Line</button>
@@ -223,7 +229,7 @@
   </div>
 
   <script type="module">
-    import init, { RayCore } from './pkg/raycore_wasm.js?v=20260223z';
+    import init, { RayCore } from './pkg/raycore_wasm.js?v=20260223-areafix';
 
     const errorBanner = document.getElementById('error-banner');
     const loading = document.getElementById('loading');
@@ -295,6 +301,30 @@
         core.set_crosshair_mode(ohlcMagnetEnabled ? 'magnet_ohlc' : 'normal');
       }
     });
+
+    // ── Chart Type Selector ─────────────────────────────────────────────────
+    const chartTypeBtns = {
+      'chart-candlestick': 'candlestick',
+      'chart-ohlc': 'ohlc',
+      'chart-line': 'line',
+      'chart-area': 'area',
+    };
+    let activeChartType = 'candlestick';
+
+    function setChartType(type) {
+      if (!core || activeChartType === type) return;
+      activeChartType = type;
+      core.set_chart_type(type);
+      // Update button states
+      for (const [btnId, t] of Object.entries(chartTypeBtns)) {
+        document.getElementById(btnId).classList.toggle('active', t === type);
+      }
+    }
+
+    // Wire up chart type buttons
+    for (const [btnId, type] of Object.entries(chartTypeBtns)) {
+      document.getElementById(btnId).addEventListener('click', () => setChartType(type));
+    }
 
     function showError(msg) {
       errorBanner.textContent = 'Error: ' + msg;
