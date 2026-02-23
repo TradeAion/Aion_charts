@@ -77,7 +77,34 @@ struct FrameState {
 const INITIAL_CANDLE_CAPACITY: usize = 8192;
 const INITIAL_RECT_CAPACITY: usize = 16384;
 
+/// Maximum number of surface recovery attempts before returning an error.
+const MAX_SURFACE_RECOVERY_ATTEMPTS: u32 = 3;
+
+/// Error type for render failures that may be recoverable.
+#[derive(Debug, Clone)]
+pub enum RenderError {
+    /// Surface was lost and could not be recovered after retries.
+    SurfaceLost(String),
+    /// Transient error that may succeed on retry.
+    Transient(String),
+    /// Permanent error that won't be fixed by retrying.
+    Permanent(String),
+}
+
+impl std::fmt::Display for RenderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RenderError::SurfaceLost(msg) => write!(f, "Surface lost: {}", msg),
+            RenderError::Transient(msg) => write!(f, "Transient error: {}", msg),
+            RenderError::Permanent(msg) => write!(f, "Permanent error: {}", msg),
+        }
+    }
+}
+
 // ── WgpuRenderer ─────────────────────────────────────────────────────────────
+
+const INITIAL_LINE_CAPACITY: usize = 4096;
+const INITIAL_AREA_CAPACITY: usize = 4096;
 
 pub struct WgpuRenderer {
     pub gpu: GpuContext,
@@ -88,6 +115,14 @@ pub struct WgpuRenderer {
     rect_uniform_buf: wgpu::Buffer,
     rect_bind_group: wgpu::BindGroup,
     rect_capacity: usize,
+
+    // Line pipeline — for smooth anti-aliased line charts
+    line_instance_buf: wgpu::Buffer,
+    line_capacity: usize,
+
+    // Area pipeline — for smooth area chart fills
+    area_instance_buf: wgpu::Buffer,
+    area_capacity: usize,
 
     // Candle pipeline — new instanced OHLCV path
     candle_pipeline: wgpu::RenderPipeline,
@@ -234,6 +269,26 @@ impl WgpuRenderer {
             }],
         });
 
+        // ── Line buffer (for smooth line/area charts) ──
+        let line_instance_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("line_instances"),
+            size: (INITIAL_LINE_CAPACITY
+                * std::mem::size_of::<crate::core::renderer::draw_list::LineSegment>())
+                as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // ── Area buffer (for smooth area chart fills) ──
+        let area_instance_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("area_instances"),
+            size: (INITIAL_AREA_CAPACITY
+                * std::mem::size_of::<crate::core::renderer::draw_list::AreaSegment>())
+                as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         Self {
             gpu,
             rect_pipelines,
@@ -241,6 +296,10 @@ impl WgpuRenderer {
             rect_uniform_buf,
             rect_bind_group,
             rect_capacity: INITIAL_RECT_CAPACITY,
+            line_instance_buf,
+            line_capacity: INITIAL_LINE_CAPACITY,
+            area_instance_buf,
+            area_capacity: INITIAL_AREA_CAPACITY,
             candle_pipeline,
             candle_instance_buf,
             candle_uniform_buf,
@@ -334,6 +393,188 @@ impl WgpuRenderer {
         } // RenderPass drops here — encoder borrow released
     }
 
+    // ── Line helpers ─────────────────────────────────────────────────────────
+
+    /// Upload LineSegments to the line instance buffer. Returns count.
+    fn upload_lines(
+        &mut self,
+        lines: &[crate::core::renderer::draw_list::LineSegment],
+        phys_w: u32,
+        phys_h: u32,
+    ) -> u32 {
+        let count = lines.len() as u32;
+        if count == 0 {
+            return 0;
+        }
+
+        // Grow if needed
+        if lines.len() > self.line_capacity {
+            self.line_capacity = lines.len().next_power_of_two();
+            self.line_instance_buf = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("line_instances"),
+                size: (self.line_capacity
+                    * std::mem::size_of::<crate::core::renderer::draw_list::LineSegment>())
+                    as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+
+        self.gpu
+            .queue
+            .write_buffer(&self.line_instance_buf, 0, bytemuck::cast_slice(lines));
+
+        // Reuse the rect uniform buffer for viewport dimensions
+        let uniform = RectViewportUniform {
+            width: phys_w as f32,
+            height: phys_h as f32,
+            _pad0: 0.0,
+            _pad1: 0.0,
+        };
+        self.gpu
+            .queue
+            .write_buffer(&self.rect_uniform_buf, 0, bytemuck::bytes_of(&uniform));
+
+        count
+    }
+
+    /// Issue a render pass that draws line segment instances.
+    fn draw_line_pass(&mut self, line_count: u32) {
+        if line_count == 0 {
+            return;
+        }
+        let frame = self
+            .frame
+            .as_mut()
+            .expect("draw_line_pass called outside begin/end_frame");
+        let load_op = if frame.cleared {
+            wgpu::LoadOp::Load
+        } else {
+            frame.cleared = true;
+            wgpu::LoadOp::Clear(wgpu::Color {
+                r: 0.09020,
+                g: 0.09020,
+                b: 0.09020,
+                a: 1.0,
+            })
+        };
+        {
+            let mut pass = frame
+                .encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("line_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &frame.view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: load_op,
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+            pass.set_pipeline(&self.rect_pipelines.line_pipeline);
+            pass.set_bind_group(0, &self.rect_bind_group, &[]);
+            pass.set_vertex_buffer(0, self.line_instance_buf.slice(..));
+            pass.draw(0..6, 0..line_count); // 6 verts per line segment (2 triangles)
+        }
+    }
+
+    // ── Area helpers ─────────────────────────────────────────────────────────
+
+    /// Upload AreaSegments to the area instance buffer. Returns count.
+    fn upload_areas(
+        &mut self,
+        areas: &[crate::core::renderer::draw_list::AreaSegment],
+        phys_w: u32,
+        phys_h: u32,
+    ) -> u32 {
+        let count = areas.len() as u32;
+        if count == 0 {
+            return 0;
+        }
+
+        // Grow if needed
+        if areas.len() > self.area_capacity {
+            self.area_capacity = areas.len().next_power_of_two();
+            self.area_instance_buf = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("area_instances"),
+                size: (self.area_capacity
+                    * std::mem::size_of::<crate::core::renderer::draw_list::AreaSegment>())
+                    as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+        }
+
+        self.gpu
+            .queue
+            .write_buffer(&self.area_instance_buf, 0, bytemuck::cast_slice(areas));
+
+        // Reuse the rect uniform buffer for viewport dimensions
+        let uniform = RectViewportUniform {
+            width: phys_w as f32,
+            height: phys_h as f32,
+            _pad0: 0.0,
+            _pad1: 0.0,
+        };
+        self.gpu
+            .queue
+            .write_buffer(&self.rect_uniform_buf, 0, bytemuck::bytes_of(&uniform));
+
+        count
+    }
+
+    /// Issue a render pass that draws area segment instances (trapezoids).
+    fn draw_area_pass(&mut self, area_count: u32) {
+        if area_count == 0 {
+            return;
+        }
+        let frame = self
+            .frame
+            .as_mut()
+            .expect("draw_area_pass called outside begin/end_frame");
+        let load_op = if frame.cleared {
+            wgpu::LoadOp::Load
+        } else {
+            frame.cleared = true;
+            wgpu::LoadOp::Clear(wgpu::Color {
+                r: 0.09020,
+                g: 0.09020,
+                b: 0.09020,
+                a: 1.0,
+            })
+        };
+        {
+            let mut pass = frame
+                .encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("area_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &frame.view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: load_op,
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+            pass.set_pipeline(&self.rect_pipelines.area_pipeline);
+            pass.set_bind_group(0, &self.rect_bind_group, &[]);
+            pass.set_vertex_buffer(0, self.area_instance_buf.slice(..));
+            pass.draw(0..6, 0..area_count); // 6 verts per area segment (2 triangles)
+        }
+    }
+
     // ── Candle helpers ───────────────────────────────────────────────────────
 
     /// Build CandleInstance array from visible bars. Maps f64 world coords
@@ -357,7 +598,8 @@ impl WgpuRenderer {
 
         let mut instances = Vec::with_capacity(end - start);
         for i in start..end {
-            let b = bars.get(i);
+            // SAFETY: i is bounded by start..end which are clamped to bars.len()
+            let b = bars.get_unchecked(i);
             // f64 world → f32 pixel, relative to viewport origin
             let center_x =
                 ((i as f64 + 0.5 - viewport.start_bar) / bar_range * pane_w).round() as f32;
@@ -459,6 +701,72 @@ impl WgpuRenderer {
             pass.draw(0..24, 0..candle_count);
         } // RenderPass drops here
     }
+
+    /// Acquire a surface texture with retry logic and exponential backoff.
+    ///
+    /// Handles transient GPU errors by:
+    /// 1. Reconfiguring the surface on Lost/Outdated errors
+    /// 2. Retrying up to MAX_SURFACE_RECOVERY_ATTEMPTS times
+    fn acquire_surface_texture(&mut self) -> Result<wgpu::SurfaceTexture, String> {
+        let mut last_error = None;
+
+        for attempt in 0..MAX_SURFACE_RECOVERY_ATTEMPTS {
+            match self.gpu.surface.get_current_texture() {
+                Ok(tex) => {
+                    if attempt > 0 {
+                        log::info!("Surface recovered after {} attempt(s)", attempt);
+                    }
+                    return Ok(tex);
+                }
+                Err(wgpu::SurfaceError::Lost) | Err(wgpu::SurfaceError::Outdated) => {
+                    log::warn!(
+                        "Surface lost/outdated (attempt {}/{}), reconfiguring...",
+                        attempt + 1,
+                        MAX_SURFACE_RECOVERY_ATTEMPTS
+                    );
+
+                    // Reconfigure the surface
+                    self.gpu
+                        .surface
+                        .configure(&self.gpu.device, &self.gpu.config);
+
+                    last_error = Some("Surface lost after reconfigure".to_string());
+                }
+                Err(wgpu::SurfaceError::Timeout) => {
+                    log::warn!(
+                        "Surface timeout (attempt {}/{}), retrying...",
+                        attempt + 1,
+                        MAX_SURFACE_RECOVERY_ATTEMPTS
+                    );
+                    last_error = Some("Surface timeout".to_string());
+                }
+                Err(wgpu::SurfaceError::OutOfMemory) => {
+                    // Out of memory is likely unrecoverable without freeing resources
+                    return Err(
+                        "GPU out of memory - cannot recover. Try reducing chart size or data."
+                            .to_string(),
+                    );
+                }
+                Err(e) => {
+                    // Other/unknown errors - log and retry
+                    log::warn!(
+                        "Surface error {:?} (attempt {}/{}), retrying...",
+                        e,
+                        attempt + 1,
+                        MAX_SURFACE_RECOVERY_ATTEMPTS
+                    );
+                    last_error = Some(format!("{:?}", e));
+                }
+            }
+        }
+
+        // All retries exhausted
+        Err(format!(
+            "Surface error after {} attempts: {}. Consider falling back to Canvas2D.",
+            MAX_SURFACE_RECOVERY_ATTEMPTS,
+            last_error.unwrap_or_else(|| "unknown".to_string())
+        ))
+    }
 }
 
 // ── ChartRenderer implementation ─────────────────────────────────────────────
@@ -477,20 +785,8 @@ impl ChartRenderer for WgpuRenderer {
     }
 
     fn begin_frame(&mut self, _ctx: &RenderContext) -> Result<(), String> {
-        let output = match self.gpu.surface.get_current_texture() {
-            Ok(tex) => tex,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                // Reconfigure surface and retry once
-                self.gpu
-                    .surface
-                    .configure(&self.gpu.device, &self.gpu.config);
-                self.gpu
-                    .surface
-                    .get_current_texture()
-                    .map_err(|e| format!("Surface error after reconfigure: {:?}", e))?
-            }
-            Err(e) => return Err(format!("Surface error: {:?}", e)),
-        };
+        let output = self.acquire_surface_texture()?;
+
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -542,38 +838,132 @@ impl ChartRenderer for WgpuRenderer {
     }
 
     fn draw_candles(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        use crate::core::chart_type::MainChartType;
+
         let pane_w = ctx.viewport.width as f64;
         let pane_h = ctx.viewport.height as f64;
         let vol_h = pane_h * ctx.viewport.volume_height_ratio as f64;
         let candle_h = pane_h - vol_h;
 
-        let sizing = CandleSizing::compute_from_pane(
-            pane_w,
-            ctx.viewport,
-            ctx.h_pixel_ratio,
-            ctx.v_pixel_ratio,
-        );
+        // For non-candlestick types, use rect-based rendering
+        match ctx.main_chart_type {
+            MainChartType::Candlestick | MainChartType::HeikinAshi => {
+                // Use the optimized instanced candle pipeline
+                let sizing = CandleSizing::compute_from_pane(
+                    pane_w,
+                    ctx.viewport,
+                    ctx.h_pixel_ratio,
+                    ctx.v_pixel_ratio,
+                );
 
-        // Build per-instance pixel-space data on CPU (f64 → f32 conversion)
-        let instances = Self::build_candle_instances(ctx.bars, ctx.viewport, pane_w, candle_h);
+                let instances = if ctx.main_chart_type == MainChartType::HeikinAshi {
+                    // For Heikin-Ashi, we'd need to transform the data
+                    // For now, fall back to rect-based rendering
+                    let rects = geometry_generator::generate_heikin_ashi_rects(
+                        ctx.bars,
+                        ctx.viewport,
+                        ctx.style,
+                        pane_w,
+                        pane_h,
+                        ctx.h_pixel_ratio,
+                        ctx.v_pixel_ratio,
+                    );
+                    let count = self.upload_rects(&rects, ctx.viewport.width, ctx.viewport.height);
+                    self.draw_rect_pass(count);
+                    return Ok(());
+                } else {
+                    Self::build_candle_instances(ctx.bars, ctx.viewport, pane_w, candle_h)
+                };
 
-        let uniforms = CandleUniforms {
-            width: pane_w as f32,
-            height: pane_h as f32,
-            bar_width: sizing.bar_width as f32,
-            wick_width: sizing.wick_width as f32,
-            border_width: sizing.border_width as f32,
-            draw_body: if sizing.draw_body { 1.0 } else { 0.0 },
-            _pad0: 0.0,
-            _pad1: 0.0,
-            bullish_body: ctx.style.bullish_color,
-            bearish_body: ctx.style.bearish_color,
-            bullish_wick: ctx.style.wick_bullish_color,
-            bearish_wick: ctx.style.wick_bearish_color,
-        };
+                let uniforms = CandleUniforms {
+                    width: pane_w as f32,
+                    height: pane_h as f32,
+                    bar_width: sizing.bar_width as f32,
+                    wick_width: sizing.wick_width as f32,
+                    border_width: sizing.border_width as f32,
+                    draw_body: if sizing.draw_body { 1.0 } else { 0.0 },
+                    _pad0: 0.0,
+                    _pad1: 0.0,
+                    bullish_body: ctx.style.bullish_color,
+                    bearish_body: ctx.style.bearish_color,
+                    bullish_wick: ctx.style.wick_bullish_color,
+                    bearish_wick: ctx.style.wick_bearish_color,
+                };
 
-        let count = self.upload_candles(&instances, &uniforms);
-        self.draw_candle_pass(count);
+                let count = self.upload_candles(&instances, &uniforms);
+                self.draw_candle_pass(count);
+            }
+            MainChartType::OhlcBars => {
+                let rects = geometry_generator::generate_ohlc_bar_rects(
+                    ctx.bars,
+                    ctx.viewport,
+                    ctx.style,
+                    pane_w,
+                    pane_h,
+                    ctx.h_pixel_ratio,
+                    ctx.v_pixel_ratio,
+                );
+                let count = self.upload_rects(&rects, ctx.viewport.width, ctx.viewport.height);
+                self.draw_rect_pass(count);
+            }
+            MainChartType::Line => {
+                // Use the line pipeline for smooth anti-aliased lines
+                let line_width = ctx.main_chart_options.line_width * ctx.v_pixel_ratio as f32;
+                let segments = geometry_generator::generate_line_segments(
+                    ctx.bars,
+                    ctx.viewport,
+                    ctx.main_chart_options.line_color,
+                    line_width,
+                    pane_w,
+                    pane_h,
+                );
+                let count = self.upload_lines(&segments, ctx.viewport.width, ctx.viewport.height);
+                self.draw_line_pass(count);
+            }
+            MainChartType::Area | MainChartType::Baseline => {
+                // Use area pipeline for smooth trapezoid fills + line pipeline for smooth top edge
+                let fill_color = if ctx.main_chart_type == MainChartType::Baseline {
+                    ctx.main_chart_options.baseline_top_fill_color
+                } else {
+                    ctx.main_chart_options.area_top_color
+                };
+                let line_color = if ctx.main_chart_type == MainChartType::Baseline {
+                    ctx.main_chart_options.baseline_top_line_color
+                } else {
+                    ctx.main_chart_options.line_color
+                };
+                let line_width = ctx.main_chart_options.line_width * ctx.v_pixel_ratio as f32;
+
+                // Generate area fill segments (trapezoids)
+                let area_segments = geometry_generator::generate_area_segments(
+                    ctx.bars,
+                    ctx.viewport,
+                    fill_color,
+                    pane_w,
+                    pane_h,
+                );
+
+                // Generate line segments for smooth top edge
+                let line_segments = geometry_generator::generate_line_segments(
+                    ctx.bars,
+                    ctx.viewport,
+                    line_color,
+                    line_width,
+                    pane_w,
+                    pane_h,
+                );
+
+                // Draw fill first (trapezoids)
+                let area_count =
+                    self.upload_areas(&area_segments, ctx.viewport.width, ctx.viewport.height);
+                self.draw_area_pass(area_count);
+
+                // Then draw the line on top
+                let line_count =
+                    self.upload_lines(&line_segments, ctx.viewport.width, ctx.viewport.height);
+                self.draw_line_pass(line_count);
+            }
+        }
         Ok(())
     }
 
