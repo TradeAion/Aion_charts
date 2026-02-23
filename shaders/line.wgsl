@@ -4,8 +4,7 @@
 // The shader computes perpendicular offsets to create a properly rotated quad.
 // 6 vertices per instance (TriangleList: 2 triangles = 1 quad).
 //
-// For crisp 1px lines, we use pixel-perfect coordinates without AA.
-// For thicker lines, minimal edge smoothing is applied.
+// Always apply edge smoothing for a visually smooth line at all widths.
 
 struct Viewport {
     width: f32,
@@ -66,9 +65,9 @@ fn vs_main(
     let px = -ny;
     let py = nx;
 
-    // Half-width for the quad (add 0.5px for AA feathering on thick lines)
+    // Half-width for the quad (add 0.5px for AA feathering).
     let hw = seg.line_width * 0.5;
-    let aa_extend = select(0.0, 0.5, seg.line_width > 1.5);
+    let aa_extend = 0.5;
     let total_hw = hw + aa_extend;
     
     let ox = px * total_hw;
@@ -111,16 +110,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let dist = abs(in.local_y);
     let hw = in.half_width;
     
-    // For thin lines (<=1.5px), render solid without AA for crispness
-    // For thicker lines, apply 1px edge smoothing
-    var alpha: f32;
-    if hw <= 0.75 {
-        // Thin line: solid fill, no AA (crisp)
-        alpha = in.color.a * step(dist, hw);
-    } else {
-        // Thicker line: smooth edge over 1px
-        alpha = in.color.a * (1.0 - smoothstep(hw - 0.5, hw + 0.5, dist));
-    }
+    // Smooth edge over 1px total feather (0.5px each side).
+    let alpha = in.color.a * (1.0 - smoothstep(hw - 0.5, hw + 0.5, dist));
     
     // Premultiplied alpha output
     return vec4<f32>(in.color.rgb * alpha, alpha);

@@ -21,11 +21,17 @@ struct AreaSegment {
     @location(2) x2: f32,      // right x
     @location(3) y2: f32,      // top-right y (close price at bar i+1)
     @location(4) bottom: f32,  // bottom y (same for both sides)
-    @location(5) r: f32,
-    @location(6) g: f32,
-    @location(7) b: f32,
-    @location(8) a: f32,
-    @location(9) _pad: f32,
+    @location(5) top_r: f32,
+    @location(6) top_g: f32,
+    @location(7) top_b: f32,
+    @location(8) top_a: f32,
+    @location(9) bottom_r: f32,
+    @location(10) bottom_g: f32,
+    @location(11) bottom_b: f32,
+    @location(12) bottom_a: f32,
+    @location(13) gradient_top: f32,
+    @location(14) _pad1: f32,
+    @location(15) _pad2: f32,
 };
 
 struct VertexOutput {
@@ -52,21 +58,48 @@ fn vs_main(
     // First triangle: top-left, bottom-left, top-right
     // Second triangle: top-right, bottom-left, bottom-right
     switch (vi) {
-        case 0u: { corner_x = seg.x1; corner_y = seg.y1; }      // v0 top-left
-        case 1u: { corner_x = seg.x1; corner_y = seg.bottom; }  // v2 bottom-left
-        case 2u: { corner_x = seg.x2; corner_y = seg.y2; }      // v1 top-right
-        case 3u: { corner_x = seg.x2; corner_y = seg.y2; }      // v1 top-right
-        case 4u: { corner_x = seg.x1; corner_y = seg.bottom; }  // v2 bottom-left
-        case 5u: { corner_x = seg.x2; corner_y = seg.bottom; }  // v3 bottom-right
-        default: { corner_x = 0.0; corner_y = 0.0; }
+        case 0u: { // v0 top-left
+            corner_x = seg.x1;
+            corner_y = seg.y1;
+        }
+        case 1u: { // v2 bottom-left
+            corner_x = seg.x1;
+            corner_y = seg.bottom;
+        }
+        case 2u: { // v1 top-right
+            corner_x = seg.x2;
+            corner_y = seg.y2;
+        }
+        case 3u: { // v1 top-right
+            corner_x = seg.x2;
+            corner_y = seg.y2;
+        }
+        case 4u: { // v2 bottom-left
+            corner_x = seg.x1;
+            corner_y = seg.bottom;
+        }
+        case 5u: { // v3 bottom-right
+            corner_x = seg.x2;
+            corner_y = seg.bottom;
+        }
+        default: {
+            corner_x = 0.0;
+            corner_y = 0.0;
+        }
     }
 
     // Pixel → NDC
     let ndc_x = (corner_x / vp.width) * 2.0 - 1.0;
     let ndc_y = 1.0 - (corner_y / vp.height) * 2.0;
 
+    // Global vertical gradient (constant across x) to avoid per-segment facets.
+    let grad_h = max(seg.bottom - seg.gradient_top, 1.0);
+    let t = clamp((corner_y - seg.gradient_top) / grad_h, 0.0, 1.0);
+    let top_color = vec4<f32>(seg.top_r, seg.top_g, seg.top_b, seg.top_a);
+    let bottom_color = vec4<f32>(seg.bottom_r, seg.bottom_g, seg.bottom_b, seg.bottom_a);
+
     out.position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
-    out.color = vec4<f32>(seg.r, seg.g, seg.b, seg.a);
+    out.color = mix(top_color, bottom_color, t);
     return out;
 }
 

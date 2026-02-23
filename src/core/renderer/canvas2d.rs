@@ -6,7 +6,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use crate::core::renderer::draw_list::{ColoredRect, LineSegment};
+use crate::core::renderer::draw_list::{AreaSegment, ColoredRect, LineSegment};
 use crate::core::renderer::geometry_generator;
 use crate::core::renderer::traits::{ChartRenderer, RenderContext};
 use wasm_bindgen::prelude::*;
@@ -111,6 +111,50 @@ impl Canvas2DRenderer {
             self.ctx.stroke();
         }
     }
+
+    /// Draw a smooth filled area from contiguous area segments.
+    /// Uses a single polygon path to avoid strip/band artifacts.
+    fn draw_area_segments(&self, segments: &[AreaSegment]) {
+        if segments.is_empty() {
+            return;
+        }
+
+        let first = segments.first().unwrap();
+        let last = segments.last().unwrap();
+
+        let mut min_top = first.y1.min(first.y2);
+        for seg in segments {
+            min_top = min_top.min(seg.y1.min(seg.y2));
+        }
+
+        let top = [first.top_r, first.top_g, first.top_b, first.top_a];
+        let bottom = [
+            first.bottom_r,
+            first.bottom_g,
+            first.bottom_b,
+            first.bottom_a,
+        ];
+
+        let gradient = self.ctx.create_linear_gradient(
+            0.0,
+            min_top as f64,
+            0.0,
+            first.bottom as f64,
+        );
+        let _ = gradient.add_color_stop(0.0, &rgba(&top));
+        let _ = gradient.add_color_stop(1.0, &rgba(&bottom));
+
+        self.ctx.begin_path();
+        self.ctx.move_to(first.x1 as f64, first.y1 as f64);
+        for seg in segments {
+            self.ctx.line_to(seg.x2 as f64, seg.y2 as f64);
+        }
+        self.ctx.line_to(last.x2 as f64, first.bottom as f64);
+        self.ctx.line_to(first.x1 as f64, first.bottom as f64);
+        self.ctx.close_path();
+        self.ctx.set_fill_style_canvas_gradient(&gradient);
+        self.ctx.fill();
+    }
 }
 
 impl ChartRenderer for Canvas2DRenderer {
@@ -186,7 +230,7 @@ impl ChartRenderer for Canvas2DRenderer {
             }
             MainChartType::Area => {
                 let line_width = ctx.main_chart_options.line_width * ctx.v_pixel_ratio as f32;
-                let fill_rects = geometry_generator::generate_main_area_fill_rects(
+                let area_segments = geometry_generator::generate_area_segments(
                     ctx.bars,
                     ctx.viewport,
                     ctx.main_chart_options.area_top_color,
@@ -194,7 +238,7 @@ impl ChartRenderer for Canvas2DRenderer {
                     pane_w,
                     pane_h,
                 );
-                let line_segments = geometry_generator::generate_line_segments(
+                let line_segments = geometry_generator::generate_main_area_line_segments(
                     ctx.bars,
                     ctx.viewport,
                     ctx.main_chart_options.line_color,
@@ -202,7 +246,7 @@ impl ChartRenderer for Canvas2DRenderer {
                     pane_w,
                     pane_h,
                 );
-                self.draw_rects(&fill_rects);
+                self.draw_area_segments(&area_segments);
                 self.draw_line_segments(&line_segments);
             }
             MainChartType::Baseline => {

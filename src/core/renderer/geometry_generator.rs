@@ -769,6 +769,58 @@ fn generate_main_close_points(
     points
 }
 
+/// Generate main-series close points for area rendering with monotonic X.
+/// This collapses duplicate X pixels (zoomed-out bars mapping to same column)
+/// so area fills cannot self-overlap and produce dark patches.
+fn generate_main_area_points(
+    bars: &crate::core::data::BarArray,
+    viewport: &Viewport,
+    pane_w: f64,
+    candle_h: f64,
+) -> Vec<(f32, f32)> {
+    let start = (viewport.start_bar.floor() as usize)
+        .saturating_sub(1)
+        .min(bars.len());
+    let end = ((viewport.end_bar.ceil() as usize) + 1).min(bars.len());
+    if start >= end {
+        return Vec::new();
+    }
+
+    let mut points = Vec::with_capacity(end - start);
+    let mut last_x_bucket: Option<i32> = None;
+    for i in start..end {
+        let b = bars.get_unchecked(i);
+        let x = bar_to_x(i as f64 + 0.5, viewport, pane_w) as f32;
+        let y = price_to_y(b.close as f64, viewport, candle_h) as f32;
+
+        if !x.is_finite() || !y.is_finite() {
+            continue;
+        }
+
+        // Deduplicate by pixel column, but keep subpixel coordinates for smooth strokes.
+        let x_bucket = x.round() as i32;
+        match last_x_bucket {
+            None => {
+                points.push((x, y));
+                last_x_bucket = Some(x_bucket);
+            }
+            Some(prev_bucket) if x_bucket > prev_bucket => {
+                points.push((x, y));
+                last_x_bucket = Some(x_bucket);
+            }
+            Some(prev_bucket) if x_bucket == prev_bucket => {
+                if let Some((last_x, last_y)) = points.last_mut() {
+                    *last_x = x;
+                    *last_y = y;
+                }
+            }
+            Some(_) => continue,
+        }
+    }
+
+    points
+}
+
 #[inline]
 fn strip_bounds(points: &[(f64, f64)], i: usize) -> Option<(f64, f64)> {
     let x = points[i].0;
@@ -787,16 +839,6 @@ fn strip_bounds(points: &[(f64, f64)], i: usize) -> Option<(f64, f64)> {
     } else {
         Some((left, right))
     }
-}
-
-#[inline]
-fn lerp_color(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
-    [
-        a[0] + (b[0] - a[0]) * t,
-        a[1] + (b[1] - a[1]) * t,
-        a[2] + (b[2] - a[2]) * t,
-        a[3] + (b[3] - a[3]) * t,
-    ]
 }
 
 /// Generate line segments for the GPU line pipeline (smooth anti-aliased lines).
@@ -847,79 +889,6 @@ pub fn generate_line_segments(
     }
 
     segments
-}
-
-/// Generate gradient fill rects for the main area chart.
-pub fn generate_main_area_fill_rects(
-    bars: &crate::core::data::BarArray,
-    viewport: &Viewport,
-    top_color: [f32; 4],
-    bottom_color: [f32; 4],
-    pane_w: f64,
-    pane_h: f64,
-) -> Vec<ColoredRect> {
-    let vol_h = pane_h * viewport.volume_height_ratio as f64;
-    let candle_h = pane_h - vol_h;
-    let base_y = candle_h.round();
-    let points = generate_main_close_points(bars, viewport, pane_w, candle_h);
-    if points.is_empty() {
-        return Vec::new();
-    }
-
-    let num_bands = 8usize;
-    let mut rects = Vec::with_capacity(points.len() * num_bands);
-    for i in 0..points.len() {
-        let (_, y0) = points[i];
-        let (left, right) = match strip_bounds(&points, i) {
-            Some(bounds) => bounds,
-            None => continue,
-        };
-        let strip_w = right - left;
-        if strip_w <= 0.0 {
-            continue;
-        }
-
-        let fill_top = y0.min(base_y);
-        let fill_bottom = y0.max(base_y);
-        let fill_h = fill_bottom - fill_top;
-        if fill_h <= 0.5 {
-            continue;
-        }
-
-        let (from, to) = if y0 <= base_y {
-            (top_color, bottom_color)
-        } else {
-            (bottom_color, top_color)
-        };
-
-        let band_h = fill_h / num_bands as f64;
-        for band in 0..num_bands {
-            let band_top = fill_top + band_h * band as f64;
-            let band_bottom = if band + 1 == num_bands {
-                fill_bottom
-            } else {
-                fill_top + band_h * (band + 1) as f64
-            };
-            let h = band_bottom - band_top;
-            if h <= 0.0 {
-                continue;
-            }
-            let mid = band_top + h * 0.5;
-            let t = ((mid - fill_top) / fill_h).clamp(0.0, 1.0) as f32;
-            let [r, g, b, a] = lerp_color(from, to, t);
-            rects.push(ColoredRect {
-                x: left as f32,
-                y: band_top as f32,
-                w: strip_w as f32,
-                h: h as f32,
-                r,
-                g,
-                b,
-                a,
-            });
-        }
-    }
-    rects
 }
 
 /// Generate two-tone fill rects for the main baseline chart.
@@ -1043,41 +1012,85 @@ pub fn generate_main_baseline_line_segments(
 pub fn generate_area_segments(
     bars: &crate::core::data::BarArray,
     viewport: &Viewport,
-    fill_color: [f32; 4],
+    top_color: [f32; 4],
+    bottom_color: [f32; 4],
     pane_w: f64,
     pane_h: f64,
 ) -> Vec<AreaSegment> {
     let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
-
-    let start = (viewport.start_bar.floor() as usize)
-        .saturating_sub(1)
-        .min(bars.len());
-    let end = ((viewport.end_bar.ceil() as usize) + 1).min(bars.len());
-
-    if end <= start || end - start < 2 {
+    let points = generate_main_area_points(bars, viewport, pane_w, candle_h);
+    if points.len() < 2 {
         return Vec::new();
     }
 
-    let [r, g, b, a] = fill_color;
+    let mut gradient_top = points[0].1;
+    for (_, y) in &points {
+        gradient_top = gradient_top.min(*y);
+    }
     let bottom = candle_h as f32;
-    let mut segments = Vec::with_capacity(end - start);
+    let mut segments = Vec::with_capacity(points.len() - 1);
 
-    for i in start..(end - 1) {
-        let b1 = bars.get_unchecked(i);
-        let b2 = bars.get_unchecked(i + 1);
-
-        let x1 = bar_to_x(i as f64 + 0.5, viewport, pane_w) as f32;
-        let y1 = price_to_y(b1.close as f64, viewport, candle_h) as f32;
-        let x2 = bar_to_x((i + 1) as f64 + 0.5, viewport, pane_w) as f32;
-        let y2 = price_to_y(b2.close as f64, viewport, candle_h) as f32;
-
+    for i in 0..(points.len() - 1) {
+        let (x1, y1) = points[i];
+        let (x2, y2) = points[i + 1];
+        if x2 <= x1 {
+            continue;
+        }
         segments.push(AreaSegment {
             x1,
             y1,
             x2,
             y2,
             bottom,
+            top_r: top_color[0],
+            top_g: top_color[1],
+            top_b: top_color[2],
+            top_a: top_color[3],
+            bottom_r: bottom_color[0],
+            bottom_g: bottom_color[1],
+            bottom_b: bottom_color[2],
+            bottom_a: bottom_color[3],
+            gradient_top,
+            _pad1: 0.0,
+            _pad2: 0.0,
+        });
+    }
+
+    segments
+}
+
+/// Generate the area top line from the same monotonic points as area fill.
+/// This keeps the line perfectly connected to the fill across zoom levels.
+pub fn generate_main_area_line_segments(
+    bars: &crate::core::data::BarArray,
+    viewport: &Viewport,
+    line_color: [f32; 4],
+    line_width: f32,
+    pane_w: f64,
+    pane_h: f64,
+) -> Vec<LineSegment> {
+    let vol_h = pane_h * viewport.volume_height_ratio as f64;
+    let candle_h = pane_h - vol_h;
+    let points = generate_main_area_points(bars, viewport, pane_w, candle_h);
+    if points.len() < 2 {
+        return Vec::new();
+    }
+
+    let [r, g, b, a] = line_color;
+    let mut segments = Vec::with_capacity(points.len() - 1);
+    for i in 0..(points.len() - 1) {
+        let (x1, y1) = points[i];
+        let (x2, y2) = points[i + 1];
+        if x2 <= x1 {
+            continue;
+        }
+        segments.push(LineSegment {
+            x1,
+            y1,
+            x2,
+            y2,
+            width: line_width,
             r,
             g,
             b,
@@ -1085,87 +1098,7 @@ pub fn generate_area_segments(
             _pad: 0.0,
         });
     }
-
     segments
-}
-
-/// Generate area fill rects + line segments for the GPU (smooth area chart).
-/// Returns (fill_rects, line_segments).
-pub fn generate_area_for_gpu(
-    bars: &crate::core::data::BarArray,
-    viewport: &Viewport,
-    fill_color: [f32; 4],
-    line_color: [f32; 4],
-    line_width: f32,
-    pane_w: f64,
-    pane_h: f64,
-) -> (Vec<ColoredRect>, Vec<LineSegment>) {
-    let vol_h = pane_h * viewport.volume_height_ratio as f64;
-    let candle_h = pane_h - vol_h;
-
-    let start = (viewport.start_bar.floor() as usize)
-        .saturating_sub(1)
-        .min(bars.len());
-    let end = ((viewport.end_bar.ceil() as usize) + 1).min(bars.len());
-
-    if end <= start {
-        return (Vec::new(), Vec::new());
-    }
-
-    let [fr, fg, fb, fa] = fill_color;
-    let [lr, lg, lb, la] = line_color;
-
-    // Generate area fill as vertical columns
-    let mut rects = Vec::with_capacity(end - start);
-    for i in start..end {
-        let b = bars.get_unchecked(i);
-        let x1 = bar_to_x(i as f64, viewport, pane_w);
-        let x2 = bar_to_x((i + 1) as f64, viewport, pane_w);
-        let y = price_to_y(b.close as f64, viewport, candle_h);
-        let height = candle_h - y;
-
-        if height > 0.0 && x2 > x1 {
-            rects.push(ColoredRect {
-                x: x1 as f32,
-                y: y as f32,
-                w: (x2 - x1).max(1.0) as f32,
-                h: height as f32,
-                r: fr,
-                g: fg,
-                b: fb,
-                a: fa,
-            });
-        }
-    }
-
-    // Generate line segments for the top edge
-    let mut segments = Vec::with_capacity(end - start);
-    if end - start >= 2 {
-        for i in start..(end - 1) {
-            let b1 = bars.get_unchecked(i);
-            let b2 = bars.get_unchecked(i + 1);
-
-            let x1 = bar_to_x(i as f64 + 0.5, viewport, pane_w) as f32;
-            let y1 = price_to_y(b1.close as f64, viewport, candle_h) as f32;
-            let x2 = bar_to_x((i + 1) as f64 + 0.5, viewport, pane_w) as f32;
-            let y2 = price_to_y(b2.close as f64, viewport, candle_h) as f32;
-
-            segments.push(LineSegment {
-                x1,
-                y1,
-                x2,
-                y2,
-                width: line_width,
-                r: lr,
-                g: lg,
-                b: lb,
-                a: la,
-                _pad: 0.0,
-            });
-        }
-    }
-
-    (rects, segments)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

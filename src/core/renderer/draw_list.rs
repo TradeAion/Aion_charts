@@ -66,13 +66,21 @@ pub struct AreaSegment {
     pub y2: f32,
     /// Bottom Y (chart bottom, same for both sides).
     pub bottom: f32,
-    /// RGBA color (0.0–1.0).
-    pub r: f32,
-    pub g: f32,
-    pub b: f32,
-    pub a: f32,
+    /// Top RGBA color (0.0-1.0), used at the line edge.
+    pub top_r: f32,
+    pub top_g: f32,
+    pub top_b: f32,
+    pub top_a: f32,
+    /// Bottom RGBA color (0.0-1.0), used at the baseline edge.
+    pub bottom_r: f32,
+    pub bottom_g: f32,
+    pub bottom_b: f32,
+    pub bottom_a: f32,
+    /// Global gradient top Y (same across visible area segments).
+    pub gradient_top: f32,
     /// Padding.
-    pub _pad: f32,
+    pub _pad1: f32,
+    pub _pad2: f32,
 }
 
 /// A line segment in physical pixel coordinates (for future studies/drawings).
