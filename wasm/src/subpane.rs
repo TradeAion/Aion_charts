@@ -615,8 +615,15 @@ impl SubPane {
 
     pub fn resize(&mut self, dpr: f64) {
         self.dpr = dpr;
-        resize_canvas(&self.chart_base, dpr);
-        resize_canvas(&self.chart_top, dpr);
+        // Read size from CONTAINER (not canvas) - the container is properly sized by CSS grid
+        let cw = self.chart_container.client_width() as f64;
+        let ch = self.chart_container.client_height() as f64;
+        if cw > 0.0 && ch > 0.0 {
+            let pw = (cw * dpr).round() as u32;
+            let ph = (ch * dpr).round() as u32;
+            resize_canvas_with_size(&self.chart_base, pw, ph, cw, ch);
+            resize_canvas_with_size(&self.chart_top, pw, ph, cw, ch);
+        }
         // Price axis canvases are resized via PriceAxisRenderer
         let aw = self.axis_container.client_width() as f64;
         let ah = self.axis_container.client_height() as f64;
@@ -1072,6 +1079,19 @@ fn resize_canvas(canvas: &HtmlCanvasElement, dpr: f64) {
         let _ = canvas.style().set_property("width", &format!("{}px", w));
         let _ = canvas.style().set_property("height", &format!("{}px", h));
     }
+}
+
+/// Resize canvas with explicit dimensions (for when size is read from container, not canvas).
+fn resize_canvas_with_size(canvas: &HtmlCanvasElement, pw: u32, ph: u32, css_w: f64, css_h: f64) {
+    canvas.set_width(pw.max(1));
+    canvas.set_height(ph.max(1));
+    // Set explicit CSS size to prevent browser scaling blur
+    let _ = canvas
+        .style()
+        .set_property("width", &format!("{}px", css_w));
+    let _ = canvas
+        .style()
+        .set_property("height", &format!("{}px", css_h));
 }
 
 fn rgba(c: &[f32; 4]) -> String {

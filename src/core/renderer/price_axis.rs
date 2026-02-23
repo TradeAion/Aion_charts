@@ -13,6 +13,7 @@ use crate::core::price_line::PriceLineManager;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
 use crate::core::renderer::traits::{ChartStyle, CrosshairState, TickMark};
+use crate::core::renderer::transforms::price_to_y;
 use crate::core::series::SeriesCollection;
 use crate::core::viewport::Viewport;
 use wasm_bindgen::prelude::*;
@@ -147,12 +148,14 @@ impl PriceAxisRenderer {
 
     /// Render the top layer: crosshair price label.
     /// Matches LWC's PriceAxisViewRenderer._calculateGeometry for alignRight=true.
+    ///
+    /// `pane_ph` is the pane height in physical pixels.
     pub fn render_top(
         &mut self,
         crosshair: &CrosshairState,
         vp: &Viewport,
         style: &ChartStyle,
-        pane_css_h: f64,
+        pane_ph: f64,
     ) {
         let w = self.pw as f64;
         let h = self.ph as f64;
@@ -165,13 +168,15 @@ impl PriceAxisRenderer {
         }
 
         let my = crosshair.y * dpr; // physical Y in pane space
-        let pane_h = pane_css_h * dpr;
-        if my < 0.0 || my > pane_h {
+        if my < 0.0 || my > pane_ph {
             return;
         }
 
-        // Price at crosshair Y — use candle area height (excludes volume zone at bottom)
-        let candle_h = pane_h * (1.0 - vp.volume_height_ratio as f64);
+        // Candle area height in physical pixels (same as everywhere else)
+        let vol_h = pane_ph * vp.volume_height_ratio as f64;
+        let candle_h = pane_ph - vol_h;
+
+        // Price at crosshair Y
         let price =
             vp.price_min + (1.0 - my / candle_h).clamp(0.0, 1.0) * (vp.price_max - vp.price_min);
         let step = (vp.price_max - vp.price_min) / 10.0;
@@ -225,8 +230,8 @@ impl PriceAxisRenderer {
         // (LWC price-axis-widget.ts _fixLabelOverlap pattern)
         let y_mid = if y_mid_raw - half_label < 0.0 {
             half_label
-        } else if y_mid_raw + half_label > pane_h {
-            pane_h - half_label
+        } else if y_mid_raw + half_label > pane_ph {
+            pane_ph - half_label
         } else {
             y_mid_raw
         };
@@ -310,17 +315,21 @@ impl PriceAxisRenderer {
     /// Each label shows the series' last value with a series-colored background,
     /// similar to the crosshair label but smaller (no extra padding).
     /// Rendered on the base canvas so crosshair label can draw on top.
+    ///
+    /// `pane_ph` is the pane height in physical pixels (same as used for candle rendering).
     pub fn render_last_price_labels(
         &mut self,
         series: &SeriesCollection,
         bars: &crate::core::data::BarArray,
         vp: &Viewport,
         style: &ChartStyle,
-        pane_css_h: f64,
+        pane_ph: f64,
     ) {
         let w = self.pw as f64;
-        let dpr = self.dpr;
-        let pane_ph = pane_css_h * dpr;
+
+        // Candle area height in physical pixels (same calculation as overlay.rs)
+        let vol_h = pane_ph * vp.volume_height_ratio as f64;
+        let candle_h = pane_ph - vol_h;
 
         // Price range for formatting
         let step = ((vp.price_max - vp.price_min) / 10.0).max(0.0001);
@@ -338,9 +347,9 @@ impl PriceAxisRenderer {
             } else {
                 style.bearish_color
             };
-            let y_css = vp.price_to_css_y(last_close, pane_css_h);
-            let y_phys = y_css * dpr;
-            if y_phys > 0.0 && y_phys < pane_ph {
+            // Use same transform as candle/overlay rendering
+            let y_phys = price_to_y(last_close, vp, candle_h);
+            if y_phys > 0.0 && y_phys < candle_h {
                 labels.push((y_phys, color, format_price(last_close, step)));
             }
         }
@@ -355,9 +364,9 @@ impl PriceAxisRenderer {
                 None => continue,
             };
             let color = s.series_color();
-            let y_css = vp.price_to_css_y(last_val, pane_css_h);
-            let y_phys = y_css * dpr;
-            if y_phys > 0.0 && y_phys < pane_ph {
+            // Use same transform as candle/overlay rendering
+            let y_phys = price_to_y(last_val, vp, candle_h);
+            if y_phys > 0.0 && y_phys < candle_h {
                 labels.push((y_phys, color, format_price(last_val, step)));
             }
         }
@@ -366,6 +375,7 @@ impl PriceAxisRenderer {
             return;
         }
 
+        let dpr = self.dpr;
         let font = style.axis_font(dpr);
         self.base_ctx.set_font(&font);
 
@@ -386,7 +396,7 @@ impl PriceAxisRenderer {
             let y_mid = y_phys.round();
             let half_h = (total_h / 2.0).round();
             let y_top = (y_mid - half_h).max(0.0);
-            let y_bottom = (y_top + total_h).min(pane_ph);
+            let y_bottom = (y_top + total_h).min(candle_h);
 
             let x_inside = w - border_size;
             let x_outside = x_inside - total_w.round();
@@ -440,12 +450,14 @@ impl PriceAxisRenderer {
     }
 
     /// Render labels for custom price lines on the price axis.
+    ///
+    /// `pane_ph` is the pane height in physical pixels.
     pub fn render_price_line_labels(
         &mut self,
         price_lines: &PriceLineManager,
         vp: &Viewport,
         style: &ChartStyle,
-        pane_css_h: f64,
+        pane_ph: f64,
     ) {
         if price_lines.is_empty() {
             return;
@@ -453,7 +465,10 @@ impl PriceAxisRenderer {
 
         let w = self.pw as f64;
         let dpr = self.dpr;
-        let pane_ph = pane_css_h * dpr;
+
+        // Candle area height in physical pixels
+        let vol_h = pane_ph * vp.volume_height_ratio as f64;
+        let candle_h = pane_ph - vol_h;
 
         let step = ((vp.price_max - vp.price_min) / 10.0).max(0.0001);
         let font = style.axis_font(dpr);
@@ -472,10 +487,10 @@ impl PriceAxisRenderer {
             }
 
             let opts = &line.options;
-            let y_css = vp.price_to_css_y(opts.price, pane_css_h);
-            let y_phys = y_css * dpr;
+            // Use same transform as candle/overlay rendering
+            let y_phys = price_to_y(opts.price, vp, candle_h);
 
-            if y_phys < 0.0 || y_phys > pane_ph {
+            if y_phys < 0.0 || y_phys > candle_h {
                 continue;
             }
 
@@ -494,7 +509,7 @@ impl PriceAxisRenderer {
             let y_mid = y_phys.round();
             let half_h = (total_h / 2.0).round();
             let y_top = (y_mid - half_h).max(0.0);
-            let y_bottom = (y_top + total_h).min(pane_ph);
+            let y_bottom = (y_top + total_h).min(candle_h);
 
             let x_inside = w - border_size;
             let x_outside = x_inside - total_w.round();

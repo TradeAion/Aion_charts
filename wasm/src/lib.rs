@@ -2954,10 +2954,10 @@ impl RayCore {
             let ChartInner { ref mut price_axis_renderer, ref engine, ref active_subpane_id, .. } = *s;
             price_axis_renderer.render_base(&engine.style, &y_ticks, pane_ph);
             price_axis_renderer.render_last_price_labels(
-                &engine.series, &engine.bars, &engine.viewport, &engine.style, pane_css_h,
+                &engine.series, &engine.bars, &engine.viewport, &engine.style, pane_ph,
             );
             price_axis_renderer.render_price_line_labels(
-                &engine.price_lines, &engine.viewport, &engine.style, pane_css_h,
+                &engine.price_lines, &engine.viewport, &engine.style, pane_ph,
             );
             // Suppress price axis crosshair label when cursor is in a subpane
             let main_ch = if active_subpane_id.is_some() && engine.crosshair.active {
@@ -2968,7 +2968,7 @@ impl RayCore {
                 engine.crosshair
             };
             price_axis_renderer.render_top(
-                &main_ch, &engine.viewport, &engine.style, pane_css_h,
+                &main_ch, &engine.viewport, &engine.style, pane_ph,
             );
         }
 
