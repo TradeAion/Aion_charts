@@ -116,9 +116,13 @@ impl ChartStyle {
     /// Keeps crosshair/live-price labels fully inside at top/bottom edges.
     #[inline]
     pub fn price_axis_label_edge_inset(&self) -> f64 {
-        self.price_axis_padding_tb()
-            .ceil()
-            .max(self.axis_border_size as f64)
+        self.price_axis_padding_tb().ceil() + self.axis_border_size as f64
+    }
+    /// Additional horizontal inset for full-width Y-axis labels (crosshair/live price).
+    /// Keeps the label body visually inside the axis rather than riding the separator.
+    #[inline]
+    pub fn price_axis_full_label_inside_gap(&self) -> f64 {
+        self.axis_border_size as f64
     }
 
     /// Computed optimal price axis width (CSS px) for a given max text width.

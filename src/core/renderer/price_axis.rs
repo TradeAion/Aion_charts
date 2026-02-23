@@ -295,7 +295,6 @@ impl PriceAxisRenderer {
             &geom,
             &style.crosshair_horz_line.label_bg_color,
         );
-        draw_right_axis_label_separator(&self.top_ctx, w, &geom, &style.bg_color);
 
         let css_font = format!("{}px {}", style.font_size, style.font_family);
         draw_right_axis_label_text(
@@ -381,7 +380,6 @@ impl PriceAxisRenderer {
             };
 
             draw_right_axis_label_background(&self.base_ctx, &geom, &item.color);
-            draw_right_axis_label_separator(&self.base_ctx, w, &geom, &style.bg_color);
             draw_right_axis_label_text(
                 &self.base_ctx,
                 &mut self.text_cache,
@@ -493,7 +491,6 @@ impl PriceAxisRenderer {
 
             draw_right_axis_label_background(&self.base_ctx, &geom, &entry.bg_color);
             draw_right_axis_label_tick(&self.base_ctx, &geom, &entry.text_color, dpr);
-            draw_right_axis_label_separator(&self.base_ctx, w, &geom, &style.bg_color);
             draw_right_axis_label_text(
                 &self.base_ctx,
                 &mut self.text_cache,
@@ -516,6 +513,7 @@ struct RightAxisLabelMetrics {
     tick_size: f64,
     border_size: f64,
     edge_inset: f64,
+    full_label_inside_gap: f64,
 }
 
 impl RightAxisLabelMetrics {
@@ -528,6 +526,7 @@ impl RightAxisLabelMetrics {
             tick_size: (style.axis_tick_length as f64 * dpr).round(),
             border_size: (style.axis_border_size as f64 * dpr).max(1.0).floor(),
             edge_inset: (style.price_axis_label_edge_inset() * dpr).round(),
+            full_label_inside_gap: (style.price_axis_full_label_inside_gap() * dpr).round(),
         }
     }
 }
@@ -541,8 +540,8 @@ struct RightAxisLabelGeometry {
     x_outside: f64,
     text_x_css: f64,
     text_y_css: f64,
+    text_align_right: bool,
     radius: f64,
-    border_size: f64,
     tick_size: f64,
 }
 
@@ -586,9 +585,20 @@ fn compute_right_axis_label_geometry(
         + metrics.padding_outer
         + text_w_phys
         + metrics.tick_size;
+    // Right price scale in LWC uses align='left':
+    // separator/border is at x=0, label extends from inside edge to the right.
+    // For full-width labels (crosshair/live), keep a small extra inset so
+    // the label body stays visually inside and does not ride the separator.
+    let inside_gap = if matches!(width_mode, RightAxisLabelWidthMode::AxisFull) {
+        metrics.full_label_inside_gap.max(0.0)
+    } else {
+        0.0
+    };
+    let x_inside = (metrics.border_size + inside_gap).min(axis_w).max(0.0);
+    let available_w = (axis_w - x_inside).max(1.0);
     let total_w_bmp = match width_mode {
-        RightAxisLabelWidthMode::AxisFull => axis_w.round().max(1.0),
-        RightAxisLabelWidthMode::TextFit => total_w_raw.min(axis_w).round(),
+        RightAxisLabelWidthMode::AxisFull => available_w.round().max(1.0),
+        RightAxisLabelWidthMode::TextFit => total_w_raw.min(available_w).round().max(1.0),
     };
 
     let y_mid_raw = y_coord_phys.round() - (dpr * 0.5).floor();
@@ -605,10 +615,21 @@ fn compute_right_axis_label_geometry(
     let y_top = (y_mid + tick_h_bmp / 2.0 - total_h_bmp / 2.0).floor();
     let y_bottom = y_top + total_h_bmp;
 
-    let x_inside = axis_w - metrics.border_size;
     let x_outside = match width_mode {
-        RightAxisLabelWidthMode::AxisFull => 0.0,
-        RightAxisLabelWidthMode::TextFit => (x_inside - total_w_bmp).max(0.0),
+        RightAxisLabelWidthMode::AxisFull => axis_w,
+        RightAxisLabelWidthMode::TextFit => (x_inside + total_w_bmp).min(axis_w),
+    };
+    let (text_x_css, text_align_right) = match width_mode {
+        // For full-width labels (crosshair/live), anchor text near the right edge
+        // to reduce excess right-side empty space.
+        RightAxisLabelWidthMode::AxisFull => (
+            (axis_w - metrics.padding_outer.max(0.0)).max(0.0) / dpr,
+            true,
+        ),
+        RightAxisLabelWidthMode::TextFit => (
+            (x_inside + metrics.tick_size + metrics.padding_inner) / dpr,
+            false,
+        ),
     };
     let radius = (2.0 * dpr).round().min(total_h_bmp / 4.0).max(0.0);
 
@@ -618,11 +639,10 @@ fn compute_right_axis_label_geometry(
         y_bottom,
         x_inside,
         x_outside,
-        text_x_css: (x_inside - metrics.tick_size - metrics.padding_inner - metrics.border_size)
-            / dpr,
+        text_x_css,
         text_y_css: (y_top + y_bottom) / 2.0 / dpr,
+        text_align_right,
         radius,
-        border_size: metrics.border_size,
         tick_size: metrics.tick_size,
     })
 }
@@ -634,42 +654,27 @@ fn draw_right_axis_label_background(
 ) {
     ctx.set_fill_style_str(&rgba(bg_color));
     ctx.begin_path();
-    ctx.move_to(geom.x_outside + geom.radius, geom.y_top);
-    ctx.line_to(geom.x_inside, geom.y_top);
-    ctx.line_to(geom.x_inside, geom.y_bottom);
-    ctx.line_to(geom.x_outside + geom.radius, geom.y_bottom);
+    // Right-axis labels are square on the inside edge and rounded on the outside edge.
+    ctx.move_to(geom.x_inside, geom.y_top);
+    ctx.line_to(geom.x_outside - geom.radius, geom.y_top);
+    let _ = ctx.arc_to(
+        geom.x_outside,
+        geom.y_top,
+        geom.x_outside,
+        geom.y_top + geom.radius,
+        geom.radius,
+    );
+    ctx.line_to(geom.x_outside, geom.y_bottom - geom.radius);
     let _ = ctx.arc_to(
         geom.x_outside,
         geom.y_bottom,
-        geom.x_outside,
-        geom.y_bottom - geom.radius,
+        geom.x_outside - geom.radius,
+        geom.y_bottom,
         geom.radius,
     );
-    ctx.line_to(geom.x_outside, geom.y_top + geom.radius);
-    let _ = ctx.arc_to(
-        geom.x_outside,
-        geom.y_top,
-        geom.x_outside + geom.radius,
-        geom.y_top,
-        geom.radius,
-    );
+    ctx.line_to(geom.x_inside, geom.y_bottom);
     ctx.close_path();
     ctx.fill();
-}
-
-fn draw_right_axis_label_separator(
-    ctx: &CanvasRenderingContext2d,
-    axis_w: f64,
-    geom: &RightAxisLabelGeometry,
-    separator_color: &[f32; 4],
-) {
-    ctx.set_fill_style_str(&rgba(separator_color));
-    ctx.fill_rect(
-        axis_w - geom.border_size,
-        geom.y_top,
-        geom.border_size,
-        geom.y_bottom - geom.y_top,
-    );
 }
 
 fn draw_right_axis_label_tick(
@@ -681,7 +686,7 @@ fn draw_right_axis_label_tick(
     let tick_h = dpr.floor().max(1.0);
     ctx.set_fill_style_str(&rgba(tick_color));
     ctx.fill_rect(
-        geom.x_inside - geom.tick_size,
+        geom.x_inside,
         geom.y_mid.round(),
         geom.tick_size,
         tick_h,
@@ -701,7 +706,7 @@ fn draw_right_axis_label_text(
     let _ = ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
     ctx.set_font(font_css);
     ctx.set_fill_style_str(&rgba(text_color));
-    ctx.set_text_align("right");
+    ctx.set_text_align(if geom.text_align_right { "right" } else { "left" });
     ctx.set_text_baseline("middle");
     let m = text_cache.measure_full(ctx, text, font_css);
     let _ = ctx.fill_text(
