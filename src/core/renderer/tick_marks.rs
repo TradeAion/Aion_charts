@@ -5,11 +5,12 @@
 //!
 //! Supports all PriceScaleMode variants: Normal, Logarithmic, Percentage, IndexedTo100.
 
-use crate::core::formatters::{
-    format_indexed, format_percent, format_price, format_timestamp, nice_step,
-};
+use crate::core::formatters::{format_timestamp, nice_step};
 use crate::core::renderer::traits::TickMark;
-use crate::core::viewport::{PriceScaleMode, Viewport};
+use crate::core::renderer::value_projection::{
+    candle_area_height_ph, format_scale_value, y_tick_step_internal,
+};
+use crate::core::viewport::Viewport;
 
 /// Compute price (Y-axis) tick marks.
 /// `chart_h` is the pane height in physical pixels.
@@ -20,26 +21,20 @@ pub fn compute_y_ticks(vp: &Viewport, chart_h: f64, dpr: f64) -> Vec<TickMark> {
         return vec![];
     }
 
-    // Target ~1 tick per 40 CSS px of height
-    let target_count = (chart_h / (40.0 * dpr)).max(3.0).min(15.0);
-    let step = nice_step(range / target_count);
+    let candle_h = candle_area_height_ph(vp, chart_h);
+    if candle_h <= 0.0 {
+        return vec![];
+    }
+
+    let step = y_tick_step_internal(vp, chart_h, dpr);
     let first = (vp.price_min / step).ceil() * step;
 
     let mut out = Vec::new();
     let mut v = first;
     while v <= vp.price_max {
         let frac = (v - vp.price_min) / range;
-        let px = chart_h * (1.0 - frac);
-
-        // Format label based on price scale mode
-        // Note: `v` is already in internal coordinate space (log/pct/indexed),
-        // so we format it directly without converting back to raw price.
-        let label = match vp.price_scale_mode {
-            PriceScaleMode::Normal => format_price(vp.internal_to_price(v), step),
-            PriceScaleMode::Logarithmic => format_price(vp.internal_to_price(v), step),
-            PriceScaleMode::Percentage => format_percent(v, step),
-            PriceScaleMode::IndexedTo100 => format_indexed(v, step),
-        };
+        let px = candle_h * (1.0 - frac);
+        let label = format_scale_value(vp, vp.internal_to_price(v), step);
 
         out.push(TickMark {
             value: v,
@@ -75,8 +70,8 @@ pub fn compute_x_ticks(
     while v <= vp.end_bar {
         let px = (v + 0.5 - vp.start_bar) / count * chart_w;
         let bar_i = v as usize;
-        let label = if bar_i < bars.len() && bars.timestamps.value(bar_i) > 0 {
-            format_timestamp(bars.timestamps.value(bar_i))
+        let label = if bar_i < bars.len() && bars.timestamp(bar_i) > 0 {
+            format_timestamp(bars.timestamp(bar_i))
         } else {
             format!("{}", v as i64)
         };

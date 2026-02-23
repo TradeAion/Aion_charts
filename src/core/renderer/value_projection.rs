@@ -1,0 +1,135 @@
+//! Shared value projection utilities.
+//!
+//! Centralizes:
+//! - Price -> pane Y projection for the main candle area
+//! - Price-scale-aware label formatting
+//! - Last-value extraction for main bars + overlay series
+//!
+//! This module ensures pane overlays and price-axis labels are derived from
+//! the exact same data and coordinate math.
+
+use crate::core::data::BarArray;
+use crate::core::formatters::{format_indexed, format_percent, format_price, nice_step};
+use crate::core::renderer::traits::ChartStyle;
+use crate::core::renderer::transforms::price_to_y;
+use crate::core::series::SeriesCollection;
+use crate::core::viewport::{PriceScaleMode, Viewport};
+
+/// A projected last-value item (used by both pane overlays and price-axis labels).
+#[derive(Debug, Clone)]
+pub struct ProjectedLastValue {
+    /// Raw price value (series close/value).
+    pub price: f64,
+    /// Y coordinate in physical pixels, in main candle-area space.
+    pub y_phys: f64,
+    /// Series color used by last-price line/label.
+    pub color: [f32; 4],
+    /// Formatted label text for the current price-scale mode.
+    pub label: String,
+}
+
+/// Candle-area height in physical pixels.
+#[inline]
+pub fn candle_area_height_ph(vp: &Viewport, pane_ph: f64) -> f64 {
+    pane_ph * vp.candle_height_frac()
+}
+
+/// Project a raw price to physical Y within the candle area.
+#[inline]
+pub fn price_to_pane_y_phys(price: f64, vp: &Viewport, pane_ph: f64) -> f64 {
+    price_to_y(price, vp, candle_area_height_ph(vp, pane_ph))
+}
+
+/// Shared Y tick-step in internal price-scale space (same policy as tick_marks.rs).
+#[inline]
+pub fn y_tick_step_internal(vp: &Viewport, pane_ph: f64, dpr: f64) -> f64 {
+    let range = vp.price_max - vp.price_min;
+    let candle_h = candle_area_height_ph(vp, pane_ph);
+    if range <= 0.0 || candle_h <= 0.0 {
+        return 0.0001;
+    }
+    let target_count = (candle_h / (40.0 * dpr)).clamp(3.0, 15.0);
+    nice_step(range / target_count).max(0.0001)
+}
+
+/// Format a raw price according to the active price-scale mode.
+#[inline]
+pub fn format_scale_value(vp: &Viewport, raw_price: f64, step_internal: f64) -> String {
+    match vp.price_scale_mode {
+        PriceScaleMode::Normal | PriceScaleMode::Logarithmic => {
+            format_price(raw_price, step_internal)
+        }
+        PriceScaleMode::Percentage => {
+            let internal = vp.price_to_internal(raw_price);
+            format_percent(internal, step_internal)
+        }
+        PriceScaleMode::IndexedTo100 => {
+            let internal = vp.price_to_internal(raw_price);
+            format_indexed(internal, step_internal)
+        }
+    }
+}
+
+/// Collect projected last values for main bars + visible overlay series.
+///
+/// Returned coordinates and labels are shared across pane/axis renderers to
+/// keep the live line and axis label perfectly synchronized.
+pub fn collect_last_values(
+    series: &SeriesCollection,
+    bars: &BarArray,
+    vp: &Viewport,
+    style: &ChartStyle,
+    pane_ph: f64,
+    dpr: f64,
+) -> Vec<ProjectedLastValue> {
+    let mut out = Vec::new();
+    let candle_h = candle_area_height_ph(vp, pane_ph);
+    if candle_h <= 0.0 {
+        return out;
+    }
+
+    let step = y_tick_step_internal(vp, pane_ph, dpr);
+
+    // Main candlestick last value (pending-aware read via BarArray::get).
+    if bars.len() > 0 {
+        if let Some(last) = bars.get(bars.len() - 1) {
+            let y_phys = price_to_y(last.close as f64, vp, candle_h);
+            if y_phys >= 0.0 && y_phys <= candle_h {
+                let color = if last.close >= last.open {
+                    style.bullish_color
+                } else {
+                    style.bearish_color
+                };
+                out.push(ProjectedLastValue {
+                    price: last.close as f64,
+                    y_phys,
+                    color,
+                    label: format_scale_value(vp, last.close as f64, step),
+                });
+            }
+        }
+    }
+
+    // Overlay series last values.
+    for s in series.iter() {
+        if !s.is_visible() {
+            continue;
+        }
+        let last_val = match s.last_value() {
+            Some(v) => v,
+            None => continue,
+        };
+        let y_phys = price_to_y(last_val, vp, candle_h);
+        if y_phys < 0.0 || y_phys > candle_h {
+            continue;
+        }
+        out.push(ProjectedLastValue {
+            price: last_val,
+            y_phys,
+            color: s.series_color(),
+            label: format_scale_value(vp, last_val, step),
+        });
+    }
+
+    out
+}

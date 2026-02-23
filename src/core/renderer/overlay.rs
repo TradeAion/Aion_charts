@@ -16,7 +16,8 @@ use crate::core::renderer::line_generator;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
 use crate::core::renderer::traits::{ChartStyle, CrosshairState};
-use crate::core::series::{LineStyle, SeriesCollection, SeriesType};
+use crate::core::renderer::value_projection::{collect_last_values, price_to_pane_y_phys};
+use crate::core::series::{SeriesCollection, SeriesType};
 use crate::core::viewport::Viewport;
 use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
@@ -257,11 +258,11 @@ impl OverlayRenderer {
             bars.len() - 1
         };
 
-        let o = bars.opens.value(bar_i) as f64;
-        let h = bars.highs.value(bar_i) as f64;
-        let l = bars.lows.value(bar_i) as f64;
-        let c = bars.closes.value(bar_i) as f64;
-        let v = bars.volumes.value(bar_i) as f64;
+        let o = bars.open(bar_i) as f64;
+        let h = bars.high(bar_i) as f64;
+        let l = bars.low(bar_i) as f64;
+        let c = bars.close(bar_i) as f64;
+        let v = bars.volume(bar_i) as f64;
 
         let is_bullish = c >= o;
 
@@ -443,80 +444,32 @@ impl OverlayRenderer {
         bars: &crate::core::data::BarArray,
         viewport: &Viewport,
         style: &ChartStyle,
-        pane_css_w: f64,
-        pane_css_h: f64,
+        _pane_css_w: f64,
+        _pane_css_h: f64,
         _time_ms: f64,
     ) {
         let dpr = self.dpr;
-        let pane_pw = pane_css_w * dpr;
-
-        // Candle area height in physical pixels (excludes volume area)
-        let candle_frac = 1.0 - viewport.volume_height_ratio as f64;
-        let candle_ph = pane_css_h * candle_frac * dpr;
+        let pane_pw = self.pw as f64;
 
         let line_w = (1.0 * dpr).floor().max(1.0);
         let dash_len = 2.0 * line_w; // LWC Dashed pattern
         let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
 
-        // Candlestick last price line
-        if bars.len() > 0 {
-            let last_i = bars.len() - 1;
-            let last_close = bars.closes.value(last_i) as f64;
-            let is_bullish = bars.closes.value(last_i) >= bars.opens.value(last_i);
-            let color = if is_bullish {
-                style.bullish_color
-            } else {
-                style.bearish_color
-            };
+        let projected = collect_last_values(series, bars, viewport, style, self.ph as f64, dpr);
 
-            // Use viewport's price_to_css_y which handles all scale modes
-            let y_css = viewport.price_to_css_y(last_close, pane_css_h);
-            let y_phys = (y_css * dpr).round() + correction;
-
-            // Only draw if within candle area (not in volume area)
-            if y_phys > 0.0 && y_phys < candle_ph {
-                self.ctx.set_stroke_style_str(&rgba(&color));
-                self.ctx.set_line_width(line_w);
-                self.ctx.set_line_cap("butt");
-                let _ = self.ctx.set_line_dash(&js_sys::Array::of2(
-                    &JsValue::from(dash_len),
-                    &JsValue::from(dash_len),
-                ));
-                self.ctx.begin_path();
-                self.ctx.move_to(0.0, y_phys);
-                self.ctx.line_to(pane_pw, y_phys);
-                self.ctx.stroke();
-            }
-        }
-
-        // Overlay series last price lines
-        for s in series.iter() {
-            if !s.is_visible() {
-                continue;
-            }
-            let last_val = match s.last_value() {
-                Some(v) => v,
-                None => continue,
-            };
-
-            let color = s.series_color();
-            let y_css = viewport.price_to_css_y(last_val, pane_css_h);
-            let y_phys = (y_css * dpr).round() + correction;
-
-            // Only draw if within candle area
-            if y_phys > 0.0 && y_phys < candle_ph {
-                self.ctx.set_stroke_style_str(&rgba(&color));
-                self.ctx.set_line_width(line_w);
-                self.ctx.set_line_cap("butt");
-                let _ = self.ctx.set_line_dash(&js_sys::Array::of2(
-                    &JsValue::from(dash_len),
-                    &JsValue::from(dash_len),
-                ));
-                self.ctx.begin_path();
-                self.ctx.move_to(0.0, y_phys);
-                self.ctx.line_to(pane_pw, y_phys);
-                self.ctx.stroke();
-            }
+        for item in projected {
+            let y = item.y_phys.round() + correction;
+            self.ctx.set_stroke_style_str(&rgba(&item.color));
+            self.ctx.set_line_width(line_w);
+            self.ctx.set_line_cap("butt");
+            let _ = self.ctx.set_line_dash(&js_sys::Array::of2(
+                &JsValue::from(dash_len),
+                &JsValue::from(dash_len),
+            ));
+            self.ctx.begin_path();
+            self.ctx.move_to(0.0, y);
+            self.ctx.line_to(pane_pw, y);
+            self.ctx.stroke();
         }
 
         // Reset dash
@@ -531,17 +484,17 @@ impl OverlayRenderer {
         &self,
         price_lines: &PriceLineManager,
         viewport: &Viewport,
-        style: &ChartStyle,
-        pane_css_w: f64,
-        pane_css_h: f64,
+        _style: &ChartStyle,
+        _pane_css_w: f64,
+        _pane_css_h: f64,
     ) {
         if price_lines.is_empty() {
             return;
         }
 
         let dpr = self.dpr;
-        let pane_pw = pane_css_w * dpr;
-        let pane_ph = pane_css_h * dpr;
+        let pane_pw = self.pw as f64;
+        let pane_ph = self.ph as f64;
 
         for line in price_lines.iter() {
             if !line.is_visible() {
@@ -549,8 +502,7 @@ impl OverlayRenderer {
             }
 
             let opts = &line.options;
-            let y_css = viewport.price_to_css_y(opts.price, pane_css_h);
-            let y_phys = y_css * dpr;
+            let y_phys = price_to_pane_y_phys(opts.price, viewport, pane_ph);
 
             if y_phys < 0.0 || y_phys > pane_ph {
                 continue;
@@ -688,7 +640,7 @@ impl OverlayRenderer {
 
             // Find the data point at or near bar_idx by matching timestamp
             let target_ts = if bar_idx < bars.len() {
-                bars.timestamps.value(bar_idx)
+                bars.timestamp(bar_idx)
             } else {
                 continue;
             };
@@ -807,11 +759,11 @@ impl OverlayRenderer {
                 let y_price: f64 = match marker.position {
                     MarkerPosition::AboveBar => {
                         // Above the bar's high
-                        bars.highs.value(marker.bar_index) as f64
+                        bars.high(marker.bar_index) as f64
                     }
                     MarkerPosition::BelowBar => {
                         // Below the bar's low
-                        bars.lows.value(marker.bar_index) as f64
+                        bars.low(marker.bar_index) as f64
                     }
                     MarkerPosition::AtPrice => marker.price,
                 };

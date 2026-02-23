@@ -13,8 +13,8 @@
 //! - time_axis.rs: dedicated TimeAxisRenderer
 //! - overlay.rs: crosshair lines + watermark on pane top canvas
 
-pub mod traits;
 pub mod theme;
+pub mod traits;
 pub mod transforms;
 
 /// Shared Canvas2D color helper — converts `[f32; 4]` RGBA to CSS string.
@@ -29,14 +29,14 @@ pub fn rgba_str(c: &[f32; 4]) -> String {
         c[3]
     )
 }
-pub mod series;
 pub mod draw_list;
-pub mod tick_marks;
 pub mod geometry_generator;
 pub mod line_generator;
-pub mod wgpu_context;
 pub mod pipeline_manager;
+pub mod series;
+pub mod tick_marks;
 pub mod wgpu_backend;
+pub mod wgpu_context;
 
 #[cfg(target_arch = "wasm32")]
 pub mod canvas2d;
@@ -52,3 +52,5 @@ pub mod price_axis;
 
 #[cfg(target_arch = "wasm32")]
 pub mod time_axis;
+
+pub mod value_projection;

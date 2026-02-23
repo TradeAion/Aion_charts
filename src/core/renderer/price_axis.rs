@@ -8,12 +8,14 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use crate::core::formatters::format_price;
 use crate::core::price_line::PriceLineManager;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
 use crate::core::renderer::traits::{ChartStyle, CrosshairState, TickMark};
-use crate::core::renderer::transforms::price_to_y;
+use crate::core::renderer::value_projection::{
+    candle_area_height_ph, collect_last_values, format_scale_value, price_to_pane_y_phys,
+    y_tick_step_internal,
+};
 use crate::core::series::SeriesCollection;
 use crate::core::viewport::Viewport;
 use wasm_bindgen::prelude::*;
@@ -65,17 +67,74 @@ impl PriceAxisRenderer {
         self.top_ctx.set_image_smoothing_enabled(false);
     }
 
-    /// Measure the maximum tick label width (physical px) for the given ticks.
-    pub fn measure_max_tick_width(&mut self, style: &ChartStyle, ticks: &[TickMark]) -> f64 {
+    /// Measure the optimal axis text width (physical px).
+    ///
+    /// Includes:
+    /// - Tick labels
+    /// - Last-price labels (main + overlays)
+    /// - Custom price-line labels
+    /// - Top/bottom edge price labels (crosshair-width safety margin)
+    pub fn measure_optimal_width(
+        &mut self,
+        style: &ChartStyle,
+        ticks: &[TickMark],
+        series: &SeriesCollection,
+        bars: &crate::core::data::BarArray,
+        price_lines: &PriceLineManager,
+        vp: &Viewport,
+        pane_ph: f64,
+    ) -> f64 {
         let font = style.axis_font(self.dpr);
         self.base_ctx.set_font(&font);
         let mut max_w: f64 = 0.0;
+
         for t in ticks {
             let w = self.text_cache.measure(&self.base_ctx, &t.label, &font);
             if w > max_w {
                 max_w = w;
             }
         }
+
+        // Last-value labels (same source as pane last-price lines).
+        for item in collect_last_values(series, bars, vp, style, pane_ph, self.dpr) {
+            let w = self.text_cache.measure(&self.base_ctx, &item.label, &font);
+            if w > max_w {
+                max_w = w;
+            }
+        }
+
+        // Custom price-line labels.
+        let step = y_tick_step_internal(vp, pane_ph, self.dpr);
+        for line in price_lines.iter() {
+            if !line.is_visible() || !line.options.show_label {
+                continue;
+            }
+            let text = if line.options.label_text.is_empty() {
+                format_scale_value(vp, line.options.price, step)
+            } else {
+                line.options.label_text.clone()
+            };
+            let w = self.text_cache.measure(&self.base_ctx, &text, &font);
+            if w > max_w {
+                max_w = w;
+            }
+        }
+
+        // Edge values: reserve width for crosshair labels near top/bottom.
+        let candle_h = candle_area_height_ph(vp, pane_ph);
+        if candle_h > 2.0 {
+            let top = vp.pixel_to_price(1.0, candle_h);
+            let bottom = vp.pixel_to_price(candle_h - 2.0, candle_h);
+            let lo = top.min(bottom) + 0.111_111_111_111_11;
+            let hi = top.max(bottom) - 0.111_111_111_111_11;
+
+            let lo_lbl = format_scale_value(vp, lo, step);
+            let hi_lbl = format_scale_value(vp, hi, step);
+            let lo_w = self.text_cache.measure(&self.base_ctx, &lo_lbl, &font);
+            let hi_w = self.text_cache.measure(&self.base_ctx, &hi_lbl, &font);
+            max_w = max_w.max(lo_w).max(hi_w);
+        }
+
         max_w
     }
 
@@ -172,32 +231,27 @@ impl PriceAxisRenderer {
             return;
         }
 
-        // Candle area height in physical pixels (same as everywhere else)
-        let vol_h = pane_ph * vp.volume_height_ratio as f64;
-        let candle_h = pane_ph - vol_h;
+        // Candle area height in physical pixels (same as pane renderer math)
+        let candle_h = candle_area_height_ph(vp, pane_ph);
+        if candle_h <= 0.0 {
+            return;
+        }
 
-        // Price at crosshair Y
-        let price =
+        // Price at crosshair Y (convert from internal price-scale space to raw price).
+        let internal =
             vp.price_min + (1.0 - my / candle_h).clamp(0.0, 1.0) * (vp.price_max - vp.price_min);
-        let step = (vp.price_max - vp.price_min) / 10.0;
-        let price_lbl = format_price(price, step.max(0.0001));
-
-        let font = style.axis_font(dpr);
-        self.top_ctx.set_font(&font);
+        let price = vp.internal_to_price(internal);
+        let step = y_tick_step_internal(vp, pane_ph, dpr);
+        let price_lbl = format_scale_value(vp, price, step);
 
         let fs = style.font_size as f64 * dpr;
         let padding_inner = style.price_axis_padding_inner() * dpr;
-        let padding_outer = style.price_axis_padding_outer() * dpr;
         let tick_length = (style.axis_tick_length as f64 * dpr).round();
         let border_size = (style.axis_border_size as f64 * dpr).max(1.0).floor();
         let extra_pad = style.crosshair_label_extra_padding() * dpr;
         let padding_top = style.price_axis_padding_tb() * dpr + extra_pad;
         let padding_bottom = padding_top;
 
-        let text_w = self
-            .text_cache
-            .measure(&self.top_ctx, &price_lbl, &font)
-            .ceil();
         let total_h = fs + padding_top + padding_bottom;
 
         // Label width should match the price axis width exactly (no overflow)
@@ -327,55 +381,13 @@ impl PriceAxisRenderer {
     ) {
         let w = self.pw as f64;
 
-        // Candle area height in physical pixels (same calculation as overlay.rs)
-        let vol_h = pane_ph * vp.volume_height_ratio as f64;
-        let candle_h = pane_ph - vol_h;
-
-        // Price range for formatting
-        let step = ((vp.price_max - vp.price_min) / 10.0).max(0.0001);
-
-        // Collect (y_phys, color, label) for all series + candles
-        let mut labels: Vec<(f64, [f32; 4], String)> = Vec::new();
-
-        // Candlestick last price
-        if bars.len() > 0 {
-            let last_i = bars.len() - 1;
-            let last_close = bars.closes.value(last_i) as f64;
-            let is_bullish = bars.closes.value(last_i) >= bars.opens.value(last_i);
-            let color = if is_bullish {
-                style.bullish_color
-            } else {
-                style.bearish_color
-            };
-            // Use same transform as candle/overlay rendering
-            let y_phys = price_to_y(last_close, vp, candle_h);
-            if y_phys > 0.0 && y_phys < candle_h {
-                labels.push((y_phys, color, format_price(last_close, step)));
-            }
-        }
-
-        // Overlay series
-        for s in series.iter() {
-            if !s.is_visible() {
-                continue;
-            }
-            let last_val = match s.last_value() {
-                Some(v) => v,
-                None => continue,
-            };
-            let color = s.series_color();
-            // Use same transform as candle/overlay rendering
-            let y_phys = price_to_y(last_val, vp, candle_h);
-            if y_phys > 0.0 && y_phys < candle_h {
-                labels.push((y_phys, color, format_price(last_val, step)));
-            }
-        }
-
+        let labels = collect_last_values(series, bars, vp, style, pane_ph, self.dpr);
         if labels.is_empty() {
             return;
         }
 
         let dpr = self.dpr;
+        let candle_h = candle_area_height_ph(vp, pane_ph);
         let font = style.axis_font(dpr);
         self.base_ctx.set_font(&font);
 
@@ -386,14 +398,17 @@ impl PriceAxisRenderer {
         let border_size = (style.axis_border_size as f64 * dpr).max(1.0).floor();
         let padding_tb = style.price_axis_padding_tb() * dpr;
 
-        for (y_phys, color, lbl) in &labels {
-            let text_w = self.text_cache.measure(&self.base_ctx, lbl, &font).ceil();
+        for item in &labels {
+            let text_w = self
+                .text_cache
+                .measure(&self.base_ctx, &item.label, &font)
+                .ceil();
             let total_h = fs + padding_tb * 2.0;
             let total_w_raw = border_size + padding_inner + padding_outer + text_w + tick_length;
             let total_w = total_w_raw.min(w);
 
             // Vertical positioning: center label on the Y position
-            let y_mid = y_phys.round();
+            let y_mid = item.y_phys.round();
             let half_h = (total_h / 2.0).round();
             let y_top = (y_mid - half_h).max(0.0);
             let y_bottom = (y_top + total_h).min(candle_h);
@@ -404,7 +419,7 @@ impl PriceAxisRenderer {
             let radius = (2.0 * dpr).round();
 
             // Rounded rect background (series color)
-            self.base_ctx.set_fill_style_str(&rgba(color));
+            self.base_ctx.set_fill_style_str(&rgba(&item.color));
             self.base_ctx.begin_path();
             self.base_ctx.move_to(x_outside + radius, y_top);
             self.base_ctx.line_to(x_inside, y_top);
@@ -441,10 +456,12 @@ impl PriceAxisRenderer {
             self.base_ctx.set_text_baseline("alphabetic");
             let text_x_css = (x_inside - tick_length - padding_inner - border_size) / dpr;
             let text_y_css = (y_top + y_bottom) / 2.0 / dpr;
-            let m = self.text_cache.measure_full(&self.base_ctx, lbl, &css_font);
-            let _ = self
-                .base_ctx
-                .fill_text(lbl, text_x_css, text_y_css + m.y_mid_correction);
+            let m = self
+                .text_cache
+                .measure_full(&self.base_ctx, &item.label, &css_font);
+            let _ =
+                self.base_ctx
+                    .fill_text(&item.label, text_x_css, text_y_css + m.y_mid_correction);
             self.base_ctx.restore();
         }
     }
@@ -467,10 +484,9 @@ impl PriceAxisRenderer {
         let dpr = self.dpr;
 
         // Candle area height in physical pixels
-        let vol_h = pane_ph * vp.volume_height_ratio as f64;
-        let candle_h = pane_ph - vol_h;
+        let candle_h = candle_area_height_ph(vp, pane_ph);
 
-        let step = ((vp.price_max - vp.price_min) / 10.0).max(0.0001);
+        let step = y_tick_step_internal(vp, pane_ph, dpr);
         let font = style.axis_font(dpr);
         self.base_ctx.set_font(&font);
 
@@ -488,7 +504,7 @@ impl PriceAxisRenderer {
 
             let opts = &line.options;
             // Use same transform as candle/overlay rendering
-            let y_phys = price_to_y(opts.price, vp, candle_h);
+            let y_phys = price_to_pane_y_phys(opts.price, vp, pane_ph);
 
             if y_phys < 0.0 || y_phys > candle_h {
                 continue;
@@ -496,7 +512,7 @@ impl PriceAxisRenderer {
 
             // Label text: custom or formatted price
             let lbl = if opts.label_text.is_empty() {
-                format_price(opts.price, step)
+                format_scale_value(vp, opts.price, step)
             } else {
                 opts.label_text.clone()
             };
