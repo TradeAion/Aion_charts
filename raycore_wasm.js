@@ -19,6 +19,210 @@ export class RayCore {
         wasm.__wbg_raycore_free(ptr, 0);
     }
     /**
+     * Add a new area series overlay. Returns the series ID.
+     *
+     * `line_color_*`: RGBA for the line stroke.
+     * `top_color_*`: RGBA for the fill at the line (top of gradient).
+     * `bottom_color_*`: RGBA for the fill at the base (bottom of gradient).
+     * @param {number} line_color_r
+     * @param {number} line_color_g
+     * @param {number} line_color_b
+     * @param {number} line_color_a
+     * @param {number} top_color_r
+     * @param {number} top_color_g
+     * @param {number} top_color_b
+     * @param {number} top_color_a
+     * @param {number} bottom_color_r
+     * @param {number} bottom_color_g
+     * @param {number} bottom_color_b
+     * @param {number} bottom_color_a
+     * @param {number} line_width
+     * @returns {number}
+     */
+    add_area_series(line_color_r, line_color_g, line_color_b, line_color_a, top_color_r, top_color_g, top_color_b, top_color_a, bottom_color_r, bottom_color_g, bottom_color_b, bottom_color_a, line_width) {
+        const ret = wasm.raycore_add_area_series(this.__wbg_ptr, line_color_r, line_color_g, line_color_b, line_color_a, top_color_r, top_color_g, top_color_b, top_color_a, bottom_color_r, bottom_color_g, bottom_color_b, bottom_color_a, line_width);
+        return ret >>> 0;
+    }
+    /**
+     * Add a new bar (OHLC) series overlay. Returns the series ID.
+     *
+     * `up_color_*`: RGBA for bullish bars (close >= open).
+     * `down_color_*`: RGBA for bearish bars (close < open).
+     * `open_visible`: whether to show the open tick.
+     * `thin_bars`: use 1px stems (like LWC thinBars option).
+     * @param {number} up_color_r
+     * @param {number} up_color_g
+     * @param {number} up_color_b
+     * @param {number} up_color_a
+     * @param {number} down_color_r
+     * @param {number} down_color_g
+     * @param {number} down_color_b
+     * @param {number} down_color_a
+     * @param {boolean} open_visible
+     * @param {boolean} thin_bars
+     * @returns {number}
+     */
+    add_bar_series(up_color_r, up_color_g, up_color_b, up_color_a, down_color_r, down_color_g, down_color_b, down_color_a, open_visible, thin_bars) {
+        const ret = wasm.raycore_add_bar_series(this.__wbg_ptr, up_color_r, up_color_g, up_color_b, up_color_a, down_color_r, down_color_g, down_color_b, down_color_a, open_visible, thin_bars);
+        return ret >>> 0;
+    }
+    /**
+     * Add a new baseline series overlay. Returns the series ID.
+     *
+     * A baseline series renders a line with two-tone fill above/below a base value.
+     * Above the base: `top_line_color` line + `top_fill_color1`→`top_fill_color2` gradient.
+     * Below the base: `bottom_line_color` line + `bottom_fill_color1`→`bottom_fill_color2` gradient.
+     * @param {number} base_value
+     * @param {number} top_line_r
+     * @param {number} top_line_g
+     * @param {number} top_line_b
+     * @param {number} top_line_a
+     * @param {number} bottom_line_r
+     * @param {number} bottom_line_g
+     * @param {number} bottom_line_b
+     * @param {number} bottom_line_a
+     * @param {number} top_fill1_r
+     * @param {number} top_fill1_g
+     * @param {number} top_fill1_b
+     * @param {number} top_fill1_a
+     * @param {number} top_fill2_r
+     * @param {number} top_fill2_g
+     * @param {number} top_fill2_b
+     * @param {number} top_fill2_a
+     * @param {number} bottom_fill1_r
+     * @param {number} bottom_fill1_g
+     * @param {number} bottom_fill1_b
+     * @param {number} bottom_fill1_a
+     * @param {number} bottom_fill2_r
+     * @param {number} bottom_fill2_g
+     * @param {number} bottom_fill2_b
+     * @param {number} bottom_fill2_a
+     * @param {number} line_width
+     * @returns {number}
+     */
+    add_baseline_series(base_value, top_line_r, top_line_g, top_line_b, top_line_a, bottom_line_r, bottom_line_g, bottom_line_b, bottom_line_a, top_fill1_r, top_fill1_g, top_fill1_b, top_fill1_a, top_fill2_r, top_fill2_g, top_fill2_b, top_fill2_a, bottom_fill1_r, bottom_fill1_g, bottom_fill1_b, bottom_fill1_a, bottom_fill2_r, bottom_fill2_g, bottom_fill2_b, bottom_fill2_a, line_width) {
+        const ret = wasm.raycore_add_baseline_series(this.__wbg_ptr, base_value, top_line_r, top_line_g, top_line_b, top_line_a, bottom_line_r, bottom_line_g, bottom_line_b, bottom_line_a, top_fill1_r, top_fill1_g, top_fill1_b, top_fill1_a, top_fill2_r, top_fill2_g, top_fill2_b, top_fill2_a, bottom_fill1_r, bottom_fill1_g, bottom_fill1_b, bottom_fill1_a, bottom_fill2_r, bottom_fill2_g, bottom_fill2_b, bottom_fill2_a, line_width);
+        return ret >>> 0;
+    }
+    /**
+     * Add a new histogram series overlay. Returns the series ID.
+     *
+     * `color_*`: RGBA for the default bar color.
+     * `base`: the base value (bars extend from base to data value).
+     * @param {number} color_r
+     * @param {number} color_g
+     * @param {number} color_b
+     * @param {number} color_a
+     * @param {number} base
+     * @returns {number}
+     */
+    add_histogram_series(color_r, color_g, color_b, color_a, base) {
+        const ret = wasm.raycore_add_histogram_series(this.__wbg_ptr, color_r, color_g, color_b, color_a, base);
+        return ret >>> 0;
+    }
+    /**
+     * Create a new indicator sub-pane below the main chart.
+     * Returns the pane ID. The indicator type should be one of: "rsi", "stochastic", "atr".
+     * The study must already be created with `create_study()`.
+     * @param {number} study_id
+     * @param {string} indicator_type
+     * @param {number} height_css
+     * @returns {number}
+     */
+    add_indicator_pane(study_id, indicator_type, height_css) {
+        const ptr0 = passStringToWasm0(indicator_type, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.raycore_add_indicator_pane(this.__wbg_ptr, study_id, ptr0, len0, height_css);
+        return ret >>> 0;
+    }
+    /**
+     * Add a new line series overlay. Returns the series ID.
+     *
+     * Default color is TradingView blue (#2962FF). Use RGBA [0.0–1.0].
+     * `line_style`: "solid", "dotted", "dashed", "large_dashed", "sparse_dotted".
+     * @param {number} color_r
+     * @param {number} color_g
+     * @param {number} color_b
+     * @param {number} color_a
+     * @param {number} line_width
+     * @param {string} line_style
+     * @returns {number}
+     */
+    add_line_series(color_r, color_g, color_b, color_a, line_width, line_style) {
+        const ptr0 = passStringToWasm0(line_style, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.raycore_add_line_series(this.__wbg_ptr, color_r, color_g, color_b, color_a, line_width, ptr0, len0);
+        return ret >>> 0;
+    }
+    /**
+     * Add a marker to a series at the specified bar index.
+     *
+     * `shape`: "arrow_up", "arrow_down", "circle", "square"
+     * `position`: "above_bar", "below_bar", "at_price"
+     * `price`: Used only when position is "at_price"
+     *
+     * Returns the marker ID.
+     * @param {number} series_id
+     * @param {number} bar_index
+     * @param {string} shape
+     * @param {string} position
+     * @param {number} price
+     * @param {number} color_r
+     * @param {number} color_g
+     * @param {number} color_b
+     * @param {number} color_a
+     * @param {number} size
+     * @param {string} text
+     * @returns {number}
+     */
+    add_marker(series_id, bar_index, shape, position, price, color_r, color_g, color_b, color_a, size, text) {
+        const ptr0 = passStringToWasm0(shape, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(position, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(text, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.raycore_add_marker(this.__wbg_ptr, series_id, bar_index, ptr0, len0, ptr1, len1, price, color_r, color_g, color_b, color_a, size, ptr2, len2);
+        return ret >>> 0;
+    }
+    /**
+     * Append a single bar to the data array. Used for real-time streaming.
+     * @param {bigint} timestamp
+     * @param {number} open
+     * @param {number} high
+     * @param {number} low
+     * @param {number} close
+     * @param {number} volume
+     */
+    append_bar(timestamp, open, high, low, close, volume) {
+        wasm.raycore_append_bar(this.__wbg_ptr, timestamp, open, high, low, close, volume);
+    }
+    /**
+     * Cancel the drawing currently being created (e.g. on Escape key).
+     */
+    cancel_drawing() {
+        wasm.raycore_cancel_drawing(this.__wbg_ptr);
+    }
+    /**
+     * Clear all markers for all series.
+     */
+    clear_all_markers() {
+        wasm.raycore_clear_all_markers(this.__wbg_ptr);
+    }
+    /**
+     * Remove all drawings.
+     */
+    clear_drawings() {
+        wasm.raycore_clear_drawings(this.__wbg_ptr);
+    }
+    /**
+     * Clear all markers for a series.
+     * @param {number} series_id
+     */
+    clear_markers(series_id) {
+        wasm.raycore_clear_markers(this.__wbg_ptr, series_id);
+    }
+    /**
      * Create a new RayCore instance inside a container div.
      * @param {string} container_id
      * @returns {Promise<RayCore>}
@@ -28,6 +232,39 @@ export class RayCore {
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.raycore_create(ptr0, len0);
         return takeObject(ret);
+    }
+    /**
+     * Create a new price line at the specified price level. Returns the price line ID.
+     *
+     * `line_style`: "solid", "dotted", "dashed", "large_dashed", "sparse_dotted".
+     * @param {number} price
+     * @param {number} color_r
+     * @param {number} color_g
+     * @param {number} color_b
+     * @param {number} color_a
+     * @param {number} line_width
+     * @param {string} line_style
+     * @param {boolean} draggable
+     * @returns {number}
+     */
+    create_price_line(price, color_r, color_g, color_b, color_a, line_width, line_style, draggable) {
+        const ptr0 = passStringToWasm0(line_style, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.raycore_create_price_line(this.__wbg_ptr, price, color_r, color_g, color_b, color_a, line_width, ptr0, len0, draggable);
+        return ret >>> 0;
+    }
+    /**
+     * Create a new study instance. Returns the study ID, or 0 if the type is unknown.
+     *
+     * Supported types: "sma", "ema", "rsi", "macd".
+     * @param {string} study_type
+     * @returns {number}
+     */
+    create_study(study_type) {
+        const ptr0 = passStringToWasm0(study_type, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.raycore_create_study(this.__wbg_ptr, ptr0, len0);
+        return ret >>> 0;
     }
     /**
      * Create with a specific renderer backend ("webgpu" or "canvas2d").
@@ -47,10 +284,84 @@ export class RayCore {
         wasm.raycore_demo_mode(this.__wbg_ptr);
     }
     /**
-     * Dispose: disconnect resize observer.
+     * Dispose: remove all event listeners, disconnect resize observer, and clean up resources.
+     *
+     * IMPORTANT: Call this when destroying the chart to prevent memory leaks.
+     * Event listeners attached to DOM elements will keep the closures alive
+     * even after RayCore is dropped, unless explicitly removed.
      */
     dispose() {
         wasm.raycore_dispose(this.__wbg_ptr);
+    }
+    /**
+     * Drag a separator to resize adjacent panes.
+     * `separator_idx` is 0 for separator between main and first subpane.
+     * `delta_y` is positive for moving down, negative for up.
+     * This uses the PaneManager's coordinated height algorithm.
+     * @param {number} separator_idx
+     * @param {number} delta_y
+     */
+    drag_pane_separator(separator_idx, delta_y) {
+        wasm.raycore_drag_pane_separator(this.__wbg_ptr, separator_idx, delta_y);
+    }
+    /**
+     * Get the number of drawings.
+     * @returns {number}
+     */
+    drawing_count() {
+        const ret = wasm.raycore_drawing_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Get all available chart types as a comma-separated string.
+     * @returns {string}
+     */
+    static get_available_chart_types() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.raycore_get_available_chart_types(retptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export4(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Get the current chart type as a string.
+     * @returns {string}
+     */
+    get_chart_type() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.raycore_get_chart_type(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export4(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Get study output data as a JS object { timestamps: BigUint64Array, values: Float32Array }.
+     * Returns null if the study or output index doesn't exist.
+     * @param {number} id
+     * @param {number} output_index
+     * @returns {any}
+     */
+    get_study_output(id, output_index) {
+        const ret = wasm.raycore_get_study_output(this.__wbg_ptr, id, output_index);
+        return takeObject(ret);
     }
     /**
      * @returns {Array<any>}
@@ -58,6 +369,105 @@ export class RayCore {
     static get_supported_renderers() {
         const ret = wasm.raycore_get_supported_renderers();
         return takeObject(ret);
+    }
+    /**
+     * Get the number of indicator sub-panes.
+     * @returns {number}
+     */
+    indicator_pane_count() {
+        const ret = wasm.raycore_indicator_pane_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Handle keyboard events. Returns true if the key was handled.
+     *
+     * Supported shortcuts:
+     * - Delete / Backspace: Remove selected drawing
+     * - Escape: Cancel drawing creation, deselect all
+     * - Arrow Left/Right: Scroll chart by one bar
+     * - Arrow Up/Down: Zoom price axis in/out
+     * - Home: Scroll to first bar
+     * - End: Scroll to last bar
+     * - +/=: Zoom in (time axis)
+     * - -: Zoom out (time axis)
+     * - 0: Reset zoom to fit all data
+     * @param {string} key
+     * @param {boolean} ctrl
+     * @param {boolean} shift
+     * @param {boolean} _alt
+     * @returns {boolean}
+     */
+    on_key_down(key, ctrl, shift, _alt) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.raycore_on_key_down(this.__wbg_ptr, ptr0, len0, ctrl, shift, _alt);
+        return ret !== 0;
+    }
+    /**
+     * Get the number of price lines.
+     * @returns {number}
+     */
+    price_line_count() {
+        const ret = wasm.raycore_price_line_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Remove all scale (measurement) drawings.
+     */
+    remove_all_scale_drawings() {
+        wasm.raycore_remove_all_scale_drawings(this.__wbg_ptr);
+    }
+    /**
+     * Remove an indicator sub-pane by ID.
+     * @param {number} pane_id
+     * @returns {boolean}
+     */
+    remove_indicator_pane(pane_id) {
+        const ret = wasm.raycore_remove_indicator_pane(this.__wbg_ptr, pane_id);
+        return ret !== 0;
+    }
+    /**
+     * Remove a specific marker from a series.
+     * @param {number} series_id
+     * @param {number} marker_id
+     * @returns {boolean}
+     */
+    remove_marker(series_id, marker_id) {
+        const ret = wasm.raycore_remove_marker(this.__wbg_ptr, series_id, marker_id);
+        return ret !== 0;
+    }
+    /**
+     * Remove a price line by ID.
+     * @param {number} id
+     * @returns {boolean}
+     */
+    remove_price_line(id) {
+        const ret = wasm.raycore_remove_price_line(this.__wbg_ptr, id);
+        return ret !== 0;
+    }
+    /**
+     * Remove the currently selected drawing (e.g. on Delete key).
+     */
+    remove_selected_drawing() {
+        wasm.raycore_remove_selected_drawing(this.__wbg_ptr);
+    }
+    /**
+     * Remove a series by ID.
+     * @param {number} id
+     * @returns {boolean}
+     */
+    remove_series(id) {
+        const ret = wasm.raycore_remove_series(this.__wbg_ptr, id);
+        return ret !== 0;
+    }
+    /**
+     * Remove a study by ID.
+     * @param {number} id
+     * @returns {boolean}
+     */
+    remove_study(id) {
+        const ret = wasm.raycore_remove_study(this.__wbg_ptr, id);
+        return ret !== 0;
     }
     /**
      * Render one frame. Call from requestAnimationFrame.
@@ -83,6 +493,228 @@ export class RayCore {
             wasm.__wbindgen_add_to_stack_pointer(16);
             wasm.__wbindgen_export4(deferred1_0, deferred1_1, 1);
         }
+    }
+    /**
+     * Get the number of overlay series.
+     * @returns {number}
+     */
+    series_count() {
+        const ret = wasm.raycore_series_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Set the axis border color (RGBA, 0.0-1.0).
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     * @param {number} a
+     */
+    set_axis_border_color(r, g, b, a) {
+        wasm.raycore_set_axis_border_color(this.__wbg_ptr, r, g, b, a);
+    }
+    /**
+     * Set the axis text color (RGBA, 0.0-1.0).
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     * @param {number} a
+     */
+    set_axis_text_color(r, g, b, a) {
+        wasm.raycore_set_axis_text_color(this.__wbg_ptr, r, g, b, a);
+    }
+    /**
+     * Set the chart background color (RGBA, 0.0-1.0).
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     * @param {number} a
+     */
+    set_background_color(r, g, b, a) {
+        wasm.raycore_set_background_color(this.__wbg_ptr, r, g, b, a);
+    }
+    /**
+     * Set data for a bar (OHLC) series.
+     * All arrays must be the same length.
+     * @param {number} id
+     * @param {BigUint64Array} timestamps
+     * @param {Float32Array} open
+     * @param {Float32Array} high
+     * @param {Float32Array} low
+     * @param {Float32Array} close
+     */
+    set_bar_series_data(id, timestamps, open, high, low, close) {
+        const ptr0 = passArray64ToWasm0(timestamps, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF32ToWasm0(open, wasm.__wbindgen_export);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArrayF32ToWasm0(high, wasm.__wbindgen_export);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passArrayF32ToWasm0(low, wasm.__wbindgen_export);
+        const len3 = WASM_VECTOR_LEN;
+        const ptr4 = passArrayF32ToWasm0(close, wasm.__wbindgen_export);
+        const len4 = WASM_VECTOR_LEN;
+        wasm.raycore_set_bar_series_data(this.__wbg_ptr, id, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
+    }
+    /**
+     * Set the bar width ratio (0.0-1.0, default 0.8).
+     * @param {number} ratio
+     */
+    set_bar_width_ratio(ratio) {
+        wasm.raycore_set_bar_width_ratio(this.__wbg_ptr, ratio);
+    }
+    /**
+     * Set bearish (down) candle colors: body fill and wick/border.
+     * @param {number} fill_r
+     * @param {number} fill_g
+     * @param {number} fill_b
+     * @param {number} fill_a
+     * @param {number} wick_r
+     * @param {number} wick_g
+     * @param {number} wick_b
+     * @param {number} wick_a
+     */
+    set_bearish_color(fill_r, fill_g, fill_b, fill_a, wick_r, wick_g, wick_b, wick_a) {
+        wasm.raycore_set_bearish_color(this.__wbg_ptr, fill_r, fill_g, fill_b, fill_a, wick_r, wick_g, wick_b, wick_a);
+    }
+    /**
+     * Set bullish (up) candle colors: body fill and wick/border.
+     * @param {number} fill_r
+     * @param {number} fill_g
+     * @param {number} fill_b
+     * @param {number} fill_a
+     * @param {number} wick_r
+     * @param {number} wick_g
+     * @param {number} wick_b
+     * @param {number} wick_a
+     */
+    set_bullish_color(fill_r, fill_g, fill_b, fill_a, wick_r, wick_g, wick_b, wick_a) {
+        wasm.raycore_set_bullish_color(this.__wbg_ptr, fill_r, fill_g, fill_b, fill_a, wick_r, wick_g, wick_b, wick_a);
+    }
+    /**
+     * Set the main chart type.
+     *
+     * Accepted values: "candlestick", "candles", "ohlc", "bars", "line", "area",
+     * "heikin_ashi", "ha", "baseline".
+     * @param {string} chart_type
+     */
+    set_chart_type(chart_type) {
+        const ptr0 = passStringToWasm0(chart_type, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.raycore_set_chart_type(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * Set the crosshair line color (RGBA, 0.0-1.0).
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     * @param {number} a
+     */
+    set_crosshair_color(r, g, b, a) {
+        wasm.raycore_set_crosshair_color(this.__wbg_ptr, r, g, b, a);
+    }
+    /**
+     * Set the crosshair label background color (RGBA, 0.0-1.0).
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     * @param {number} a
+     */
+    set_crosshair_label_bg_color(r, g, b, a) {
+        wasm.raycore_set_crosshair_label_bg_color(this.__wbg_ptr, r, g, b, a);
+    }
+    /**
+     * Set the crosshair label text color (RGBA, 0.0-1.0).
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     * @param {number} a
+     */
+    set_crosshair_label_text_color(r, g, b, a) {
+        wasm.raycore_set_crosshair_label_text_color(this.__wbg_ptr, r, g, b, a);
+    }
+    /**
+     * Set crosshair axis-label visibility.
+     * `target`: "vert", "horz", or "both".
+     * @param {string} target
+     * @param {boolean} visible
+     */
+    set_crosshair_label_visible(target, visible) {
+        const ptr0 = passStringToWasm0(target, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.raycore_set_crosshair_label_visible(this.__wbg_ptr, ptr0, len0, visible);
+    }
+    /**
+     * Set crosshair line color.
+     * `target`: "vert", "horz", or "both".
+     * @param {string} target
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     * @param {number} a
+     */
+    set_crosshair_line_color(target, r, g, b, a) {
+        const ptr0 = passStringToWasm0(target, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.raycore_set_crosshair_line_color(this.__wbg_ptr, ptr0, len0, r, g, b, a);
+    }
+    /**
+     * Set crosshair label background color.
+     * `target`: "vert", "horz", or "both".
+     * @param {string} target
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     * @param {number} a
+     */
+    set_crosshair_line_label_bg_color(target, r, g, b, a) {
+        const ptr0 = passStringToWasm0(target, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.raycore_set_crosshair_line_label_bg_color(this.__wbg_ptr, ptr0, len0, r, g, b, a);
+    }
+    /**
+     * Set crosshair line style.
+     * `target`: "vert", "horz", or "both".
+     * `line_style`: "solid", "dotted", "dashed", "large_dashed", "sparse_dotted".
+     * @param {string} target
+     * @param {string} line_style
+     */
+    set_crosshair_line_style(target, line_style) {
+        const ptr0 = passStringToWasm0(target, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(line_style, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.raycore_set_crosshair_line_style(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+    }
+    /**
+     * Set crosshair line visibility.
+     * `target`: "vert", "horz", or "both".
+     * @param {string} target
+     * @param {boolean} visible
+     */
+    set_crosshair_line_visible(target, visible) {
+        const ptr0 = passStringToWasm0(target, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.raycore_set_crosshair_line_visible(this.__wbg_ptr, ptr0, len0, visible);
+    }
+    /**
+     * Set crosshair line width in CSS pixels.
+     * `target`: "vert", "horz", or "both".
+     * @param {string} target
+     * @param {number} width
+     */
+    set_crosshair_line_width(target, width) {
+        const ptr0 = passStringToWasm0(target, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.raycore_set_crosshair_line_width(this.__wbg_ptr, ptr0, len0, width);
+    }
+    /**
+     * Set crosshair mode: "normal", "magnet", or "magnet_ohlc".
+     * @param {string} mode
+     */
+    set_crosshair_mode(mode) {
+        const ptr0 = passStringToWasm0(mode, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.raycore_set_crosshair_mode(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * @param {Float32Array} data
@@ -114,6 +746,252 @@ export class RayCore {
         const ptr5 = passArray64ToWasm0(timestamps, wasm.__wbindgen_export);
         const len5 = WASM_VECTOR_LEN;
         wasm.raycore_set_data_arrays(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5);
+    }
+    /**
+     * Set active drawing tool: "none", "trend_line", "rectangle", "fibonacci", "scale".
+     * @param {string} tool
+     */
+    set_drawing_tool(tool) {
+        const ptr0 = passStringToWasm0(tool, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.raycore_set_drawing_tool(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * Set the font family for axis labels.
+     * @param {string} family
+     */
+    set_font_family(family) {
+        const ptr0 = passStringToWasm0(family, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.raycore_set_font_family(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * Set the font size for axis labels (in CSS pixels).
+     * @param {number} size
+     */
+    set_font_size(size) {
+        wasm.raycore_set_font_size(this.__wbg_ptr, size);
+    }
+    /**
+     * Set the grid line color (RGBA, 0.0-1.0).
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     * @param {number} a
+     */
+    set_grid_color(r, g, b, a) {
+        wasm.raycore_set_grid_color(this.__wbg_ptr, r, g, b, a);
+    }
+    /**
+     * Set data for a histogram series. `values` and `timestamps` must be same length.
+     * Per-bar colors are optional — pass empty arrays to use the series default color.
+     * @param {number} id
+     * @param {Float32Array} values
+     * @param {BigUint64Array} timestamps
+     * @param {Float32Array} colors_r
+     * @param {Float32Array} colors_g
+     * @param {Float32Array} colors_b
+     * @param {Float32Array} colors_a
+     */
+    set_histogram_data(id, values, timestamps, colors_r, colors_g, colors_b, colors_a) {
+        const ptr0 = passArrayF32ToWasm0(values, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray64ToWasm0(timestamps, wasm.__wbindgen_export);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArrayF32ToWasm0(colors_r, wasm.__wbindgen_export);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passArrayF32ToWasm0(colors_g, wasm.__wbindgen_export);
+        const len3 = WASM_VECTOR_LEN;
+        const ptr4 = passArrayF32ToWasm0(colors_b, wasm.__wbindgen_export);
+        const len4 = WASM_VECTOR_LEN;
+        const ptr5 = passArrayF32ToWasm0(colors_a, wasm.__wbindgen_export);
+        const len5 = WASM_VECTOR_LEN;
+        wasm.raycore_set_histogram_data(this.__wbg_ptr, id, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5);
+    }
+    /**
+     * Set live last-price label visibility on the Y axis.
+     * @param {boolean} visible
+     */
+    set_last_price_label_visible(visible) {
+        wasm.raycore_set_last_price_label_visible(this.__wbg_ptr, visible);
+    }
+    /**
+     * Set live last-price line style.
+     * `line_style`: "solid", "dotted", "dashed", "large_dashed", "sparse_dotted".
+     * @param {string} line_style
+     */
+    set_last_price_line_style(line_style) {
+        const ptr0 = passStringToWasm0(line_style, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.raycore_set_last_price_line_style(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * Set live last-price line visibility.
+     * @param {boolean} visible
+     */
+    set_last_price_line_visible(visible) {
+        wasm.raycore_set_last_price_line_visible(this.__wbg_ptr, visible);
+    }
+    /**
+     * Set live last-price line width in CSS pixels.
+     * @param {number} width
+     */
+    set_last_price_line_width(width) {
+        wasm.raycore_set_last_price_line_width(this.__wbg_ptr, width);
+    }
+    /**
+     * Set multiple markers for a series at once (replaces existing).
+     * `marker_data` is a flat array: [bar_index, shape_idx, position_idx, price, r, g, b, a, size, ...]
+     * where shape_idx: 0=arrowUp, 1=arrowDown, 2=circle, 3=square
+     * and position_idx: 0=aboveBar, 1=belowBar, 2=atPrice
+     * @param {number} series_id
+     * @param {Float64Array} marker_data
+     */
+    set_markers(series_id, marker_data) {
+        const ptr0 = passArrayF64ToWasm0(marker_data, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.raycore_set_markers(this.__wbg_ptr, series_id, ptr0, len0);
+    }
+    /**
+     * Set the label text of a price line. Empty string uses formatted price.
+     * @param {number} id
+     * @param {string} label
+     */
+    set_price_line_label(id, label) {
+        const ptr0 = passStringToWasm0(label, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.raycore_set_price_line_label(this.__wbg_ptr, id, ptr0, len0);
+    }
+    /**
+     * Update the price of an existing price line.
+     * @param {number} id
+     * @param {number} price
+     */
+    set_price_line_price(id, price) {
+        wasm.raycore_set_price_line_price(this.__wbg_ptr, id, price);
+    }
+    /**
+     * Set whether a price line is visible.
+     * @param {number} id
+     * @param {boolean} visible
+     */
+    set_price_line_visible(id, visible) {
+        wasm.raycore_set_price_line_visible(this.__wbg_ptr, id, visible);
+    }
+    /**
+     * Set the price scale margins (top and bottom as fractions 0.0-1.0).
+     * Default is 0.2 top, 0.1 bottom.
+     * @param {number} top
+     * @param {number} bottom
+     */
+    set_price_scale_margins(top, bottom) {
+        wasm.raycore_set_price_scale_margins(this.__wbg_ptr, top, bottom);
+    }
+    /**
+     * Set the price scale mode.
+     *
+     * Accepted values: "normal", "logarithmic" (or "log"), "percentage" (or "percent"),
+     * "indexed_to_100" (or "indexedTo100", "indexed").
+     * @param {string} mode
+     */
+    set_price_scale_mode(mode) {
+        const ptr0 = passStringToWasm0(mode, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.raycore_set_price_scale_mode(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * Set data for a line series. `values` and `timestamps` must be same length.
+     * @param {number} id
+     * @param {Float32Array} values
+     * @param {BigUint64Array} timestamps
+     */
+    set_series_data(id, values, timestamps) {
+        const ptr0 = passArrayF32ToWasm0(values, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray64ToWasm0(timestamps, wasm.__wbindgen_export);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.raycore_set_series_data(this.__wbg_ptr, id, ptr0, len0, ptr1, len1);
+    }
+    /**
+     * Show or hide a series.
+     * @param {number} id
+     * @param {boolean} visible
+     */
+    set_series_visible(id, visible) {
+        wasm.raycore_set_series_visible(this.__wbg_ptr, id, visible);
+    }
+    /**
+     * Set a study parameter (e.g., "period" for SMA/EMA, "fast_period" for MACD).
+     * The study will be recalculated on the next render.
+     * @param {number} id
+     * @param {string} key
+     * @param {number} value
+     */
+    set_study_parameter(id, key, value) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.raycore_set_study_parameter(this.__wbg_ptr, id, ptr0, len0, value);
+    }
+    /**
+     * Set volume bar colors: bullish and bearish.
+     * @param {number} up_r
+     * @param {number} up_g
+     * @param {number} up_b
+     * @param {number} up_a
+     * @param {number} down_r
+     * @param {number} down_g
+     * @param {number} down_b
+     * @param {number} down_a
+     */
+    set_volume_colors(up_r, up_g, up_b, up_a, down_r, down_g, down_b, down_a) {
+        wasm.raycore_set_volume_colors(this.__wbg_ptr, up_r, up_g, up_b, up_a, down_r, down_g, down_b, down_a);
+    }
+    /**
+     * Set watermark text displayed centered on the chart pane.
+     * @param {string} text
+     */
+    set_watermark(text) {
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.raycore_set_watermark(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * Set the watermark text color (RGBA, 0.0-1.0).
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     * @param {number} a
+     */
+    set_watermark_color(r, g, b, a) {
+        wasm.raycore_set_watermark_color(this.__wbg_ptr, r, g, b, a);
+    }
+    /**
+     * Get the number of studies.
+     * @returns {number}
+     */
+    study_count() {
+        const ret = wasm.raycore_study_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Update indicator sub-pane data from a study.
+     * @param {number} pane_id
+     * @param {number} study_id
+     */
+    update_indicator_pane(pane_id, study_id) {
+        wasm.raycore_update_indicator_pane(this.__wbg_ptr, pane_id, study_id);
+    }
+    /**
+     * Update the last bar in the data array. Used for real-time tick updates.
+     * @param {bigint} timestamp
+     * @param {number} open
+     * @param {number} high
+     * @param {number} low
+     * @param {number} close
+     * @param {number} volume
+     */
+    update_last_bar(timestamp, open, high, low, close, volume) {
+        wasm.raycore_update_last_bar(this.__wbg_ptr, timestamp, open, high, low, close, volume);
     }
     /**
      * @returns {Float64Array}
@@ -171,11 +1049,25 @@ function __wbg_get_imports() {
             const ret = getObject(arg0) === undefined;
             return ret;
         },
+        __wbg___wbindgen_number_get_8ff4255516ccad3e: function(arg0, arg1) {
+            const obj = getObject(arg1);
+            const ret = typeof(obj) === 'number' ? obj : undefined;
+            getDataViewMemory0().setFloat64(arg0 + 8 * 1, isLikeNone(ret) ? 0 : ret, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, !isLikeNone(ret), true);
+        },
         __wbg___wbindgen_throw_be289d5034ed271b: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
         __wbg__wbg_cb_unref_d9b87ff7982e3b21: function(arg0) {
             getObject(arg0)._wbg_cb_unref();
+        },
+        __wbg_actualBoundingBoxAscent_c53eadfc1424b1ea: function(arg0) {
+            const ret = getObject(arg0).actualBoundingBoxAscent;
+            return ret;
+        },
+        __wbg_actualBoundingBoxDescent_f30ccd05a7e262e3: function(arg0) {
+            const ret = getObject(arg0).actualBoundingBoxDescent;
+            return ret;
         },
         __wbg_addEventListener_3acb0aad4483804c: function() { return handleError(function (arg0, arg1, arg2, arg3) {
             getObject(arg0).addEventListener(getStringFromWasm0(arg1, arg2), getObject(arg3));
@@ -190,6 +1082,9 @@ function __wbg_get_imports() {
         __wbg_arcTo_ddf6b8adf3bf5084: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4, arg5) {
             getObject(arg0).arcTo(arg1, arg2, arg3, arg4, arg5);
         }, arguments); },
+        __wbg_arc_60bf829e1bd2add5: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4, arg5) {
+            getObject(arg0).arc(arg1, arg2, arg3, arg4, arg5);
+        }, arguments); },
         __wbg_beginPath_9873f939d695759c: function(arg0) {
             getObject(arg0).beginPath();
         },
@@ -197,9 +1092,17 @@ function __wbg_get_imports() {
             const ret = getObject(arg0).beginRenderPass(getObject(arg1));
             return addHeapObject(ret);
         }, arguments); },
+        __wbg_body_f67922363a220026: function(arg0) {
+            const ret = getObject(arg0).body;
+            return isLikeNone(ret) ? 0 : addHeapObject(ret);
+        },
         __wbg_buffer_26d0910f3a5bc899: function(arg0) {
             const ret = getObject(arg0).buffer;
             return addHeapObject(ret);
+        },
+        __wbg_button_d86841d0a03adc44: function(arg0) {
+            const ret = getObject(arg0).button;
+            return ret;
         },
         __wbg_call_389efe28435a9388: function() { return handleError(function (arg0, arg1) {
             const ret = getObject(arg0).call(getObject(arg1));
@@ -209,8 +1112,15 @@ function __wbg_get_imports() {
             const ret = getObject(arg0).call(getObject(arg1), getObject(arg2));
             return addHeapObject(ret);
         }, arguments); },
+        __wbg_call_812d25f1510c13c8: function() { return handleError(function (arg0, arg1, arg2, arg3) {
+            const ret = getObject(arg0).call(getObject(arg1), getObject(arg2), getObject(arg3));
+            return addHeapObject(ret);
+        }, arguments); },
         __wbg_clearRect_1eed255045515c55: function(arg0, arg1, arg2, arg3, arg4) {
             getObject(arg0).clearRect(arg1, arg2, arg3, arg4);
+        },
+        __wbg_clearTimeout_df03cf00269bc442: function(arg0, arg1) {
+            getObject(arg0).clearTimeout(arg1);
         },
         __wbg_clientHeight_6432ff0d61ccfe7d: function(arg0) {
             const ret = getObject(arg0).clientHeight;
@@ -222,6 +1132,14 @@ function __wbg_get_imports() {
         },
         __wbg_clientX_a3c5f4ff30e91264: function(arg0) {
             const ret = getObject(arg0).clientX;
+            return ret;
+        },
+        __wbg_clientX_ed7d2827ca30c165: function(arg0) {
+            const ret = getObject(arg0).clientX;
+            return ret;
+        },
+        __wbg_clientY_79ab4711d0597b2c: function(arg0) {
+            const ret = getObject(arg0).clientY;
             return ret;
         },
         __wbg_clientY_e28509acb9b4a42a: function(arg0) {
@@ -388,6 +1306,14 @@ function __wbg_get_imports() {
             const ret = getObject(arg0).getUTCSeconds();
             return ret;
         },
+        __wbg_get_4fe487fe39ff3573: function(arg0, arg1) {
+            const ret = getObject(arg0)[arg1 >>> 0];
+            return isLikeNone(ret) ? 0 : addHeapObject(ret);
+        },
+        __wbg_get_9b94d73e6221f75c: function(arg0, arg1) {
+            const ret = getObject(arg0)[arg1 >>> 0];
+            return addHeapObject(ret);
+        },
         __wbg_get_b3ed3ad4be2bc8ac: function() { return handleError(function (arg0, arg1) {
             const ret = Reflect.get(getObject(arg0), getObject(arg1));
             return addHeapObject(ret);
@@ -401,6 +1327,10 @@ function __wbg_get_imports() {
             return addHeapObject(ret);
         },
         __wbg_height_38750dc6de41ee75: function(arg0) {
+            const ret = getObject(arg0).height;
+            return ret;
+        },
+        __wbg_height_45209601b4c4ede6: function(arg0) {
             const ret = getObject(arg0).height;
             return ret;
         },
@@ -477,6 +1407,10 @@ function __wbg_get_imports() {
             const ret = result;
             return ret;
         },
+        __wbg_is_f29129f676e5410c: function(arg0, arg1) {
+            const ret = Object.is(getObject(arg0), getObject(arg1));
+            return ret;
+        },
         __wbg_label_f279af9fe090b53f: function(arg0, arg1) {
             const ret = getObject(arg1).label;
             const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_export, wasm.__wbindgen_export2);
@@ -486,6 +1420,14 @@ function __wbg_get_imports() {
         },
         __wbg_left_3b7c3c1030d5ca7a: function(arg0) {
             const ret = getObject(arg0).left;
+            return ret;
+        },
+        __wbg_length_25b2ccd77d48ecb1: function(arg0) {
+            const ret = getObject(arg0).length;
+            return ret;
+        },
+        __wbg_length_35a7bace40f36eac: function(arg0) {
+            const ret = getObject(arg0).length;
             return ret;
         },
         __wbg_limits_486026e4aa69b9b2: function(arg0) {
@@ -660,7 +1602,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_737(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_1170(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -679,6 +1621,18 @@ function __wbg_get_imports() {
             const ret = new Function(getStringFromWasm0(arg0, arg1));
             return addHeapObject(ret);
         },
+        __wbg_new_with_args_7bba34e94b1cfa40: function(arg0, arg1, arg2, arg3) {
+            const ret = new Function(getStringFromWasm0(arg0, arg1), getStringFromWasm0(arg2, arg3));
+            return addHeapObject(ret);
+        },
+        __wbg_new_with_length_63f2683cc2521026: function(arg0) {
+            const ret = new Float32Array(arg0 >>> 0);
+            return addHeapObject(ret);
+        },
+        __wbg_new_with_length_68f01b2100133ebd: function(arg0) {
+            const ret = new BigUint64Array(arg0 >>> 0);
+            return addHeapObject(ret);
+        },
         __wbg_now_a3af9a2f4bbaa4d1: function() {
             const ret = Date.now();
             return ret;
@@ -694,9 +1648,20 @@ function __wbg_get_imports() {
             const ret = getObject(arg0).onSubmittedWorkDone();
             return addHeapObject(ret);
         },
+        __wbg_pageY_5653bbc6f8a6f28d: function(arg0) {
+            const ret = getObject(arg0).pageY;
+            return ret;
+        },
         __wbg_pointerId_466b1bdcaf2fe835: function(arg0) {
             const ret = getObject(arg0).pointerId;
             return ret;
+        },
+        __wbg_pointerType_ba53c6f18634a26d: function(arg0, arg1) {
+            const ret = getObject(arg1).pointerType;
+            const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
         },
         __wbg_preventDefault_cdcfcd7e301b9702: function(arg0) {
             getObject(arg0).preventDefault();
@@ -727,6 +1692,12 @@ function __wbg_get_imports() {
         __wbg_releasePointerCapture_420ef33c7c5fb6f4: function() { return handleError(function (arg0, arg1) {
             getObject(arg0).releasePointerCapture(arg1);
         }, arguments); },
+        __wbg_removeEventListener_e63328781a5b9af9: function() { return handleError(function (arg0, arg1, arg2, arg3) {
+            getObject(arg0).removeEventListener(getStringFromWasm0(arg1, arg2), getObject(arg3));
+        }, arguments); },
+        __wbg_remove_31c39325eee968fc: function(arg0) {
+            getObject(arg0).remove();
+        },
         __wbg_requestAdapter_cc9a9924f72519ab: function(arg0, arg1) {
             const ret = getObject(arg0).requestAdapter(getObject(arg1));
             return addHeapObject(ret);
@@ -739,6 +1710,15 @@ function __wbg_get_imports() {
             const ret = Promise.resolve(getObject(arg0));
             return addHeapObject(ret);
         },
+        __wbg_restore_0d233789d098ba64: function(arg0) {
+            getObject(arg0).restore();
+        },
+        __wbg_save_e0cc2e58b36d33c9: function(arg0) {
+            getObject(arg0).save();
+        },
+        __wbg_scale_543277ecf8cf836b: function() { return handleError(function (arg0, arg1, arg2) {
+            getObject(arg0).scale(arg1, arg2);
+        }, arguments); },
         __wbg_setBindGroup_bf7233e51ee0fd56: function(arg0, arg1, arg2) {
             getObject(arg0).setBindGroup(arg1 >>> 0, getObject(arg2));
         },
@@ -753,6 +1733,13 @@ function __wbg_get_imports() {
         }, arguments); },
         __wbg_setProperty_cbb25c4e74285b39: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4) {
             getObject(arg0).setProperty(getStringFromWasm0(arg1, arg2), getStringFromWasm0(arg3, arg4));
+        }, arguments); },
+        __wbg_setTimeout_eff32631ea138533: function() { return handleError(function (arg0, arg1, arg2) {
+            const ret = getObject(arg0).setTimeout(getObject(arg1), arg2);
+            return ret;
+        }, arguments); },
+        __wbg_setTransform_96b561b274a594ca: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4, arg5, arg6) {
+            getObject(arg0).setTransform(arg1, arg2, arg3, arg4, arg5, arg6);
         }, arguments); },
         __wbg_setVertexBuffer_c8234139ead62a61: function(arg0, arg1, arg2, arg3, arg4) {
             getObject(arg0).setVertexBuffer(arg1 >>> 0, getObject(arg2), arg3, arg4);
@@ -791,6 +1778,9 @@ function __wbg_get_imports() {
         __wbg_set_base_mip_level_845abe28a57bd901: function(arg0, arg1) {
             getObject(arg0).baseMipLevel = arg1 >>> 0;
         },
+        __wbg_set_beginning_of_pass_write_index_18bb7ab9fb16de02: function(arg0, arg1) {
+            getObject(arg0).beginningOfPassWriteIndex = arg1 >>> 0;
+        },
         __wbg_set_bind_group_layouts_db65f9787380e242: function(arg0, arg1) {
             getObject(arg0).bindGroupLayouts = getObject(arg1);
         },
@@ -824,6 +1814,9 @@ function __wbg_get_imports() {
         __wbg_set_color_attachments_4d4c71d7eeba8e2f: function(arg0, arg1) {
             getObject(arg0).colorAttachments = getObject(arg1);
         },
+        __wbg_set_compare_f3fb77a9bf3f0f7e: function(arg0, arg1) {
+            getObject(arg0).compare = __wbindgen_enum_GpuCompareFunction[arg1];
+        },
         __wbg_set_count_8cf9a3dd1ffc7b7d: function(arg0, arg1) {
             getObject(arg0).count = arg1 >>> 0;
         },
@@ -833,11 +1826,50 @@ function __wbg_get_imports() {
         __wbg_set_cull_mode_41c12526410d3e05: function(arg0, arg1) {
             getObject(arg0).cullMode = __wbindgen_enum_GpuCullMode[arg1];
         },
+        __wbg_set_depth_bias_31554aeaaa675954: function(arg0, arg1) {
+            getObject(arg0).depthBias = arg1;
+        },
+        __wbg_set_depth_bias_clamp_8cf5f4f0d80e8cba: function(arg0, arg1) {
+            getObject(arg0).depthBiasClamp = arg1;
+        },
+        __wbg_set_depth_bias_slope_scale_310ae406f2d3a055: function(arg0, arg1) {
+            getObject(arg0).depthBiasSlopeScale = arg1;
+        },
+        __wbg_set_depth_clear_value_8760aafb583d5312: function(arg0, arg1) {
+            getObject(arg0).depthClearValue = arg1;
+        },
+        __wbg_set_depth_compare_8831904ce3173063: function(arg0, arg1) {
+            getObject(arg0).depthCompare = __wbindgen_enum_GpuCompareFunction[arg1];
+        },
+        __wbg_set_depth_fail_op_62ec602580477afc: function(arg0, arg1) {
+            getObject(arg0).depthFailOp = __wbindgen_enum_GpuStencilOperation[arg1];
+        },
+        __wbg_set_depth_load_op_102d57f3ddf95461: function(arg0, arg1) {
+            getObject(arg0).depthLoadOp = __wbindgen_enum_GpuLoadOp[arg1];
+        },
+        __wbg_set_depth_read_only_aebc24a542debafd: function(arg0, arg1) {
+            getObject(arg0).depthReadOnly = arg1 !== 0;
+        },
+        __wbg_set_depth_stencil_5627e73aaf33912c: function(arg0, arg1) {
+            getObject(arg0).depthStencil = getObject(arg1);
+        },
+        __wbg_set_depth_stencil_attachment_04b936535778e362: function(arg0, arg1) {
+            getObject(arg0).depthStencilAttachment = getObject(arg1);
+        },
+        __wbg_set_depth_store_op_610b0a50dbb00eb8: function(arg0, arg1) {
+            getObject(arg0).depthStoreOp = __wbindgen_enum_GpuStoreOp[arg1];
+        },
+        __wbg_set_depth_write_enabled_f94217df9ff2d60c: function(arg0, arg1) {
+            getObject(arg0).depthWriteEnabled = arg1 !== 0;
+        },
         __wbg_set_device_dab18ead7bfc077b: function(arg0, arg1) {
             getObject(arg0).device = getObject(arg1);
         },
         __wbg_set_dst_factor_cf872fec841747ac: function(arg0, arg1) {
             getObject(arg0).dstFactor = __wbindgen_enum_GpuBlendFactor[arg1];
+        },
+        __wbg_set_end_of_pass_write_index_02ee5189026c1d3a: function(arg0, arg1) {
+            getObject(arg0).endOfPassWriteIndex = arg1 >>> 0;
         },
         __wbg_set_entries_1472deaee7053fb7: function(arg0, arg1) {
             getObject(arg0).entries = getObject(arg1);
@@ -851,6 +1883,9 @@ function __wbg_get_imports() {
         __wbg_set_entry_point_f9224cdb29cbe5df: function(arg0, arg1, arg2) {
             getObject(arg0).entryPoint = getStringFromWasm0(arg1, arg2);
         },
+        __wbg_set_fail_op_73a4e194f4bc914a: function(arg0, arg1) {
+            getObject(arg0).failOp = __wbindgen_enum_GpuStencilOperation[arg1];
+        },
         __wbg_set_fillStyle_783d3f7489475421: function(arg0, arg1, arg2) {
             getObject(arg0).fillStyle = getStringFromWasm0(arg1, arg2);
         },
@@ -862,6 +1897,9 @@ function __wbg_get_imports() {
         },
         __wbg_set_format_3f7008e9e568f0fc: function(arg0, arg1) {
             getObject(arg0).format = __wbindgen_enum_GpuVertexFormat[arg1];
+        },
+        __wbg_set_format_4a4fccdfc45bc409: function(arg0, arg1) {
+            getObject(arg0).format = __wbindgen_enum_GpuTextureFormat[arg1];
         },
         __wbg_set_format_974a01725f579c5d: function(arg0, arg1) {
             getObject(arg0).format = __wbindgen_enum_GpuTextureFormat[arg1];
@@ -889,6 +1927,12 @@ function __wbg_get_imports() {
         },
         __wbg_set_imageSmoothingEnabled_85c30565ebbfba4f: function(arg0, arg1) {
             getObject(arg0).imageSmoothingEnabled = arg1 !== 0;
+        },
+        __wbg_set_index_41955224420ba3c6: function(arg0, arg1, arg2) {
+            getObject(arg0)[arg1 >>> 0] = arg2;
+        },
+        __wbg_set_index_77f6ba43cebcf275: function(arg0, arg1, arg2) {
+            getObject(arg0)[arg1 >>> 0] = BigInt.asUintN(64, arg2);
         },
         __wbg_set_innerHTML_edd39677e3460291: function(arg0, arg1, arg2) {
             getObject(arg0).innerHTML = getStringFromWasm0(arg1, arg2);
@@ -932,6 +1976,9 @@ function __wbg_get_imports() {
         __wbg_set_lineCap_59a017de1ad2b0be: function(arg0, arg1, arg2) {
             getObject(arg0).lineCap = getStringFromWasm0(arg1, arg2);
         },
+        __wbg_set_lineJoin_9b9f1aaa283be35a: function(arg0, arg1, arg2) {
+            getObject(arg0).lineJoin = getStringFromWasm0(arg1, arg2);
+        },
         __wbg_set_lineWidth_89fa506592f5b994: function(arg0, arg1) {
             getObject(arg0).lineWidth = arg1;
         },
@@ -962,6 +2009,9 @@ function __wbg_get_imports() {
         __wbg_set_operation_b96fabca3716aaa3: function(arg0, arg1) {
             getObject(arg0).operation = __wbindgen_enum_GpuBlendOperation[arg1];
         },
+        __wbg_set_pass_op_765be90bb2f27220: function(arg0, arg1) {
+            getObject(arg0).passOp = __wbindgen_enum_GpuStencilOperation[arg1];
+        },
         __wbg_set_passive_f411e67e6f28687b: function(arg0, arg1) {
             getObject(arg0).passive = arg1 !== 0;
         },
@@ -971,11 +2021,17 @@ function __wbg_get_imports() {
         __wbg_set_primitive_d6456d7efe6b4fe5: function(arg0, arg1) {
             getObject(arg0).primitive = getObject(arg1);
         },
+        __wbg_set_query_set_20ecd7f9a16f3ec6: function(arg0, arg1) {
+            getObject(arg0).querySet = getObject(arg1);
+        },
         __wbg_set_r_07bd987697069496: function(arg0, arg1) {
             getObject(arg0).r = arg1;
         },
         __wbg_set_required_features_650c9e5dafbaa395: function(arg0, arg1) {
             getObject(arg0).requiredFeatures = getObject(arg1);
+        },
+        __wbg_set_resolve_target_c18cd4048765732a: function(arg0, arg1) {
+            getObject(arg0).resolveTarget = getObject(arg1);
         },
         __wbg_set_resource_8cea0fe2c8745c3e: function(arg0, arg1) {
             getObject(arg0).resource = getObject(arg1);
@@ -989,11 +2045,38 @@ function __wbg_get_imports() {
         __wbg_set_src_factor_50cef27aa8aece91: function(arg0, arg1) {
             getObject(arg0).srcFactor = __wbindgen_enum_GpuBlendFactor[arg1];
         },
+        __wbg_set_stencil_back_e740415a5c0b637a: function(arg0, arg1) {
+            getObject(arg0).stencilBack = getObject(arg1);
+        },
+        __wbg_set_stencil_clear_value_6be76b512040398d: function(arg0, arg1) {
+            getObject(arg0).stencilClearValue = arg1 >>> 0;
+        },
+        __wbg_set_stencil_front_03185e1c3bafa411: function(arg0, arg1) {
+            getObject(arg0).stencilFront = getObject(arg1);
+        },
+        __wbg_set_stencil_load_op_084f44352b978b3d: function(arg0, arg1) {
+            getObject(arg0).stencilLoadOp = __wbindgen_enum_GpuLoadOp[arg1];
+        },
+        __wbg_set_stencil_read_mask_e2736fc4af9399e4: function(arg0, arg1) {
+            getObject(arg0).stencilReadMask = arg1 >>> 0;
+        },
+        __wbg_set_stencil_read_only_31f3d99299373c12: function(arg0, arg1) {
+            getObject(arg0).stencilReadOnly = arg1 !== 0;
+        },
+        __wbg_set_stencil_store_op_428fb4955e4899d6: function(arg0, arg1) {
+            getObject(arg0).stencilStoreOp = __wbindgen_enum_GpuStoreOp[arg1];
+        },
+        __wbg_set_stencil_write_mask_b1d3e1655305a187: function(arg0, arg1) {
+            getObject(arg0).stencilWriteMask = arg1 >>> 0;
+        },
         __wbg_set_step_mode_98e49f7877daf1c5: function(arg0, arg1) {
             getObject(arg0).stepMode = __wbindgen_enum_GpuVertexStepMode[arg1];
         },
         __wbg_set_store_op_e761080d541a10cc: function(arg0, arg1) {
             getObject(arg0).storeOp = __wbindgen_enum_GpuStoreOp[arg1];
+        },
+        __wbg_set_strip_index_format_16df9e33c7aa97e6: function(arg0, arg1) {
+            getObject(arg0).stripIndexFormat = __wbindgen_enum_GpuIndexFormat[arg1];
         },
         __wbg_set_strokeStyle_087121ed5350b038: function(arg0, arg1, arg2) {
             getObject(arg0).strokeStyle = getStringFromWasm0(arg1, arg2);
@@ -1006,6 +2089,9 @@ function __wbg_get_imports() {
         },
         __wbg_set_textBaseline_c7ec6538cc52b073: function(arg0, arg1, arg2) {
             getObject(arg0).textBaseline = getStringFromWasm0(arg1, arg2);
+        },
+        __wbg_set_timestamp_writes_3998dbfa21e48dbe: function(arg0, arg1) {
+            getObject(arg0).timestampWrites = getObject(arg1);
         },
         __wbg_set_topology_036632318a24227d: function(arg0, arg1) {
             getObject(arg0).topology = __wbindgen_enum_GpuPrimitiveTopology[arg1];
@@ -1027,6 +2113,9 @@ function __wbg_get_imports() {
         },
         __wbg_set_vertex_76b7ac4bdfbb06f4: function(arg0, arg1) {
             getObject(arg0).vertex = getObject(arg1);
+        },
+        __wbg_set_view_1ef41eeb26eaf718: function(arg0, arg1) {
+            getObject(arg0).view = getObject(arg1);
         },
         __wbg_set_view_46b654a12649c6f6: function(arg0, arg1) {
             getObject(arg0).view = getObject(arg1);
@@ -1079,6 +2168,10 @@ function __wbg_get_imports() {
         __wbg_submit_a1850a1cb6baf64a: function(arg0, arg1) {
             getObject(arg0).submit(getObject(arg1));
         },
+        __wbg_target_0448c1b49e7df279: function(arg0) {
+            const ret = getObject(arg0).target;
+            return addHeapObject(ret);
+        },
         __wbg_then_0d9fe2c7b1857d32: function(arg0, arg1, arg2) {
             const ret = getObject(arg0).then(getObject(arg1), getObject(arg2));
             return addHeapObject(ret);
@@ -1091,6 +2184,13 @@ function __wbg_get_imports() {
             const ret = getObject(arg0).top;
             return ret;
         },
+        __wbg_touches_55ce167b42bcdf52: function(arg0) {
+            const ret = getObject(arg0).touches;
+            return addHeapObject(ret);
+        },
+        __wbg_translate_3aa10730376a8c06: function() { return handleError(function (arg0, arg1, arg2) {
+            getObject(arg0).translate(arg1, arg2);
+        }, arguments); },
         __wbg_warn_f7ae1b2e66ccb930: function(arg0) {
             console.warn(getObject(arg0));
         },
@@ -1102,35 +2202,54 @@ function __wbg_get_imports() {
             const ret = getObject(arg0).width;
             return ret;
         },
+        __wbg_width_ae46cb8e98ee102f: function(arg0) {
+            const ret = getObject(arg0).width;
+            return ret;
+        },
         __wbg_writeBuffer_b203cf79b98d6dd8: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4, arg5) {
             getObject(arg0).writeBuffer(getObject(arg1), arg2, getObject(arg3), arg4, arg5);
         }, arguments); },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 23, function: Function { arguments: [Externref], shim_idx: 24, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_352, __wasm_bindgen_func_elem_353);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 26, function: Function { arguments: [Externref], shim_idx: 27, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_517, __wasm_bindgen_func_elem_518);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 23, function: Function { arguments: [NamedExternref("Array<any>")], shim_idx: 24, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_352, __wasm_bindgen_func_elem_353);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 26, function: Function { arguments: [NamedExternref("Array<any>")], shim_idx: 27, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_517, __wasm_bindgen_func_elem_518);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 23, function: Function { arguments: [NamedExternref("Event")], shim_idx: 24, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_352, __wasm_bindgen_func_elem_353);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 26, function: Function { arguments: [NamedExternref("Event")], shim_idx: 27, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_517, __wasm_bindgen_func_elem_518);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 23, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 24, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_352, __wasm_bindgen_func_elem_353);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 26, function: Function { arguments: [NamedExternref("MouseEvent")], shim_idx: 27, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_517, __wasm_bindgen_func_elem_518);
             return addHeapObject(ret);
         },
-        __wbindgen_cast_0000000000000005: function(arg0) {
+        __wbindgen_cast_0000000000000005: function(arg0, arg1) {
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 26, function: Function { arguments: [NamedExternref("TouchEvent")], shim_idx: 27, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_517, __wasm_bindgen_func_elem_518);
+            return addHeapObject(ret);
+        },
+        __wbindgen_cast_0000000000000006: function(arg0, arg1) {
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 26, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 27, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_517, __wasm_bindgen_func_elem_518);
+            return addHeapObject(ret);
+        },
+        __wbindgen_cast_0000000000000007: function(arg0, arg1) {
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 26, function: Function { arguments: [], shim_idx: 33, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_517, __wasm_bindgen_func_elem_521);
+            return addHeapObject(ret);
+        },
+        __wbindgen_cast_0000000000000008: function(arg0) {
             // Cast intrinsic for `F64 -> Externref`.
             const ret = arg0;
             return addHeapObject(ret);
         },
-        __wbindgen_cast_0000000000000006: function(arg0, arg1) {
+        __wbindgen_cast_0000000000000009: function(arg0, arg1) {
             // Cast intrinsic for `Ref(String) -> Externref`.
             const ret = getStringFromWasm0(arg0, arg1);
             return addHeapObject(ret);
@@ -1149,12 +2268,16 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_353(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_353(arg0, arg1, addHeapObject(arg2));
+function __wasm_bindgen_func_elem_521(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_521(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_737(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_737(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_518(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_518(arg0, arg1, addHeapObject(arg2));
+}
+
+function __wasm_bindgen_func_elem_1170(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_1170(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 
@@ -1170,10 +2293,16 @@ const __wbindgen_enum_GpuBufferBindingType = ["uniform", "storage", "read-only-s
 const __wbindgen_enum_GpuCanvasAlphaMode = ["opaque", "premultiplied"];
 
 
+const __wbindgen_enum_GpuCompareFunction = ["never", "less", "equal", "less-equal", "greater", "not-equal", "greater-equal", "always"];
+
+
 const __wbindgen_enum_GpuCullMode = ["none", "front", "back"];
 
 
 const __wbindgen_enum_GpuFrontFace = ["ccw", "cw"];
+
+
+const __wbindgen_enum_GpuIndexFormat = ["uint16", "uint32"];
 
 
 const __wbindgen_enum_GpuLoadOp = ["load", "clear"];
@@ -1183,6 +2312,9 @@ const __wbindgen_enum_GpuPowerPreference = ["low-power", "high-performance"];
 
 
 const __wbindgen_enum_GpuPrimitiveTopology = ["point-list", "line-list", "line-strip", "triangle-list", "triangle-strip"];
+
+
+const __wbindgen_enum_GpuStencilOperation = ["keep", "zero", "replace", "invert", "increment-clamp", "decrement-clamp", "increment-wrap", "decrement-wrap"];
 
 
 const __wbindgen_enum_GpuStoreOp = ["store", "discard"];
@@ -1398,6 +2530,13 @@ function passArray64ToWasm0(arg, malloc) {
 function passArrayF32ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 4, 4) >>> 0;
     getFloat32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passArrayF64ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 8, 8) >>> 0;
+    getFloat64ArrayMemory0().set(arg, ptr / 8);
     WASM_VECTOR_LEN = arg.length;
     return ptr;
 }
