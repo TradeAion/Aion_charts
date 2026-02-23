@@ -50,7 +50,8 @@ pub fn generate_sample_data(n: usize, start_ms: u64, interval_ms: u64) -> Vec<Ba
 /// Linear congruential generator — fast, deterministic pseudo-random.
 #[inline]
 fn lcg_next(seed: u64) -> u64 {
-    seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)
+    seed.wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407)
 }
 
 /// Convert LCG state to f64 in [0, 1).

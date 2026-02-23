@@ -130,9 +130,9 @@ pub use crate::core::drawings::types::DrawingTool;
 
 /// Chart series (candlestick, line, area, histogram, etc.).
 pub use crate::core::series::{
-    AreaSeriesOptions, BarSeriesOptions, BaselineSeriesOptions, HistogramDataArray,
-    HistogramPoint, HistogramSeriesOptions, LineDataArray, LinePoint, LineSeriesOptions,
-    LineStyle, OhlcDataArray, OhlcPoint, Series, SeriesCollection, SeriesId, SeriesType,
+    AreaSeriesOptions, BarSeriesOptions, BaselineSeriesOptions, HistogramDataArray, HistogramPoint,
+    HistogramSeriesOptions, LineDataArray, LinePoint, LineSeriesOptions, LineStyle, OhlcDataArray,
+    OhlcPoint, Series, SeriesCollection, SeriesId, SeriesType,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -140,7 +140,9 @@ pub use crate::core::series::{
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Study (indicator) management.
-pub use crate::core::studies::manager::{Study, StudyCalculator, StudyId, StudyInput, StudyManager, StudyOutput};
+pub use crate::core::studies::manager::{
+    Study, StudyCalculator, StudyId, StudyInput, StudyManager, StudyOutput,
+};
 
 /// Built-in study implementations.
 pub use crate::core::studies::built_in::{
@@ -152,10 +154,14 @@ pub use crate::core::studies::built_in::{
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Horizontal price lines.
-pub use crate::core::price_line::{PriceLine, PriceLineHit, PriceLineId, PriceLineManager, PriceLineOptions};
+pub use crate::core::price_line::{
+    PriceLine, PriceLineHit, PriceLineId, PriceLineManager, PriceLineOptions,
+};
 
 /// Series markers (annotations on bars).
-pub use crate::core::markers::{MarkerManager, MarkerPosition, MarkerShape, SeriesMarker, SeriesMarkers};
+pub use crate::core::markers::{
+    MarkerManager, MarkerPosition, MarkerShape, SeriesMarker, SeriesMarkers,
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Re-exports: Pane & Layout
@@ -172,7 +178,7 @@ pub use crate::core::kinetic_animation::{KineticAnimation, ScrollState};
 
 /// Global crosshair state.
 pub use crate::core::crosshair::{
-    CrosshairMode as GlobalCrosshairMode, CrosshairPaneView, Crosshair as GlobalCrosshair,
+    Crosshair as GlobalCrosshair, CrosshairMode as GlobalCrosshairMode, CrosshairPaneView,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════

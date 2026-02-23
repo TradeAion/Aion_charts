@@ -16,8 +16,7 @@ pub fn optimal_candlestick_width(bar_spacing: f64, pixel_ratio: f64) -> f64 {
     }
     let reducing_coeff = 0.2;
     let coeff = 1.0
-        - reducing_coeff
-            * (bar_spacing.max(special_to) - special_to).atan()
+        - reducing_coeff * (bar_spacing.max(special_to) - special_to).atan()
             / (std::f64::consts::FRAC_PI_2);
     let res = (bar_spacing * coeff * pixel_ratio).floor();
     let scaled_bar_spacing = (bar_spacing * pixel_ratio).floor();
