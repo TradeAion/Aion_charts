@@ -16,8 +16,9 @@ use crate::core::renderer::canvas_dash::{clear_canvas_line_dash, set_canvas_line
 use crate::core::renderer::line_generator;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
+use crate::core::renderer::transforms::bar_to_x;
 use crate::core::renderer::traits::{ChartStyle, CrosshairState};
-use crate::core::renderer::value_projection::{collect_last_values, price_to_pane_y_phys};
+use crate::core::renderer::value_projection::{price_to_pane_y_phys, timestamp_to_bar_index_in_bars};
 use crate::core::series::{LineStyle, SeriesCollection, SeriesType};
 use crate::core::viewport::Viewport;
 use wasm_bindgen::prelude::*;
@@ -76,11 +77,21 @@ impl OverlayRenderer {
     }
 
     pub fn resize(&mut self, pw: u32, ph: u32, dpr: f64) {
+        let pw = pw.max(1);
+        let ph = ph.max(1);
+        if self.pw == pw && self.ph == ph && (self.dpr - dpr).abs() < 1e-6 {
+            return;
+        }
+
         self.pw = pw;
         self.ph = ph;
         self.dpr = dpr;
-        self.canvas.set_width(pw.max(1));
-        self.canvas.set_height(ph.max(1));
+        if self.canvas.width() != pw {
+            self.canvas.set_width(pw);
+        }
+        if self.canvas.height() != ph {
+            self.canvas.set_height(ph);
+        }
         self.ctx.set_image_smoothing_enabled(false);
     }
 
@@ -427,7 +438,8 @@ impl OverlayRenderer {
 
     /// Render horizontal live last-price lines for all visible series.
     ///
-    /// Each line spans the full pane width at the series' last data value.
+    /// Each line starts at the currently printing point and extends to the
+    /// price axis edge, so it stays visually connected to the live print.
     /// Style is controlled by `style.last_price_line` (LWC-like options).
     pub fn render_last_price_lines(
         &self,
@@ -435,8 +447,8 @@ impl OverlayRenderer {
         bars: &crate::core::data::BarArray,
         viewport: &Viewport,
         style: &ChartStyle,
-        _pane_css_w: f64,
-        _pane_css_h: f64,
+        pane_css_w: f64,
+        pane_css_h: f64,
         _time_ms: f64,
     ) {
         if !style.last_price_line.visible {
@@ -444,21 +456,95 @@ impl OverlayRenderer {
         }
 
         let dpr = self.dpr;
-        let pane_pw = self.pw as f64;
+        let pane_pw = pane_css_w * dpr;
+        let pane_ph = pane_css_h * dpr;
+        let candle_h = pane_ph * viewport.candle_height_frac();
 
         let line_w = (style.last_price_line.width * dpr).floor().max(1.0);
         let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
 
-        let projected = collect_last_values(series, bars, viewport, style, self.ph as f64, dpr);
+        self.ctx.set_line_width(line_w);
+        self.ctx.set_line_cap("butt");
+        set_canvas_line_dash(&self.ctx, style.last_price_line.style, line_w);
 
-        for item in projected {
-            let y = item.y_phys.round() + correction;
-            self.ctx.set_stroke_style_str(&rgba(&item.color));
-            self.ctx.set_line_width(line_w);
-            self.ctx.set_line_cap("butt");
-            set_canvas_line_dash(&self.ctx, style.last_price_line.style, line_w);
+        // Main series (candles / line / area / bars / baseline)
+        if bars.len() > 0 {
+            if let Some(last) = bars.get(bars.len() - 1) {
+                let x_anchor = bar_to_x((bars.len() - 1) as f64 + 0.5, viewport, pane_pw);
+                let y_phys = price_to_pane_y_phys(last.close as f64, viewport, pane_ph);
+                if x_anchor >= 0.0 && x_anchor < pane_pw && y_phys >= 0.0 && y_phys <= candle_h {
+                    let y = y_phys.round() + correction;
+                    self.ctx.set_stroke_style_str(&rgba(&if last.close >= last.open {
+                        style.bullish_color
+                    } else {
+                        style.bearish_color
+                    }));
+                    self.ctx.begin_path();
+                    self.ctx.move_to(x_anchor.max(0.0), y);
+                    self.ctx.line_to(pane_pw, y);
+                    self.ctx.stroke();
+                }
+            }
+        }
+
+        // Overlay series
+        for s in series.iter() {
+            if !s.is_visible() {
+                continue;
+            }
+
+            let (last_price, last_ts, color) = match s.series_type() {
+                SeriesType::Line | SeriesType::Area | SeriesType::Baseline => {
+                    if s.line_data.is_empty() {
+                        continue;
+                    }
+                    (
+                        s.line_data.values[s.line_data.len() - 1] as f64,
+                        s.line_data.last_timestamp(),
+                        s.series_color(),
+                    )
+                }
+                SeriesType::Histogram => {
+                    if s.histogram_data.is_empty() {
+                        continue;
+                    }
+                    (
+                        s.histogram_data.values[s.histogram_data.len() - 1] as f64,
+                        s.histogram_data.last_timestamp(),
+                        s.series_color(),
+                    )
+                }
+                SeriesType::Bar => {
+                    if s.bar_data.is_empty() {
+                        continue;
+                    }
+                    (
+                        s.bar_data.close[s.bar_data.len() - 1] as f64,
+                        s.bar_data.last_timestamp(),
+                        s.series_color(),
+                    )
+                }
+                SeriesType::Candlestick => continue,
+            };
+
+            let ts = match last_ts {
+                Some(v) => v,
+                None => continue,
+            };
+            let bar_idx = match timestamp_to_bar_index_in_bars(ts, bars) {
+                Some(v) => v,
+                None => continue,
+            };
+            let x_anchor = bar_to_x(bar_idx + 0.5, viewport, pane_pw);
+            let y_phys = price_to_pane_y_phys(last_price, viewport, pane_ph);
+            if x_anchor < 0.0 || x_anchor >= pane_pw || y_phys < 0.0 || y_phys > candle_h {
+                continue;
+            }
+
+            let y = y_phys.round() + correction;
+            self.ctx.set_stroke_style_str(&rgba(&color));
             self.ctx.begin_path();
-            self.ctx.move_to(0.0, y);
+            self.ctx.move_to(x_anchor.max(0.0), y);
             self.ctx.line_to(pane_pw, y);
             self.ctx.stroke();
         }

@@ -133,3 +133,67 @@ pub fn collect_last_values(
 
     out
 }
+
+/// Map a timestamp to a fractional bar index using `BarArray` timestamps.
+///
+/// Returns:
+/// - exact index for an exact timestamp match
+/// - interpolated fractional index between surrounding bars
+/// - extrapolated fractional index before/after the data range
+pub fn timestamp_to_bar_index_in_bars(ts: u64, bars: &BarArray) -> Option<f64> {
+    let len = bars.len();
+    if len == 0 {
+        return None;
+    }
+
+    // lower_bound binary search on BarArray::timestamp(i)
+    let mut lo = 0usize;
+    let mut hi = len;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if bars.timestamp(mid) < ts {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+
+    if lo < len && bars.timestamp(lo) == ts {
+        return Some(lo as f64);
+    }
+
+    // insertion point = lo
+    if lo == 0 {
+        if len >= 2 {
+            let t0 = bars.timestamp(0) as f64;
+            let t1 = bars.timestamp(1) as f64;
+            let dt = t1 - t0;
+            if dt > 0.0 {
+                return Some(-((t0 - ts as f64) / dt));
+            }
+        }
+        return None;
+    }
+
+    if lo >= len {
+        if len >= 2 {
+            let tn1 = bars.timestamp(len - 1) as f64;
+            let tn2 = bars.timestamp(len - 2) as f64;
+            let dt = tn1 - tn2;
+            if dt > 0.0 {
+                return Some((len - 1) as f64 + ((ts as f64 - tn1) / dt));
+            }
+        }
+        return None;
+    }
+
+    let t0 = bars.timestamp(lo - 1) as f64;
+    let t1 = bars.timestamp(lo) as f64;
+    let dt = t1 - t0;
+    if dt <= 0.0 {
+        return Some(lo as f64);
+    }
+
+    let frac = (ts as f64 - t0) / dt;
+    Some((lo - 1) as f64 + frac)
+}
