@@ -8,6 +8,8 @@
 //! (chart area). Axis rendering is handled by dedicated axis renderers
 //! in the WASM layer.
 
+use crate::core::chart_type::{MainChartOptions, MainChartType};
+use crate::core::constants::{AUTO_SCROLL_THRESHOLD_RATIO, DEFAULT_INITIAL_VISIBLE_BARS};
 use crate::core::data::{Bar, BarArray};
 use crate::core::drawings::DrawingManager;
 use crate::core::markers::MarkerManager;
@@ -40,6 +42,10 @@ pub struct ChartEngine {
     pub h_pixel_ratio: f64,
     /// Vertical pixel ratio: exact `bitmapHeight / cssHeight`.
     pub v_pixel_ratio: f64,
+    /// Main chart type (candlestick, OHLC bars, line, area, etc.).
+    pub main_chart_type: MainChartType,
+    /// Options for the main chart rendering.
+    pub main_chart_options: MainChartOptions,
 }
 
 impl ChartEngine {
@@ -73,12 +79,36 @@ impl ChartEngine {
             dpr,
             h_pixel_ratio: dpr,
             v_pixel_ratio: dpr,
+            main_chart_type: MainChartType::default(),
+            main_chart_options: MainChartOptions::default(),
         }
     }
 
     /// Which renderer backend is active.
     pub fn renderer_name(&self) -> &str {
         self.renderer.name()
+    }
+
+    /// Get the current main chart type.
+    pub fn main_chart_type(&self) -> MainChartType {
+        self.main_chart_type
+    }
+
+    /// Set the main chart type (candlestick, OHLC bars, line, area, etc.).
+    pub fn set_main_chart_type(&mut self, chart_type: MainChartType) {
+        self.main_chart_type = chart_type;
+        self.main_chart_options.chart_type = chart_type;
+    }
+
+    /// Get the main chart options.
+    pub fn main_chart_options(&self) -> &MainChartOptions {
+        &self.main_chart_options
+    }
+
+    /// Set main chart options.
+    pub fn set_main_chart_options(&mut self, options: MainChartOptions) {
+        self.main_chart_type = options.chart_type;
+        self.main_chart_options = options;
     }
 
     /// Replace all bar data.
@@ -90,7 +120,7 @@ impl ChartEngine {
         self.studies.update_studies(&self.bars);
 
         // Auto-fit viewport to show last N bars
-        let visible = (len as f64).min(200.0);
+        let visible = (len as f64).min(DEFAULT_INITIAL_VISIBLE_BARS);
         self.viewport.set_range((len as f64) - visible, len as f64);
 
         if !self.viewport.price_locked {
@@ -224,6 +254,20 @@ impl ChartEngine {
         }
     }
 
+    /// Recalculate all studies. Call this after changing parameters or when
+    /// data is updated from the WASM layer (as opposed to via append_bar/update_bar).
+    pub fn recalculate_studies(&mut self) {
+        self.studies.update_studies(&self.bars);
+    }
+
+    /// Auto-fit price axis to visible data if not locked.
+    /// Call this after panning/zooming when price_locked is false.
+    pub fn auto_fit_price_if_unlocked(&mut self) {
+        if !self.viewport.price_locked {
+            self.viewport.auto_fit_price(&self.bars);
+        }
+    }
+
     /// Get study count.
     pub fn study_count(&self) -> usize {
         self.studies.study_count()
@@ -242,7 +286,7 @@ impl ChartEngine {
         // Scroll viewport to keep latest bar visible (if near the right edge)
         let len = self.bars.len() as f64;
         let visible = self.viewport.end_bar - self.viewport.start_bar;
-        if self.viewport.end_bar >= len - visible * 0.1 - 1.0 {
+        if self.viewport.end_bar >= len - visible * AUTO_SCROLL_THRESHOLD_RATIO - 1.0 {
             // User is near the right edge — auto-scroll
             self.viewport.set_range(len - visible, len);
         }
@@ -300,6 +344,8 @@ impl ChartEngine {
             y_ticks,
             x_ticks,
             series: &self.series,
+            main_chart_type: self.main_chart_type,
+            main_chart_options: &self.main_chart_options,
         };
 
         self.renderer.render_frame(&ctx)

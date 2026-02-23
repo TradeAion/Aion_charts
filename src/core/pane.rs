@@ -7,6 +7,10 @@
 //! - Main pane (index 0) contains the primary candlestick data
 //! - Sub-panes (index 1+) contain indicators like RSI, MACD
 
+use crate::core::constants::{
+    MAIN_PANE_STRETCH_FACTOR, MIN_INDICATOR_PANE_HEIGHT_CSS, MIN_MAIN_PANE_HEIGHT_CSS,
+    PANE_SEPARATOR_HEIGHT_CSS,
+};
 use crate::core::series::SeriesCollection;
 use crate::core::viewport::{PriceScaleMode, Viewport};
 
@@ -39,7 +43,7 @@ impl Default for PaneOptions {
             stretch_factor: 1.0,
             show_volume: false,
             price_scale_mode: PriceScaleMode::Normal,
-            min_height: 50.0,
+            min_height: MIN_INDICATOR_PANE_HEIGHT_CSS,
         }
     }
 }
@@ -48,10 +52,10 @@ impl PaneOptions {
     /// Options for the main chart pane.
     pub fn main() -> Self {
         Self {
-            stretch_factor: 3.0,
+            stretch_factor: MAIN_PANE_STRETCH_FACTOR,
             show_volume: true,
             price_scale_mode: PriceScaleMode::Normal,
-            min_height: 100.0,
+            min_height: MIN_MAIN_PANE_HEIGHT_CSS,
         }
     }
 
@@ -61,7 +65,7 @@ impl PaneOptions {
             stretch_factor: 1.0,
             show_volume: false,
             price_scale_mode: PriceScaleMode::Normal,
-            min_height: 50.0,
+            min_height: MIN_INDICATOR_PANE_HEIGHT_CSS,
         }
     }
 }
@@ -216,9 +220,8 @@ impl PaneManager {
         }
 
         // Account for separators (N-1 separators for N panes)
-        let separator_height = 4.0; // CSS pixels per separator
         let num_separators = self.panes.len().saturating_sub(1);
-        let available = self.total_height - (num_separators as f64 * separator_height);
+        let available = self.total_height - (num_separators as f64 * PANE_SEPARATOR_HEIGHT_CSS);
 
         // Sum of all stretch factors
         let total_stretch: f64 = self.panes.iter().map(|p| p.options.stretch_factor).sum();
@@ -259,14 +262,13 @@ impl PaneManager {
 
     /// Get cumulative Y offset for a pane (for hit-testing).
     pub fn pane_y_offset(&self, id: PaneId) -> f64 {
-        let separator_height = 4.0;
         let mut offset = 0.0;
 
         for pane in &self.panes {
             if pane.id == id {
                 return offset;
             }
-            offset += pane.height_css + separator_height;
+            offset += pane.height_css + PANE_SEPARATOR_HEIGHT_CSS;
         }
 
         offset
@@ -274,7 +276,6 @@ impl PaneManager {
 
     /// Find which pane contains a given Y coordinate.
     pub fn pane_at_y(&self, y: f64) -> Option<PaneId> {
-        let separator_height = 4.0;
         let mut cumulative = 0.0;
 
         for pane in &self.panes {
@@ -285,7 +286,7 @@ impl PaneManager {
                 return Some(pane.id);
             }
 
-            cumulative = bottom + separator_height;
+            cumulative = bottom + PANE_SEPARATOR_HEIGHT_CSS;
         }
 
         None
@@ -294,18 +295,17 @@ impl PaneManager {
     /// Check if Y coordinate is on a separator (for resize dragging).
     /// Returns the index of the separator (0 = between pane 0 and 1).
     pub fn separator_at_y(&self, y: f64) -> Option<usize> {
-        let separator_height = 4.0;
         let mut cumulative = 0.0;
 
         for (i, pane) in self.panes.iter().enumerate() {
             cumulative += pane.height_css;
 
             // Check if in separator zone
-            if y >= cumulative && y < cumulative + separator_height {
+            if y >= cumulative && y < cumulative + PANE_SEPARATOR_HEIGHT_CSS {
                 return Some(i);
             }
 
-            cumulative += separator_height;
+            cumulative += PANE_SEPARATOR_HEIGHT_CSS;
         }
 
         None

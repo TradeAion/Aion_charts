@@ -26,9 +26,32 @@
 //!   wheel deltaY  → zoom price
 //!   dbl-click     → reset price
 
+use crate::core::constants::{
+    DEFAULT_INITIAL_VISIBLE_BARS, DOUBLE_CLICK_WINDOW_MS, KINETIC_FRICTION_COEFFICIENT,
+    KINETIC_TRIGGER_WINDOW_MS, MIN_GLIDE_VELOCITY, MIN_KINETIC_VELOCITY, MIN_PINCH_SCALE,
+    MIN_PRICE_SCALE_COEFF, PHYSICS_FRAME_MS, PINCH_SCALE_MULTIPLIER, PRICE_SCALE_OFFSET_COEFF,
+    SCROLL_MULTIPLIER, TIME_AXIS_MAX_BAR_MULTIPLIER, TIME_AXIS_MIN_BARS, VELOCITY_SAMPLE_WINDOW_MS,
+    VELOCITY_SMOOTHING_FACTOR, WHEEL_DELTA_LINE_MULTIPLIER, WHEEL_DELTA_PAGE_MULTIPLIER,
+    WHEEL_SPEED_DIVISOR, ZOOM_FACTOR_DIVISOR,
+};
 use crate::core::data::BarArray;
 use crate::core::renderer::traits::{CrosshairMode, CrosshairState};
 use crate::core::viewport::Viewport;
+
+/// Get current time in milliseconds (platform-agnostic).
+#[cfg(target_arch = "wasm32")]
+fn now_ms() -> f64 {
+    js_sys::Date::now()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn now_ms() -> f64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as f64)
+        .unwrap_or(0.0)
+}
 
 /// Manhattan distance threshold before drag starts (LWC: CancelClickManhattanDistance = 5).
 const CANCEL_CLICK_DISTANCE: f64 = 5.0;
@@ -254,7 +277,7 @@ impl InteractionHandler {
         }
 
         // LWC: zoomScale = (scale - prevScale) * 5
-        let zoom_scale = (scale - self.pinch_prev_scale) * 5.0;
+        let zoom_scale = (scale - self.pinch_prev_scale) * PINCH_SCALE_MULTIPLIER;
         self.pinch_prev_scale = scale;
 
         if zoom_scale.abs() < 0.0001 {
@@ -262,13 +285,13 @@ impl InteractionHandler {
         }
 
         // Time zoom — same as LWC zoomTime
-        let factor = 1.0 / (1.0 + zoom_scale / 10.0);
+        let factor = 1.0 / (1.0 + zoom_scale / ZOOM_FACTOR_DIVISOR);
         viewport.zoom(self.pinch_start_center_bar, factor);
         viewport.clamp_to_data(bars.len());
 
         // Price zoom — scale around midpoint
         if viewport.price_locked {
-            let half = self.pinch_start_price_range / 2.0 / scale.max(0.1);
+            let half = self.pinch_start_price_range / 2.0 / scale.max(MIN_PINCH_SCALE);
             viewport.price_min = self.pinch_start_price_mid - half;
             viewport.price_max = self.pinch_start_price_mid + half;
         } else {
@@ -317,7 +340,7 @@ impl InteractionHandler {
             // Reset view (same as mouse double-click on chart)
             viewport.price_locked = false;
             let len = bars.len() as f64;
-            let visible = len.min(200.0);
+            let visible = len.min(DEFAULT_INITIAL_VISIBLE_BARS);
             viewport.set_range(len - visible, len);
             viewport.auto_fit_price(bars);
         }
@@ -338,7 +361,7 @@ impl InteractionHandler {
         let pane_phys_w = pane_css_w * dpr;
         let _pane_phys_h = pane_css_h * dpr;
         let candle_phys_h = pane_css_h * viewport.candle_height_frac() * dpr;
-        let now = js_sys::Date::now();
+        let now = now_ms();
 
         // ── TOUCH: tracking mode (long-press activated) ──
         // Crosshair follows finger; chart does NOT move.
@@ -454,9 +477,10 @@ impl InteractionHandler {
                 // Track velocity (touch-only, used for inertia)
                 if self.is_touch {
                     let dt = now - self.last_move_time;
-                    if dt > 0.0 && dt < 100.0 {
+                    if dt > 0.0 && dt < VELOCITY_SAMPLE_WINDOW_MS {
                         let vx = (x - self.last_move_x) / dt;
-                        self.velocity_x = self.velocity_x * 0.5 + vx * 0.5;
+                        self.velocity_x = self.velocity_x * VELOCITY_SMOOTHING_FACTOR
+                            + vx * (1.0 - VELOCITY_SMOOTHING_FACTOR);
                     }
                 }
                 self.last_move_time = now;
@@ -506,8 +530,10 @@ impl InteractionHandler {
                 let start_len = (pane_css_w - self.time_scale_start_x).clamp(1.0, pane_css_w);
                 let current_len = (pane_css_w - x).clamp(1.0, pane_css_w);
                 let ratio = start_len / current_len;
-                let new_bar_count = (self.time_scale_start_visible_bars * ratio)
-                    .clamp(2.0, bars.len() as f64 * 4.0);
+                let new_bar_count = (self.time_scale_start_visible_bars * ratio).clamp(
+                    TIME_AXIS_MIN_BARS,
+                    bars.len() as f64 * TIME_AXIS_MAX_BAR_MULTIPLIER,
+                );
                 let end = viewport.end_bar;
                 let new_start = end - new_bar_count;
                 viewport.set_range(new_start, end);
@@ -530,9 +556,9 @@ impl InteractionHandler {
             if self.drag_active && pane_css_h > 1.0 {
                 let h = self.price_scale_height;
                 let inv_y = (h - y).max(0.0);
-                let offset = (h - 1.0) * 0.2;
-                let scale_coeff =
-                    ((self.price_scale_start_y_inv + offset) / (inv_y + offset)).max(0.1);
+                let offset = (h - 1.0) * PRICE_SCALE_OFFSET_COEFF;
+                let scale_coeff = ((self.price_scale_start_y_inv + offset) / (inv_y + offset))
+                    .max(MIN_PRICE_SCALE_COEFF);
 
                 let half = self.price_scale_start_range * scale_coeff / 2.0;
                 let mid = self.price_scale_start_mid;
@@ -562,7 +588,7 @@ impl InteractionHandler {
         // Reset gliding state
         self.velocity_x = 0.0;
         self.velocity_y = 0.0;
-        self.last_move_time = js_sys::Date::now();
+        self.last_move_time = now_ms();
         self.last_move_x = x;
         self.last_move_y = y;
         self.is_gliding = false;
@@ -597,7 +623,7 @@ impl InteractionHandler {
         // Kinetic scrolling: TOUCH ONLY, horizontal only
         if self.is_touch && self.pressed && self.drag_active && zone == HitZone::Chart {
             let dt = now_ms - self.last_move_time;
-            if dt < 50.0 && self.velocity_x.abs() > 0.1 {
+            if dt < KINETIC_TRIGGER_WINDOW_MS && self.velocity_x.abs() > MIN_KINETIC_VELOCITY {
                 self.is_gliding = true;
                 self.velocity_y = 0.0; // horizontal only
             } else {
@@ -615,14 +641,14 @@ impl InteractionHandler {
         self.pressed = false;
         self.drag_active = false;
 
-        // Double-click / double-tap detection (LWC: 500ms)
+        // Double-click / double-tap detection
         if was_click && zone != HitZone::None && !self.long_press_fired {
             let dt = now_ms - self.last_click_time;
-            if dt < 500.0 && self.last_click_zone == zone {
+            if dt < DOUBLE_CLICK_WINDOW_MS && self.last_click_zone == zone {
                 match zone {
                     HitZone::TimeAxis => {
                         let len = bars.len() as f64;
-                        let visible = len.min(200.0);
+                        let visible = len.min(DEFAULT_INITIAL_VISIBLE_BARS);
                         viewport.set_range(len - visible, len);
                         if !viewport.price_locked {
                             viewport.auto_fit_price(bars);
@@ -637,7 +663,7 @@ impl InteractionHandler {
                         if !self.is_touch {
                             viewport.price_locked = false;
                             let len = bars.len() as f64;
-                            let visible = len.min(200.0);
+                            let visible = len.min(DEFAULT_INITIAL_VISIBLE_BARS);
                             viewport.set_range(len - visible, len);
                             viewport.auto_fit_price(bars);
                         }
@@ -671,18 +697,18 @@ impl InteractionHandler {
         }
 
         let speed_adj = match delta_mode {
-            2 => 120.0, // DOM_DELTA_PAGE
-            1 => 32.0,  // DOM_DELTA_LINE
-            _ => 1.0,   // DOM_DELTA_PIXEL
+            2 => WHEEL_DELTA_PAGE_MULTIPLIER, // DOM_DELTA_PAGE
+            1 => WHEEL_DELTA_LINE_MULTIPLIER, // DOM_DELTA_LINE
+            _ => 1.0,                         // DOM_DELTA_PIXEL
         };
 
-        let adj_dx = speed_adj * delta_x / 100.0;
-        let adj_dy = -(speed_adj * delta_y / 100.0);
+        let adj_dx = speed_adj * delta_x / WHEEL_SPEED_DIVISOR;
+        let adj_dy = -(speed_adj * delta_y / WHEEL_SPEED_DIVISOR);
 
         // deltaY → zoom time
         if adj_dy.abs() > 0.001 {
             let zoom_scale = adj_dy.signum() * adj_dy.abs().min(1.0);
-            let factor = 1.0 / (1.0 + zoom_scale / 10.0);
+            let factor = 1.0 / (1.0 + zoom_scale / ZOOM_FACTOR_DIVISOR);
 
             let scroll_position = x.clamp(0.0, pane_css_w);
             let focal_frac = scroll_position / pane_css_w;
@@ -700,7 +726,7 @@ impl InteractionHandler {
         if adj_dx.abs() > 0.001 {
             let visible_bars = viewport.end_bar - viewport.start_bar;
             let bar_spacing = pane_css_w / visible_bars;
-            let scroll_bars = adj_dx * -80.0 / bar_spacing;
+            let scroll_bars = adj_dx * SCROLL_MULTIPLIER / bar_spacing;
             viewport.pan_clamped(scroll_bars, bars.len());
             if !viewport.price_locked {
                 viewport.auto_fit_price(bars);
@@ -724,14 +750,14 @@ impl InteractionHandler {
     /// Wheel event on the price axis — zoom price range.
     pub fn price_axis_wheel(&mut self, delta_y: f64, delta_mode: u32, viewport: &mut Viewport) {
         let speed_adj = match delta_mode {
-            2 => 120.0,
-            1 => 32.0,
+            2 => WHEEL_DELTA_PAGE_MULTIPLIER,
+            1 => WHEEL_DELTA_LINE_MULTIPLIER,
             _ => 1.0,
         };
-        let adj_dy = -(speed_adj * delta_y / 100.0);
+        let adj_dy = -(speed_adj * delta_y / WHEEL_SPEED_DIVISOR);
         if adj_dy.abs() > 0.001 {
             let zoom_scale = adj_dy.signum() * adj_dy.abs().min(1.0);
-            let factor = 1.0 / (1.0 + zoom_scale / 10.0);
+            let factor = 1.0 / (1.0 + zoom_scale / ZOOM_FACTOR_DIVISOR);
             let mid = (viewport.price_min + viewport.price_max) / 2.0;
             let half = (viewport.price_max - viewport.price_min) / 2.0;
             viewport.price_min = mid - half * factor;
@@ -791,7 +817,7 @@ impl InteractionHandler {
             return false;
         }
 
-        let now = js_sys::Date::now();
+        let now = now_ms();
         let dt = now - self.last_move_time;
         if dt <= 0.0 {
             return true;
@@ -810,12 +836,12 @@ impl InteractionHandler {
         }
 
         // Decelerate (friction)
-        let friction = (0.95f64).powf(dt / 16.0);
+        let friction = KINETIC_FRICTION_COEFFICIENT.powf(dt / PHYSICS_FRAME_MS);
         self.velocity_x *= friction;
         self.last_move_time = now;
 
         // Stop gliding if velocity is negligible
-        if self.velocity_x.abs() < 0.01 {
+        if self.velocity_x.abs() < MIN_GLIDE_VELOCITY {
             self.is_gliding = false;
             self.velocity_x = 0.0;
         }

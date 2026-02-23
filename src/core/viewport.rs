@@ -7,6 +7,11 @@
 //!
 //! Supports multiple price scale modes: Normal, Logarithmic, Percentage, IndexedTo100.
 
+use crate::core::constants::{
+    DEFAULT_PRICE_MAX, DEFAULT_SCALE_MARGIN_BOTTOM, DEFAULT_SCALE_MARGIN_TOP,
+    DEFAULT_VOLUME_HEIGHT_RATIO, DEGENERATE_PRICE_RANGE_FALLBACK, MIN_VISIBLE_BARS,
+};
+
 /// Price scale mode — determines how prices are mapped to visual coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PriceScaleMode {
@@ -53,7 +58,7 @@ impl LogFormula {
     fn for_range(min: f64, max: f64) -> Self {
         // LWC uses a complex adaptive formula. Simplified version:
         // For prices that can go to zero or negative, we need an offset.
-        let min_pos = min.max(1e-10);
+        let _min_pos = min.max(1e-10);
         let log_offset = if min <= 0.0 { 1.0 - min } else { 0.0 };
         let log_base = 10.0_f64; // standard log10 scale
         Self {
@@ -110,15 +115,15 @@ impl Viewport {
     pub fn new(width: u32, height: u32) -> Self {
         Self {
             start_bar: 0.0,
-            end_bar: 100.0,
+            end_bar: DEFAULT_PRICE_MAX, // Default visible bars
             price_min: 0.0,
-            price_max: 100.0,
+            price_max: DEFAULT_PRICE_MAX,
             width,
             height,
-            volume_height_ratio: 0.15,
+            volume_height_ratio: DEFAULT_VOLUME_HEIGHT_RATIO as f32,
             price_locked: false,
-            scale_margin_top: 0.2,
-            scale_margin_bottom: 0.1,
+            scale_margin_top: DEFAULT_SCALE_MARGIN_TOP,
+            scale_margin_bottom: DEFAULT_SCALE_MARGIN_BOTTOM,
             price_invalidated: true,
             price_scale_mode: PriceScaleMode::Normal,
             first_value: 0.0,
@@ -184,13 +189,15 @@ impl Viewport {
         let mut lo = f32::MAX;
         let mut hi = f32::MIN;
         for i in start..end {
-            let bar = bars.get(i);
+            // SAFETY: i is bounded by start..end which are clamped to bars.len()
+            let bar = bars.get_unchecked(i);
             lo = lo.min(bar.low);
             hi = hi.max(bar.high);
         }
 
         // Update first_value for percentage/indexed modes
-        self.first_value = bars.closes.value(start) as f64;
+        // Flush to ensure Arrow arrays are up to date
+        self.first_value = bars.close(start) as f64;
 
         // For log mode, update the formula
         if self.price_scale_mode == PriceScaleMode::Logarithmic {
@@ -233,8 +240,8 @@ impl Viewport {
         let full_range = if raw_range > 0.0 {
             raw_range / internal_frac
         } else {
-            // Degenerate single price — extend by 10 units (LWC behavior)
-            10.0 / internal_frac
+            // Degenerate single price — extend by fallback value (LWC behavior)
+            DEGENERATE_PRICE_RANGE_FALLBACK / internal_frac
         };
         self.price_min = internal_lo - full_range * self.scale_margin_bottom;
         self.price_max = self.price_min + full_range;
@@ -426,11 +433,232 @@ impl Viewport {
         let right = self.end_bar - focal_bar;
         self.start_bar = focal_bar - left * factor;
         self.end_bar = focal_bar + right * factor;
-        if self.end_bar - self.start_bar < 5.0 {
+        if self.end_bar - self.start_bar < MIN_VISIBLE_BARS {
             let mid = (self.start_bar + self.end_bar) / 2.0;
-            self.start_bar = mid - 2.5;
-            self.end_bar = mid + 2.5;
+            self.start_bar = mid - MIN_VISIBLE_BARS / 2.0;
+            self.end_bar = mid + MIN_VISIBLE_BARS / 2.0;
         }
         self.price_invalidated = true;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Unit Tests
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Basic viewport operations ──
+
+    #[test]
+    fn test_viewport_new() {
+        let vp = Viewport::new(800, 600);
+        assert_eq!(vp.width, 800);
+        assert_eq!(vp.height, 600);
+        assert!(!vp.price_locked);
+    }
+
+    #[test]
+    fn test_visible_bar_count() {
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(0.0, 100.0);
+        assert_eq!(vp.visible_bar_count(), 100.0);
+
+        vp.set_range(50.0, 150.0);
+        assert_eq!(vp.visible_bar_count(), 100.0);
+    }
+
+    #[test]
+    fn test_set_range_min_bars() {
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(0.0, 0.5); // Less than 1 bar
+                                // end_bar is forced to be at least start + 1
+        assert!(vp.end_bar >= vp.start_bar + 1.0);
+    }
+
+    #[test]
+    fn test_resize() {
+        let mut vp = Viewport::new(800, 600);
+        vp.resize(1024, 768);
+        assert_eq!(vp.width, 1024);
+        assert_eq!(vp.height, 768);
+        assert!(vp.price_invalidated);
+    }
+
+    // ── Coordinate conversion ──
+
+    #[test]
+    fn test_bar_to_frac() {
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(0.0, 100.0);
+
+        assert_eq!(vp.bar_to_frac(0.0), 0.0);
+        assert_eq!(vp.bar_to_frac(50.0), 0.5);
+        assert_eq!(vp.bar_to_frac(100.0), 1.0);
+    }
+
+    #[test]
+    fn test_price_to_frac() {
+        let mut vp = Viewport::new(800, 600);
+        vp.price_min = 100.0;
+        vp.price_max = 200.0;
+
+        assert_eq!(vp.price_to_frac(100.0), 0.0);
+        assert_eq!(vp.price_to_frac(150.0), 0.5);
+        assert_eq!(vp.price_to_frac(200.0), 1.0);
+    }
+
+    #[test]
+    fn test_price_to_css_y_inverts() {
+        let mut vp = Viewport::new(800, 600);
+        vp.price_min = 100.0;
+        vp.price_max = 200.0;
+
+        // Higher prices should have lower Y values (top of screen)
+        let y_low = vp.price_to_css_y(100.0, 600.0);
+        let y_high = vp.price_to_css_y(200.0, 600.0);
+
+        assert!(y_high < y_low); // High price = lower Y
+    }
+
+    // ── Zoom operations ──
+
+    #[test]
+    fn test_zoom_in_reduces_visible_bars() {
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(0.0, 100.0);
+
+        let initial_bars = vp.visible_bar_count();
+        vp.zoom(50.0, 0.5); // Zoom in by factor of 0.5
+
+        assert!(vp.visible_bar_count() < initial_bars);
+    }
+
+    #[test]
+    fn test_zoom_out_increases_visible_bars() {
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(0.0, 100.0);
+
+        let initial_bars = vp.visible_bar_count();
+        vp.zoom(50.0, 2.0); // Zoom out by factor of 2
+
+        assert!(vp.visible_bar_count() > initial_bars);
+    }
+
+    #[test]
+    fn test_zoom_respects_minimum_bars() {
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(0.0, 10.0);
+
+        // Zoom in extremely
+        for _ in 0..20 {
+            vp.zoom(5.0, 0.1);
+        }
+
+        // Should not go below MIN_VISIBLE_BARS
+        assert!(vp.visible_bar_count() >= MIN_VISIBLE_BARS);
+    }
+
+    #[test]
+    fn test_zoom_focal_point() {
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(0.0, 100.0);
+
+        // Zoom at focal point 25 (25% from left)
+        let focal = 25.0;
+        vp.zoom(focal, 0.5);
+
+        // The focal bar should remain at approximately the same screen position
+        // (This is a proportional zoom)
+        let frac_after = vp.bar_to_frac(focal);
+        assert!((frac_after - 0.25).abs() < 0.001);
+    }
+
+    // ── Pan operations ──
+
+    #[test]
+    fn test_pan() {
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(0.0, 100.0);
+
+        vp.pan(10.0);
+
+        assert_eq!(vp.start_bar, 10.0);
+        assert_eq!(vp.end_bar, 110.0);
+    }
+
+    #[test]
+    fn test_pan_clamped_left() {
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(0.0, 100.0);
+
+        vp.pan_clamped(-50.0, 200); // Try to pan left beyond start
+
+        // Should stop at start (with some allowance for left edge)
+        assert!(vp.start_bar >= -100.0); // Can go some bars left
+    }
+
+    #[test]
+    fn test_pan_clamped_right() {
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(0.0, 100.0);
+
+        vp.pan_clamped(500.0, 200); // Try to pan way past end
+
+        // Should be clamped to reasonable range
+        assert!(vp.end_bar <= 400.0); // 2x data len max
+    }
+
+    // ── Price scale modes ──
+
+    #[test]
+    fn test_price_scale_mode_default_is_normal() {
+        let vp = Viewport::new(800, 600);
+        assert_eq!(vp.price_scale_mode, PriceScaleMode::Normal);
+    }
+
+    #[test]
+    fn test_set_price_scale_mode() {
+        let mut vp = Viewport::new(800, 600);
+        vp.set_price_scale_mode(PriceScaleMode::Logarithmic);
+        assert_eq!(vp.price_scale_mode, PriceScaleMode::Logarithmic);
+        assert!(vp.price_invalidated);
+    }
+
+    #[test]
+    fn test_price_scale_mode_from_str() {
+        assert_eq!(PriceScaleMode::from_str("normal"), PriceScaleMode::Normal);
+        assert_eq!(PriceScaleMode::from_str("log"), PriceScaleMode::Logarithmic);
+        assert_eq!(
+            PriceScaleMode::from_str("logarithmic"),
+            PriceScaleMode::Logarithmic
+        );
+        assert_eq!(
+            PriceScaleMode::from_str("percentage"),
+            PriceScaleMode::Percentage
+        );
+        assert_eq!(
+            PriceScaleMode::from_str("percent"),
+            PriceScaleMode::Percentage
+        );
+        assert_eq!(
+            PriceScaleMode::from_str("indexedTo100"),
+            PriceScaleMode::IndexedTo100
+        );
+        assert_eq!(PriceScaleMode::from_str("unknown"), PriceScaleMode::Normal);
+    }
+
+    // ── Candle height fraction ──
+
+    #[test]
+    fn test_candle_height_frac() {
+        let mut vp = Viewport::new(800, 600);
+        vp.volume_height_ratio = 0.2;
+
+        // Candle area should be 80% of height
+        // Use approximate comparison due to f32->f64 conversion
+        assert!((vp.candle_height_frac() - 0.8).abs() < 1e-6);
     }
 }
