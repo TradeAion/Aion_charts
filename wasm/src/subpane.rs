@@ -1011,6 +1011,24 @@ impl SubPane {
         let _ = self.axis_container.remove();
         let _ = self.drag_overlay.remove();
     }
+
+    /// Dispose: clear all event closures and remove DOM elements.
+    ///
+    /// Note: The closures hold Rc references to shared state. Clearing them
+    /// allows the DOM to release its references to the JS functions,
+    /// preventing memory leaks when the subpane is destroyed.
+    pub fn dispose(&mut self) {
+        // Clear closure vectors - this drops the closures
+        // DOM listeners are not explicitly removed here since we're removing
+        // the DOM elements entirely, which effectively removes all listeners
+        self._closures.clear();
+        self._interaction_closures.clear();
+        self._wheel_closures.clear();
+        self._touch_closures.clear();
+
+        // Remove DOM elements
+        self.remove();
+    }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

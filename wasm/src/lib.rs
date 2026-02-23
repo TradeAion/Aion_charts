@@ -12,6 +12,11 @@
 //!   core.set_data(...)                  → load bar data
 //!   core.render()                       → draw one frame (call from RAF)
 //!   core.dispose()                      → detach events, cleanup
+//!
+//! Module structure:
+//!   - chart_inner: Internal state (ChartInner) and helper methods
+//!   - canvas_manager: DOM layout and canvas management (WidgetLayout)
+//!   - subpane: Indicator subpane management
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -32,8 +37,11 @@ use raycore::{
 };
 
 mod canvas_manager;
+mod chart_inner;
 mod subpane;
+
 use canvas_manager::WidgetLayout;
+use chart_inner::{ChartInner, ExactPixelSizes, SharedInner, EventListenerRegistry, event_css_pos, wheel_css_pos};
 use subpane::{SubPane, IndicatorConfig, PaneHeightCoordinator};
 
 fn init_logging() {
@@ -58,321 +66,6 @@ fn get_dpr() -> f64 {
         .max(1.0)
 }
 
-/// Exact device-pixel sizes for each widget container, reported by
-/// `ResizeObserver` with `device-pixel-content-box`. When available these
-/// replace the lossy `round(css * dpr)` fallback and eliminate ±1px blur.
-#[derive(Debug, Clone, Copy, Default)]
-struct ExactPixelSizes {
-    /// Set to true once the observer has fired at least once.
-    available: bool,
-    pane_pw: u32,
-    pane_ph: u32,
-    price_axis_pw: u32,
-    price_axis_ph: u32,
-    time_axis_pw: u32,
-    time_axis_ph: u32,
-    corner_stub_pw: u32,
-    corner_stub_ph: u32,
-}
-
-/// Internal chart state shared between event closures and the public API.
-struct ChartInner {
-    engine: ChartEngine,
-    overlay: OverlayRenderer,
-    price_axis_renderer: PriceAxisRenderer,
-    time_axis_renderer: TimeAxisRenderer,
-    layout: WidgetLayout,
-    interaction: InteractionHandler,
-    /// Exact pixel sizes from device-pixel-content-box ResizeObserver.
-    exact_sizes: ExactPixelSizes,
-    /// Sub-panes for indicators (RSI, ATR, etc.)
-    subpanes: Vec<SubPane>,
-    /// Next sub-pane ID
-    next_subpane_id: u32,
-    /// Which sub-pane the cursor is currently over (None = main pane or outside).
-    /// Used for proper crosshair coordination instead of y=-1000 hack.
-    active_subpane_id: Option<u32>,
-    /// Coordinates pane heights using stretch factors (PaneManager bridge).
-    pane_coordinator: PaneHeightCoordinator,
-}
-
-/// Helper methods that destructure `self` to satisfy the borrow checker.
-/// Each method borrows `interaction` and `engine` fields separately.
-impl ChartInner {
-    fn on_pointer_enter(&mut self, zone: HitZone) {
-        let Self { interaction, engine, .. } = self;
-        interaction.pointer_enter(zone, &mut engine.crosshair);
-    }
-
-    fn on_pointer_leave(&mut self, zone: HitZone) {
-        let Self { interaction, engine, .. } = self;
-        interaction.pointer_leave(zone, &mut engine.crosshair);
-    }
-
-    fn on_pane_pointer_move(&mut self, x: f64, y: f64) {
-        let (pw, ph) = self.layout.pane_css_size();
-        let dpr = self.engine.dpr;
-
-        // Pre-compute logical coords from viewport (before any mutable drawing borrow)
-        let bar = self.engine.viewport.pixel_to_bar(x, pw);
-        // Use candle area height for drawing coordinates — matches price_to_css_y().
-        // Candles occupy the top (1 - volume_ratio) of the pane; volume is below.
-        let candle_css_h = ph * self.engine.viewport.candle_height_frac();
-        let price = self.engine.viewport.pixel_to_price(y, candle_css_h);
-
-        let mut is_drawing_drag = false;
-        let mut hover_cursor: Option<&'static str> = None;
-
-        // Drawing tool: update preview or drag
-        {
-            let drawings = &mut self.engine.drawings;
-            if drawings.is_creating() {
-                drawings.update_creation_preview(bar, price);
-                // Still fall through so crosshair updates
-            } else if let Some(id) = drawings.selected_id {
-                if matches!(drawings.get(id).map(|d| d.state()),
-                    Some(raycore::core::drawings::types::DrawingState::Dragging { .. })) {
-                    drawings.update_drag(id, bar, price);
-                    is_drawing_drag = true;
-                }
-            }
-
-            // Hover hit-test for cursor feedback (not during drag/creation, no tool active)
-            if !is_drawing_drag && !drawings.is_creating()
-                && drawings.active_tool == raycore::DrawingTool::None
-            {
-                if let Some((hit_id, result)) = drawings.hit_test(x, y, &self.engine.viewport, pw, ph) {
-                    use raycore::core::drawings::types::cursor_for_drawing_hit;
-                    let tool = drawings.get(hit_id)
-                        .map(|d| d.tool())
-                        .unwrap_or(raycore::DrawingTool::None);
-                    hover_cursor = Some(cursor_for_drawing_hit(tool, result.part, None));
-                }
-            }
-        }
-
-        // Update hover cursor only when not in a drawing drag
-        if !self.interaction.drawing_drag_active {
-            self.interaction.set_drawing_cursor(hover_cursor);
-        }
-
-        if is_drawing_drag {
-            // Suppress crosshair while dragging a drawing
-            self.engine.crosshair.active = false;
-            return; // don't move chart while dragging drawing
-        }
-
-        let Self { interaction, engine, .. } = self;
-        interaction.pane_pointer_move(
-            x, y, pw, ph,
-            &mut engine.viewport, &mut engine.crosshair,
-            &engine.bars, dpr,
-        );
-    }
-
-    fn on_pointer_down(&mut self, x: f64, y: f64, zone: HitZone) {
-        let (pw, ph) = self.layout.pane_css_size();
-
-        if zone == HitZone::Chart {
-            let bar = self.engine.viewport.pixel_to_bar(x, pw);
-            // Use candle area height — consistent with point_to_css / price_to_css_y.
-            let candle_css_h = ph * self.engine.viewport.candle_height_frac();
-            let price = self.engine.viewport.pixel_to_price(y, candle_css_h);
-
-            let mut should_return = false;
-            let mut drag_cursor: Option<&'static str> = None;
-
-            {
-                let drawings = &mut self.engine.drawings;
-
-                if drawings.is_tool_active() {
-                    // Start creating a new drawing
-                    if !drawings.is_creating() {
-                        drawings.start_creating(bar, price);
-                    } else {
-                        // Multi-step tools: place next anchor on click
-                        drawings.finalize_creation_step(bar, price);
-                    }
-                    should_return = true;
-                } else {
-                    // No tool active: check if user clicked on an existing drawing
-                    let hit = drawings.hit_test(x, y, &self.engine.viewport, pw, ph);
-                    if let Some((id, result)) = hit {
-                        use raycore::core::drawings::types::{HitPart, cursor_for_drawing_hit};
-                        let tool = drawings.get(id)
-                            .map(|d| d.tool())
-                            .unwrap_or(raycore::DrawingTool::None);
-                        let anchor_idx = match result.part {
-                            HitPart::Anchor(i) => Some(i),
-                            _ => None,
-                        };
-
-                        // Rectangle: body clicks select only and fall through to
-                        // chart pan. Edge clicks move the whole rectangle.
-                        // Anchor clicks resize (move single anchor).
-                        if tool == raycore::DrawingTool::Rectangle && result.part == HitPart::Body {
-                            drawings.select(id);
-                            // Don't start drag — fall through to chart pan
-                        } else {
-                            drawings.select(id);
-                            drawings.start_drag(id, anchor_idx, bar, price);
-                            drag_cursor = Some(cursor_for_drawing_hit(tool, result.part, anchor_idx));
-                            should_return = true;
-                        }
-                    } else {
-                        // Click on empty space: deselect
-                        drawings.deselect_all();
-                    }
-                }
-            }
-
-            if should_return {
-                if let Some(cursor) = drag_cursor {
-                    self.interaction.drawing_drag_active = true;
-                    self.interaction.set_drawing_cursor(Some(cursor));
-                }
-                return; // don't pan while drawing tool / drawing drag
-            }
-        }
-
-        let Self { interaction, engine, .. } = self;
-        interaction.pointer_down(x, y, zone, &engine.viewport, ph);
-    }
-
-    fn on_pointer_up(&mut self) {
-        let now_ms = js_sys::Date::now();
-        let (pw, ph) = self.layout.pane_css_size();
-
-        // If a drawing was being created (drag-to-create: release = place second anchor)
-        {
-            let drawings = &mut self.engine.drawings;
-            if drawings.is_creating() {
-                // Read the preview anchor position first (immutable borrow scope)
-                let anchor_pos: Option<(f64, f64)> = {
-                    drawings.all().iter()
-                        .find(|d| matches!(d.state(), raycore::core::drawings::types::DrawingState::Creating { .. }))
-                        .and_then(|d| {
-                            let anchors = d.anchors();
-                            if anchors.len() >= 2 {
-                                Some((anchors[1].point.bar_index, anchors[1].point.price))
-                            } else if !anchors.is_empty() {
-                                Some((anchors[0].point.bar_index, anchors[0].point.price))
-                            } else {
-                                None
-                            }
-                        })
-                };
-                // Now finalize with the stored position (mutable borrow)
-                if let Some((bar, price)) = anchor_pos {
-                    drawings.finalize_creation_step(bar, price);
-                }
-                return;
-            }
-        }
-
-        // End any drawing drag
-        let mut ended_drag = false;
-        {
-            let drawings = &mut self.engine.drawings;
-            if let Some(id) = drawings.selected_id {
-                if matches!(drawings.get(id).map(|d| d.state()),
-                    Some(raycore::core::drawings::types::DrawingState::Dragging { .. })) {
-                    drawings.end_drag(id);
-                    ended_drag = true;
-                }
-            }
-        }
-        if ended_drag {
-            self.interaction.drawing_drag_active = false;
-            self.interaction.set_drawing_cursor(None);
-            // Restore crosshair for mouse (touch handled by tracking mode)
-            if !self.interaction.is_touch {
-                self.engine.crosshair.active = true;
-            }
-            return;
-        }
-
-        let _ = (pw, ph); // suppress unused warning
-        let Self { interaction, engine, .. } = self;
-        interaction.pointer_up(&mut engine.viewport, &engine.bars, now_ms);
-    }
-
-    fn on_pane_wheel(&mut self, x: f64, dx: f64, dy: f64, dm: u32) {
-        let (pw, _) = self.layout.pane_css_size();
-        let Self { interaction, engine, .. } = self;
-        interaction.pane_wheel(x, dx, dy, dm, pw, &mut engine.viewport, &engine.bars);
-    }
-
-    fn on_price_axis_move(&mut self, y: f64) {
-        let (_, ph) = self.layout.pane_css_size();
-        let Self { interaction, engine, .. } = self;
-        interaction.price_axis_pointer_move(y, ph, &mut engine.viewport);
-    }
-
-    fn on_price_axis_wheel(&mut self, dy: f64, dm: u32) {
-        let Self { interaction, engine, .. } = self;
-        interaction.price_axis_wheel(dy, dm, &mut engine.viewport);
-    }
-
-    fn on_time_axis_move(&mut self, x: f64) {
-        let (pw, _) = self.layout.pane_css_size();
-        let Self { interaction, engine, .. } = self;
-        interaction.time_axis_pointer_move(x, pw, &mut engine.viewport, &engine.bars);
-    }
-
-    fn on_time_axis_wheel(&mut self, x: f64, dy: f64, dm: u32) {
-        let (pw, _) = self.layout.pane_css_size();
-        let Self { interaction, engine, .. } = self;
-        interaction.time_axis_wheel(x, dy, dm, pw, &mut engine.viewport, &engine.bars);
-    }
-
-    fn on_pinch_start(&mut self, cx: f64, _cy: f64, distance: f64) {
-        let (pw, _) = self.layout.pane_css_size();
-        let Self { interaction, engine, .. } = self;
-        interaction.pinch_start(cx, _cy, distance, pw, &engine.viewport);
-    }
-
-    fn on_pinch_update(&mut self, scale: f64) {
-        let Self { interaction, engine, .. } = self;
-        interaction.pinch_update(scale, &mut engine.viewport, &engine.bars);
-    }
-
-    fn on_pinch_end(&mut self) {
-        self.interaction.pinch_end();
-    }
-
-    fn on_long_press(&mut self, x: f64, y: f64) {
-        let Self { interaction, engine, .. } = self;
-        interaction.long_press(x, y, &mut engine.crosshair);
-    }
-
-    fn on_touch_double_tap(&mut self) {
-        let Self { interaction, engine, .. } = self;
-        interaction.touch_double_tap(
-            &mut engine.crosshair,
-            &mut engine.viewport,
-            &engine.bars,
-        );
-    }
-
-    fn cursor_css(&self) -> &'static str {
-        self.interaction.cursor_hint()
-    }
-}
-
-type SharedInner = Rc<RefCell<ChartInner>>;
-
-/// Helper: get CSS coords from PointerEvent relative to an element.
-fn event_css_pos(e: &web_sys::PointerEvent, el: &web_sys::Element) -> (f64, f64) {
-    let rect = el.get_bounding_client_rect();
-    (e.client_x() as f64 - rect.left(), e.client_y() as f64 - rect.top())
-}
-
-fn wheel_css_pos(e: &web_sys::WheelEvent, el: &web_sys::Element) -> (f64, f64) {
-    let rect = el.get_bounding_client_rect();
-    (e.client_x() as f64 - rect.left(), e.client_y() as f64 - rect.top())
-}
-
 #[wasm_bindgen]
 pub struct RayCore {
     inner: SharedInner,
@@ -385,6 +78,8 @@ pub struct RayCore {
     _long_press_timer: Rc<RefCell<Option<i32>>>,
     /// Last touch-tap time for double-tap detection.
     _last_tap_time: Rc<RefCell<f64>>,
+    /// Registry for tracking event listeners for cleanup.
+    _event_registry: EventListenerRegistry,
 }
 
 #[wasm_bindgen]
@@ -1279,6 +974,7 @@ impl RayCore {
             _resize_observer: Some(resize_observer),
             _long_press_timer: long_press_timer,
             _last_tap_time: last_tap_time,
+            _event_registry: EventListenerRegistry::new(),
         })
     }
 
@@ -1655,6 +1351,34 @@ impl RayCore {
         use raycore::PriceScaleMode;
         let mode = PriceScaleMode::from_str(mode);
         self.inner.borrow_mut().engine.viewport.set_price_scale_mode(mode);
+    }
+
+    // ── Main Chart Type API ────────────────────────────────────────────────────
+
+    /// Set the main chart type.
+    ///
+    /// Accepted values: "candlestick", "candles", "ohlc", "bars", "line", "area",
+    /// "heikin_ashi", "ha", "baseline".
+    pub fn set_chart_type(&mut self, chart_type: &str) {
+        use raycore::MainChartType;
+        let ct = MainChartType::from_str(chart_type);
+        self.inner.borrow_mut().engine.set_main_chart_type(ct);
+        log::info!("set_chart_type: {}", ct.as_str());
+    }
+
+    /// Get the current chart type as a string.
+    pub fn get_chart_type(&self) -> String {
+        self.inner.borrow().engine.main_chart_type().as_str().to_string()
+    }
+
+    /// Get all available chart types as a comma-separated string.
+    pub fn get_available_chart_types() -> String {
+        use raycore::MainChartType;
+        MainChartType::all()
+            .iter()
+            .map(|ct| ct.as_str())
+            .collect::<Vec<_>>()
+            .join(",")
     }
 
     /// Get the number of drawings.
@@ -2045,13 +1769,8 @@ impl RayCore {
         match s.engine.create_study(study_type) {
             Some(id) => {
                 // If we have bar data, run initial calculation
-                // We need to split the borrow: collect bar data pointer via raw parts
-                // to avoid simultaneous mutable+immutable borrow on engine.
-                let bar_len = s.engine.bars.len();
-                if bar_len > 0 {
-                    // Safe: update_studies only reads bars, doesn't modify engine.bars
-                    let bars_ptr = &s.engine.bars as *const raycore::BarArray;
-                    unsafe { s.engine.studies.update_studies(&*bars_ptr); }
+                if s.engine.bars.len() > 0 {
+                    s.engine.recalculate_studies();
                 }
                 log::info!("create_study: type='{}', id={}", study_type, id.0);
                 id.0
@@ -2076,10 +1795,8 @@ impl RayCore {
         let mut s = self.inner.borrow_mut();
         s.engine.set_study_parameter(raycore::StudyId(id), key, value);
         // Recalculate immediately if we have data
-        let bar_len = s.engine.bars.len();
-        if bar_len > 0 {
-            let bars_ptr = &s.engine.bars as *const raycore::BarArray;
-            unsafe { s.engine.studies.update_studies(&*bars_ptr); }
+        if s.engine.bars.len() > 0 {
+            s.engine.recalculate_studies();
         }
         log::info!("set_study_parameter: id={}, {}={}", id, key, value);
     }
@@ -2362,10 +2079,7 @@ impl RayCore {
                         let bar_len = s.engine.bars.len();
                         s.engine.viewport.clamp_to_data(bar_len);
                         // Main chart auto-fits if not locked
-                        if !s.engine.viewport.price_locked {
-                            let bars_ptr = &s.engine.bars as *const raycore::BarArray;
-                            unsafe { s.engine.viewport.auto_fit_price(&*bars_ptr); }
-                        }
+                        s.engine.auto_fit_price_if_unlocked();
                     }
                     
                     // Vertical drag - ONLY if subpane price is locked (same as main chart)
@@ -3097,10 +2811,7 @@ impl RayCore {
                 let bar_range = s.engine.viewport.end_bar - s.engine.viewport.start_bar;
                 let delta_bars = -total_kinetic_delta_px * bar_range / pane_css_w_for_kinetic;
                 s.engine.viewport.pan_clamped(delta_bars, bar_len);
-                if !s.engine.viewport.price_locked {
-                    let bars_ptr = &s.engine.bars as *const raycore::BarArray;
-                    unsafe { s.engine.viewport.auto_fit_price(&*bars_ptr); }
-                }
+                s.engine.auto_fit_price_if_unlocked();
             }
         }
 
@@ -3387,10 +3098,42 @@ impl RayCore {
         ctx.fill_rect(0.0, 0.0, border_size, h);
     }
 
-    /// Dispose: disconnect resize observer.
+    /// Dispose: remove all event listeners, disconnect resize observer, and clean up resources.
+    /// 
+    /// IMPORTANT: Call this when destroying the chart to prevent memory leaks.
+    /// Event listeners attached to DOM elements will keep the closures alive
+    /// even after RayCore is dropped, unless explicitly removed.
     pub fn dispose(&mut self) {
+        // 1. Disconnect resize observer
         if let Some(obs) = self._resize_observer.take() {
             obs.disconnect();
         }
+        
+        // 2. Cancel any pending long-press timer
+        if let Some(tid) = self._long_press_timer.borrow_mut().take() {
+            if let Some(window) = web_sys::window() {
+                let _ = window.clear_timeout_with_handle(tid);
+            }
+        }
+        
+        // 3. Remove all tracked event listeners
+        self._event_registry.remove_all();
+        
+        // 4. Clear closure vectors (closures will be dropped, but DOM refs are now removed)
+        self._closures.clear();
+        self._wheel_closures.clear();
+        self._touch_closures.clear();
+        self._resize_closure = None;
+        
+        // 5. Clean up subpane event listeners
+        {
+            let mut inner = self.inner.borrow_mut();
+            for subpane in inner.subpanes.iter_mut() {
+                subpane.dispose();
+            }
+            inner.subpanes.clear();
+        }
+        
+        log::info!("RayCore disposed: all event listeners removed");
     }
 }
