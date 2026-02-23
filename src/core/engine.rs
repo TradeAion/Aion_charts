@@ -13,16 +13,54 @@ use crate::core::constants::{AUTO_SCROLL_THRESHOLD_RATIO, DEFAULT_INITIAL_VISIBL
 use crate::core::data::{Bar, BarArray};
 use crate::core::drawings::DrawingManager;
 use crate::core::markers::MarkerManager;
-use crate::core::price_line::{PriceLineId, PriceLineManager, PriceLineOptions};
+use crate::core::price_line::PriceLineManager;
 use crate::core::renderer::traits::{
     ChartStyle, CrosshairState, RenderContext, Renderer, RendererBackend,
 };
 use crate::core::series::{
     AreaSeriesOptions, BarSeriesOptions, BaselineSeriesOptions, HistogramPoint,
-    HistogramSeriesOptions, LinePoint, LineSeriesOptions, OhlcPoint, SeriesCollection, SeriesId,
+    HistogramSeriesOptions, LinePoint, LineSeriesOptions, OhlcPoint, Series, SeriesCollection,
+    SeriesId, SeriesType,
 };
 use crate::core::studies::manager::{StudyId, StudyManager};
 use crate::core::viewport::Viewport;
+
+#[inline]
+fn ensure_strictly_increasing_timestamps(name: &str, timestamps: &[u64]) -> Result<(), String> {
+    for i in 1..timestamps.len() {
+        if timestamps[i] <= timestamps[i - 1] {
+            return Err(format!(
+                "{} timestamps must be strictly increasing at index {}: {} <= {}",
+                name,
+                i,
+                timestamps[i],
+                timestamps[i - 1]
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[inline]
+fn ensure_strictly_increasing_bar_timestamps(bars: &[Bar]) -> Result<(), String> {
+    for i in 1..bars.len() {
+        if bars[i].timestamp <= bars[i - 1].timestamp {
+            return Err(format!(
+                "bars timestamps must be strictly increasing at index {}: {} <= {}",
+                i,
+                bars[i].timestamp,
+                bars[i - 1].timestamp
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UpsertAction {
+    Append,
+    UpdateLast,
+}
 
 /// The main chart engine. Owns everything needed to render the pane.
 pub struct ChartEngine {
@@ -49,6 +87,95 @@ pub struct ChartEngine {
 }
 
 impl ChartEngine {
+    fn series_type_name(series_type: SeriesType) -> &'static str {
+        match series_type {
+            SeriesType::Candlestick => "candlestick",
+            SeriesType::Line => "line",
+            SeriesType::Area => "area",
+            SeriesType::Histogram => "histogram",
+            SeriesType::Bar => "bar",
+            SeriesType::Baseline => "baseline",
+        }
+    }
+
+    fn get_series_mut_checked(
+        &mut self,
+        id: SeriesId,
+        accepted: &[SeriesType],
+    ) -> Result<&mut Series, String> {
+        let s = self
+            .series
+            .get_mut(id)
+            .ok_or_else(|| format!("series id {} not found", id.0))?;
+
+        let actual = s.series_type();
+        if accepted.iter().any(|t| *t == actual) {
+            return Ok(s);
+        }
+
+        let expected = accepted
+            .iter()
+            .map(|t| Self::series_type_name(*t))
+            .collect::<Vec<_>>()
+            .join("|");
+        Err(format!(
+            "series id {} has type {}, expected {}",
+            id.0,
+            Self::series_type_name(actual),
+            expected
+        ))
+    }
+
+    #[inline]
+    fn validate_append_timestamp(
+        op: &str,
+        last_ts: Option<u64>,
+        incoming_ts: u64,
+    ) -> Result<(), String> {
+        if let Some(last) = last_ts {
+            if incoming_ts <= last {
+                return Err(format!(
+                    "{} requires timestamp > last timestamp ({} <= {})",
+                    op, incoming_ts, last
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn validate_update_timestamp(
+        op: &str,
+        last_ts: Option<u64>,
+        incoming_ts: u64,
+    ) -> Result<(), String> {
+        let last = last_ts.ok_or_else(|| format!("{} cannot update an empty series", op))?;
+        if incoming_ts != last {
+            return Err(format!(
+                "{} requires timestamp == last timestamp ({} != {})",
+                op, incoming_ts, last
+            ));
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn resolve_upsert_action(
+        op: &str,
+        last_ts: Option<u64>,
+        incoming_ts: u64,
+    ) -> Result<UpsertAction, String> {
+        match last_ts {
+            None => Ok(UpsertAction::Append),
+            Some(last) if incoming_ts == last => Ok(UpsertAction::UpdateLast),
+            Some(last) if incoming_ts > last => Ok(UpsertAction::Append),
+            Some(last) => Err(format!(
+                "{} requires timestamp >= last timestamp ({} < {})",
+                op, incoming_ts, last
+            )),
+        }
+    }
+
     /// Create a new engine with a given renderer backend.
     /// `width` and `height` are the PANE physical pixel dimensions.
     pub fn new(renderer: RendererBackend, width: u32, height: u32, dpr: f64) -> Self {
@@ -112,7 +239,8 @@ impl ChartEngine {
     }
 
     /// Replace all bar data.
-    pub fn set_data(&mut self, bars: Vec<Bar>) {
+    pub fn set_data(&mut self, bars: Vec<Bar>) -> Result<(), String> {
+        ensure_strictly_increasing_bar_timestamps(&bars)?;
         let len = bars.len();
         self.bars.set(bars);
 
@@ -126,6 +254,7 @@ impl ChartEngine {
         if !self.viewport.price_locked {
             self.viewport.auto_fit_price(&self.bars);
         }
+        Ok(())
     }
 
     /// Resize the pane canvas / surface.
@@ -171,31 +300,81 @@ impl ChartEngine {
     }
 
     /// Set data points for a line or area series.
-    pub fn set_series_data(&mut self, id: SeriesId, data: Vec<LinePoint>) {
-        if let Some(s) = self.series.get_mut(id) {
-            s.line_data.set(data);
+    pub fn set_series_data(&mut self, id: SeriesId, data: Vec<LinePoint>) -> Result<(), String> {
+        for i in 1..data.len() {
+            if data[i].timestamp <= data[i - 1].timestamp {
+                return Err(format!(
+                    "line timestamps must be strictly increasing at index {}: {} <= {}",
+                    i,
+                    data[i].timestamp,
+                    data[i - 1].timestamp
+                ));
+            }
         }
+        let s = self.get_series_mut_checked(
+            id,
+            &[SeriesType::Line, SeriesType::Area, SeriesType::Baseline],
+        )?;
+        s.line_data.set(data);
+        Ok(())
     }
 
     /// Set data points for a histogram series.
-    pub fn set_histogram_data(&mut self, id: SeriesId, data: Vec<HistogramPoint>) {
-        if let Some(s) = self.series.get_mut(id) {
-            s.histogram_data.set_data(data);
+    pub fn set_histogram_data(
+        &mut self,
+        id: SeriesId,
+        data: Vec<HistogramPoint>,
+    ) -> Result<(), String> {
+        for i in 1..data.len() {
+            if data[i].timestamp <= data[i - 1].timestamp {
+                return Err(format!(
+                    "histogram timestamps must be strictly increasing at index {}: {} <= {}",
+                    i,
+                    data[i].timestamp,
+                    data[i - 1].timestamp
+                ));
+            }
         }
+        let s = self.get_series_mut_checked(id, &[SeriesType::Histogram])?;
+        s.histogram_data.set_data(data);
+        Ok(())
     }
 
     /// Set histogram data from parallel arrays (no per-bar color).
-    pub fn set_histogram_data_arrays(&mut self, id: SeriesId, timestamps: &[u64], values: &[f32]) {
-        if let Some(s) = self.series.get_mut(id) {
-            s.histogram_data.set_from_arrays(timestamps, values);
+    pub fn set_histogram_data_arrays(
+        &mut self,
+        id: SeriesId,
+        timestamps: &[u64],
+        values: &[f32],
+    ) -> Result<(), String> {
+        if timestamps.len() != values.len() {
+            return Err(format!(
+                "histogram arrays length mismatch: timestamps={} values={}",
+                timestamps.len(),
+                values.len()
+            ));
         }
+        ensure_strictly_increasing_timestamps("histogram", timestamps)?;
+        let s = self.get_series_mut_checked(id, &[SeriesType::Histogram])?;
+        s.histogram_data.set_from_arrays(timestamps, values)?;
+        Ok(())
     }
 
     /// Set data points for a bar (OHLC) series.
-    pub fn set_bar_data(&mut self, id: SeriesId, data: Vec<OhlcPoint>) {
-        if let Some(s) = self.series.get_mut(id) {
-            s.bar_data.set_data(data);
+    pub fn set_bar_data(&mut self, id: SeriesId, data: Vec<OhlcPoint>) -> Result<(), String> {
+        for i in 1..data.len() {
+            if data[i].timestamp <= data[i - 1].timestamp {
+                return Err(format!(
+                    "bar timestamps must be strictly increasing at index {}: {} <= {}",
+                    i,
+                    data[i].timestamp,
+                    data[i - 1].timestamp
+                ));
+            }
         }
+        let s = self.get_series_mut_checked(id, &[SeriesType::Bar])?;
+        s.bar_data.set_data(data);
+        Ok(())
     }
 
     /// Set bar (OHLC) data from parallel arrays.
@@ -207,10 +386,170 @@ impl ChartEngine {
         high: &[f32],
         low: &[f32],
         close: &[f32],
-    ) {
-        if let Some(s) = self.series.get_mut(id) {
-            s.bar_data
-                .set_from_arrays(timestamps, open, high, low, close);
+    ) -> Result<(), String> {
+        let len = timestamps.len();
+        if open.len() != len || high.len() != len || low.len() != len || close.len() != len {
+            return Err(format!(
+                "bar arrays length mismatch: timestamps={} open={} high={} low={} close={}",
+                len,
+                open.len(),
+                high.len(),
+                low.len(),
+                close.len()
+            ));
+        }
+        ensure_strictly_increasing_timestamps("bar", timestamps)?;
+        let s = self.get_series_mut_checked(id, &[SeriesType::Bar])?;
+        s.bar_data
+            .set_from_arrays(timestamps, open, high, low, close)?;
+        Ok(())
+    }
+
+    /// Append a point to a line/area/baseline overlay series.
+    pub fn append_series_point(&mut self, id: SeriesId, point: LinePoint) -> Result<(), String> {
+        let s = self.get_series_mut_checked(
+            id,
+            &[SeriesType::Line, SeriesType::Area, SeriesType::Baseline],
+        )?;
+        Self::validate_append_timestamp(
+            "append_series_point",
+            s.line_data.last_timestamp(),
+            point.timestamp,
+        )?;
+        s.line_data.push(point);
+        Ok(())
+    }
+
+    /// Update the last point in a line/area/baseline overlay series.
+    pub fn update_last_series_point(
+        &mut self,
+        id: SeriesId,
+        point: LinePoint,
+    ) -> Result<(), String> {
+        let s = self.get_series_mut_checked(
+            id,
+            &[SeriesType::Line, SeriesType::Area, SeriesType::Baseline],
+        )?;
+        Self::validate_update_timestamp(
+            "update_last_series_point",
+            s.line_data.last_timestamp(),
+            point.timestamp,
+        )?;
+        s.line_data.update_last(point);
+        Ok(())
+    }
+
+    /// LWC-style update semantics for a line/area/baseline series:
+    /// update last when timestamp matches, append when newer.
+    pub fn upsert_series_point(&mut self, id: SeriesId, point: LinePoint) -> Result<(), String> {
+        let last_ts = self
+            .get_series_mut_checked(
+                id,
+                &[SeriesType::Line, SeriesType::Area, SeriesType::Baseline],
+            )?
+            .line_data
+            .last_timestamp();
+        match Self::resolve_upsert_action("upsert_series_point", last_ts, point.timestamp)? {
+            UpsertAction::Append => self.append_series_point(id, point),
+            UpsertAction::UpdateLast => self.update_last_series_point(id, point),
+        }
+    }
+
+    /// Append a point to a histogram overlay series.
+    pub fn append_histogram_point(
+        &mut self,
+        id: SeriesId,
+        point: HistogramPoint,
+    ) -> Result<(), String> {
+        let s = self.get_series_mut_checked(id, &[SeriesType::Histogram])?;
+        Self::validate_append_timestamp(
+            "append_histogram_point",
+            s.histogram_data.last_timestamp(),
+            point.timestamp,
+        )?;
+        s.histogram_data.push(point);
+        Ok(())
+    }
+
+    /// Update the last point in a histogram overlay series.
+    pub fn update_last_histogram_point(
+        &mut self,
+        id: SeriesId,
+        point: HistogramPoint,
+    ) -> Result<(), String> {
+        let s = self.get_series_mut_checked(id, &[SeriesType::Histogram])?;
+        Self::validate_update_timestamp(
+            "update_last_histogram_point",
+            s.histogram_data.last_timestamp(),
+            point.timestamp,
+        )?;
+        s.histogram_data.update_last(point);
+        Ok(())
+    }
+
+    /// LWC-style update semantics for a histogram series:
+    /// update last when timestamp matches, append when newer.
+    pub fn upsert_histogram_point(
+        &mut self,
+        id: SeriesId,
+        point: HistogramPoint,
+    ) -> Result<(), String> {
+        let last_ts = self
+            .get_series_mut_checked(id, &[SeriesType::Histogram])?
+            .histogram_data
+            .last_timestamp();
+        match Self::resolve_upsert_action("upsert_histogram_point", last_ts, point.timestamp)? {
+            UpsertAction::Append => self.append_histogram_point(id, point),
+            UpsertAction::UpdateLast => self.update_last_histogram_point(id, point),
+        }
+    }
+
+    /// Append a point to a bar (OHLC) overlay series.
+    pub fn append_bar_series_point(
+        &mut self,
+        id: SeriesId,
+        point: OhlcPoint,
+    ) -> Result<(), String> {
+        let s = self.get_series_mut_checked(id, &[SeriesType::Bar])?;
+        Self::validate_append_timestamp(
+            "append_bar_series_point",
+            s.bar_data.last_timestamp(),
+            point.timestamp,
+        )?;
+        s.bar_data.push(point);
+        Ok(())
+    }
+
+    /// Update the last point in a bar (OHLC) overlay series.
+    pub fn update_last_bar_series_point(
+        &mut self,
+        id: SeriesId,
+        point: OhlcPoint,
+    ) -> Result<(), String> {
+        let s = self.get_series_mut_checked(id, &[SeriesType::Bar])?;
+        Self::validate_update_timestamp(
+            "update_last_bar_series_point",
+            s.bar_data.last_timestamp(),
+            point.timestamp,
+        )?;
+        s.bar_data.update_last(point);
+        Ok(())
+    }
+
+    /// LWC-style update semantics for an OHLC bar overlay series:
+    /// update last when timestamp matches, append when newer.
+    pub fn upsert_bar_series_point(
+        &mut self,
+        id: SeriesId,
+        point: OhlcPoint,
+    ) -> Result<(), String> {
+        let last_ts = self
+            .get_series_mut_checked(id, &[SeriesType::Bar])?
+            .bar_data
+            .last_timestamp();
+        match Self::resolve_upsert_action("upsert_bar_series_point", last_ts, point.timestamp)? {
+            UpsertAction::Append => self.append_bar_series_point(id, point),
+            UpsertAction::UpdateLast => self.update_last_bar_series_point(id, point),
         }
     }
 
@@ -275,9 +614,19 @@ impl ChartEngine {
 
     // ── Real-time data updates ──────────────────────────────────────────
 
+    #[inline]
+    fn last_main_timestamp(&self) -> Option<u64> {
+        if self.bars.is_empty() {
+            None
+        } else {
+            Some(self.bars.timestamp(self.bars.len() - 1))
+        }
+    }
+
     /// Append a single bar to the end of the data array.
     /// Updates studies incrementally and adjusts viewport to keep the latest bar visible.
-    pub fn append_bar(&mut self, bar: Bar) {
+    pub fn append_bar(&mut self, bar: Bar) -> Result<(), String> {
+        Self::validate_append_timestamp("append_bar", self.last_main_timestamp(), bar.timestamp)?;
         self.bars.append(bar);
 
         // Update studies with new data
@@ -294,14 +643,13 @@ impl ChartEngine {
         if !self.viewport.price_locked {
             self.viewport.auto_fit_price(&self.bars);
         }
+        Ok(())
     }
 
     /// Update the last bar in the data array (e.g., for real-time tick updates).
-    pub fn update_bar(&mut self, bar: Bar) {
+    pub fn update_bar(&mut self, bar: Bar) -> Result<(), String> {
+        Self::validate_update_timestamp("update_bar", self.last_main_timestamp(), bar.timestamp)?;
         let len = self.bars.len();
-        if len == 0 {
-            return;
-        }
 
         self.bars.update_last(bar);
 
@@ -316,6 +664,17 @@ impl ChartEngine {
 
         if !self.viewport.price_locked {
             self.viewport.auto_fit_price(&self.bars);
+        }
+        Ok(())
+    }
+
+    /// LWC-style update semantics for the main bar series:
+    /// update last when timestamp matches, append when newer.
+    pub fn upsert_bar(&mut self, bar: Bar) -> Result<(), String> {
+        match Self::resolve_upsert_action("upsert_bar", self.last_main_timestamp(), bar.timestamp)?
+        {
+            UpsertAction::Append => self.append_bar(bar),
+            UpsertAction::UpdateLast => self.update_bar(bar),
         }
     }
 
@@ -349,5 +708,76 @@ impl ChartEngine {
         };
 
         self.renderer.render_frame(&ctx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ensure_strictly_increasing_bar_timestamps, ensure_strictly_increasing_timestamps,
+        ChartEngine, UpsertAction,
+    };
+    use crate::core::data::Bar;
+
+    fn mk_bar(ts: u64) -> Bar {
+        Bar {
+            timestamp: ts,
+            open: 1.0,
+            high: 2.0,
+            low: 0.5,
+            close: 1.5,
+            volume: 1.0,
+            _pad: 0.0,
+        }
+    }
+
+    #[test]
+    fn increasing_timestamps_pass() {
+        assert!(ensure_strictly_increasing_timestamps("line", &[1, 2, 3, 4]).is_ok());
+    }
+
+    #[test]
+    fn duplicate_timestamps_fail() {
+        assert!(ensure_strictly_increasing_timestamps("line", &[1, 2, 2, 3]).is_err());
+    }
+
+    #[test]
+    fn descending_timestamps_fail() {
+        assert!(ensure_strictly_increasing_timestamps("line", &[1, 3, 2]).is_err());
+    }
+
+    #[test]
+    fn increasing_bar_timestamps_pass() {
+        let bars = vec![mk_bar(1000), mk_bar(2000), mk_bar(3000)];
+        assert!(ensure_strictly_increasing_bar_timestamps(&bars).is_ok());
+    }
+
+    #[test]
+    fn duplicate_bar_timestamps_fail() {
+        let bars = vec![mk_bar(1000), mk_bar(2000), mk_bar(2000)];
+        assert!(ensure_strictly_increasing_bar_timestamps(&bars).is_err());
+    }
+
+    #[test]
+    fn upsert_action_for_empty_is_append() {
+        let action = ChartEngine::resolve_upsert_action("x", None, 1000).unwrap();
+        assert_eq!(action, UpsertAction::Append);
+    }
+
+    #[test]
+    fn upsert_action_for_equal_timestamp_is_update() {
+        let action = ChartEngine::resolve_upsert_action("x", Some(1000), 1000).unwrap();
+        assert_eq!(action, UpsertAction::UpdateLast);
+    }
+
+    #[test]
+    fn upsert_action_for_newer_timestamp_is_append() {
+        let action = ChartEngine::resolve_upsert_action("x", Some(1000), 1001).unwrap();
+        assert_eq!(action, UpsertAction::Append);
+    }
+
+    #[test]
+    fn upsert_action_for_older_timestamp_is_error() {
+        assert!(ChartEngine::resolve_upsert_action("x", Some(1000), 999).is_err());
     }
 }

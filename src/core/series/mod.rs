@@ -11,6 +11,7 @@ pub mod histogram_data;
 pub mod histogram_options;
 pub mod line_data;
 pub mod line_options;
+pub mod validation;
 
 pub use area_options::AreaSeriesOptions;
 pub use bar_data::{OhlcDataArray, OhlcPoint};
