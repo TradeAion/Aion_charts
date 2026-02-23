@@ -26,6 +26,55 @@ pub struct ColoredRect {
     pub a: f32,
 }
 
+/// A line segment in physical pixel coordinates for GPU rendering.
+/// The GPU shader generates a rotated quad for proper anti-aliased line rendering.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct LineSegment {
+    /// Start X in physical pixels.
+    pub x1: f32,
+    /// Start Y in physical pixels.
+    pub y1: f32,
+    /// End X in physical pixels.
+    pub x2: f32,
+    /// End Y in physical pixels.
+    pub y2: f32,
+    /// Line width in physical pixels.
+    pub width: f32,
+    /// RGBA color (0.0–1.0).
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+    /// Padding to align to 16-byte boundary.
+    pub _pad: f32,
+}
+
+/// An area segment (trapezoid) for smooth area chart fills.
+/// Top edge follows the line from (x1, y1) to (x2, y2).
+/// Bottom edge is horizontal at y = bottom.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct AreaSegment {
+    /// Left X in physical pixels.
+    pub x1: f32,
+    /// Top-left Y (close price at bar i).
+    pub y1: f32,
+    /// Right X in physical pixels.
+    pub x2: f32,
+    /// Top-right Y (close price at bar i+1).
+    pub y2: f32,
+    /// Bottom Y (chart bottom, same for both sides).
+    pub bottom: f32,
+    /// RGBA color (0.0–1.0).
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+    /// Padding.
+    pub _pad: f32,
+}
+
 /// A line segment in physical pixel coordinates (for future studies/drawings).
 #[derive(Debug, Clone, Copy)]
 pub struct ColoredLine {
