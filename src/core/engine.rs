@@ -9,7 +9,10 @@
 //! in the WASM layer.
 
 use crate::core::chart_type::{MainChartOptions, MainChartType};
-use crate::core::constants::{AUTO_SCROLL_THRESHOLD_RATIO, DEFAULT_INITIAL_VISIBLE_BARS};
+use crate::core::constants::{
+    AUTO_SCROLL_THRESHOLD_RATIO, DEFAULT_BAR_SPACING_CSS, DEFAULT_INITIAL_VISIBLE_BARS,
+    MIN_VISIBLE_BARS,
+};
 use crate::core::data::{Bar, BarArray};
 use crate::core::drawings::DrawingManager;
 use crate::core::markers::MarkerManager;
@@ -247,8 +250,16 @@ impl ChartEngine {
         // Update studies with new data
         self.studies.update_studies(&self.bars);
 
-        // Auto-fit viewport to show last N bars
-        let visible = (len as f64).min(DEFAULT_INITIAL_VISIBLE_BARS);
+        // LWC-like initial zoom: derive visible bars from default bar spacing (6 CSS px).
+        // Fallback to legacy constant if dimensions are not ready yet.
+        let visible = {
+            let by_spacing = if self.viewport.width > 0 && self.h_pixel_ratio > 0.0 {
+                self.viewport.width as f64 / (DEFAULT_BAR_SPACING_CSS * self.h_pixel_ratio)
+            } else {
+                DEFAULT_INITIAL_VISIBLE_BARS
+            };
+            (len as f64).min(by_spacing.max(MIN_VISIBLE_BARS))
+        };
         self.viewport.set_range((len as f64) - visible, len as f64);
 
         if !self.viewport.price_locked {

@@ -99,3 +99,80 @@ impl CandleSizing {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lwc_optimal_candlestick_width(bar_spacing: f64, pixel_ratio: f64) -> f64 {
+        let bar_spacing_special_case_from = 2.5;
+        let bar_spacing_special_case_to = 4.0;
+        let bar_spacing_special_case_coeff = 3.0;
+        if bar_spacing >= bar_spacing_special_case_from && bar_spacing <= bar_spacing_special_case_to
+        {
+            return (bar_spacing_special_case_coeff * pixel_ratio).floor();
+        }
+
+        let bar_spacing_reducing_coeff = 0.2;
+        let coeff = 1.0
+            - bar_spacing_reducing_coeff
+                * (bar_spacing_special_case_to.max(bar_spacing) - bar_spacing_special_case_to)
+                    .atan()
+                / std::f64::consts::FRAC_PI_2;
+        let res = (bar_spacing * coeff * pixel_ratio).floor();
+        let scaled_bar_spacing = (bar_spacing * pixel_ratio).floor();
+        let optimal = res.min(scaled_bar_spacing);
+        optimal.max(pixel_ratio.floor())
+    }
+
+    #[test]
+    fn optimal_width_matches_lwc_formula_across_zoom_presets() {
+        let bar_spacings = [0.5, 0.8, 1.0, 1.7, 2.4, 2.5, 3.0, 4.0, 4.1, 6.0, 10.0, 18.0];
+        let pixel_ratios = [1.0, 1.25, 1.5, 2.0, 3.0];
+
+        for spacing in bar_spacings {
+            for ratio in pixel_ratios {
+                let expected = lwc_optimal_candlestick_width(spacing, ratio);
+                let actual = optimal_candlestick_width(spacing, ratio);
+                assert!(
+                    (actual - expected).abs() < f64::EPSILON,
+                    "spacing={} ratio={} expected={} actual={}",
+                    spacing,
+                    ratio,
+                    expected,
+                    actual
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn wick_and_border_widths_are_lwc_compatible() {
+        let bar_spacings = [0.5, 1.0, 2.0, 3.0, 6.0, 12.0];
+        let pixel_ratios = [1.0, 1.5, 2.0, 3.0];
+
+        for spacing in bar_spacings {
+            for ratio in pixel_ratios {
+                let mut bw = optimal_candlestick_width(spacing, ratio);
+                let ww = wick_width(spacing, ratio, bw);
+                bw = parity_fix(bw, ww);
+                let border = border_width(ratio, bw);
+
+                assert!(ww >= ratio.floor(), "wick too thin for spacing={}, ratio={}", spacing, ratio);
+                assert!(ww <= bw, "wick wider than body for spacing={}, ratio={}", spacing, ratio);
+                assert!(
+                    bw >= ratio.floor(),
+                    "body below minimum for spacing={}, ratio={}",
+                    spacing,
+                    ratio
+                );
+                assert!(
+                    border >= ratio.floor(),
+                    "border below minimum for spacing={}, ratio={}",
+                    spacing,
+                    ratio
+                );
+            }
+        }
+    }
+}
