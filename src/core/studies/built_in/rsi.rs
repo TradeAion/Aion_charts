@@ -17,11 +17,9 @@ impl StudyCalculator for RsiCalculator {
             return;
         }
 
-        let output = study.get_output_mut(0);
-        if output.is_none() {
+        let Some(output) = study.get_output_mut(0) else {
             return;
-        }
-        let output = output.unwrap();
+        };
 
         // Ensure output data array is large enough
         if output.data.timestamps.len() < bars.len() {

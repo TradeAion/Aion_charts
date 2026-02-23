@@ -18,7 +18,7 @@ pub struct HistogramDataArray {
     pub timestamps: Vec<u64>,
     pub values: Vec<f32>,
     /// Per-bar color overrides. Same length as `values`.
-    /// [0,0,0,0] means "use series default color".
+    /// `[0,0,0,0]` means "use series default color".
     pub colors: Vec<[f32; 4]>,
 }
 

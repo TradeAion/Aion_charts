@@ -245,7 +245,7 @@ fn extend_line_to_rect(
     }
 
     // Sort and take min/max
-    t_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    t_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let t_min = t_values[0];
     let t_max = t_values[t_values.len() - 1];
 

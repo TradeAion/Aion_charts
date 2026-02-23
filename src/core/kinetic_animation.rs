@@ -167,13 +167,15 @@ impl ScrollState {
         self.dragging = false;
 
         // Compute velocity from recent samples
-        if self.velocity_samples.len() >= 2 {
-            let first = self.velocity_samples.first().unwrap();
-            let last = self.velocity_samples.last().unwrap();
-            let dt = last.1 - first.1;
-            if dt > 0.0 {
-                let velocity = (last.0 - first.0) / dt;
-                self.animation.start(velocity, now_ms);
+        if let (Some(first), Some(last)) =
+            (self.velocity_samples.first(), self.velocity_samples.last())
+        {
+            if self.velocity_samples.len() >= 2 {
+                let dt = last.1 - first.1;
+                if dt > 0.0 {
+                    let velocity = (last.0 - first.0) / dt;
+                    self.animation.start(velocity, now_ms);
+                }
             }
         }
 

@@ -608,7 +608,11 @@ pub fn resolve_label_overlaps(labels: &mut [LabelRect], pane_h: f64) {
     }
 
     // Sort by Y position
-    labels.sort_by(|a, b| a.y_center.partial_cmp(&b.y_center).unwrap());
+    labels.sort_by(|a, b| {
+        a.y_center
+            .partial_cmp(&b.y_center)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Multiple passes to resolve overlaps
     for _pass in 0..5 {
