@@ -116,6 +116,89 @@
       z-index: 10;
     }
 
+    #lwc-config-panel {
+      position: fixed;
+      top: 54px;
+      right: 8px;
+      width: 340px;
+      max-height: calc(100dvh - 62px);
+      overflow: auto;
+      background: #131319ee;
+      border: 1px solid #2a2a34;
+      border-radius: 8px;
+      padding: 10px;
+      z-index: 12;
+      backdrop-filter: blur(4px);
+    }
+
+    #lwc-config-panel.hidden {
+      display: none;
+    }
+
+    #lwc-config-panel h2 {
+      font-size: 12px;
+      color: #ddd;
+      margin-bottom: 8px;
+    }
+
+    .cfg-row {
+      display: grid;
+      grid-template-columns: 100px 1fr;
+      gap: 6px;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .cfg-row label {
+      font-size: 11px;
+      color: #888;
+    }
+
+    .cfg-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .cfg-controls select,
+    .cfg-controls input[type="number"] {
+      background: #1f1f26;
+      color: #d0d0d0;
+      border: 1px solid #353544;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 11px;
+      min-width: 84px;
+    }
+
+    .cfg-controls input[type="number"] {
+      width: 60px;
+      min-width: 60px;
+    }
+
+    .cfg-controls input[type="color"] {
+      width: 24px;
+      height: 20px;
+      border: none;
+      background: transparent;
+      padding: 0;
+    }
+
+    .cfg-controls .cfg-check {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      color: #9a9a9a;
+      font-size: 11px;
+    }
+
+    .cfg-divider {
+      height: 1px;
+      background: #292933;
+      margin: 8px 0;
+    }
+
     #error-banner {
       display: none;
       background: #2a1010;
@@ -165,6 +248,17 @@
         top: 4px;
         left: 4px;
       }
+
+      #lwc-config-panel {
+        width: calc(100% - 8px);
+        right: 4px;
+        top: 44px;
+        max-height: calc(100dvh - 48px);
+      }
+
+      .cfg-row {
+        grid-template-columns: 86px 1fr;
+      }
     }
 
     @media (max-height: 400px) {
@@ -190,7 +284,7 @@
     <button class="toggle-btn" id="chart-line" title="Line chart (close prices)">Line</button>
     <button class="toggle-btn" id="chart-area" title="Area chart">Area</button>
     <span style="color:#444;margin:0 4px">|</span>
-    <button class="toggle-btn" id="crosshair-btn" title="Toggle OHLC Magnet mode">OHLC Magnet</button>
+    <button class="toggle-btn active" id="crosshair-settings-toggle" title="Show/hide crosshair and live-price config">LWC Config</button>
     <span style="color:#444;margin:0 4px">|</span>
     <button class="toggle-btn" id="draw-trendline" title="Trend Line">Line</button>
     <button class="toggle-btn" id="draw-rectangle" title="Rectangle">Rect</button>
@@ -227,9 +321,80 @@
     <div id="loading">Initializing…</div>
     <div id="hud"></div>
   </div>
+  <div id="lwc-config-panel">
+    <h2>Crosshair / Live Price</h2>
+    <div class="cfg-row">
+      <label for="cfg-crosshair-mode">Mode</label>
+      <div class="cfg-controls">
+        <select id="cfg-crosshair-mode">
+          <option value="normal">Normal</option>
+          <option value="magnet" selected>Magnet</option>
+          <option value="magnet_ohlc">Magnet OHLC</option>
+        </select>
+      </div>
+    </div>
+    <div class="cfg-row">
+      <label for="cfg-vert-style">Vert Line</label>
+      <div class="cfg-controls">
+        <select id="cfg-vert-style">
+          <option value="solid">Solid</option>
+          <option value="dotted">Dotted</option>
+          <option value="dashed">Dashed</option>
+          <option value="large_dashed" selected>LargeDashed</option>
+          <option value="sparse_dotted">SparseDotted</option>
+        </select>
+        <input type="number" id="cfg-vert-width" min="1" step="1" value="1" title="Width">
+        <label class="cfg-check"><input type="checkbox" id="cfg-vert-visible" checked>Line</label>
+        <label class="cfg-check"><input type="checkbox" id="cfg-vert-label-visible" checked>Label</label>
+      </div>
+    </div>
+    <div class="cfg-row">
+      <label for="cfg-horz-style">Horz Line</label>
+      <div class="cfg-controls">
+        <select id="cfg-horz-style">
+          <option value="solid">Solid</option>
+          <option value="dotted">Dotted</option>
+          <option value="dashed">Dashed</option>
+          <option value="large_dashed" selected>LargeDashed</option>
+          <option value="sparse_dotted">SparseDotted</option>
+        </select>
+        <input type="number" id="cfg-horz-width" min="1" step="1" value="1" title="Width">
+        <label class="cfg-check"><input type="checkbox" id="cfg-horz-visible" checked>Line</label>
+        <label class="cfg-check"><input type="checkbox" id="cfg-horz-label-visible" checked>Label</label>
+      </div>
+    </div>
+    <div class="cfg-row">
+      <label for="cfg-crosshair-color">Line Color</label>
+      <div class="cfg-controls">
+        <input type="color" id="cfg-crosshair-color" value="#9598a1">
+        <label for="cfg-crosshair-label-bg">Label BG</label>
+        <input type="color" id="cfg-crosshair-label-bg" value="#131722">
+        <label for="cfg-crosshair-label-text">Text</label>
+        <input type="color" id="cfg-crosshair-label-text" value="#e5e5e5">
+      </div>
+    </div>
+
+    <div class="cfg-divider"></div>
+
+    <div class="cfg-row">
+      <label for="cfg-last-style">Live Price</label>
+      <div class="cfg-controls">
+        <select id="cfg-last-style">
+          <option value="solid">Solid</option>
+          <option value="dotted">Dotted</option>
+          <option value="dashed" selected>Dashed</option>
+          <option value="large_dashed">LargeDashed</option>
+          <option value="sparse_dotted">SparseDotted</option>
+        </select>
+        <input type="number" id="cfg-last-width" min="1" step="1" value="1" title="Width">
+        <label class="cfg-check"><input type="checkbox" id="cfg-last-visible" checked>Line</label>
+        <label class="cfg-check"><input type="checkbox" id="cfg-last-label-visible" checked>Label</label>
+      </div>
+    </div>
+  </div>
 
   <script type="module">
-    import init, { RayCore } from './pkg/raycore_wasm.js?v=20260223-candlecorefix3';
+    import init, { RayCore } from './pkg/raycore_wasm.js?v=20260224-lwc-crosshair-liveprice';
 
     const errorBanner = document.getElementById('error-banner');
     const loading = document.getElementById('loading');
@@ -237,8 +402,76 @@
     const badge = document.getElementById('renderer-badge');
     const toggleGroup = document.getElementById('toggle-group');
     const container = document.getElementById('chart-container');
-    const crosshairBtn = document.getElementById('crosshair-btn');
-    let ohlcMagnetEnabled = false;
+    const cfgPanel = document.getElementById('lwc-config-panel');
+    const cfgToggleBtn = document.getElementById('crosshair-settings-toggle');
+
+    const cfg = {
+      crosshairMode: document.getElementById('cfg-crosshair-mode'),
+      vertStyle: document.getElementById('cfg-vert-style'),
+      vertWidth: document.getElementById('cfg-vert-width'),
+      vertVisible: document.getElementById('cfg-vert-visible'),
+      vertLabelVisible: document.getElementById('cfg-vert-label-visible'),
+      horzStyle: document.getElementById('cfg-horz-style'),
+      horzWidth: document.getElementById('cfg-horz-width'),
+      horzVisible: document.getElementById('cfg-horz-visible'),
+      horzLabelVisible: document.getElementById('cfg-horz-label-visible'),
+      crosshairColor: document.getElementById('cfg-crosshair-color'),
+      crosshairLabelBg: document.getElementById('cfg-crosshair-label-bg'),
+      crosshairLabelText: document.getElementById('cfg-crosshair-label-text'),
+      lastStyle: document.getElementById('cfg-last-style'),
+      lastWidth: document.getElementById('cfg-last-width'),
+      lastVisible: document.getElementById('cfg-last-visible'),
+      lastLabelVisible: document.getElementById('cfg-last-label-visible'),
+    };
+
+    function hexToRgba01(hex) {
+      const clean = hex.replace('#', '');
+      const v = parseInt(clean, 16);
+      const r = ((v >> 16) & 255) / 255;
+      const g = ((v >> 8) & 255) / 255;
+      const b = (v & 255) / 255;
+      return [r, g, b, 1.0];
+    }
+
+    function applyLwcConfig() {
+      if (!core) return;
+
+      core.set_crosshair_mode(cfg.crosshairMode.value);
+
+      core.set_crosshair_line_style('vert', cfg.vertStyle.value);
+      core.set_crosshair_line_width('vert', Number(cfg.vertWidth.value) || 1);
+      core.set_crosshair_line_visible('vert', cfg.vertVisible.checked);
+      core.set_crosshair_label_visible('vert', cfg.vertLabelVisible.checked);
+
+      core.set_crosshair_line_style('horz', cfg.horzStyle.value);
+      core.set_crosshair_line_width('horz', Number(cfg.horzWidth.value) || 1);
+      core.set_crosshair_line_visible('horz', cfg.horzVisible.checked);
+      core.set_crosshair_label_visible('horz', cfg.horzLabelVisible.checked);
+
+      const [cr, cg, cb, ca] = hexToRgba01(cfg.crosshairColor.value);
+      core.set_crosshair_line_color('both', cr, cg, cb, ca);
+      const [br, bg, bb, ba] = hexToRgba01(cfg.crosshairLabelBg.value);
+      core.set_crosshair_line_label_bg_color('both', br, bg, bb, ba);
+      const [tr, tg, tb, ta] = hexToRgba01(cfg.crosshairLabelText.value);
+      core.set_crosshair_label_text_color(tr, tg, tb, ta);
+
+      core.set_last_price_line_style(cfg.lastStyle.value);
+      core.set_last_price_line_width(Number(cfg.lastWidth.value) || 1);
+      core.set_last_price_line_visible(cfg.lastVisible.checked);
+      core.set_last_price_label_visible(cfg.lastLabelVisible.checked);
+    }
+
+    cfgToggleBtn.addEventListener('click', () => {
+      const hidden = cfgPanel.classList.toggle('hidden');
+      cfgToggleBtn.classList.toggle('active', !hidden);
+    });
+
+    Object.values(cfg).forEach((el) => {
+      el.addEventListener('change', applyLwcConfig);
+      if (el.tagName === 'INPUT') {
+        el.addEventListener('input', applyLwcConfig);
+      }
+    });
 
     // Drawing tool buttons
     const drawBtns = {
@@ -293,15 +526,6 @@
       }
     });
 
-    // OHLC Magnet mode toggle
-    crosshairBtn.addEventListener('click', () => {
-      ohlcMagnetEnabled = !ohlcMagnetEnabled;
-      crosshairBtn.classList.toggle('active', ohlcMagnetEnabled);
-      if (core) {
-        core.set_crosshair_mode(ohlcMagnetEnabled ? 'magnet_ohlc' : 'normal');
-      }
-    });
-
     // ── Chart Type Selector ─────────────────────────────────────────────────
     const chartTypeBtns = {
       'chart-candlestick': 'candlestick',
@@ -353,7 +577,7 @@
       if (core) { core.dispose(); core.free(); core = null; }
 
       // Clear container DOM (RayCore appends its own elements)
-      // Keep #loading and #hud
+      // Keep fixed UI overlays inside the chart container.
       const keep = new Set(['loading', 'hud']);
       Array.from(container.children).forEach(el => {
         if (!keep.has(el.id)) el.remove();
@@ -371,11 +595,7 @@
 
         core.demo_mode();
         loading.style.display = 'none';
-
-        // Restore OHLC magnet mode if it was enabled
-        if (ohlcMagnetEnabled) {
-          core.set_crosshair_mode('magnet_ohlc');
-        }
+        applyLwcConfig();
 
         hud.innerHTML = currentRenderer + ' | 600 bars | dpr=' + (window.devicePixelRatio || 1).toFixed(1) +
           '<br><span style="color:#666;font-size:10px">Keys: ←→ scroll | ↑↓ zoom price | +/- zoom time | Home/End jump | 0 fit | Del remove | Esc cancel</span>';
