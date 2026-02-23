@@ -203,6 +203,10 @@ pub struct RenderContext<'a> {
     pub x_ticks: &'a [TickMark],
     /// Overlay series (line, area, etc.) — renderers iterate these in draw_lines().
     pub series: &'a SeriesCollection,
+    /// Main chart type (candlestick, OHLC bars, line, area, etc.).
+    pub main_chart_type: crate::core::chart_type::MainChartType,
+    /// Main chart rendering options.
+    pub main_chart_options: &'a crate::core::chart_type::MainChartOptions,
 }
 
 /// Tick mark for axis rendering.
