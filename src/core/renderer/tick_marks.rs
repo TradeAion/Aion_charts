@@ -7,9 +7,7 @@
 
 use crate::core::formatters::{format_timestamp, nice_step};
 use crate::core::renderer::traits::TickMark;
-use crate::core::renderer::value_projection::{
-    candle_area_height_ph, format_scale_value, y_tick_step_internal,
-};
+use crate::core::renderer::value_projection::format_scale_value;
 use crate::core::viewport::Viewport;
 
 /// Compute price (Y-axis) tick marks.
@@ -21,19 +19,17 @@ pub fn compute_y_ticks(vp: &Viewport, chart_h: f64, dpr: f64) -> Vec<TickMark> {
         return vec![];
     }
 
-    let candle_h = candle_area_height_ph(vp, chart_h);
-    if candle_h <= 0.0 {
-        return vec![];
-    }
-
-    let step = y_tick_step_internal(vp, chart_h, dpr);
+    // Price axis ticks should span the full axis height, not only candle area.
+    // This avoids an empty visual gap in the lower portion of the Y axis.
+    let target_count = (chart_h / (40.0 * dpr)).clamp(3.0, 15.0);
+    let step = nice_step(range / target_count).max(0.0001);
     let first = (vp.price_min / step).ceil() * step;
 
     let mut out = Vec::new();
     let mut v = first;
     while v <= vp.price_max {
         let frac = (v - vp.price_min) / range;
-        let px = candle_h * (1.0 - frac);
+        let px = chart_h * (1.0 - frac);
         let label = format_scale_value(vp, vp.internal_to_price(v), step);
 
         out.push(TickMark {

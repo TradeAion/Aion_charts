@@ -3472,13 +3472,6 @@ impl RayCore {
                 ..
             } = *s;
             time_axis_renderer.render_base(&engine.style, &x_ticks, pane_pw);
-            // Scrollbar indicator at top of time axis
-            time_axis_renderer.render_scrollbar(
-                &engine.style,
-                &engine.viewport,
-                engine.bars.len(),
-                pane_pw,
-            );
             time_axis_renderer.render_top(
                 &engine.crosshair,
                 &engine.bars,
