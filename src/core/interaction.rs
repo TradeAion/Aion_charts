@@ -389,22 +389,7 @@ impl InteractionHandler {
 
             // Y line behavior depends on mode
             match crosshair.mode {
-                CrosshairMode::Magnet => {
-                    // Snap to close when we have actual bar data
-                    if let Some(idx) = crosshair.bar_index {
-                        let snap_price = magnet_snap_close_price(bars, idx);
-                        crosshair.y = viewport
-                            .price_to_css_y(snap_price, pane_css_h)
-                            .clamp(0.0, pane_css_h);
-                        crosshair.price = snap_price;
-                    } else {
-                        let cy = (self.track_crosshair_init_y + (y - self.track_start_y))
-                            .clamp(0.0, pane_css_h);
-                        crosshair.y = cy;
-                        crosshair.price = viewport.pixel_to_price(cy * dpr, candle_phys_h);
-                    }
-                }
-                CrosshairMode::MagnetOHLC => {
+                CrosshairMode::Magnet | CrosshairMode::MagnetOHLC => {
                     // Only snap Y if we have actual bar data
                     if let Some(idx) = crosshair.bar_index {
                         let cursor_y = (self.track_crosshair_init_y + (y - self.track_start_y))
@@ -458,20 +443,7 @@ impl InteractionHandler {
 
             // Y line behavior depends on mode
             match crosshair.mode {
-                CrosshairMode::Magnet => {
-                    // Snap to close when we have actual bar data
-                    if let Some(idx) = crosshair.bar_index {
-                        let snap_price = magnet_snap_close_price(bars, idx);
-                        crosshair.y = viewport
-                            .price_to_css_y(snap_price, pane_css_h)
-                            .clamp(0.0, pane_css_h);
-                        crosshair.price = snap_price;
-                    } else {
-                        crosshair.y = y.clamp(0.0, pane_css_h);
-                        crosshair.price = viewport.pixel_to_price(crosshair.y * dpr, candle_phys_h);
-                    }
-                }
-                CrosshairMode::MagnetOHLC => {
+                CrosshairMode::Magnet | CrosshairMode::MagnetOHLC => {
                     // Only snap Y if we have actual bar data
                     if let Some(idx) = crosshair.bar_index {
                         let cursor_y = y.clamp(0.0, pane_css_h);
@@ -878,12 +850,6 @@ impl InteractionHandler {
 
         self.is_gliding
     }
-}
-
-/// Compute the magnet-snap price for a given bar (Magnet mode).
-#[inline]
-fn magnet_snap_close_price(bars: &BarArray, idx: usize) -> f64 {
-    bars.close(idx) as f64
 }
 
 /// Compute the magnet-snap price for a given bar (MagnetOHLC mode).

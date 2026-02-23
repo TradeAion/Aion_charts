@@ -1295,14 +1295,16 @@ impl RayCore {
         vec![s.engine.viewport.start_bar, s.engine.viewport.end_bar]
     }
 
-    /// Set crosshair mode: "normal", "magnet", or "magnet_ohlc".
+    /// Set crosshair mode: "normal" or "magnet_ohlc".
+    ///
+    /// Legacy alias:
+    /// - "magnet" is accepted and treated as "magnet_ohlc".
     pub fn set_crosshair_mode(&mut self, mode: &str) {
         let mut s = self.inner.borrow_mut();
         s.engine.crosshair.mode = match mode {
             "normal" => raycore::CrosshairMode::Normal,
-            "magnet" => raycore::CrosshairMode::Magnet,
-            "magnet_ohlc" => raycore::CrosshairMode::MagnetOHLC,
-            _ => raycore::CrosshairMode::Magnet,
+            "magnet_ohlc" | "magnet" => raycore::CrosshairMode::MagnetOHLC,
+            _ => raycore::CrosshairMode::Normal,
         };
     }
 

@@ -199,9 +199,10 @@ impl Default for ChartStyle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CrosshairMode {
     /// Normal mode — Y follows cursor exactly.
-    Normal,
-    /// Magnet mode — Y snaps to close/value of the target bar.
     #[default]
+    Normal,
+    /// Legacy magnet mode alias.
+    /// Treated the same as `MagnetOHLC` in interaction logic.
     Magnet,
     /// Magnet OHLC mode — Y snaps to the nearest of O, H, L, C to the cursor Y.
     MagnetOHLC,

@@ -327,9 +327,8 @@
       <label for="cfg-crosshair-mode">Mode</label>
       <div class="cfg-controls">
         <select id="cfg-crosshair-mode">
-          <option value="normal">Normal</option>
-          <option value="magnet" selected>Magnet</option>
-          <option value="magnet_ohlc">Magnet OHLC</option>
+          <option value="normal" selected>Normal</option>
+          <option value="magnet_ohlc">OHLC Magnet</option>
         </select>
       </div>
     </div>
@@ -394,7 +393,7 @@
   </div>
 
   <script type="module">
-    import init, { RayCore } from './pkg/raycore_wasm.js?v=20260224-pane-resize-flicker-fix-v2';
+    import init, { RayCore } from './pkg/raycore_wasm.js?v=20260224-crosshair-default-normal';
 
     const errorBanner = document.getElementById('error-banner');
     const loading = document.getElementById('loading');
