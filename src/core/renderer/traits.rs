@@ -122,7 +122,7 @@ impl ChartStyle {
     /// Keeps the label body visually inside the axis rather than riding the separator.
     #[inline]
     pub fn price_axis_full_label_inside_gap(&self) -> f64 {
-        self.axis_border_size as f64
+        0.0
     }
 
     /// Computed optimal price axis width (CSS px) for a given max text width.
