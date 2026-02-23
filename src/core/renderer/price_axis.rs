@@ -246,8 +246,16 @@ impl PriceAxisRenderer {
         let step = y_tick_step_internal(vp, pane_ph, dpr);
         let price_lbl = format_scale_value(vp, price, step);
 
+        let font = style.axis_font(dpr);
+        self.top_ctx.set_font(&font);
+        let text_w = self
+            .text_cache
+            .measure(&self.top_ctx, &price_lbl, &font)
+            .ceil();
+
         let fs = style.font_size as f64 * dpr;
         let padding_inner = style.price_axis_padding_inner() * dpr;
+        let padding_outer = style.price_axis_padding_outer() * dpr;
         let tick_length = (style.axis_tick_length as f64 * dpr).round();
         let border_size = (style.axis_border_size as f64 * dpr).max(1.0).floor();
         let extra_pad = style.crosshair_label_extra_padding() * dpr;
@@ -255,10 +263,8 @@ impl PriceAxisRenderer {
         let padding_bottom = padding_top;
 
         let total_h = fs + padding_top + padding_bottom;
-
-        // Label width should match the price axis width exactly (no overflow)
-        // Use the canvas width directly since it's sized to the axis
-        let total_w = w;
+        let total_w_raw = border_size + padding_inner + padding_outer + text_w + tick_length;
+        let total_w = total_w_raw.min(w);
 
         // LWC: label height parity must match tick height parity
         let tick_h_bmp = dpr.floor().max(1.0);
@@ -299,9 +305,6 @@ impl PriceAxisRenderer {
         let x_inside = w - horz_border_bmp;
         // xOutside = xInside - totalWidthBitmap (label extends leftward)
         let x_outside = x_inside - total_w_bmp;
-        // xTick = xInside - tickSizeBitmap
-        let x_tick = x_inside - tick_size_bmp;
-
         // Clamp radius to avoid overflow when label fills full width
         let radius = (2.0 * dpr).round().min(total_h_bmp / 4.0).max(0.0);
 
@@ -328,13 +331,6 @@ impl PriceAxisRenderer {
             .arc_to(x_outside, y_top, x_outside + radius, y_top, radius);
         self.top_ctx.close_path();
         self.top_ctx.fill();
-
-        // Tick mark — LWC: fillRect(xInside, yMid, xTick - xInside, tickHeight)
-        // For alignRight, xTick < xInside, so we draw from xTick to xInside
-        self.top_ctx
-            .set_fill_style_str(&rgba(&style.crosshair_label_text));
-        self.top_ctx
-            .fill_rect(x_tick, y_mid, x_inside - x_tick, tick_h_bmp);
 
         // Separator (border line) — LWC: fillRect(right - horzBorder, yTop, horzBorder, yBottom - yTop)
         // using pane background color
@@ -421,7 +417,6 @@ impl PriceAxisRenderer {
 
             let x_inside = w - border_size;
             let x_outside = x_inside - total_w.round();
-            let x_tick = x_inside - tick_length;
             let radius = (2.0 * dpr).round();
 
             // Rounded rect background (series color)
@@ -440,12 +435,6 @@ impl PriceAxisRenderer {
                 .arc_to(x_outside, y_top, x_outside + radius, y_top, radius);
             self.base_ctx.close_path();
             self.base_ctx.fill();
-
-            // Tick mark
-            let tick_h = (1.0 * dpr).floor().max(1.0);
-            self.base_ctx.set_fill_style_str("rgba(255,255,255,0.9)");
-            self.base_ctx
-                .fill_rect(x_tick, y_mid, x_inside - x_tick, tick_h);
 
             // Separator border
             self.base_ctx.set_fill_style_str(&rgba(&style.bg_color));

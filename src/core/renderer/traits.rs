@@ -74,7 +74,7 @@ pub struct ChartStyle {
     pub watermark_text: String,
     /// Font family — LWC default: `-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif`.
     pub font_family: String,
-    /// Layout font size in CSS px (LWC default: 11).
+    /// Layout font size in CSS px (LWC default: 12).
     pub font_size: f32,
     pub font_size_watermark: f32,
     /// Bar width as fraction of bar slot (0.0-1.0). 0.8 = 80%.
@@ -166,7 +166,7 @@ impl ChartStyle {
         2.0 / 12.0 * self.font_size as f64
     }
 
-    /// Build the CSS font string for the axis: `"11px -apple-system, ..."`.
+    /// Build the CSS font string for the axis: `"12px -apple-system, ..."`.
     #[inline]
     pub fn axis_font(&self, dpr: f64) -> String {
         format!(

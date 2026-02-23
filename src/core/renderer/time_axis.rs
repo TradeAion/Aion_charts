@@ -156,14 +156,13 @@ impl TimeAxisRenderer {
             return;
         }
 
-        let mx = crosshair.x * dpr; // physical X in pane space
-        let pane_w = pane_css_w * dpr;
-        if mx < 0.0 || mx > pane_w {
+        let mx_css = crosshair.x;
+        if mx_css < 0.0 || mx_css > pane_css_w {
             return;
         }
 
         // Bar index at crosshair X — use floor() not round() (matches interaction.rs fix)
-        let bar_idx = vp.bar_index_at_pixel(mx, pane_w, bars.len());
+        let bar_idx = vp.bar_index_at_pixel(mx_css, pane_css_w, bars.len());
         let bar_i = bar_idx.unwrap_or(0);
         let bar_lbl = if bar_idx.is_some() && bars.timestamp(bar_i) > 0 {
             format_crosshair_time(bars.timestamp(bar_i))
@@ -171,78 +170,76 @@ impl TimeAxisRenderer {
             format!("{}", bar_i)
         };
 
-        let font = style.axis_font(dpr);
-        self.top_ctx.set_font(&font);
+        // LWC parity: compute label geometry in media/CSS coordinates, then convert to bitmap.
+        let css_font = format!("{}px {}", style.font_size, style.font_family);
+        self.top_ctx.set_font(&css_font);
 
         let text_w = self
             .text_cache
-            .measure(&self.top_ctx, &bar_lbl, &font)
+            .measure(&self.top_ctx, &bar_lbl, &css_font)
             .round();
-        let h_margin = style.time_axis_padding_horizontal() * dpr;
+        let h_margin = style.time_axis_padding_horizontal();
         let label_w = text_w + 2.0 * h_margin;
         let label_half = label_w / 2.0;
 
-        // Center on crosshair X, clamp to bounds
-        let mut coord = mx;
-        let mut lx1 = (coord - label_half).floor();
+        // Center on crosshair X, clamp to bounds (LWC uses +0.5 half-pixel offset).
+        let mut coord = mx_css;
+        let mut lx1 = (coord - label_half).floor() + 0.5;
         if lx1 < 0.0 {
             coord += -lx1;
-            lx1 = (coord - label_half).floor();
-        } else if lx1 + label_w > pane_w {
-            coord -= (lx1 + label_w) - pane_w;
-            lx1 = (coord - label_half).floor();
+            lx1 = (coord - label_half).floor() + 0.5;
+        } else if lx1 + label_w > pane_css_w {
+            coord -= (lx1 + label_w) - pane_css_w;
+            lx1 = (coord - label_half).floor() + 0.5;
         }
         let lx2 = lx1 + label_w;
 
-        // Label height should match the time axis height exactly (no overflow)
-        // Use the canvas height directly since it's sized to the axis
-        let label_h = h;
+        // Label height excludes labelBottomOffset (LWC y2 calculation in time-axis-view-renderer.ts).
+        let border_size = style.axis_border_size as f64;
+        let tick_length = style.axis_tick_length as f64;
+        let padding_top = style.time_axis_padding_top();
+        let padding_bottom = style.time_axis_padding_bottom();
+        let fs = style.font_size as f64;
 
-        // Compute layout positions for text
-        let border_size = (style.axis_border_size as f64 * dpr).max(1.0).floor();
-        let tick_length = (style.axis_tick_length as f64 * dpr).round();
-        let padding_top = style.time_axis_padding_top() * dpr;
-        let fs = style.font_size as f64 * dpr;
+        let by1_css = 0.0;
+        let by2_css = (by1_css + border_size + tick_length + padding_top + fs + padding_bottom)
+            .ceil()
+            .min(h / dpr);
 
-        let by1 = 0.0;
-        let by2 = label_h;
-        let radius = (2.0 * dpr).round().min(label_h / 4.0); // Clamp radius to avoid overflow
+        let lx1_bmp = (lx1 * dpr).round();
+        let lx2_bmp = (lx2 * dpr).round();
+        let by1_bmp = (by1_css * dpr).round();
+        let by2_bmp = (by2_css * dpr).round();
+        let label_h_bmp = (by2_bmp - by1_bmp).max(0.0);
+        let radius = (2.0 * dpr).round().min(label_h_bmp / 2.0);
 
         // Rounded rect: top corners square, bottom corners rounded
         self.top_ctx
             .set_fill_style_str(&rgba(&style.crosshair_vert_line.label_bg_color));
         self.top_ctx.begin_path();
-        self.top_ctx.move_to(lx1, by1);
-        self.top_ctx.line_to(lx2, by1);
-        self.top_ctx.line_to(lx2, by2 - radius);
-        let _ = self.top_ctx.arc_to(lx2, by2, lx2 - radius, by2, radius);
-        self.top_ctx.line_to(lx1 + radius, by2);
-        let _ = self.top_ctx.arc_to(lx1, by2, lx1, by2 - radius, radius);
-        self.top_ctx.line_to(lx1, by1);
+        self.top_ctx.move_to(lx1_bmp, by1_bmp);
+        self.top_ctx.line_to(lx1_bmp, by2_bmp - radius);
+        let _ = self
+            .top_ctx
+            .arc_to(lx1_bmp, by2_bmp, lx1_bmp + radius, by2_bmp, radius);
+        self.top_ctx.line_to(lx2_bmp - radius, by2_bmp);
+        let _ = self
+            .top_ctx
+            .arc_to(lx2_bmp, by2_bmp, lx2_bmp, by2_bmp - radius, radius);
+        self.top_ctx.line_to(lx2_bmp, by1_bmp);
         self.top_ctx.close_path();
         self.top_ctx.fill();
-
-        // Time tick mark
-        let tick_w_px = (1.0 * dpr).floor().max(1.0);
-        let tick_off_x = (dpr * 0.5).floor();
-        let tick_x = coord.round();
-        self.top_ctx
-            .set_fill_style_str(&rgba(&style.crosshair_label_text));
-        self.top_ctx
-            .fill_rect(tick_x - tick_off_x, 0.0, tick_w_px, tick_length);
 
         // Time text — draw in media (CSS) coordinate space for sharp text.
         self.top_ctx.save();
         let _ = self.top_ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
-        let css_font = format!("{}px {}", style.font_size, style.font_family);
         self.top_ctx.set_font(&css_font);
         self.top_ctx
             .set_fill_style_str(&rgba(&style.crosshair_label_text));
         self.top_ctx.set_text_align("left");
-        self.top_ctx.set_text_baseline("alphabetic");
-        let text_x_css = (lx1 + h_margin) / dpr;
-        let text_y_css = (border_size + tick_length + padding_top + fs / 2.0) / dpr;
-        // yMidCorrection already computed during width measurement above
+        self.top_ctx.set_text_baseline("middle");
+        let text_x_css = lx1 + h_margin;
+        let text_y_css = by1_css + border_size + tick_length + padding_top + fs / 2.0;
         let m = self
             .text_cache
             .measure_full(&self.top_ctx, &bar_lbl, &css_font);

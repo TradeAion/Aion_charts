@@ -55,7 +55,7 @@ pub const WATERMARK: [f32; 4] = [0.15, 0.16, 0.18, 1.0];
 pub const FONT_FAMILY: &str =
     "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
 /// Axis label font size in CSS px.
-pub const FONT_SIZE: f32 = 11.0;
+pub const FONT_SIZE: f32 = 12.0;
 /// Watermark font size in CSS px.
 pub const FONT_SIZE_WATERMARK: f32 = 48.0;
 /// Bar width as fraction of bar slot (0.0–1.0).
