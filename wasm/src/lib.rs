@@ -20,9 +20,9 @@
 
 use raycore::{
     generate_sample_data, tick_marks, AreaSeriesOptions, Bar, BarSeriesOptions,
-    BaselineSeriesOptions, Canvas2DRenderer, ChartEngine, ChartStyle, GpuContext,
+    BaselineSeriesOptions, Canvas2DRenderer, ChartEngine, ChartStyle, GpuContext, HistogramPoint,
     HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint, LineSeriesOptions, LineStyle,
-    MarkerPosition, MarkerShape, OverlayRenderer, PriceAxisRenderer, PriceLineOptions,
+    MarkerPosition, MarkerShape, OhlcPoint, OverlayRenderer, PriceAxisRenderer, PriceLineOptions,
     RendererBackend, SeriesId, SeriesMarker, TimeAxisRenderer, Viewport, WgpuRenderer,
 };
 use std::cell::{Cell, RefCell};
@@ -148,6 +148,38 @@ where
             f(&mut style.crosshair_horz_line);
         }
     }
+}
+
+fn js_err(message: impl Into<String>) -> JsValue {
+    JsValue::from_str(&message.into())
+}
+
+fn ensure_equal_len(name_a: &str, len_a: usize, name_b: &str, len_b: usize) -> Result<(), JsValue> {
+    if len_a != len_b {
+        Err(js_err(format!(
+            "{} and {} length mismatch: {} != {}",
+            name_a, name_b, len_a, len_b
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+fn ensure_finite_slice(name: &str, values: &[f32]) -> Result<(), JsValue> {
+    if let Some((idx, value)) = values.iter().enumerate().find(|(_, v)| !v.is_finite()) {
+        return Err(js_err(format!(
+            "{} contains non-finite value at index {}: {}",
+            name, idx, value
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_finite_fields(ctx: &str, fields: &[(&str, f32)]) -> Result<(), JsValue> {
+    if let Some((name, _)) = fields.iter().find(|(_, v)| !v.is_finite()) {
+        return Err(js_err(format!("{}: {} must be finite", ctx, name)));
+    }
+    Ok(())
 }
 
 #[wasm_bindgen]
@@ -1156,21 +1188,22 @@ impl RayCore {
         close: &[f32],
         volume: &[f32],
         timestamps: &[u64],
-    ) {
-        let count = open
-            .len()
-            .min(high.len())
-            .min(low.len())
-            .min(close.len())
-            .min(volume.len());
+    ) -> Result<(), JsValue> {
+        let count = open.len();
+        ensure_equal_len("open", count, "high", high.len())?;
+        ensure_equal_len("open", count, "low", low.len())?;
+        ensure_equal_len("open", count, "close", close.len())?;
+        ensure_equal_len("open", count, "volume", volume.len())?;
+        ensure_equal_len("open", count, "timestamps", timestamps.len())?;
+        ensure_finite_slice("open", open)?;
+        ensure_finite_slice("high", high)?;
+        ensure_finite_slice("low", low)?;
+        ensure_finite_slice("close", close)?;
+        ensure_finite_slice("volume", volume)?;
 
         let bars: Vec<Bar> = (0..count)
             .map(|i| Bar {
-                timestamp: if i < timestamps.len() {
-                    timestamps[i]
-                } else {
-                    i as u64
-                },
+                timestamp: timestamps[i],
                 open: open[i],
                 high: high[i],
                 low: low[i],
@@ -1179,39 +1212,62 @@ impl RayCore {
                 _pad: 0.0,
             })
             .collect();
-
-        self.inner.borrow_mut().engine.set_data(bars);
+        self.inner
+            .borrow_mut()
+            .engine
+            .set_data(bars)
+            .map_err(js_err)?;
         log::info!("set_data_arrays: {} bars", count);
+        Ok(())
     }
 
-    pub fn set_data(&mut self, data: &[f32]) {
+    pub fn set_data(&mut self, data: &[f32]) -> Result<(), JsValue> {
         const N: usize = 8;
         if data.len() % N != 0 {
-            log::error!(
+            return Err(js_err(format!(
                 "set_data: array length must be multiple of 8, got {}",
                 data.len()
-            );
-            return;
+            )));
         }
-        let bars: Vec<Bar> = (0..data.len() / N)
-            .map(|i| {
-                let b = i * N;
-                let ts_lo = data[b] as u32;
-                let ts_hi = data[b + 1] as u32;
-                Bar {
-                    timestamp: ((ts_hi as u64) << 32) | ts_lo as u64,
-                    open: data[b + 2],
-                    high: data[b + 3],
-                    low: data[b + 4],
-                    close: data[b + 5],
-                    volume: data[b + 6],
-                    _pad: 0.0,
+        let count = data.len() / N;
+        let mut bars = Vec::with_capacity(count);
+        for i in 0..count {
+            let b = i * N;
+            for (offset, field) in [
+                (2usize, "open"),
+                (3usize, "high"),
+                (4usize, "low"),
+                (5usize, "close"),
+                (6usize, "volume"),
+            ] {
+                let v = data[b + offset];
+                if !v.is_finite() {
+                    return Err(js_err(format!(
+                        "set_data: {} contains non-finite value at bar {}",
+                        field, i
+                    )));
                 }
-            })
-            .collect();
+            }
+            let ts_lo = data[b] as u32;
+            let ts_hi = data[b + 1] as u32;
+            bars.push(Bar {
+                timestamp: ((ts_hi as u64) << 32) | ts_lo as u64,
+                open: data[b + 2],
+                high: data[b + 3],
+                low: data[b + 4],
+                close: data[b + 5],
+                volume: data[b + 6],
+                _pad: 0.0,
+            });
+        }
         let n = bars.len();
-        self.inner.borrow_mut().engine.set_data(bars);
+        self.inner
+            .borrow_mut()
+            .engine
+            .set_data(bars)
+            .map_err(js_err)?;
         log::info!("set_data: {} bars", n);
+        Ok(())
     }
 
     // ── Demo mode ────────────────────────────────────────────────────────────
@@ -1222,8 +1278,10 @@ impl RayCore {
         let interval_ms = 60_000;
         let start_ms = now_ms - (num_bars as u64) * interval_ms;
         let bars = generate_sample_data(num_bars, start_ms, interval_ms);
-        self.inner.borrow_mut().engine.set_data(bars);
-        log::info!("demo_mode: {} bars loaded", num_bars);
+        match self.inner.borrow_mut().engine.set_data(bars) {
+            Ok(()) => log::info!("demo_mode: {} bars loaded", num_bars),
+            Err(e) => log::error!("demo_mode failed: {}", e),
+        }
     }
 
     // ── Viewport control ─────────────────────────────────────────────────────
@@ -1998,28 +2056,45 @@ impl RayCore {
         colors_g: &[f32],
         colors_b: &[f32],
         colors_a: &[f32],
-    ) {
-        let count = values.len().min(timestamps.len());
-        let has_colors = colors_r.len() >= count
-            && colors_g.len() >= count
-            && colors_b.len() >= count
-            && colors_a.len() >= count;
+    ) -> Result<(), JsValue> {
+        ensure_equal_len("values", values.len(), "timestamps", timestamps.len())?;
+        ensure_finite_slice("values", values)?;
+        let count = values.len();
+
+        let has_any_color = !colors_r.is_empty()
+            || !colors_g.is_empty()
+            || !colors_b.is_empty()
+            || !colors_a.is_empty();
+        let has_colors = if has_any_color {
+            ensure_equal_len("colors_r", colors_r.len(), "values", count)?;
+            ensure_equal_len("colors_g", colors_g.len(), "values", count)?;
+            ensure_equal_len("colors_b", colors_b.len(), "values", count)?;
+            ensure_equal_len("colors_a", colors_a.len(), "values", count)?;
+            ensure_finite_slice("colors_r", colors_r)?;
+            ensure_finite_slice("colors_g", colors_g)?;
+            ensure_finite_slice("colors_b", colors_b)?;
+            ensure_finite_slice("colors_a", colors_a)?;
+            true
+        } else {
+            false
+        };
 
         let mut s = self.inner.borrow_mut();
         if has_colors {
-            // Build per-bar color array
-            let mut colors = Vec::with_capacity(count);
-            for i in 0..count {
-                colors.push([colors_r[i], colors_g[i], colors_b[i], colors_a[i]]);
-            }
-            if let Some(series) = s.engine.series.get_mut(SeriesId(id)) {
-                series
-                    .histogram_data
-                    .set_from_arrays_with_colors(timestamps, values, &colors);
-            }
+            let data: Vec<HistogramPoint> = (0..count)
+                .map(|i| HistogramPoint {
+                    timestamp: timestamps[i],
+                    value: values[i],
+                    color: [colors_r[i], colors_g[i], colors_b[i], colors_a[i]],
+                })
+                .collect();
+            s.engine
+                .set_histogram_data(SeriesId(id), data)
+                .map_err(js_err)?;
         } else {
             s.engine
-                .set_histogram_data_arrays(SeriesId(id), timestamps, values);
+                .set_histogram_data_arrays(SeriesId(id), timestamps, values)
+                .map_err(js_err)?;
         }
         log::info!(
             "set_histogram_data: id={}, {} points, colors={}",
@@ -2027,6 +2102,7 @@ impl RayCore {
             count,
             has_colors
         );
+        Ok(())
     }
 
     /// Add a new bar (OHLC) series overlay. Returns the series ID.
@@ -2068,17 +2144,23 @@ impl RayCore {
         high: &[f32],
         low: &[f32],
         close: &[f32],
-    ) {
+    ) -> Result<(), JsValue> {
+        ensure_equal_len("timestamps", timestamps.len(), "open", open.len())?;
+        ensure_equal_len("timestamps", timestamps.len(), "high", high.len())?;
+        ensure_equal_len("timestamps", timestamps.len(), "low", low.len())?;
+        ensure_equal_len("timestamps", timestamps.len(), "close", close.len())?;
+        ensure_finite_slice("open", open)?;
+        ensure_finite_slice("high", high)?;
+        ensure_finite_slice("low", low)?;
+        ensure_finite_slice("close", close)?;
+
         let mut s = self.inner.borrow_mut();
         s.engine
-            .set_bar_data_arrays(SeriesId(id), timestamps, open, high, low, close);
-        let count = timestamps
-            .len()
-            .min(open.len())
-            .min(high.len())
-            .min(low.len())
-            .min(close.len());
+            .set_bar_data_arrays(SeriesId(id), timestamps, open, high, low, close)
+            .map_err(js_err)?;
+        let count = timestamps.len();
         log::info!("set_bar_series_data: id={}, {} bars", id, count);
+        Ok(())
     }
 
     /// Add a new baseline series overlay. Returns the series ID.
@@ -2144,8 +2226,15 @@ impl RayCore {
     }
 
     /// Set data for a line series. `values` and `timestamps` must be same length.
-    pub fn set_series_data(&mut self, id: u32, values: &[f32], timestamps: &[u64]) {
-        let count = values.len().min(timestamps.len());
+    pub fn set_series_data(
+        &mut self,
+        id: u32,
+        values: &[f32],
+        timestamps: &[u64],
+    ) -> Result<(), JsValue> {
+        ensure_equal_len("values", values.len(), "timestamps", timestamps.len())?;
+        ensure_finite_slice("values", values)?;
+        let count = values.len();
         let data: Vec<LinePoint> = (0..count)
             .map(|i| LinePoint {
                 timestamp: timestamps[i],
@@ -2155,8 +2244,10 @@ impl RayCore {
         self.inner
             .borrow_mut()
             .engine
-            .set_series_data(SeriesId(id), data);
+            .set_series_data(SeriesId(id), data)
+            .map_err(js_err)?;
         log::info!("set_series_data: id={}, {} points", id, count);
+        Ok(())
     }
 
     /// Remove a series by ID.
@@ -3231,7 +3322,17 @@ impl RayCore {
         low: f32,
         close: f32,
         volume: f32,
-    ) {
+    ) -> Result<(), JsValue> {
+        ensure_finite_fields(
+            "append_bar",
+            &[
+                ("open", open),
+                ("high", high),
+                ("low", low),
+                ("close", close),
+                ("volume", volume),
+            ],
+        )?;
         let bar = Bar {
             timestamp,
             open,
@@ -3241,7 +3342,11 @@ impl RayCore {
             volume,
             _pad: 0.0,
         };
-        self.inner.borrow_mut().engine.append_bar(bar);
+        self.inner
+            .borrow_mut()
+            .engine
+            .append_bar(bar)
+            .map_err(js_err)
     }
 
     /// Update the last bar in the data array. Used for real-time tick updates.
@@ -3253,7 +3358,17 @@ impl RayCore {
         low: f32,
         close: f32,
         volume: f32,
-    ) {
+    ) -> Result<(), JsValue> {
+        ensure_finite_fields(
+            "update_last_bar",
+            &[
+                ("open", open),
+                ("high", high),
+                ("low", low),
+                ("close", close),
+                ("volume", volume),
+            ],
+        )?;
         let bar = Bar {
             timestamp,
             open,
@@ -3263,7 +3378,311 @@ impl RayCore {
             volume,
             _pad: 0.0,
         };
-        self.inner.borrow_mut().engine.update_bar(bar);
+        self.inner
+            .borrow_mut()
+            .engine
+            .update_bar(bar)
+            .map_err(js_err)
+    }
+
+    /// LWC-style main series update semantics:
+    /// update last bar if timestamp matches, append if timestamp is newer.
+    pub fn upsert_bar(
+        &mut self,
+        timestamp: u64,
+        open: f32,
+        high: f32,
+        low: f32,
+        close: f32,
+        volume: f32,
+    ) -> Result<(), JsValue> {
+        ensure_finite_fields(
+            "upsert_bar",
+            &[
+                ("open", open),
+                ("high", high),
+                ("low", low),
+                ("close", close),
+                ("volume", volume),
+            ],
+        )?;
+        self.inner
+            .borrow_mut()
+            .engine
+            .upsert_bar(Bar {
+                timestamp,
+                open,
+                high,
+                low,
+                close,
+                volume,
+                _pad: 0.0,
+            })
+            .map_err(js_err)
+    }
+
+    /// Append a single point to a line/area/baseline overlay series.
+    pub fn append_series_point(
+        &mut self,
+        id: u32,
+        timestamp: u64,
+        value: f32,
+    ) -> Result<(), JsValue> {
+        if !value.is_finite() {
+            return Err(js_err("append_series_point: value must be finite"));
+        }
+        self.inner
+            .borrow_mut()
+            .engine
+            .append_series_point(SeriesId(id), LinePoint { timestamp, value })
+            .map_err(js_err)
+    }
+
+    /// Update the last point in a line/area/baseline overlay series.
+    pub fn update_last_series_point(
+        &mut self,
+        id: u32,
+        timestamp: u64,
+        value: f32,
+    ) -> Result<(), JsValue> {
+        if !value.is_finite() {
+            return Err(js_err("update_last_series_point: value must be finite"));
+        }
+        self.inner
+            .borrow_mut()
+            .engine
+            .update_last_series_point(SeriesId(id), LinePoint { timestamp, value })
+            .map_err(js_err)
+    }
+
+    /// LWC-style update semantics for line/area/baseline overlays:
+    /// update last point if timestamp matches, append if timestamp is newer.
+    pub fn upsert_series_point(
+        &mut self,
+        id: u32,
+        timestamp: u64,
+        value: f32,
+    ) -> Result<(), JsValue> {
+        if !value.is_finite() {
+            return Err(js_err("upsert_series_point: value must be finite"));
+        }
+        self.inner
+            .borrow_mut()
+            .engine
+            .upsert_series_point(SeriesId(id), LinePoint { timestamp, value })
+            .map_err(js_err)
+    }
+
+    /// Append a single point to a histogram overlay series.
+    pub fn append_histogram_point(
+        &mut self,
+        id: u32,
+        timestamp: u64,
+        value: f32,
+        color_r: f32,
+        color_g: f32,
+        color_b: f32,
+        color_a: f32,
+    ) -> Result<(), JsValue> {
+        ensure_finite_fields(
+            "append_histogram_point",
+            &[
+                ("value", value),
+                ("color_r", color_r),
+                ("color_g", color_g),
+                ("color_b", color_b),
+                ("color_a", color_a),
+            ],
+        )?;
+        self.inner
+            .borrow_mut()
+            .engine
+            .append_histogram_point(
+                SeriesId(id),
+                HistogramPoint {
+                    timestamp,
+                    value,
+                    color: [color_r, color_g, color_b, color_a],
+                },
+            )
+            .map_err(js_err)
+    }
+
+    /// Update the last point in a histogram overlay series.
+    pub fn update_last_histogram_point(
+        &mut self,
+        id: u32,
+        timestamp: u64,
+        value: f32,
+        color_r: f32,
+        color_g: f32,
+        color_b: f32,
+        color_a: f32,
+    ) -> Result<(), JsValue> {
+        ensure_finite_fields(
+            "update_last_histogram_point",
+            &[
+                ("value", value),
+                ("color_r", color_r),
+                ("color_g", color_g),
+                ("color_b", color_b),
+                ("color_a", color_a),
+            ],
+        )?;
+        self.inner
+            .borrow_mut()
+            .engine
+            .update_last_histogram_point(
+                SeriesId(id),
+                HistogramPoint {
+                    timestamp,
+                    value,
+                    color: [color_r, color_g, color_b, color_a],
+                },
+            )
+            .map_err(js_err)
+    }
+
+    /// LWC-style update semantics for histogram overlays:
+    /// update last point if timestamp matches, append if timestamp is newer.
+    pub fn upsert_histogram_point(
+        &mut self,
+        id: u32,
+        timestamp: u64,
+        value: f32,
+        color_r: f32,
+        color_g: f32,
+        color_b: f32,
+        color_a: f32,
+    ) -> Result<(), JsValue> {
+        ensure_finite_fields(
+            "upsert_histogram_point",
+            &[
+                ("value", value),
+                ("color_r", color_r),
+                ("color_g", color_g),
+                ("color_b", color_b),
+                ("color_a", color_a),
+            ],
+        )?;
+        self.inner
+            .borrow_mut()
+            .engine
+            .upsert_histogram_point(
+                SeriesId(id),
+                HistogramPoint {
+                    timestamp,
+                    value,
+                    color: [color_r, color_g, color_b, color_a],
+                },
+            )
+            .map_err(js_err)
+    }
+
+    /// Append a single point to a bar (OHLC) overlay series.
+    pub fn append_bar_series_point(
+        &mut self,
+        id: u32,
+        timestamp: u64,
+        open: f32,
+        high: f32,
+        low: f32,
+        close: f32,
+    ) -> Result<(), JsValue> {
+        ensure_finite_fields(
+            "append_bar_series_point",
+            &[
+                ("open", open),
+                ("high", high),
+                ("low", low),
+                ("close", close),
+            ],
+        )?;
+        self.inner
+            .borrow_mut()
+            .engine
+            .append_bar_series_point(
+                SeriesId(id),
+                OhlcPoint {
+                    timestamp,
+                    open,
+                    high,
+                    low,
+                    close,
+                },
+            )
+            .map_err(js_err)
+    }
+
+    /// Update the last point in a bar (OHLC) overlay series.
+    pub fn update_last_bar_series_point(
+        &mut self,
+        id: u32,
+        timestamp: u64,
+        open: f32,
+        high: f32,
+        low: f32,
+        close: f32,
+    ) -> Result<(), JsValue> {
+        ensure_finite_fields(
+            "update_last_bar_series_point",
+            &[
+                ("open", open),
+                ("high", high),
+                ("low", low),
+                ("close", close),
+            ],
+        )?;
+        self.inner
+            .borrow_mut()
+            .engine
+            .update_last_bar_series_point(
+                SeriesId(id),
+                OhlcPoint {
+                    timestamp,
+                    open,
+                    high,
+                    low,
+                    close,
+                },
+            )
+            .map_err(js_err)
+    }
+
+    /// LWC-style update semantics for OHLC bar overlays:
+    /// update last point if timestamp matches, append if timestamp is newer.
+    pub fn upsert_bar_series_point(
+        &mut self,
+        id: u32,
+        timestamp: u64,
+        open: f32,
+        high: f32,
+        low: f32,
+        close: f32,
+    ) -> Result<(), JsValue> {
+        ensure_finite_fields(
+            "upsert_bar_series_point",
+            &[
+                ("open", open),
+                ("high", high),
+                ("low", low),
+                ("close", close),
+            ],
+        )?;
+        self.inner
+            .borrow_mut()
+            .engine
+            .upsert_bar_series_point(
+                SeriesId(id),
+                OhlcPoint {
+                    timestamp,
+                    open,
+                    high,
+                    low,
+                    close,
+                },
+            )
+            .map_err(js_err)
     }
 
     // ── Render ───────────────────────────────────────────────────────────────
