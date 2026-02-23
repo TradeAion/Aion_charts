@@ -9,7 +9,7 @@
 //! the exact same data and coordinate math.
 
 use crate::core::data::BarArray;
-use crate::core::formatters::{format_indexed, format_percent, format_price, nice_step};
+use crate::core::formatters::{format_indexed, format_percent, format_price, nice_step_ceiling};
 use crate::core::renderer::traits::ChartStyle;
 use crate::core::renderer::transforms::price_to_y;
 use crate::core::series::SeriesCollection;
@@ -52,7 +52,7 @@ pub fn y_tick_step_internal(vp: &Viewport, axis_ph: f64, dpr: f64, style: &Chart
     // tickMarkHeight = ceil(fontSize * tickMarkDensity)
     let row_spacing_css = style.price_scale_tick_mark_spacing_css();
     let target_count = (axis_ph / (row_spacing_css * dpr)).max(1.0);
-    nice_step(range / target_count).max(0.0001)
+    nice_step_ceiling(range / target_count).max(0.0001)
 }
 
 /// Format a raw price according to the active price-scale mode.

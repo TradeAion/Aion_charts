@@ -4,7 +4,7 @@
 //! - PriceFormatter: automatic decimal precision based on price scale
 //! - Time formatting: adaptive labels (year/month/day/time) matching LWC's defaultTickMarkFormatter
 //! - VolumeFormatter: K/M/B suffixes matching LWC's volume-formatter.ts
-//! - nice_step: 1-2-5 series for clean tick values
+//! - nice_step: LWC-like 1-2-2.5-5 series for clean tick values
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -185,9 +185,10 @@ pub fn format_crosshair_time(ms: u64) -> String {
     format!("{}", ms)
 }
 
-// ── Tick step computation (1-2-5 series) ─────────────────────────────────────
+// ── Tick step computation (LWC-like 1-2-2.5-5 series) ───────────────────────
 
-/// Compute a "nice" step value for axis ticks (1-2-5 series).
+/// Compute a "nice" step value for axis ticks.
+/// Uses LWC-like ladder: 1, 2, 2.5, 5, 10.
 pub fn nice_step(raw: f64) -> f64 {
     if raw <= 0.0 {
         return 1.0;
@@ -196,9 +197,33 @@ pub fn nice_step(raw: f64) -> f64 {
     let r = raw / mag;
     let n = if r <= 1.5 {
         1.0
-    } else if r <= 3.5 {
+    } else if r <= 2.25 {
         2.0
+    } else if r <= 3.75 {
+        2.5
     } else if r <= 7.5 {
+        5.0
+    } else {
+        10.0
+    };
+    n * mag
+}
+
+/// Compute a "nice" step using the same ladder, but round upward only.
+/// This is used where dense labels are undesirable (e.g. price-axis text rows).
+pub fn nice_step_ceiling(raw: f64) -> f64 {
+    if raw <= 0.0 {
+        return 1.0;
+    }
+    let mag = 10.0_f64.powf(raw.log10().floor());
+    let r = raw / mag;
+    let n = if r <= 1.0 {
+        1.0
+    } else if r <= 2.0 {
+        2.0
+    } else if r <= 2.5 {
+        2.5
+    } else if r <= 5.0 {
         5.0
     } else {
         10.0

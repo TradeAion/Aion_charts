@@ -25,13 +25,20 @@ pub fn compute_y_ticks(vp: &Viewport, chart_h: f64, dpr: f64, style: &ChartStyle
     // Price axis ticks should span the full axis height, not only candle area.
     // Spacing follows LWC's typography-driven density model.
     let step = y_tick_step_internal(vp, chart_h, dpr, style).max(0.0001);
+    let min_gap_px = (style.price_scale_tick_mark_spacing_css() * dpr - 0.5).max(1.0);
     let first = (vp.price_min / step).ceil() * step;
 
-    let mut out = Vec::new();
+    let mut out: Vec<TickMark> = Vec::new();
     let mut v = first;
     while v <= vp.price_max {
         let frac = (v - vp.price_min) / range;
         let px = chart_h * (1.0 - frac);
+        if let Some(prev) = out.last() {
+            if (prev.pixel - px).abs() < min_gap_px {
+                v += step;
+                continue;
+            }
+        }
         let label = format_scale_value(vp, vp.internal_to_price(v), step);
 
         out.push(TickMark {

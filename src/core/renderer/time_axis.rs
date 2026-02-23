@@ -148,12 +148,7 @@ impl TimeAxisRenderer {
                 t.pixel / dpr,
                 pane_css_w_axis,
             );
-            let m = self
-                .text_cache
-                .measure_full(&self.base_ctx, &t.label, font_key);
-            let _ = self
-                .base_ctx
-                .fill_text(&t.label, x_css, text_y_css + m.y_mid_correction);
+            let _ = self.base_ctx.fill_text(&t.label, x_css, text_y_css);
         }
         self.base_ctx.restore();
     }
@@ -171,6 +166,7 @@ impl TimeAxisRenderer {
         let w = self.pw as f64;
         let h = self.ph as f64;
         let dpr = self.dpr;
+        let axis_css_w = if dpr > 0.0 { w / dpr } else { pane_css_w };
 
         self.top_ctx.clear_rect(0.0, 0.0, w, h);
 
@@ -210,8 +206,8 @@ impl TimeAxisRenderer {
         if lx1 < 0.0 {
             coord += -lx1;
             lx1 = (coord - label_half).floor() + 0.5;
-        } else if lx1 + label_w > pane_css_w {
-            coord -= (lx1 + label_w) - pane_css_w;
+        } else if lx1 + label_w > axis_css_w {
+            coord -= (lx1 + label_w) - axis_css_w;
             lx1 = (coord - label_half).floor() + 0.5;
         }
         let lx2 = lx1 + label_w;
@@ -225,8 +221,7 @@ impl TimeAxisRenderer {
 
         let by1_css = 0.0;
         let by2_css = (by1_css + border_size + tick_length + padding_top + fs + padding_bottom)
-            .ceil()
-            .min(h / dpr);
+            .ceil();
 
         let lx1_bmp = (lx1 * dpr).round();
         let lx2_bmp = (lx2 * dpr).round();
@@ -263,7 +258,7 @@ impl TimeAxisRenderer {
         let text_y_css = by1_css + border_size + tick_length + padding_top + fs / 2.0;
         let m = self
             .text_cache
-            .measure_full(&self.top_ctx, &bar_lbl, &css_font);
+            .measure_full(&self.top_ctx, "Apr0", &css_font);
         let _ = self
             .top_ctx
             .fill_text(&bar_lbl, text_x_css, text_y_css + m.y_mid_correction);

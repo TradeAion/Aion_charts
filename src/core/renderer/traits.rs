@@ -156,10 +156,11 @@ impl ChartStyle {
     pub fn time_axis_padding_horizontal(&self) -> f64 {
         9.0 * self.font_size as f64 / 12.0
     }
-    /// Time axis labelBottomOffset: `4 * fontSize / 12`.
+    /// Time axis labelBottomOffset.
+    /// Tuned slightly tighter to reduce excess blank space at the bottom edge.
     #[inline]
     pub fn time_axis_label_bottom_offset(&self) -> f64 {
-        4.0 * self.font_size as f64 / 12.0
+        3.0 * self.font_size as f64 / 12.0
     }
 
     /// Crosshair label additional padding (LWC: `2/12 * fontSize`).
