@@ -22,6 +22,7 @@ pub fn bar_to_x(bar_idx: f64, vp: &Viewport, chart_w: f64) -> f64 {
 /// Convert a price to Y pixel coordinate.
 ///
 /// Note: Y increases downward, so higher prices are at lower Y values.
+/// Handles all price scale modes (Normal, Log, Percentage, IndexedTo100).
 ///
 /// # Arguments
 /// * `price` - The price value
@@ -29,7 +30,13 @@ pub fn bar_to_x(bar_idx: f64, vp: &Viewport, chart_w: f64) -> f64 {
 /// * `candle_h` - The candle area height in pixels
 #[inline]
 pub fn price_to_y(price: f64, vp: &Viewport, candle_h: f64) -> f64 {
-    let frac = (price - vp.price_min) / (vp.price_max - vp.price_min);
+    let range = vp.price_max - vp.price_min;
+    if range <= 0.0 {
+        return 0.0;
+    }
+    // Transform price to internal coordinate space (handles log/percentage modes)
+    let internal = vp.price_to_internal(price);
+    let frac = (internal - vp.price_min) / range;
     candle_h * (1.0 - frac)
 }
 
@@ -46,6 +53,8 @@ pub fn x_to_bar(x_px: f64, vp: &Viewport, chart_w: f64) -> f64 {
 
 /// Convert Y pixel coordinate to price.
 ///
+/// Handles all price scale modes (Normal, Log, Percentage, IndexedTo100).
+///
 /// # Arguments
 /// * `y_px` - Y coordinate in pixels
 /// * `vp` - The current viewport
@@ -53,7 +62,9 @@ pub fn x_to_bar(x_px: f64, vp: &Viewport, chart_w: f64) -> f64 {
 #[inline]
 pub fn y_to_price(y_px: f64, vp: &Viewport, candle_h: f64) -> f64 {
     let frac = 1.0 - (y_px / candle_h);
-    vp.price_min + frac * (vp.price_max - vp.price_min)
+    let internal = vp.price_min + frac * (vp.price_max - vp.price_min);
+    // Transform back from internal coordinate space
+    vp.internal_to_price(internal)
 }
 
 /// Snap to pixel center for Canvas2D (floor + 0.5 for crisp 1px lines).

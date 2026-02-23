@@ -437,8 +437,6 @@ impl OverlayRenderer {
     ///
     /// Each line spans the full pane width at the series' last data value.
     /// Uses the series color with a `Dashed` pattern (2w, 2w).
-    ///
-    /// `time_ms` is used for the pulsing dot animation (pass 0 to disable animation).
     pub fn render_last_price_lines(
         &self,
         series: &SeriesCollection,
@@ -447,26 +445,18 @@ impl OverlayRenderer {
         style: &ChartStyle,
         pane_css_w: f64,
         pane_css_h: f64,
-        time_ms: f64,
+        _time_ms: f64,
     ) {
         let dpr = self.dpr;
         let pane_pw = pane_css_w * dpr;
-        let pane_ph = pane_css_h * dpr;
+
+        // Candle area height in physical pixels (excludes volume area)
+        let candle_frac = 1.0 - viewport.volume_height_ratio as f64;
+        let candle_ph = pane_css_h * candle_frac * dpr;
+
         let line_w = (1.0 * dpr).floor().max(1.0);
         let dash_len = 2.0 * line_w; // LWC Dashed pattern
         let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
-
-        // Calculate pulse phase (0.0 to 1.0, 1 second cycle)
-        let pulse_phase = if time_ms > 0.0 {
-            ((time_ms / 1000.0) % 1.0) as f32
-        } else {
-            0.5 // Static if no time provided
-        };
-        // Smooth pulse: sin wave gives smooth breathing effect
-        let pulse = (pulse_phase * std::f32::consts::TAU).sin() * 0.5 + 0.5;
-        let base_radius = 4.0 * dpr;
-        let pulse_radius = base_radius * (0.8 + 0.4 * pulse as f64); // 80% to 120% of base
-        let pulse_alpha = 0.6 + 0.4 * pulse as f64; // 60% to 100% opacity
 
         // Candlestick last price line
         if bars.len() > 0 {
@@ -478,11 +468,13 @@ impl OverlayRenderer {
             } else {
                 style.bearish_color
             };
+
+            // Use viewport's price_to_css_y which handles all scale modes
             let y_css = viewport.price_to_css_y(last_close, pane_css_h);
             let y_phys = (y_css * dpr).round() + correction;
 
-            if y_phys > 0.0 && y_phys < pane_ph {
-                // Draw the dashed line
+            // Only draw if within candle area (not in volume area)
+            if y_phys > 0.0 && y_phys < candle_ph {
                 self.ctx.set_stroke_style_str(&rgba(&color));
                 self.ctx.set_line_width(line_w);
                 self.ctx.set_line_cap("butt");
@@ -494,21 +486,6 @@ impl OverlayRenderer {
                 self.ctx.move_to(0.0, y_phys);
                 self.ctx.line_to(pane_pw, y_phys);
                 self.ctx.stroke();
-
-                // Draw pulsing dot at right edge
-                let dot_x = pane_pw - base_radius - 2.0 * dpr;
-                self.ctx.set_fill_style_str(&format!(
-                    "rgba({},{},{},{})",
-                    (color[0] * 255.0) as u8,
-                    (color[1] * 255.0) as u8,
-                    (color[2] * 255.0) as u8,
-                    pulse_alpha
-                ));
-                self.ctx.begin_path();
-                let _ = self
-                    .ctx
-                    .arc(dot_x, y_phys, pulse_radius, 0.0, std::f64::consts::TAU);
-                self.ctx.fill();
             }
         }
 
@@ -526,7 +503,8 @@ impl OverlayRenderer {
             let y_css = viewport.price_to_css_y(last_val, pane_css_h);
             let y_phys = (y_css * dpr).round() + correction;
 
-            if y_phys > 0.0 && y_phys < pane_ph {
+            // Only draw if within candle area
+            if y_phys > 0.0 && y_phys < candle_ph {
                 self.ctx.set_stroke_style_str(&rgba(&color));
                 self.ctx.set_line_width(line_w);
                 self.ctx.set_line_cap("butt");
@@ -538,21 +516,6 @@ impl OverlayRenderer {
                 self.ctx.move_to(0.0, y_phys);
                 self.ctx.line_to(pane_pw, y_phys);
                 self.ctx.stroke();
-
-                // Draw pulsing dot at right edge
-                let dot_x = pane_pw - base_radius - 2.0 * dpr;
-                self.ctx.set_fill_style_str(&format!(
-                    "rgba({},{},{},{})",
-                    (color[0] * 255.0) as u8,
-                    (color[1] * 255.0) as u8,
-                    (color[2] * 255.0) as u8,
-                    pulse_alpha
-                ));
-                self.ctx.begin_path();
-                let _ = self
-                    .ctx
-                    .arc(dot_x, y_phys, pulse_radius, 0.0, std::f64::consts::TAU);
-                self.ctx.fill();
             }
         }
 
