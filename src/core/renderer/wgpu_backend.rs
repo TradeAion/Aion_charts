@@ -993,20 +993,30 @@ impl ChartRenderer for WgpuRenderer {
             .map(|i| ctx.bars.timestamps.value(i))
             .collect();
 
-        let line_rects = crate::core::renderer::line_generator::generate_all_line_rects(
-            ctx.series,
-            ctx.viewport,
-            &ts,
-            pane_w,
-            pane_h,
-            ctx.h_pixel_ratio,
-            ctx.v_pixel_ratio,
-        );
+        // Generate smooth line segments + fill rects for overlays
+        let (line_segments, fill_rects) =
+            crate::core::renderer::line_generator::generate_all_overlay_geometry(
+                ctx.series,
+                ctx.viewport,
+                &ts,
+                pane_w,
+                pane_h,
+                ctx.h_pixel_ratio,
+                ctx.v_pixel_ratio,
+            );
 
-        if !line_rects.is_empty() {
-            let count = self.upload_rects(&line_rects, ctx.viewport.width, ctx.viewport.height);
+        // Draw fill rects first (area/baseline fills behind lines)
+        if !fill_rects.is_empty() {
+            let count = self.upload_rects(&fill_rects, ctx.viewport.width, ctx.viewport.height);
             self.draw_rect_pass(count);
         }
+
+        // Draw smooth anti-aliased line segments on top
+        if !line_segments.is_empty() {
+            let count = self.upload_lines(&line_segments, ctx.viewport.width, ctx.viewport.height);
+            self.draw_line_pass(count);
+        }
+
         Ok(())
     }
 

@@ -6,7 +6,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use crate::core::renderer::draw_list::ColoredRect;
+use crate::core::renderer::draw_list::{ColoredRect, LineSegment};
 use crate::core::renderer::geometry_generator;
 use crate::core::renderer::traits::{ChartRenderer, RenderContext};
 use crate::core::renderer::transforms::{bar_to_x, price_to_y};
@@ -71,6 +71,45 @@ impl Canvas2DRenderer {
             self.ctx.set_fill_style_str(&color);
             self.ctx
                 .fill_rect(rect.x as f64, rect.y as f64, rect.w as f64, rect.h as f64);
+        }
+    }
+
+    /// Draw line segments as native Canvas2D strokes for smooth anti-aliased lines.
+    /// Coordinates are already pixel-aligned by the generator, so we just draw them directly.
+    fn draw_line_segments(&self, segments: &[LineSegment]) {
+        if segments.is_empty() {
+            return;
+        }
+
+        // Set line cap and join for clean segment connections
+        self.ctx.set_line_cap("round");
+        self.ctx.set_line_join("round");
+
+        // Group segments by color and width for efficient batching
+        let mut prev_color: Option<[f32; 4]> = None;
+        let mut prev_width: Option<f32> = None;
+
+        for seg in segments {
+            let color = [seg.r, seg.g, seg.b, seg.a];
+            let width = seg.width;
+
+            // Update stroke style only when color changes
+            if prev_color != Some(color) {
+                self.ctx.set_stroke_style_str(&rgba(&color));
+                prev_color = Some(color);
+            }
+
+            // Update line width only when it changes
+            if prev_width != Some(width) {
+                self.ctx.set_line_width(width as f64);
+                prev_width = Some(width);
+            }
+
+            // Coordinates are already pixel-aligned by generate_line_segments
+            self.ctx.begin_path();
+            self.ctx.move_to(seg.x1 as f64, seg.y1 as f64);
+            self.ctx.line_to(seg.x2 as f64, seg.y2 as f64);
+            self.ctx.stroke();
         }
     }
 
@@ -325,16 +364,24 @@ impl ChartRenderer for Canvas2DRenderer {
             .map(|i| ctx.bars.timestamps.value(i))
             .collect();
 
-        let line_rects = crate::core::renderer::line_generator::generate_all_line_rects(
-            ctx.series,
-            ctx.viewport,
-            &ts,
-            pane_w,
-            pane_h,
-            ctx.h_pixel_ratio,
-            ctx.v_pixel_ratio,
-        );
-        self.draw_rects(&line_rects);
+        // Generate smooth line segments + fill rects for overlays
+        let (line_segments, fill_rects) =
+            crate::core::renderer::line_generator::generate_all_overlay_geometry(
+                ctx.series,
+                ctx.viewport,
+                &ts,
+                pane_w,
+                pane_h,
+                ctx.h_pixel_ratio,
+                ctx.v_pixel_ratio,
+            );
+
+        // Draw fill rects first (area/baseline fills behind lines)
+        self.draw_rects(&fill_rects);
+
+        // Draw smooth line segments on top using native Canvas2D strokes
+        self.draw_line_segments(&line_segments);
+
         Ok(())
     }
 

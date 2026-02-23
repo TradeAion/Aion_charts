@@ -1,13 +1,14 @@
-//! Line geometry generator — produces ColoredRect segments for line series.
+//! Line geometry generator — produces geometry for line series.
 //!
-//! Uses the LWC "walk-line" approach: for each pair of consecutive data points,
-//! draw a horizontal rect at the source Y, then a vertical connector to the
-//! next Y level. This produces crisp, pixel-perfect staircase rendering
-//! identical to LWC's line series.
+//! Supports two rendering modes:
+//! - **LineSegment**: Smooth anti-aliased diagonal lines via GPU line pipeline.
+//!   Used by WebGPU backend for high-quality rendering.
+//! - **ColoredRect**: Staircase/walk-line approach as fallback for Canvas2D.
 //!
-//! An alternative "diagonal" mode could be added later with anti-aliased lines.
+//! The LineSegment approach produces proper diagonal lines that connect data
+//! points directly, rendered with anti-aliasing by the line.wgsl shader.
 
-use crate::core::renderer::draw_list::ColoredRect;
+use crate::core::renderer::draw_list::{ColoredRect, LineSegment};
 use crate::core::renderer::transforms::{bar_to_x, price_to_y};
 use crate::core::series::{Series, SeriesType};
 use crate::core::viewport::Viewport;
@@ -122,6 +123,275 @@ pub fn generate_line_series_points(
 
     points
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LineSegment Generators (GPU anti-aliased lines)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Generate LineSegment elements for a line series (Solid style only).
+///
+/// Produces smooth anti-aliased diagonal line segments for GPU rendering.
+/// Each segment connects two consecutive data points directly.
+///
+/// Dashed line series (Dotted, Dashed, LargeDashed, SparseDotted) are skipped
+/// here — they are rendered via Canvas2D strokePath in the overlay renderer.
+pub fn generate_line_segments(
+    series: &Series,
+    viewport: &Viewport,
+    bar_timestamps: &[u64],
+    pane_w: f64,
+    pane_h: f64,
+    _h_ratio: f64,
+    v_ratio: f64,
+) -> Vec<LineSegment> {
+    if series.series_type() != SeriesType::Line || !series.line_options.visible {
+        return Vec::new();
+    }
+
+    // Skip dashed line series — they use Canvas2D strokePath rendering
+    if series.line_options.line_style.is_dashed() {
+        return Vec::new();
+    }
+
+    let opts = &series.line_options;
+    let color = opts.color;
+    let [r, g, b, a] = color;
+
+    // Line width in physical pixels (round to whole pixel for crisp rendering)
+    let line_w = (opts.line_width * v_ratio).round().max(1.0) as f32;
+
+    let points = generate_line_series_points(series, viewport, bar_timestamps, pane_w, pane_h);
+
+    if points.len() < 2 {
+        return Vec::new();
+    }
+
+    // For odd-width lines (1px, 3px), offset by 0.5 for pixel-center alignment
+    // Points are already integer-rounded by generate_line_series_points
+    let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
+
+    let mut segments = Vec::with_capacity(points.len() - 1);
+
+    for i in 0..points.len() - 1 {
+        let (x1, y1) = points[i];
+        let (x2, y2) = points[i + 1];
+
+        segments.push(LineSegment {
+            x1: (x1 + correction) as f32,
+            y1: (y1 + correction) as f32,
+            x2: (x2 + correction) as f32,
+            y2: (y2 + correction) as f32,
+            width: line_w,
+            r,
+            g,
+            b,
+            a,
+            _pad: 0.0,
+        });
+    }
+
+    segments
+}
+
+/// Generate LineSegment elements for the line portion of an area series.
+pub fn generate_area_line_segments(
+    series: &Series,
+    viewport: &Viewport,
+    bar_timestamps: &[u64],
+    pane_w: f64,
+    pane_h: f64,
+    _h_ratio: f64,
+    v_ratio: f64,
+) -> Vec<LineSegment> {
+    if series.series_type() != SeriesType::Area || !series.area_options.visible {
+        return Vec::new();
+    }
+
+    let data = &series.line_data;
+    if data.is_empty() {
+        return Vec::new();
+    }
+
+    let opts = &series.area_options;
+    let color = opts.line_color;
+    let [r, g, b, a] = color;
+
+    let line_w = (opts.line_width * v_ratio).round().max(1.0) as f32;
+
+    let vol_h = pane_h * viewport.volume_height_ratio as f64;
+    let candle_h = pane_h - vol_h;
+
+    let mut points: Vec<(f64, f64)> = Vec::with_capacity(data.len());
+
+    for i in 0..data.len() {
+        let pt = data.get(i);
+        let bar_idx = match timestamp_to_bar_index(pt.timestamp, bar_timestamps) {
+            Some(bi) => bi,
+            None => i as f64,
+        };
+
+        if bar_idx < viewport.start_bar - 2.0 || bar_idx > viewport.end_bar + 2.0 {
+            if !points.is_empty() || i + 1 < data.len() {
+                let next_visible = if i + 1 < data.len() {
+                    let next_ts = data.get(i + 1).timestamp;
+                    if let Some(next_bi) = timestamp_to_bar_index(next_ts, bar_timestamps) {
+                        next_bi >= viewport.start_bar - 2.0 && next_bi <= viewport.end_bar + 2.0
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if !next_visible && (points.is_empty() || bar_idx < viewport.start_bar - 2.0) {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+        }
+
+        let px_x = bar_to_x(bar_idx + 0.5, viewport, pane_w).round();
+        let px_y = price_to_y(pt.value as f64, viewport, candle_h).round();
+        points.push((px_x, px_y));
+    }
+
+    if points.len() < 2 {
+        return Vec::new();
+    }
+
+    // For odd-width lines (1px, 3px), offset by 0.5 for pixel-center alignment
+    let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
+
+    let mut segments = Vec::with_capacity(points.len() - 1);
+
+    for i in 0..points.len() - 1 {
+        let (x1, y1) = points[i];
+        let (x2, y2) = points[i + 1];
+
+        segments.push(LineSegment {
+            x1: (x1 + correction) as f32,
+            y1: (y1 + correction) as f32,
+            x2: (x2 + correction) as f32,
+            y2: (y2 + correction) as f32,
+            width: line_w,
+            r,
+            g,
+            b,
+            a,
+            _pad: 0.0,
+        });
+    }
+
+    segments
+}
+
+/// Generate LineSegment elements for the line portion of a baseline series.
+/// Uses two-tone coloring: above baseline uses top_line_color, below uses bottom_line_color.
+pub fn generate_baseline_line_segments(
+    series: &Series,
+    viewport: &Viewport,
+    bar_timestamps: &[u64],
+    pane_w: f64,
+    pane_h: f64,
+    _h_ratio: f64,
+    v_ratio: f64,
+) -> Vec<LineSegment> {
+    if series.series_type() != SeriesType::Baseline || !series.baseline_options.visible {
+        return Vec::new();
+    }
+
+    let data = &series.line_data;
+    if data.is_empty() {
+        return Vec::new();
+    }
+
+    let opts = &series.baseline_options;
+    let top_color = opts.top_line_color;
+    let bottom_color = opts.bottom_line_color;
+
+    let line_w = (opts.line_width * v_ratio).round().max(1.0) as f32;
+
+    let vol_h = pane_h * viewport.volume_height_ratio as f64;
+    let candle_h = pane_h - vol_h;
+
+    let base_y = price_to_y(opts.base_value, viewport, candle_h).round();
+
+    let mut points: Vec<(f64, f64)> = Vec::with_capacity(data.len());
+
+    for i in 0..data.len() {
+        let pt = data.get(i);
+        let bar_idx = match timestamp_to_bar_index(pt.timestamp, bar_timestamps) {
+            Some(bi) => bi,
+            None => i as f64,
+        };
+
+        if bar_idx < viewport.start_bar - 2.0 || bar_idx > viewport.end_bar + 2.0 {
+            if !points.is_empty() || i + 1 < data.len() {
+                let next_visible = if i + 1 < data.len() {
+                    let next_ts = data.get(i + 1).timestamp;
+                    if let Some(next_bi) = timestamp_to_bar_index(next_ts, bar_timestamps) {
+                        next_bi >= viewport.start_bar - 2.0 && next_bi <= viewport.end_bar + 2.0
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if !next_visible && (points.is_empty() || bar_idx < viewport.start_bar - 2.0) {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+        }
+
+        let px_x = bar_to_x(bar_idx + 0.5, viewport, pane_w).round();
+        let px_y = price_to_y(pt.value as f64, viewport, candle_h).round();
+        points.push((px_x, px_y));
+    }
+
+    if points.len() < 2 {
+        return Vec::new();
+    }
+
+    // For odd-width lines (1px, 3px), offset by 0.5 for pixel-center alignment
+    let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
+
+    let mut segments = Vec::with_capacity(points.len() - 1);
+
+    for i in 0..points.len() - 1 {
+        let (x1, y1) = points[i];
+        let (x2, y2) = points[i + 1];
+
+        // Determine segment color based on midpoint relative to baseline
+        let mid_y = (y1 + y2) * 0.5;
+        let color = if mid_y <= base_y {
+            top_color
+        } else {
+            bottom_color
+        };
+        let [r, g, b, a] = color;
+
+        segments.push(LineSegment {
+            x1: (x1 + correction) as f32,
+            y1: (y1 + correction) as f32,
+            x2: (x2 + correction) as f32,
+            y2: (y2 + correction) as f32,
+            width: line_w,
+            r,
+            g,
+            b,
+            a,
+            _pad: 0.0,
+        });
+    }
+
+    segments
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ColoredRect Generators (fallback for Canvas2D)
+// ═══════════════════════════════════════════════════════════════════════════════
 
 /// Generate ColoredRect segments for a single line series (Solid style only).
 ///
@@ -1151,4 +1421,125 @@ pub fn generate_all_line_rects(
         }
     }
     all_rects
+}
+
+/// Generate LineSegments for ALL visible overlay line series (line, area, baseline).
+///
+/// This is used by the WebGPU backend to render smooth anti-aliased indicator lines.
+/// Histogram and Bar series don't use line segments — they continue to use rects.
+///
+/// Returns (line_segments, fill_rects) where:
+/// - line_segments: smooth lines for Line, Area (line portion), and Baseline series
+/// - fill_rects: area/baseline fill rects that still need rect rendering
+pub fn generate_all_overlay_geometry(
+    series: &crate::core::series::SeriesCollection,
+    viewport: &Viewport,
+    bar_timestamps: &[u64],
+    pane_w: f64,
+    pane_h: f64,
+    h_ratio: f64,
+    v_ratio: f64,
+) -> (Vec<LineSegment>, Vec<ColoredRect>) {
+    let mut all_segments = Vec::new();
+    let mut all_rects = Vec::new();
+
+    for s in series.iter() {
+        match s.series_type() {
+            SeriesType::Line if s.line_options.visible => {
+                // Use smooth line segments for solid lines
+                if !s.line_options.line_style.is_dashed() {
+                    let segments = generate_line_segments(
+                        s,
+                        viewport,
+                        bar_timestamps,
+                        pane_w,
+                        pane_h,
+                        h_ratio,
+                        v_ratio,
+                    );
+                    all_segments.extend(segments);
+                }
+                // Dashed lines are handled by Canvas2D overlay renderer
+            }
+            SeriesType::Area if s.area_options.visible => {
+                // Area fill (rects) first
+                let fill_rects = generate_area_fill_rects(
+                    s,
+                    viewport,
+                    bar_timestamps,
+                    pane_w,
+                    pane_h,
+                    h_ratio,
+                    v_ratio,
+                );
+                all_rects.extend(fill_rects);
+
+                // Then smooth line segments on top
+                let segments = generate_area_line_segments(
+                    s,
+                    viewport,
+                    bar_timestamps,
+                    pane_w,
+                    pane_h,
+                    h_ratio,
+                    v_ratio,
+                );
+                all_segments.extend(segments);
+            }
+            SeriesType::Histogram if s.histogram_options.visible => {
+                // Histogram uses rects only
+                let rects = generate_histogram_rects(
+                    s,
+                    viewport,
+                    bar_timestamps,
+                    pane_w,
+                    pane_h,
+                    h_ratio,
+                    v_ratio,
+                );
+                all_rects.extend(rects);
+            }
+            SeriesType::Bar if s.bar_options.visible => {
+                // Bar (OHLC) uses rects only
+                let rects = generate_bar_ohlc_rects(
+                    s,
+                    viewport,
+                    bar_timestamps,
+                    pane_w,
+                    pane_h,
+                    h_ratio,
+                    v_ratio,
+                );
+                all_rects.extend(rects);
+            }
+            SeriesType::Baseline if s.baseline_options.visible => {
+                // Baseline fill (rects) first
+                let fill_rects = generate_baseline_fill_rects(
+                    s,
+                    viewport,
+                    bar_timestamps,
+                    pane_w,
+                    pane_h,
+                    h_ratio,
+                    v_ratio,
+                );
+                all_rects.extend(fill_rects);
+
+                // Then smooth two-tone line segments on top
+                let segments = generate_baseline_line_segments(
+                    s,
+                    viewport,
+                    bar_timestamps,
+                    pane_w,
+                    pane_h,
+                    h_ratio,
+                    v_ratio,
+                );
+                all_segments.extend(segments);
+            }
+            _ => {}
+        }
+    }
+
+    (all_segments, all_rects)
 }
