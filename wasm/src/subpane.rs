@@ -21,6 +21,7 @@ use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, Document, HtmlCanvasElement, HtmlDivElement, MouseEvent};
 
 use raycore::core::drawings::types::DrawingGeometry;
+use raycore::core::renderer::canvas_dash::{clear_canvas_line_dash, set_canvas_line_dash};
 use raycore::core::renderer::geometry_generator;
 use raycore::core::renderer::tick_marks::compute_y_ticks;
 use raycore::core::renderer::traits::{ChartStyle, CrosshairMode, CrosshairState, TickMark};
@@ -429,8 +430,8 @@ impl SubPane {
         }));
         let mut closures: Vec<Closure<dyn FnMut(MouseEvent)>> = Vec::new();
 
-        // Hover highlight -- use crosshair color from theme
-        let hover_color = rgba(&style.crosshair_color);
+        // Hover highlight -- use vertical crosshair color from theme
+        let hover_color = rgba(&style.crosshair_vert_line.color);
         {
             let sep = separator.clone();
             let hc = hover_color.clone();
@@ -707,18 +708,22 @@ impl SubPane {
         if pw <= 0.0 || ph <= 0.0 {
             return;
         }
+        if !style.crosshair_vert_line.visible {
+            return;
+        }
+
+        let line_w = (style.crosshair_vert_line.width * dpr).floor().max(1.0);
+        let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
 
         // Set crosshair line style
         self.chart_top_ctx
-            .set_stroke_style_str(&rgba(&style.crosshair_color));
-        self.chart_top_ctx.set_line_width(1.0);
-        let _ = self.chart_top_ctx.set_line_dash(&js_sys::Array::of2(
-            &JsValue::from(4.0),
-            &JsValue::from(3.0),
-        ));
+            .set_stroke_style_str(&rgba(&style.crosshair_vert_line.color));
+        self.chart_top_ctx.set_line_width(line_w);
+        self.chart_top_ctx.set_line_cap("butt");
+        set_canvas_line_dash(&self.chart_top_ctx, style.crosshair_vert_line.style, line_w);
 
         // Vertical crosshair line
-        let x = (x_css * dpr).round() + 0.5;
+        let x = (x_css * dpr).round() + correction;
         if x >= 0.0 && x <= pw {
             self.chart_top_ctx.begin_path();
             self.chart_top_ctx.move_to(x, 0.0);
@@ -726,7 +731,7 @@ impl SubPane {
             self.chart_top_ctx.stroke();
         }
 
-        let _ = self.chart_top_ctx.set_line_dash(&js_sys::Array::new());
+        clear_canvas_line_dash(&self.chart_top_ctx);
     }
 
     /// Render horizontal crosshair line + price axis label when cursor is in this sub-pane.
@@ -748,25 +753,27 @@ impl SubPane {
         }
 
         let y_css = self.crosshair_y.get();
-        let y = (y_css * dpr).round() + 0.5;
+        if style.crosshair_horz_line.visible {
+            let line_w = (style.crosshair_horz_line.width * dpr).floor().max(1.0);
+            let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
+            let y = (y_css * dpr).round() + correction;
 
-        // Draw horizontal crosshair on chart top canvas
-        self.chart_top_ctx
-            .set_stroke_style_str(&rgba(&style.crosshair_color));
-        self.chart_top_ctx.set_line_width(1.0);
-        let _ = self.chart_top_ctx.set_line_dash(&js_sys::Array::of2(
-            &JsValue::from(4.0),
-            &JsValue::from(3.0),
-        ));
+            // Draw horizontal crosshair on chart top canvas
+            self.chart_top_ctx
+                .set_stroke_style_str(&rgba(&style.crosshair_horz_line.color));
+            self.chart_top_ctx.set_line_width(line_w);
+            self.chart_top_ctx.set_line_cap("butt");
+            set_canvas_line_dash(&self.chart_top_ctx, style.crosshair_horz_line.style, line_w);
 
-        if y >= 0.0 && y <= ph {
-            self.chart_top_ctx.begin_path();
-            self.chart_top_ctx.move_to(0.0, y);
-            self.chart_top_ctx.line_to(pw, y);
-            self.chart_top_ctx.stroke();
+            if y >= 0.0 && y <= ph {
+                self.chart_top_ctx.begin_path();
+                self.chart_top_ctx.move_to(0.0, y);
+                self.chart_top_ctx.line_to(pw, y);
+                self.chart_top_ctx.stroke();
+            }
+
+            clear_canvas_line_dash(&self.chart_top_ctx);
         }
-
-        let _ = self.chart_top_ctx.set_line_dash(&js_sys::Array::new());
 
         // Compute price for the crosshair label
         let css_h = ph / dpr;

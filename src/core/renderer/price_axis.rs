@@ -96,10 +96,12 @@ impl PriceAxisRenderer {
         }
 
         // Last-value labels (same source as pane last-price lines).
-        for item in collect_last_values(series, bars, vp, style, pane_ph, self.dpr) {
-            let w = self.text_cache.measure(&self.base_ctx, &item.label, &font);
-            if w > max_w {
-                max_w = w;
+        if style.last_price_line.label_visible {
+            for item in collect_last_values(series, bars, vp, style, pane_ph, self.dpr) {
+                let w = self.text_cache.measure(&self.base_ctx, &item.label, &font);
+                if w > max_w {
+                    max_w = w;
+                }
             }
         }
 
@@ -222,7 +224,7 @@ impl PriceAxisRenderer {
 
         self.top_ctx.clear_rect(0.0, 0.0, w, h);
 
-        if !crosshair.active {
+        if !crosshair.active || !style.crosshair_horz_line.label_visible {
             return;
         }
 
@@ -306,7 +308,7 @@ impl PriceAxisRenderer {
         // Draw rounded rect — LWC alignRight corners: [radius, 0, 0, radius]
         // = top-left rounded, top-right square, bottom-right square, bottom-left rounded
         self.top_ctx
-            .set_fill_style_str(&rgba(&style.crosshair_label_bg));
+            .set_fill_style_str(&rgba(&style.crosshair_horz_line.label_bg_color));
         self.top_ctx.begin_path();
         // Start top-left (rounded)
         self.top_ctx.move_to(x_outside + radius, y_top);
@@ -379,6 +381,10 @@ impl PriceAxisRenderer {
         style: &ChartStyle,
         pane_ph: f64,
     ) {
+        if !style.last_price_line.label_visible {
+            return;
+        }
+
         let w = self.pw as f64;
 
         let labels = collect_last_values(series, bars, vp, style, pane_ph, self.dpr);

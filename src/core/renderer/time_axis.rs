@@ -152,7 +152,7 @@ impl TimeAxisRenderer {
 
         self.top_ctx.clear_rect(0.0, 0.0, w, h);
 
-        if !crosshair.active {
+        if !crosshair.active || !style.crosshair_vert_line.label_visible {
             return;
         }
 
@@ -210,7 +210,7 @@ impl TimeAxisRenderer {
 
         // Rounded rect: top corners square, bottom corners rounded
         self.top_ctx
-            .set_fill_style_str(&rgba(&style.crosshair_label_bg));
+            .set_fill_style_str(&rgba(&style.crosshair_vert_line.label_bg_color));
         self.top_ctx.begin_path();
         self.top_ctx.move_to(lx1, by1);
         self.top_ctx.line_to(lx2, by1);

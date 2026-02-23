@@ -12,12 +12,13 @@ use crate::core::drawings::types::DrawingGeometry;
 use crate::core::formatters::{format_price, format_volume};
 use crate::core::markers::{MarkerManager, MarkerPosition, MarkerShape};
 use crate::core::price_line::PriceLineManager;
+use crate::core::renderer::canvas_dash::{clear_canvas_line_dash, set_canvas_line_dash};
 use crate::core::renderer::line_generator;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
 use crate::core::renderer::traits::{ChartStyle, CrosshairState};
 use crate::core::renderer::value_projection::{collect_last_values, price_to_pane_y_phys};
-use crate::core::series::{SeriesCollection, SeriesType};
+use crate::core::series::{LineStyle, SeriesCollection, SeriesType};
 use crate::core::viewport::Viewport;
 use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
@@ -157,7 +158,7 @@ impl OverlayRenderer {
             ctx.line_to(l.x1 as f64 + correction, l.y1 as f64 + correction);
             ctx.stroke();
         }
-        let _ = ctx.set_line_dash(&js_sys::Array::new());
+        clear_canvas_line_dash(ctx);
 
         // Text labels (in physical pixel coords)
         for t in &geom.texts {
@@ -396,20 +397,10 @@ impl OverlayRenderer {
         color: &[f32; 4],
         css_width: f64,
         v_ratio: f64,
-        style: &crate::core::series::LineStyle,
+        style: &LineStyle,
     ) {
         let line_w = (css_width * v_ratio).round().max(1.0);
-
-        // Set dash pattern
-        let (dash, gap) = style.dash_pattern(line_w);
-        if dash > 0.0 && gap > 0.0 {
-            let _ = ctx.set_line_dash(&js_sys::Array::of2(
-                &JsValue::from(dash),
-                &JsValue::from(gap),
-            ));
-        } else {
-            let _ = ctx.set_line_dash(&js_sys::Array::new());
-        }
+        set_canvas_line_dash(ctx, *style, line_w);
 
         ctx.set_stroke_style_str(&rgba(color));
         ctx.set_line_width(line_w);
@@ -431,13 +422,13 @@ impl OverlayRenderer {
         ctx.stroke();
 
         // Reset dash
-        let _ = ctx.set_line_dash(&js_sys::Array::new());
+        clear_canvas_line_dash(ctx);
     }
 
-    /// Render horizontal dashed last-price lines for all visible series.
+    /// Render horizontal live last-price lines for all visible series.
     ///
     /// Each line spans the full pane width at the series' last data value.
-    /// Uses the series color with a `Dashed` pattern (2w, 2w).
+    /// Style is controlled by `style.last_price_line` (LWC-like options).
     pub fn render_last_price_lines(
         &self,
         series: &SeriesCollection,
@@ -448,11 +439,14 @@ impl OverlayRenderer {
         _pane_css_h: f64,
         _time_ms: f64,
     ) {
+        if !style.last_price_line.visible {
+            return;
+        }
+
         let dpr = self.dpr;
         let pane_pw = self.pw as f64;
 
-        let line_w = (1.0 * dpr).floor().max(1.0);
-        let dash_len = 2.0 * line_w; // LWC Dashed pattern
+        let line_w = (style.last_price_line.width * dpr).floor().max(1.0);
         let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
 
         let projected = collect_last_values(series, bars, viewport, style, self.ph as f64, dpr);
@@ -462,10 +456,7 @@ impl OverlayRenderer {
             self.ctx.set_stroke_style_str(&rgba(&item.color));
             self.ctx.set_line_width(line_w);
             self.ctx.set_line_cap("butt");
-            let _ = self.ctx.set_line_dash(&js_sys::Array::of2(
-                &JsValue::from(dash_len),
-                &JsValue::from(dash_len),
-            ));
+            set_canvas_line_dash(&self.ctx, style.last_price_line.style, line_w);
             self.ctx.begin_path();
             self.ctx.move_to(0.0, y);
             self.ctx.line_to(pane_pw, y);
@@ -473,7 +464,7 @@ impl OverlayRenderer {
         }
 
         // Reset dash
-        let _ = self.ctx.set_line_dash(&js_sys::Array::new());
+        clear_canvas_line_dash(&self.ctx);
     }
 
     /// Render custom price lines.
@@ -512,15 +503,7 @@ impl OverlayRenderer {
             let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
 
             // Set dash pattern based on line style
-            let (dash, gap) = opts.line_style.dash_pattern(line_w);
-            if dash > 0.0 && gap > 0.0 {
-                let _ = self.ctx.set_line_dash(&js_sys::Array::of2(
-                    &JsValue::from(dash),
-                    &JsValue::from(gap),
-                ));
-            } else {
-                let _ = self.ctx.set_line_dash(&js_sys::Array::new());
-            }
+            set_canvas_line_dash(&self.ctx, opts.line_style, line_w);
 
             // Highlight if hovered
             let color = if line.hovered {
@@ -547,7 +530,7 @@ impl OverlayRenderer {
         }
 
         // Reset dash
-        let _ = self.ctx.set_line_dash(&js_sys::Array::new());
+        clear_canvas_line_dash(&self.ctx);
     }
 
     fn draw_crosshair(&self, ch: &CrosshairState, style: &ChartStyle, pane_w: f64, pane_h: f64) {
@@ -559,39 +542,45 @@ impl OverlayRenderer {
         let mx = ch.x * dpr;
         let my = ch.y * dpr;
 
-        if mx < 0.0 || mx > pane_w || my < 0.0 || my > pane_h {
+        let vert_in_bounds = mx >= 0.0 && mx <= pane_w;
+        let horz_in_bounds = my >= 0.0 && my <= pane_h;
+        if !vert_in_bounds && !horz_in_bounds {
             return;
         }
 
-        // Dashed crosshair lines (LWC: LargeDashed = 6*lineWidth, 6*lineWidth)
-        let line_w = (1.0 * dpr).floor().max(1.0);
-        let dash_len = 6.0 * line_w;
-        let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
-
-        self.ctx.set_stroke_style_str(&rgba(&style.crosshair_color));
-        self.ctx.set_line_width(line_w);
         self.ctx.set_line_cap("butt");
-        let _ = self.ctx.set_line_dash(&js_sys::Array::of2(
-            &JsValue::from(dash_len),
-            &JsValue::from(dash_len),
-        ));
 
-        // Horizontal line (full pane width)
-        let hy = my.round() + correction;
-        self.ctx.begin_path();
-        self.ctx.move_to(0.0, hy);
-        self.ctx.line_to(pane_w, hy);
-        self.ctx.stroke();
+        if style.crosshair_horz_line.visible && horz_in_bounds {
+            let line_w = (style.crosshair_horz_line.width * dpr).floor().max(1.0);
+            let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
+            self.ctx
+                .set_stroke_style_str(&rgba(&style.crosshair_horz_line.color));
+            self.ctx.set_line_width(line_w);
+            set_canvas_line_dash(&self.ctx, style.crosshair_horz_line.style, line_w);
 
-        // Vertical line (full pane height)
-        let vx = mx.round() + correction;
-        self.ctx.begin_path();
-        self.ctx.move_to(vx, 0.0);
-        self.ctx.line_to(vx, pane_h);
-        self.ctx.stroke();
+            let hy = my.round() + correction;
+            self.ctx.begin_path();
+            self.ctx.move_to(0.0, hy);
+            self.ctx.line_to(pane_w, hy);
+            self.ctx.stroke();
+        }
 
-        // Reset dash
-        let _ = self.ctx.set_line_dash(&js_sys::Array::new());
+        if style.crosshair_vert_line.visible && vert_in_bounds {
+            let line_w = (style.crosshair_vert_line.width * dpr).floor().max(1.0);
+            let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
+            self.ctx
+                .set_stroke_style_str(&rgba(&style.crosshair_vert_line.color));
+            self.ctx.set_line_width(line_w);
+            set_canvas_line_dash(&self.ctx, style.crosshair_vert_line.style, line_w);
+
+            let vx = mx.round() + correction;
+            self.ctx.begin_path();
+            self.ctx.move_to(vx, 0.0);
+            self.ctx.line_to(vx, pane_h);
+            self.ctx.stroke();
+        }
+
+        clear_canvas_line_dash(&self.ctx);
     }
 
     /// Render crosshair marker circles at the intersection with line/area/baseline series.
