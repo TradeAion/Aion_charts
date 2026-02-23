@@ -48,6 +48,9 @@ pub mod overlay;
 pub mod text_cache;
 
 #[cfg(target_arch = "wasm32")]
+pub mod canvas_dash;
+
+#[cfg(target_arch = "wasm32")]
 pub mod price_axis;
 
 #[cfg(target_arch = "wasm32")]

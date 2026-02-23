@@ -11,8 +11,38 @@
 //! immediately, avoiding self-referential borrows.
 
 use crate::core::data::BarArray;
-use crate::core::series::SeriesCollection;
+use crate::core::series::{LineStyle, SeriesCollection};
 use crate::core::viewport::Viewport;
+
+/// Crosshair line options (LWC-style) for vertical/horizontal lines.
+#[derive(Debug, Clone, Copy)]
+pub struct CrosshairLineStyle {
+    /// Line color [R, G, B, A].
+    pub color: [f32; 4],
+    /// Line width in CSS px.
+    pub width: f64,
+    /// Dash style.
+    pub style: LineStyle,
+    /// Whether the line itself is rendered.
+    pub visible: bool,
+    /// Whether the corresponding axis label is rendered.
+    pub label_visible: bool,
+    /// Axis label background color.
+    pub label_bg_color: [f32; 4],
+}
+
+/// Main-series live price line options (LWC-style series price line).
+#[derive(Debug, Clone, Copy)]
+pub struct LastPriceLineStyle {
+    /// Whether the live price line is rendered.
+    pub visible: bool,
+    /// Line width in CSS px.
+    pub width: f64,
+    /// Dash style.
+    pub style: LineStyle,
+    /// Whether the live price label on price axis is rendered.
+    pub label_visible: bool,
+}
 
 /// Style configuration for the chart — colors, sizes, etc.
 /// Shared between all renderers so the chart looks identical regardless of backend.
@@ -31,11 +61,14 @@ pub struct ChartStyle {
     pub axis_border_color: [f32; 4],
     pub axis_text_color: [f32; 4],
     pub axis_bg_color: [f32; 4],
-    /// Crosshair line color (LWC default: #9598A1).
-    pub crosshair_color: [f32; 4],
-    /// Crosshair label background (LWC default: #131722).
-    pub crosshair_label_bg: [f32; 4],
+    /// Crosshair vertical line options (LWC `crosshair.vertLine`).
+    pub crosshair_vert_line: CrosshairLineStyle,
+    /// Crosshair horizontal line options (LWC `crosshair.horzLine`).
+    pub crosshair_horz_line: CrosshairLineStyle,
+    /// Shared crosshair label text color.
     pub crosshair_label_text: [f32; 4],
+    /// Live price line options for main/overlay series.
+    pub last_price_line: LastPriceLineStyle,
     pub watermark_color: [f32; 4],
     /// Watermark text displayed centered on the pane.
     pub watermark_text: String,
@@ -166,8 +199,10 @@ impl Default for ChartStyle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CrosshairMode {
     /// Normal mode — Y follows cursor exactly.
-    #[default]
     Normal,
+    /// Magnet mode — Y snaps to close/value of the target bar.
+    #[default]
+    Magnet,
     /// Magnet OHLC mode — Y snaps to the nearest of O, H, L, C to the cursor Y.
     MagnetOHLC,
 }

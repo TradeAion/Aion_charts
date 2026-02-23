@@ -3,7 +3,8 @@
 //! Edit this file to change the look of the chart.
 //! `ChartStyle::default()` in traits.rs delegates here.
 
-use super::traits::ChartStyle;
+use super::traits::{ChartStyle, CrosshairLineStyle, LastPriceLineStyle};
+use crate::core::series::LineStyle;
 
 /// Hex helper: converts a u8 channel (0–255) to the 0.0–1.0 range.
 const fn ch(v: u8) -> f32 {
@@ -80,9 +81,29 @@ pub fn default_style() -> ChartStyle {
         axis_border_color: AXIS_BORDER,
         axis_text_color: AXIS_TEXT,
         axis_bg_color: BG,
-        crosshair_color: CROSSHAIR,
-        crosshair_label_bg: CROSSHAIR_LABEL_BG,
+        crosshair_vert_line: CrosshairLineStyle {
+            color: CROSSHAIR,
+            width: 1.0,
+            style: LineStyle::LargeDashed,
+            visible: true,
+            label_visible: true,
+            label_bg_color: CROSSHAIR_LABEL_BG,
+        },
+        crosshair_horz_line: CrosshairLineStyle {
+            color: CROSSHAIR,
+            width: 1.0,
+            style: LineStyle::LargeDashed,
+            visible: true,
+            label_visible: true,
+            label_bg_color: CROSSHAIR_LABEL_BG,
+        },
         crosshair_label_text: CROSSHAIR_LABEL_TEXT,
+        last_price_line: LastPriceLineStyle {
+            visible: true,
+            width: 1.0,
+            style: LineStyle::Dashed,
+            label_visible: true,
+        },
         watermark_color: WATERMARK,
         watermark_text: String::new(),
         font_family: FONT_FAMILY.into(),
