@@ -112,6 +112,14 @@ impl ChartStyle {
     pub fn price_axis_label_offset(&self) -> f64 {
         5.0
     }
+    /// Extra in-axis inset used when clamping Y-axis label boxes.
+    /// Keeps crosshair/live-price labels fully inside at top/bottom edges.
+    #[inline]
+    pub fn price_axis_label_edge_inset(&self) -> f64 {
+        self.price_axis_padding_tb()
+            .ceil()
+            .max(self.axis_border_size as f64)
+    }
 
     /// Computed optimal price axis width (CSS px) for a given max text width.
     /// LWC: borderSize + tickLength + paddingInner + paddingOuter + LabelOffset + textWidth
@@ -167,6 +175,12 @@ impl ChartStyle {
     #[inline]
     pub fn crosshair_label_extra_padding(&self) -> f64 {
         2.0 / 12.0 * self.font_size as f64
+    }
+    /// Top inset for X-axis crosshair label box.
+    /// Keeps label fully inside the time-axis border box.
+    #[inline]
+    pub fn time_axis_crosshair_label_top_inset(&self) -> f64 {
+        self.axis_border_size as f64
     }
 
     /// Effective Y-axis row spacing for price ticks (CSS px).

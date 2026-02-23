@@ -248,8 +248,9 @@ impl PriceAxisRenderer {
             return;
         }
 
+        let pane_limit_h = pane_ph.min(h);
         let my = crosshair.y * dpr; // physical Y in pane space
-        if my < 0.0 || my > pane_ph {
+        if my < 0.0 || my > pane_limit_h {
             return;
         }
 
@@ -277,7 +278,7 @@ impl PriceAxisRenderer {
         let extra_pad = style.crosshair_label_extra_padding() * dpr;
         let geom = match compute_right_axis_label_geometry(
             w,
-            pane_ph,
+            pane_limit_h,
             my,
             text_w,
             dpr,
@@ -336,6 +337,7 @@ impl PriceAxisRenderer {
 
         let dpr = self.dpr;
         let candle_h = candle_area_height_ph(vp, pane_ph);
+        let label_h = candle_h.min(self.ph as f64);
         let font = style.axis_font(dpr);
         self.base_ctx.set_font(&font);
         let metrics = RightAxisLabelMetrics::from_style(style, dpr);
@@ -351,7 +353,7 @@ impl PriceAxisRenderer {
                 index: i,
             })
             .collect();
-        resolve_label_overlaps(&mut layout, candle_h);
+        resolve_label_overlaps(&mut layout, label_h);
 
         let css_font = format!("{}px {}", style.font_size, style.font_family);
         let text_color = [1.0, 1.0, 1.0, 0.9];
@@ -366,7 +368,7 @@ impl PriceAxisRenderer {
                 .unwrap_or_else(|| item.y_phys.round());
             let geom = match compute_right_axis_label_geometry(
                 w,
-                candle_h,
+                label_h,
                 y_mid,
                 text_w,
                 dpr,
@@ -411,6 +413,7 @@ impl PriceAxisRenderer {
 
         // Candle area height in physical pixels
         let candle_h = candle_area_height_ph(vp, pane_ph);
+        let label_h = candle_h.min(self.ph as f64);
 
         let step = y_tick_step_internal(vp, pane_ph, dpr, style);
         let font = style.axis_font(dpr);
@@ -462,7 +465,7 @@ impl PriceAxisRenderer {
                 index: i,
             })
             .collect();
-        resolve_label_overlaps(&mut layout, candle_h);
+        resolve_label_overlaps(&mut layout, label_h);
 
         let css_font = format!("{}px {}", style.font_size, style.font_family);
         for (i, entry) in entries.iter().enumerate() {
@@ -476,7 +479,7 @@ impl PriceAxisRenderer {
                 .unwrap_or_else(|| entry.y_phys.round());
             let geom = match compute_right_axis_label_geometry(
                 w,
-                candle_h,
+                label_h,
                 y_mid,
                 text_w,
                 dpr,
@@ -512,6 +515,7 @@ struct RightAxisLabelMetrics {
     padding_tb: f64,
     tick_size: f64,
     border_size: f64,
+    edge_inset: f64,
 }
 
 impl RightAxisLabelMetrics {
@@ -523,6 +527,7 @@ impl RightAxisLabelMetrics {
             padding_tb: style.price_axis_padding_tb() * dpr,
             tick_size: (style.axis_tick_length as f64 * dpr).round(),
             border_size: (style.axis_border_size as f64 * dpr).max(1.0).floor(),
+            edge_inset: (style.price_axis_label_edge_inset() * dpr).round(),
         }
     }
 }
@@ -588,12 +593,13 @@ fn compute_right_axis_label_geometry(
 
     let y_mid_raw = y_coord_phys.round() - (dpr * 0.5).floor();
     let half = total_h_bmp / 2.0;
-    let y_mid = if y_mid_raw - half < 0.0 {
-        half
-    } else if y_mid_raw + half > pane_h {
-        pane_h - half
+    let edge_inset = metrics.edge_inset.max(0.0);
+    let min_mid = half + edge_inset;
+    let max_mid = pane_h - half - edge_inset;
+    let y_mid = if max_mid >= min_mid {
+        y_mid_raw.clamp(min_mid, max_mid)
     } else {
-        y_mid_raw
+        (pane_h * 0.5).round()
     };
     let tick_h_bmp = dpr.floor().max(1.0);
     let y_top = (y_mid + tick_h_bmp / 2.0 - total_h_bmp / 2.0).floor();

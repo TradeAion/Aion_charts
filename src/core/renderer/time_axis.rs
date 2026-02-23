@@ -116,7 +116,6 @@ impl TimeAxisRenderer {
         let _ = self.base_ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
 
         let css_font_normal = format!("{}px {}", style.font_size, style.font_family);
-        let css_font_bold = format!("bold {}px {}", style.font_size, style.font_family);
         self.base_ctx
             .set_fill_style_str(&rgba(&style.axis_text_color));
         self.base_ctx.set_text_align("center");
@@ -131,19 +130,12 @@ impl TimeAxisRenderer {
             if t.pixel < 0.0 || t.pixel > pane_w {
                 continue;
             }
-            // LWC: year ("2024") and month ("Jan") labels are bold
-            let is_bold_label = (t.label.len() == 4 && t.label.chars().all(|c| c.is_ascii_digit()))
-                || (t.label.len() == 3 && t.label.chars().all(|c| c.is_alphabetic()));
-            let font_key = if is_bold_label {
-                &css_font_bold
-            } else {
-                &css_font_normal
-            };
-            self.base_ctx.set_font(font_key);
+            // Keep x-axis tick labels at consistent weight to match LWC visual tone.
+            self.base_ctx.set_font(&css_font_normal);
             let x_css = align_tick_label_x_css(
                 &mut self.text_cache,
                 &self.base_ctx,
-                font_key,
+                &css_font_normal,
                 &t.label,
                 t.pixel / dpr,
                 pane_css_w_axis,
@@ -219,9 +211,12 @@ impl TimeAxisRenderer {
         let padding_bottom = style.time_axis_padding_bottom();
         let fs = style.font_size as f64;
 
-        let by1_css = 0.0;
+        // Keep the label box inside the time-axis bounds with a small top inset
+        // so it doesn't bleed over the border at extreme DPR/zoom combinations.
+        let by1_css = style.time_axis_crosshair_label_top_inset();
         let by2_css = (by1_css + border_size + tick_length + padding_top + fs + padding_bottom)
-            .ceil();
+            .ceil()
+            .min(h / dpr);
 
         let lx1_bmp = (lx1 * dpr).round();
         let lx2_bmp = (lx2 * dpr).round();

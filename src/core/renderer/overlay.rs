@@ -481,7 +481,7 @@ impl OverlayRenderer {
                     }));
                     self.ctx.begin_path();
                     self.ctx.move_to(x_anchor.max(0.0), y);
-                    self.ctx.line_to(pane_pw, y);
+                    self.ctx.line_to(pane_pw + line_w + 1.0, y);
                     self.ctx.stroke();
                 }
             }
@@ -545,7 +545,7 @@ impl OverlayRenderer {
             self.ctx.set_stroke_style_str(&rgba(&color));
             self.ctx.begin_path();
             self.ctx.move_to(x_anchor.max(0.0), y);
-            self.ctx.line_to(pane_pw, y);
+            self.ctx.line_to(pane_pw + line_w + 1.0, y);
             self.ctx.stroke();
         }
 
@@ -645,9 +645,10 @@ impl OverlayRenderer {
             set_canvas_line_dash(&self.ctx, style.crosshair_horz_line.style, line_w);
 
             let hy = my.round() + correction;
+            let span = line_w + 1.0;
             self.ctx.begin_path();
-            self.ctx.move_to(0.0, hy);
-            self.ctx.line_to(pane_w, hy);
+            self.ctx.move_to(-span, hy);
+            self.ctx.line_to(pane_w + span, hy);
             self.ctx.stroke();
         }
 
@@ -660,9 +661,10 @@ impl OverlayRenderer {
             set_canvas_line_dash(&self.ctx, style.crosshair_vert_line.style, line_w);
 
             let vx = mx.round() + correction;
+            let span = line_w + 1.0;
             self.ctx.begin_path();
-            self.ctx.move_to(vx, 0.0);
-            self.ctx.line_to(vx, pane_h);
+            self.ctx.move_to(vx, -span);
+            self.ctx.line_to(vx, pane_h + span);
             self.ctx.stroke();
         }
 

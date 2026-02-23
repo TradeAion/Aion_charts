@@ -725,9 +725,10 @@ impl SubPane {
         // Vertical crosshair line
         let x = (x_css * dpr).round() + correction;
         if x >= 0.0 && x <= pw {
+            let span = line_w + 1.0;
             self.chart_top_ctx.begin_path();
-            self.chart_top_ctx.move_to(x, 0.0);
-            self.chart_top_ctx.line_to(x, ph);
+            self.chart_top_ctx.move_to(x, -span);
+            self.chart_top_ctx.line_to(x, ph + span);
             self.chart_top_ctx.stroke();
         }
 
@@ -766,9 +767,10 @@ impl SubPane {
             set_canvas_line_dash(&self.chart_top_ctx, style.crosshair_horz_line.style, line_w);
 
             if y >= 0.0 && y <= ph {
+                let span = line_w + 1.0;
                 self.chart_top_ctx.begin_path();
-                self.chart_top_ctx.move_to(0.0, y);
-                self.chart_top_ctx.line_to(pw, y);
+                self.chart_top_ctx.move_to(-span, y);
+                self.chart_top_ctx.line_to(pw + span, y);
                 self.chart_top_ctx.stroke();
             }
 
