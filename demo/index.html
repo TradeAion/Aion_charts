@@ -809,15 +809,11 @@
           // Every 3 seconds, start a new bar; otherwise update the last bar
           const now = BigInt(Date.now());
           const elapsed = Number(now - lastBarTs);
-
+          const barTs = elapsed >= 3000 ? now : lastBarTs;
           if (elapsed >= 3000) {
-            // New bar
-            lastBarTs = now;
-            core.append_bar(now, newClose, newHigh, newLow, newClose, volume);
-          } else {
-            // Update current bar
-            core.update_last_bar(lastBarTs, lastClose, newHigh, newLow, newClose, volume);
+            lastBarTs = barTs;
           }
+          core.upsert_bar(barTs, lastClose, newHigh, newLow, newClose, volume);
 
           lastClose = newClose;
         }
