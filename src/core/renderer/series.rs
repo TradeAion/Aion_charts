@@ -82,14 +82,9 @@ impl CandleSizing {
 
         // Horizontal sizing uses h_ratio (matches LWC's horizontalPixelRatio)
         let mut bw = optimal_candlestick_width(bar_spacing, h_ratio);
-        let mut ww = wick_width(bar_spacing, h_ratio, bw);
+        let ww = wick_width(bar_spacing, h_ratio, bw);
         bw = parity_fix(bw, ww);
-        let mut bdw = border_width(h_ratio, bw);
-
-        // ── High-DPR proportion guard ──
-        ww = ww.min((bw / 3.0).floor().max(1.0));
-        let max_border = ((bw - 1.0) / 2.0).floor().max(0.0);
-        bdw = bdw.min(max_border);
+        let bdw = border_width(h_ratio, bw);
 
         let draw_body = bw > bdw * 2.0;
 

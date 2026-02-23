@@ -106,7 +106,7 @@ pub use crate::core::renderer::tick_marks;
 pub use crate::core::renderer::wgpu_context::GpuContext;
 
 /// WebGPU renderer implementation.
-pub use crate::core::renderer::wgpu_backend::{CandleInstance, CandleUniforms, WgpuRenderer};
+pub use crate::core::renderer::wgpu_backend::WgpuRenderer;
 
 /// GPU pipeline management.
 pub use crate::core::renderer::pipeline_manager::PipelineManager;

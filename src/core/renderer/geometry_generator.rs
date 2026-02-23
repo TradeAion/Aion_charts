@@ -202,6 +202,89 @@ fn push_inner_border(
 
 // ── Candle generation (3-pass LWC order: wicks → borders → body fill) ────────
 
+/// Project one visible candle to discrete physical-pixel geometry.
+/// Values are in physical pixels, using LWC-style inclusive body/wick ends.
+#[derive(Debug, Clone, Copy)]
+pub struct ProjectedCandle {
+    pub bar_left: f64,
+    pub bar_width: f64,
+    pub wick_left: f64,
+    pub wick_width: f64,
+    pub body_top: f64,
+    pub body_bottom: f64,
+    pub high_y: f64,
+    pub low_y: f64,
+    pub bull: bool,
+}
+
+/// Shared candle projection for all backends.
+/// This centralizes the bar/wick overlap clamp and pixel rounding policy.
+pub fn project_candles(
+    bars: &crate::core::data::BarArray,
+    vp: &Viewport,
+    chart_w: f64,
+    candle_h: f64,
+    sizing: &CandleSizing,
+) -> Vec<ProjectedCandle> {
+    let start = (vp.start_bar.floor() as usize)
+        .saturating_sub(1)
+        .min(bars.len());
+    let end = ((vp.end_bar.ceil() as usize) + 1).min(bars.len());
+    if start >= end {
+        return Vec::new();
+    }
+
+    let half_bar = (sizing.bar_width * 0.5).floor();
+    let wick_offset = (sizing.wick_width * 0.5).floor();
+    let mut prev_wick_right: Option<f64> = None;
+    let mut prev_bar_right: Option<f64> = None;
+
+    let mut projected = Vec::with_capacity(end - start);
+    for i in start..end {
+        // SAFETY: i is bounded by start..end which are clamped to bars.len()
+        let b = bars.get_unchecked(i);
+        let bull = b.close >= b.open;
+
+        let center_x = bar_to_x(i as f64 + 0.5, vp, chart_w).round();
+        let body_top = price_to_y(b.open.max(b.close) as f64, vp, candle_h).round();
+        let body_bottom = price_to_y(b.open.min(b.close) as f64, vp, candle_h).round();
+        let high_y = price_to_y(b.high as f64, vp, candle_h).round();
+        let low_y = price_to_y(b.low as f64, vp, candle_h).round();
+
+        // Wick X edges with anti-overlap clamp.
+        let mut wick_left = center_x - wick_offset;
+        let wick_right = wick_left + sizing.wick_width - 1.0;
+        if let Some(prev) = prev_wick_right {
+            wick_left = wick_left.max(prev + 1.0).min(wick_right);
+        }
+        let wick_width = (wick_right - wick_left + 1.0).max(1.0);
+        prev_wick_right = Some(wick_right);
+
+        // Body X edges with anti-overlap clamp.
+        let mut bar_left = center_x - half_bar;
+        let bar_right = bar_left + sizing.bar_width - 1.0;
+        if let Some(prev) = prev_bar_right {
+            bar_left = bar_left.max(prev + 1.0).min(bar_right);
+        }
+        let bar_width = (bar_right - bar_left + 1.0).max(1.0);
+        prev_bar_right = Some(bar_right);
+
+        projected.push(ProjectedCandle {
+            bar_left,
+            bar_width,
+            wick_left,
+            wick_width,
+            body_top,
+            body_bottom,
+            high_y,
+            low_y,
+            bull,
+        });
+    }
+
+    projected
+}
+
 fn generate_candles_into(
     bars: &crate::core::data::BarArray,
     vp: &Viewport,
@@ -211,101 +294,61 @@ fn generate_candles_into(
     sizing: &CandleSizing,
     rects: &mut Vec<ColoredRect>,
 ) {
-    let start = (vp.start_bar.floor() as usize)
-        .saturating_sub(1)
-        .min(bars.len());
-    let end = ((vp.end_bar.ceil() as usize) + 1).min(bars.len());
-    if start >= end {
+    let projected = project_candles(bars, vp, chart_w, candle_h, sizing);
+    if projected.is_empty() {
         return;
     }
 
-    let half_bar = (sizing.bar_width * 0.5).floor();
-    let wick_offset = (sizing.wick_width * 0.5).floor();
-
     // ── Pass 1: Wicks ────────────────────────────────────────────────────
-    let mut prev_edge: Option<f64> = None;
-    for i in start..end {
-        // SAFETY: i is bounded by start..end which are clamped to bars.len()
-        let b = bars.get_unchecked(i);
-        let bull = b.close >= b.open;
-        let (wr, wg, wb, wa) = if bull {
+    for c in &projected {
+        let (wr, wg, wb, wa) = if c.bull {
             color4(&style.wick_bullish_color)
         } else {
             color4(&style.wick_bearish_color)
         };
 
-        let phys_x = bar_to_x(i as f64 + 0.5, vp, chart_w).round();
-        let body_top = price_to_y(b.open.max(b.close) as f64, vp, candle_h).round();
-        let body_bottom = price_to_y(b.open.min(b.close) as f64, vp, candle_h).round();
-        let high_y = price_to_y(b.high as f64, vp, candle_h).round();
-        let low_y = price_to_y(b.low as f64, vp, candle_h).round();
-
-        let mut left = phys_x - wick_offset;
-        let right = left + sizing.wick_width - 1.0;
-        if let Some(pe) = prev_edge {
-            left = left.max(pe + 1.0).min(right);
-        }
-        let width = right - left + 1.0;
-
-        if body_top > high_y {
+        if c.body_top > c.high_y {
             rects.push(ColoredRect {
-                x: left as f32,
-                y: high_y as f32,
-                w: width as f32,
-                h: (body_top - high_y) as f32,
+                x: c.wick_left as f32,
+                y: c.high_y as f32,
+                w: c.wick_width as f32,
+                h: (c.body_top - c.high_y) as f32,
                 r: wr,
                 g: wg,
                 b: wb,
                 a: wa,
             });
         }
-        if low_y > body_bottom + 1.0 {
+        // LWC parity: draw 1px lower wick when low == body_bottom + 1.
+        if c.low_y > c.body_bottom {
             rects.push(ColoredRect {
-                x: left as f32,
-                y: (body_bottom + 1.0) as f32,
-                w: width as f32,
-                h: (low_y - body_bottom) as f32,
+                x: c.wick_left as f32,
+                y: (c.body_bottom + 1.0) as f32,
+                w: c.wick_width as f32,
+                h: (c.low_y - c.body_bottom) as f32,
                 r: wr,
                 g: wg,
                 b: wb,
                 a: wa,
             });
         }
-
-        prev_edge = Some(right);
     }
 
     // ── Pass 2: Borders ──────────────────────────────────────────────────
-    prev_edge = None;
-    for i in start..end {
-        // SAFETY: i is bounded by start..end which are clamped to bars.len()
-        let b = bars.get_unchecked(i);
-        let bull = b.close >= b.open;
-        let (br, bg, bb, ba) = if bull {
+    for c in &projected {
+        let (br, bg, bb, ba) = if c.bull {
             color4(&style.wick_bullish_color)
         } else {
             color4(&style.wick_bearish_color)
         };
 
-        let phys_x = bar_to_x(i as f64 + 0.5, vp, chart_w).round();
-        let mut left = phys_x - half_bar;
-        let right = left + sizing.bar_width - 1.0;
-        let top = price_to_y(b.open.max(b.close) as f64, vp, candle_h).round();
-        let bottom = price_to_y(b.open.min(b.close) as f64, vp, candle_h).round();
-
-        if let Some(pe) = prev_edge {
-            left = left.max(pe + 1.0).min(right);
-        }
-
-        let w = right - left + 1.0;
-        let h = (bottom - top + 1.0).max(1.0);
-
+        let h = (c.body_bottom - c.body_top + 1.0).max(1.0);
         if sizing.bar_spacing * sizing.h_pixel_ratio > 2.0 * sizing.border_width {
             push_inner_border(
                 rects,
-                left as f32,
-                top as f32,
-                w as f32,
+                c.bar_left as f32,
+                c.body_top as f32,
+                c.bar_width as f32,
                 h as f32,
                 sizing.border_width as f32,
                 br,
@@ -315,9 +358,9 @@ fn generate_candles_into(
             );
         } else {
             rects.push(ColoredRect {
-                x: left as f32,
-                y: top as f32,
-                w: w as f32,
+                x: c.bar_left as f32,
+                y: c.body_top as f32,
+                w: c.bar_width as f32,
                 h: h as f32,
                 r: br,
                 g: bg,
@@ -325,32 +368,22 @@ fn generate_candles_into(
                 a: ba,
             });
         }
-
-        prev_edge = Some(right);
     }
 
     // ── Pass 3: Body fill ────────────────────────────────────────────────
     if sizing.draw_body {
-        for i in start..end {
-            // SAFETY: i is bounded by start..end which are clamped to bars.len()
-            let b = bars.get_unchecked(i);
-            let bull = b.close >= b.open;
-            let (cr, cg, cb, ca) = if bull {
+        for c in &projected {
+            let (cr, cg, cb, ca) = if c.bull {
                 color4(&style.bullish_color)
             } else {
                 color4(&style.bearish_color)
             };
 
-            let phys_x = bar_to_x(i as f64 + 0.5, vp, chart_w).round();
-            let left = phys_x - half_bar;
-            let right = left + sizing.bar_width - 1.0;
-            let top = price_to_y(b.open.max(b.close) as f64, vp, candle_h).round();
-            let bottom = price_to_y(b.open.min(b.close) as f64, vp, candle_h).round();
-
-            let bl = left + sizing.border_width;
-            let bt = top + sizing.border_width;
+            let right = c.bar_left + c.bar_width - 1.0;
+            let bl = c.bar_left + sizing.border_width;
+            let bt = c.body_top + sizing.border_width;
             let br_x = right - sizing.border_width;
-            let bb_y = bottom - sizing.border_width;
+            let bb_y = c.body_bottom - sizing.border_width;
 
             if bt > bb_y {
                 continue;
@@ -991,7 +1024,7 @@ fn generate_heikin_ashi_into(
         }
 
         // Wick (body bottom to low)
-        if low_y > body_bottom + 1.0 {
+        if low_y > body_bottom {
             rects.push(ColoredRect {
                 x: (phys_x - wick_offset) as f32,
                 y: (body_bottom + 1.0) as f32,
