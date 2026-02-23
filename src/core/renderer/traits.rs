@@ -85,6 +85,8 @@ pub struct ChartStyle {
     pub axis_border_size: f32,
     /// Tick line length perpendicular to axis (LWC: 5).
     pub axis_tick_length: f32,
+    /// Price-scale tick mark density (LWC: `priceScale.tickMarkDensity`, default 2.5).
+    pub price_scale_tick_mark_density: f32,
 }
 
 impl ChartStyle {
@@ -164,6 +166,15 @@ impl ChartStyle {
     #[inline]
     pub fn crosshair_label_extra_padding(&self) -> f64 {
         2.0 / 12.0 * self.font_size as f64
+    }
+
+    /// Effective Y-axis row spacing for price ticks (CSS px).
+    /// Matches LWC: `ceil(fontSize * tickMarkDensity)`.
+    #[inline]
+    pub fn price_scale_tick_mark_spacing_css(&self) -> f64 {
+        (self.font_size as f64 * self.price_scale_tick_mark_density as f64)
+            .ceil()
+            .max(1.0)
     }
 
     /// Build the CSS font string for the axis: `"12px -apple-system, ..."`.

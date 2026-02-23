@@ -4,6 +4,7 @@
 //! `ChartStyle::default()` in traits.rs delegates here.
 
 use super::traits::{ChartStyle, CrosshairLineStyle, LastPriceLineStyle};
+use crate::core::constants::DEFAULT_PRICE_SCALE_TICK_MARK_DENSITY;
 use crate::core::series::LineStyle;
 
 /// Hex helper: converts a u8 channel (0–255) to the 0.0–1.0 range.
@@ -112,5 +113,6 @@ pub fn default_style() -> ChartStyle {
         bar_width_ratio: BAR_WIDTH_RATIO,
         axis_border_size: AXIS_BORDER_SIZE,
         axis_tick_length: AXIS_TICK_LENGTH,
+        price_scale_tick_mark_density: DEFAULT_PRICE_SCALE_TICK_MARK_DENSITY as f32,
     }
 }

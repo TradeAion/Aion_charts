@@ -120,11 +120,12 @@ impl TimeAxisRenderer {
         self.base_ctx
             .set_fill_style_str(&rgba(&style.axis_text_color));
         self.base_ctx.set_text_align("center");
-        self.base_ctx.set_text_baseline("alphabetic");
+        self.base_ctx.set_text_baseline("middle");
 
         let padding_top_css = style.time_axis_padding_top();
         let fs_css = style.font_size as f64;
         let text_y_css = (border_size + tick_length) / dpr + padding_top_css + fs_css / 2.0;
+        let pane_css_w_axis = pane_w / dpr;
 
         for t in ticks {
             if t.pixel < 0.0 || t.pixel > pane_w {
@@ -139,7 +140,14 @@ impl TimeAxisRenderer {
                 &css_font_normal
             };
             self.base_ctx.set_font(font_key);
-            let x_css = t.pixel / dpr;
+            let x_css = align_tick_label_x_css(
+                &mut self.text_cache,
+                &self.base_ctx,
+                font_key,
+                &t.label,
+                t.pixel / dpr,
+                pane_css_w_axis,
+            );
             let m = self
                 .text_cache
                 .measure_full(&self.base_ctx, &t.label, font_key);
@@ -224,8 +232,7 @@ impl TimeAxisRenderer {
         let lx2_bmp = (lx2 * dpr).round();
         let by1_bmp = (by1_css * dpr).round();
         let by2_bmp = (by2_css * dpr).round();
-        let label_h_bmp = (by2_bmp - by1_bmp).max(0.0);
-        let radius = (2.0 * dpr).round().min(label_h_bmp / 2.0);
+        let radius = (2.0 * dpr).round();
 
         // Rounded rect: top corners square, bottom corners rounded
         self.top_ctx
@@ -331,6 +338,27 @@ impl TimeAxisRenderer {
             .base_ctx
             .round_rect_with_f64(thumb_x, track_y, thumb_w, track_height, radius);
         self.base_ctx.fill();
+    }
+}
+
+#[inline]
+fn align_tick_label_x_css(
+    text_cache: &mut TextWidthCache,
+    ctx: &CanvasRenderingContext2d,
+    font_key: &str,
+    label: &str,
+    x_css: f64,
+    axis_css_w: f64,
+) -> f64 {
+    let label_w = text_cache.measure(ctx, label, font_key);
+    let half = label_w / 2.0;
+    let left = (x_css - half).floor() + 0.5;
+    if left < 0.0 {
+        x_css + (0.0 - left)
+    } else if left + label_w > axis_css_w {
+        x_css - ((left + label_w) - axis_css_w)
+    } else {
+        x_css
     }
 }
 

@@ -11,8 +11,8 @@
 //! (e.g. "11px monospace" vs "bold 11px sans-serif").
 //!
 //! Also caches `yMidCorrection` — the precise vertical centering offset computed
-//! from `actualBoundingBoxAscent` / `actualBoundingBoxDescent`. This replaces
-//! the imprecise `textBaseline = "middle"` browser approximation.
+//! from `actualBoundingBoxAscent` / `actualBoundingBoxDescent`.
+//! Matches LWC behavior by measuring with `textBaseline = "middle"`.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -26,8 +26,8 @@ pub struct TextMeasurement {
     /// yMidCorrection: vertical offset to apply when centering text.
     ///
     /// Computed as `(actualBoundingBoxAscent - actualBoundingBoxDescent) / 2`.
-    /// When using `textBaseline = "alphabetic"`, add this to the Y coordinate
-    /// to achieve precise vertical centering (replaces imprecise "middle" baseline).
+    /// When drawing with `textBaseline = "middle"`, add this to the Y coordinate
+    /// for consistent vertical centering across browsers.
     pub y_mid_correction: f64,
 }
 
@@ -64,7 +64,7 @@ impl TextWidthCache {
 
     /// Measure text and return the full measurement (width + yMidCorrection).
     ///
-    /// Use `yMidCorrection` with `textBaseline = "alphabetic"` for precise
+    /// Use `yMidCorrection` with `textBaseline = "middle"` for precise
     /// vertical centering of text in labels.
     pub fn measure_full(
         &mut self,
@@ -81,20 +81,27 @@ impl TextWidthCache {
             }
         }
 
-        // Cache miss -- measure via browser
-        let measurement = match ctx.measure_text(text) {
-            Ok(m) => {
-                let ascent = m.actual_bounding_box_ascent();
-                let descent = m.actual_bounding_box_descent();
-                TextMeasurement {
-                    width: m.width(),
-                    y_mid_correction: (ascent - descent) / 2.0,
+        // Cache miss -- measure via browser (LWC-compatible baseline handling)
+        let measurement = {
+            ctx.save();
+            ctx.set_text_baseline("middle");
+            let measured = ctx.measure_text(text);
+            ctx.restore();
+
+            match measured {
+                Ok(m) => {
+                    let ascent = m.actual_bounding_box_ascent();
+                    let descent = m.actual_bounding_box_descent();
+                    TextMeasurement {
+                        width: m.width(),
+                        y_mid_correction: (ascent - descent) / 2.0,
+                    }
                 }
+                Err(_) => TextMeasurement {
+                    width: 0.0,
+                    y_mid_correction: 0.0,
+                },
             }
-            Err(_) => TextMeasurement {
-                width: 0.0,
-                y_mid_correction: 0.0,
-            },
         };
 
         // FIFO eviction

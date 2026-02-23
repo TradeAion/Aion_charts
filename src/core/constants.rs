@@ -10,6 +10,9 @@
 /// Default number of visible bars when chart is first loaded or reset.
 pub const DEFAULT_INITIAL_VISIBLE_BARS: f64 = 200.0;
 
+/// LWC default time-scale bar spacing (CSS pixels).
+pub const DEFAULT_BAR_SPACING_CSS: f64 = 6.0;
+
 /// Minimum number of bars that can be visible (maximum zoom in).
 pub const MIN_VISIBLE_BARS: f64 = 5.0;
 
@@ -147,23 +150,21 @@ pub const LEGEND_GAP_CSS: f64 = 4.0;
 pub const LAST_PRICE_DOT_BASE_RADIUS_CSS: f64 = 4.0;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Tick Mark Spacing
+// Tick Mark Density & Spacing
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Target spacing between Y-axis tick marks (CSS pixels).
-pub const Y_TICK_TARGET_SPACING_CSS: f64 = 40.0;
-
-/// Minimum number of Y-axis tick marks.
-pub const Y_TICK_MIN_COUNT: f64 = 3.0;
-
-/// Maximum number of Y-axis tick marks.
-pub const Y_TICK_MAX_COUNT: f64 = 15.0;
+/// LWC default price-scale tick mark density.
+/// Effective Y-tick row height is `ceil(fontSize * tickMarkDensity)`.
+pub const DEFAULT_PRICE_SCALE_TICK_MARK_DENSITY: f64 = 2.5;
 
 /// Target spacing between X-axis tick marks (CSS pixels).
 pub const X_TICK_TARGET_SPACING_CSS: f64 = 100.0;
 
 /// Minimum number of X-axis tick marks.
 pub const X_TICK_MIN_COUNT: f64 = 2.0;
+
+/// Maximum number of X-axis tick marks.
+pub const X_TICK_MAX_COUNT: f64 = 12.0;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Animation & Visual Effects
@@ -198,6 +199,7 @@ mod tests {
     #[test]
     fn test_viewport_constants_are_positive() {
         assert!(DEFAULT_INITIAL_VISIBLE_BARS > 0.0);
+        assert!(DEFAULT_BAR_SPACING_CSS > 0.0);
         assert!(MIN_VISIBLE_BARS > 0.0);
         assert!(DEFAULT_PRICE_MAX > 0.0);
     }
@@ -254,10 +256,8 @@ mod tests {
 
     #[test]
     fn test_tick_spacing_constants() {
-        assert!(Y_TICK_TARGET_SPACING_CSS > 0.0);
+        assert!(DEFAULT_PRICE_SCALE_TICK_MARK_DENSITY > 0.0);
         assert!(X_TICK_TARGET_SPACING_CSS > 0.0);
-        assert!(Y_TICK_MIN_COUNT > 0.0);
-        assert!(Y_TICK_MAX_COUNT > Y_TICK_MIN_COUNT);
         assert!(X_TICK_MIN_COUNT > 0.0);
     }
 

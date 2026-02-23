@@ -681,7 +681,7 @@ impl SubPane {
         }
 
         // Compute Y tick marks for this sub-pane's viewport
-        let y_ticks = compute_y_ticks(&self.viewport, ph, dpr);
+        let y_ticks = compute_y_ticks(&self.viewport, ph, dpr, style);
 
         // Render chart area (grid, reference lines, data lines)
         self.render_chart(main_viewport, style, &y_ticks, x_ticks);

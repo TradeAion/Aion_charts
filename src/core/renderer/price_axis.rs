@@ -102,8 +102,14 @@ impl PriceAxisRenderer {
         self.base_ctx.set_font(&font);
         let mut max_w: f64 = 0.0;
 
-        for t in ticks {
-            let w = self.text_cache.measure(&self.base_ctx, &t.label, &font);
+        if let Some(first) = ticks.first() {
+            let w = self.text_cache.measure(&self.base_ctx, &first.label, &font);
+            if w > max_w {
+                max_w = w;
+            }
+        }
+        if let Some(last) = ticks.last() {
+            let w = self.text_cache.measure(&self.base_ctx, &last.label, &font);
             if w > max_w {
                 max_w = w;
             }
@@ -120,7 +126,7 @@ impl PriceAxisRenderer {
         }
 
         // Custom price-line labels.
-        let step = y_tick_step_internal(vp, pane_ph, self.dpr);
+        let step = y_tick_step_internal(vp, pane_ph, self.dpr, style);
         for line in price_lines.iter() {
             if !line.is_visible() || !line.options.show_label {
                 continue;
@@ -200,7 +206,7 @@ impl PriceAxisRenderer {
         self.base_ctx
             .set_fill_style_str(&rgba(&style.axis_text_color));
         self.base_ctx.set_text_align("left");
-        self.base_ctx.set_text_baseline("alphabetic");
+        self.base_ctx.set_text_baseline("middle");
 
         let padding_inner_css = style.price_axis_padding_inner();
         let text_x_css = tick_length / dpr + padding_inner_css;
@@ -257,7 +263,7 @@ impl PriceAxisRenderer {
         let internal =
             vp.price_min + (1.0 - my / candle_h).clamp(0.0, 1.0) * (vp.price_max - vp.price_min);
         let price = vp.internal_to_price(internal);
-        let step = y_tick_step_internal(vp, pane_ph, dpr);
+        let step = y_tick_step_internal(vp, pane_ph, dpr, style);
         let price_lbl = format_scale_value(vp, price, step);
 
         let font = style.axis_font(dpr);
@@ -267,113 +273,39 @@ impl PriceAxisRenderer {
             .measure(&self.top_ctx, &price_lbl, &font)
             .ceil();
 
-        let fs = style.font_size as f64 * dpr;
-        let padding_inner = style.price_axis_padding_inner() * dpr;
-        let padding_outer = style.price_axis_padding_outer() * dpr;
-        let tick_length = (style.axis_tick_length as f64 * dpr).round();
-        let border_size = (style.axis_border_size as f64 * dpr).max(1.0).floor();
+        let metrics = RightAxisLabelMetrics::from_style(style, dpr);
         let extra_pad = style.crosshair_label_extra_padding() * dpr;
-        let padding_top = style.price_axis_padding_tb() * dpr + extra_pad;
-        let padding_bottom = padding_top;
-
-        let total_h = fs + padding_top + padding_bottom;
-        let total_w_raw = border_size + padding_inner + padding_outer + text_w + tick_length;
-        let total_w = total_w_raw.min(w);
-
-        // LWC: label height parity must match tick height parity
-        let tick_h_bmp = dpr.floor().max(1.0);
-        let tick_h_i = tick_h_bmp as i32;
-        let mut total_h_bmp = total_h.round() as i32;
-        if total_h_bmp % 2 != tick_h_i % 2 {
-            total_h_bmp += 1;
-        }
-        let total_h_bmp = total_h_bmp as f64;
-        let total_w_bmp = total_w.round();
-
-        let horz_border_bmp = if border_size > 0.0 {
-            (border_size).max(1.0).floor()
-        } else {
-            0.0
+        let geom = match compute_right_axis_label_geometry(
+            w,
+            pane_ph,
+            my,
+            text_w,
+            dpr,
+            &metrics,
+            extra_pad,
+            RightAxisLabelWidthMode::AxisFull,
+        ) {
+            Some(v) => v,
+            None => return,
         };
 
-        let tick_size_bmp = tick_length;
-
-        // LWC: yMid = round(coordinate * vpr) - floor(vpr * 0.5)
-        let y_mid_raw = my.round() - (dpr * 0.5).floor();
-        let half_label = total_h_bmp / 2.0;
-
-        // Vertical clamping: push label inward when near top/bottom edge of pane
-        // (LWC price-axis-widget.ts _fixLabelOverlap pattern)
-        let y_mid = if y_mid_raw - half_label < 0.0 {
-            half_label
-        } else if y_mid_raw + half_label > pane_ph {
-            pane_ph - half_label
-        } else {
-            y_mid_raw
-        };
-
-        let y_top = (y_mid + tick_h_bmp / 2.0 - total_h_bmp / 2.0).floor();
-        let y_bottom = y_top + total_h_bmp;
-
-        // LWC alignRight: xInside = bitmapSize.width - horzBorderBitmap (right edge minus border)
-        let x_inside = w - horz_border_bmp;
-        // xOutside = xInside - totalWidthBitmap (label extends leftward)
-        let x_outside = x_inside - total_w_bmp;
-        // Clamp radius to avoid overflow when label fills full width
-        let radius = (2.0 * dpr).round().min(total_h_bmp / 4.0).max(0.0);
-
-        // Draw rounded rect — LWC alignRight corners: [radius, 0, 0, radius]
-        // = top-left rounded, top-right square, bottom-right square, bottom-left rounded
-        self.top_ctx
-            .set_fill_style_str(&rgba(&style.crosshair_horz_line.label_bg_color));
-        self.top_ctx.begin_path();
-        // Start top-left (rounded)
-        self.top_ctx.move_to(x_outside + radius, y_top);
-        // Top edge -> top-right (square)
-        self.top_ctx.line_to(x_inside, y_top);
-        // Right edge -> bottom-right (square)
-        self.top_ctx.line_to(x_inside, y_bottom);
-        // Bottom edge -> bottom-left (rounded)
-        self.top_ctx.line_to(x_outside + radius, y_bottom);
-        let _ = self
-            .top_ctx
-            .arc_to(x_outside, y_bottom, x_outside, y_bottom - radius, radius);
-        // Left edge -> top-left (rounded)
-        self.top_ctx.line_to(x_outside, y_top + radius);
-        let _ = self
-            .top_ctx
-            .arc_to(x_outside, y_top, x_outside + radius, y_top, radius);
-        self.top_ctx.close_path();
-        self.top_ctx.fill();
-
-        // Separator (border line) — LWC: fillRect(right - horzBorder, yTop, horzBorder, yBottom - yTop)
-        // using pane background color
-        self.top_ctx.set_fill_style_str(&rgba(&style.bg_color));
-        self.top_ctx.fill_rect(
-            w - horz_border_bmp,
-            y_top,
-            horz_border_bmp,
-            y_bottom - y_top,
+        draw_right_axis_label_background(
+            &self.top_ctx,
+            &geom,
+            &style.crosshair_horz_line.label_bg_color,
         );
+        draw_right_axis_label_separator(&self.top_ctx, w, &geom, &style.bg_color);
 
-        // Price text — draw in media (CSS) coordinate space for sharp text rendering.
-        self.top_ctx.save();
-        let _ = self.top_ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
         let css_font = format!("{}px {}", style.font_size, style.font_family);
-        self.top_ctx.set_font(&css_font);
-        self.top_ctx
-            .set_fill_style_str(&rgba(&style.crosshair_label_text));
-        self.top_ctx.set_text_align("right");
-        self.top_ctx.set_text_baseline("alphabetic");
-        let text_x_css = (x_inside - tick_size_bmp - padding_inner - horz_border_bmp) / dpr;
-        let text_y_css = (y_top + y_bottom) / 2.0 / dpr;
-        let m = self
-            .text_cache
-            .measure_full(&self.top_ctx, &price_lbl, &css_font);
-        let _ = self
-            .top_ctx
-            .fill_text(&price_lbl, text_x_css, text_y_css + m.y_mid_correction);
-        self.top_ctx.restore();
+        draw_right_axis_label_text(
+            &self.top_ctx,
+            &mut self.text_cache,
+            &price_lbl,
+            &css_font,
+            &style.crosshair_label_text,
+            &geom,
+            dpr,
+        );
     }
 
     /// Render last-price labels for all visible series on the price axis.
@@ -406,72 +338,57 @@ impl PriceAxisRenderer {
         let candle_h = candle_area_height_ph(vp, pane_ph);
         let font = style.axis_font(dpr);
         self.base_ctx.set_font(&font);
+        let metrics = RightAxisLabelMetrics::from_style(style, dpr);
+        let half_h = right_axis_label_height_bmp(&metrics, dpr, 0.0) / 2.0;
 
-        let fs = style.font_size as f64 * dpr;
-        let padding_inner = style.price_axis_padding_inner() * dpr;
-        let padding_outer = style.price_axis_padding_outer() * dpr;
-        let tick_length = (style.axis_tick_length as f64 * dpr).round();
-        let border_size = (style.axis_border_size as f64 * dpr).max(1.0).floor();
-        let padding_tb = style.price_axis_padding_tb() * dpr;
+        let mut layout: Vec<LabelRect> = labels
+            .iter()
+            .enumerate()
+            .map(|(i, item)| LabelRect {
+                y_center: item.y_phys.round(),
+                half_height: half_h,
+                priority: 50,
+                index: i,
+            })
+            .collect();
+        resolve_label_overlaps(&mut layout, candle_h);
 
-        for item in &labels {
+        let css_font = format!("{}px {}", style.font_size, style.font_family);
+        let text_color = [1.0, 1.0, 1.0, 0.9];
+        for (i, item) in labels.iter().enumerate() {
             let text_w = self
                 .text_cache
                 .measure(&self.base_ctx, &item.label, &font)
                 .ceil();
-            let total_h = fs + padding_tb * 2.0;
-            let total_w_raw = border_size + padding_inner + padding_outer + text_w + tick_length;
-            let total_w = total_w_raw.min(w);
+            let y_mid = layout
+                .get(i)
+                .map(|l| l.y_center)
+                .unwrap_or_else(|| item.y_phys.round());
+            let geom = match compute_right_axis_label_geometry(
+                w,
+                candle_h,
+                y_mid,
+                text_w,
+                dpr,
+                &metrics,
+                0.0,
+                RightAxisLabelWidthMode::AxisFull,
+            ) {
+                Some(v) => v,
+                None => continue,
+            };
 
-            // Vertical positioning: center label on the Y position
-            let y_mid = item.y_phys.round();
-            let half_h = (total_h / 2.0).round();
-            let y_top = (y_mid - half_h).max(0.0);
-            let y_bottom = (y_top + total_h).min(candle_h);
-
-            let x_inside = w - border_size;
-            let x_outside = x_inside - total_w.round();
-            let radius = (2.0 * dpr).round();
-
-            // Rounded rect background (series color)
-            self.base_ctx.set_fill_style_str(&rgba(&item.color));
-            self.base_ctx.begin_path();
-            self.base_ctx.move_to(x_outside + radius, y_top);
-            self.base_ctx.line_to(x_inside, y_top);
-            self.base_ctx.line_to(x_inside, y_bottom);
-            self.base_ctx.line_to(x_outside + radius, y_bottom);
-            let _ = self
-                .base_ctx
-                .arc_to(x_outside, y_bottom, x_outside, y_bottom - radius, radius);
-            self.base_ctx.line_to(x_outside, y_top + radius);
-            let _ = self
-                .base_ctx
-                .arc_to(x_outside, y_top, x_outside + radius, y_top, radius);
-            self.base_ctx.close_path();
-            self.base_ctx.fill();
-
-            // Separator border
-            self.base_ctx.set_fill_style_str(&rgba(&style.bg_color));
-            self.base_ctx
-                .fill_rect(w - border_size, y_top, border_size, y_bottom - y_top);
-
-            // Text in CSS coordinate space
-            self.base_ctx.save();
-            let _ = self.base_ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
-            let css_font = format!("{}px {}", style.font_size, style.font_family);
-            self.base_ctx.set_font(&css_font);
-            self.base_ctx.set_fill_style_str("rgba(255,255,255,0.9)");
-            self.base_ctx.set_text_align("right");
-            self.base_ctx.set_text_baseline("alphabetic");
-            let text_x_css = (x_inside - tick_length - padding_inner - border_size) / dpr;
-            let text_y_css = (y_top + y_bottom) / 2.0 / dpr;
-            let m = self
-                .text_cache
-                .measure_full(&self.base_ctx, &item.label, &css_font);
-            let _ =
-                self.base_ctx
-                    .fill_text(&item.label, text_x_css, text_y_css + m.y_mid_correction);
-            self.base_ctx.restore();
+            draw_right_axis_label_background(&self.base_ctx, &geom, &item.color);
+            draw_right_axis_label_separator(&self.base_ctx, w, &geom, &style.bg_color);
+            draw_right_axis_label_text(
+                &self.base_ctx,
+                &mut self.text_cache,
+                &item.label,
+                &css_font,
+                &text_color,
+                &geom,
+                dpr,
+            );
         }
     }
 
@@ -495,103 +412,298 @@ impl PriceAxisRenderer {
         // Candle area height in physical pixels
         let candle_h = candle_area_height_ph(vp, pane_ph);
 
-        let step = y_tick_step_internal(vp, pane_ph, dpr);
+        let step = y_tick_step_internal(vp, pane_ph, dpr, style);
         let font = style.axis_font(dpr);
         self.base_ctx.set_font(&font);
+        let metrics = RightAxisLabelMetrics::from_style(style, dpr);
+        let half_h = right_axis_label_height_bmp(&metrics, dpr, 0.0) / 2.0;
 
-        let fs = style.font_size as f64 * dpr;
-        let padding_inner = style.price_axis_padding_inner() * dpr;
-        let padding_outer = style.price_axis_padding_outer() * dpr;
-        let tick_length = (style.axis_tick_length as f64 * dpr).round();
-        let border_size = (style.axis_border_size as f64 * dpr).max(1.0).floor();
-        let padding_tb = style.price_axis_padding_tb() * dpr;
+        struct PriceLineLabel {
+            text: String,
+            y_phys: f64,
+            bg_color: [f32; 4],
+            text_color: [f32; 4],
+        }
 
+        let mut entries: Vec<PriceLineLabel> = Vec::new();
         for line in price_lines.iter() {
             if !line.is_visible() || !line.options.show_label {
                 continue;
             }
-
             let opts = &line.options;
-            // Use same transform as candle/overlay rendering
             let y_phys = price_to_pane_y_phys(opts.price, vp, pane_ph);
-
             if y_phys < 0.0 || y_phys > candle_h {
                 continue;
             }
-
-            // Label text: custom or formatted price
-            let lbl = if opts.label_text.is_empty() {
+            let text = if opts.label_text.is_empty() {
                 format_scale_value(vp, opts.price, step)
             } else {
                 opts.label_text.clone()
             };
+            entries.push(PriceLineLabel {
+                text,
+                y_phys,
+                bg_color: opts.label_bg_color.unwrap_or(opts.color),
+                text_color: opts.label_text_color,
+            });
+        }
 
-            let text_w = self.text_cache.measure(&self.base_ctx, &lbl, &font).ceil();
-            let total_h = fs + padding_tb * 2.0;
-            let total_w_raw = border_size + padding_inner + padding_outer + text_w + tick_length;
-            let total_w = total_w_raw.min(w);
+        if entries.is_empty() {
+            return;
+        }
 
-            let y_mid = y_phys.round();
-            let half_h = (total_h / 2.0).round();
-            let y_top = (y_mid - half_h).max(0.0);
-            let y_bottom = (y_top + total_h).min(candle_h);
+        let mut layout: Vec<LabelRect> = entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| LabelRect {
+                y_center: e.y_phys.round(),
+                half_height: half_h,
+                priority: 30,
+                index: i,
+            })
+            .collect();
+        resolve_label_overlaps(&mut layout, candle_h);
 
-            let x_inside = w - border_size;
-            let x_outside = x_inside - total_w.round();
-            let radius = (2.0 * dpr).round();
-
-            // Background color: custom or line color
-            let bg_color = opts.label_bg_color.unwrap_or(opts.color);
-
-            // Rounded rect background
-            self.base_ctx.set_fill_style_str(&rgba(&bg_color));
-            self.base_ctx.begin_path();
-            self.base_ctx.move_to(x_outside + radius, y_top);
-            self.base_ctx.line_to(x_inside, y_top);
-            self.base_ctx.line_to(x_inside, y_bottom);
-            self.base_ctx.line_to(x_outside + radius, y_bottom);
-            let _ = self
-                .base_ctx
-                .arc_to(x_outside, y_bottom, x_outside, y_bottom - radius, radius);
-            self.base_ctx.line_to(x_outside, y_top + radius);
-            let _ = self
-                .base_ctx
-                .arc_to(x_outside, y_top, x_outside + radius, y_top, radius);
-            self.base_ctx.close_path();
-            self.base_ctx.fill();
-
-            // Tick mark
-            let tick_h = (1.0 * dpr).floor().max(1.0);
-            self.base_ctx
-                .set_fill_style_str(&rgba(&opts.label_text_color));
-            self.base_ctx
-                .fill_rect(x_inside - tick_length, y_mid, tick_length, tick_h);
-
-            // Separator border
-            self.base_ctx.set_fill_style_str(&rgba(&style.bg_color));
-            self.base_ctx
-                .fill_rect(w - border_size, y_top, border_size, y_bottom - y_top);
-
-            // Text
-            self.base_ctx.save();
-            let _ = self.base_ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
-            let css_font = format!("{}px {}", style.font_size, style.font_family);
-            self.base_ctx.set_font(&css_font);
-            self.base_ctx
-                .set_fill_style_str(&rgba(&opts.label_text_color));
-            self.base_ctx.set_text_align("right");
-            self.base_ctx.set_text_baseline("alphabetic");
-            let text_x_css = (x_inside - tick_length - padding_inner - border_size) / dpr;
-            let text_y_css = (y_top + y_bottom) / 2.0 / dpr;
-            let m = self
+        let css_font = format!("{}px {}", style.font_size, style.font_family);
+        for (i, entry) in entries.iter().enumerate() {
+            let text_w = self
                 .text_cache
-                .measure_full(&self.base_ctx, &lbl, &css_font);
-            let _ = self
-                .base_ctx
-                .fill_text(&lbl, text_x_css, text_y_css + m.y_mid_correction);
-            self.base_ctx.restore();
+                .measure(&self.base_ctx, &entry.text, &font)
+                .ceil();
+            let y_mid = layout
+                .get(i)
+                .map(|l| l.y_center)
+                .unwrap_or_else(|| entry.y_phys.round());
+            let geom = match compute_right_axis_label_geometry(
+                w,
+                candle_h,
+                y_mid,
+                text_w,
+                dpr,
+                &metrics,
+                0.0,
+                RightAxisLabelWidthMode::TextFit,
+            ) {
+                Some(v) => v,
+                None => continue,
+            };
+
+            draw_right_axis_label_background(&self.base_ctx, &geom, &entry.bg_color);
+            draw_right_axis_label_tick(&self.base_ctx, &geom, &entry.text_color, dpr);
+            draw_right_axis_label_separator(&self.base_ctx, w, &geom, &style.bg_color);
+            draw_right_axis_label_text(
+                &self.base_ctx,
+                &mut self.text_cache,
+                &entry.text,
+                &css_font,
+                &entry.text_color,
+                &geom,
+                dpr,
+            );
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RightAxisLabelMetrics {
+    fs: f64,
+    padding_inner: f64,
+    padding_outer: f64,
+    padding_tb: f64,
+    tick_size: f64,
+    border_size: f64,
+}
+
+impl RightAxisLabelMetrics {
+    fn from_style(style: &ChartStyle, dpr: f64) -> Self {
+        Self {
+            fs: style.font_size as f64 * dpr,
+            padding_inner: style.price_axis_padding_inner() * dpr,
+            padding_outer: style.price_axis_padding_outer() * dpr,
+            padding_tb: style.price_axis_padding_tb() * dpr,
+            tick_size: (style.axis_tick_length as f64 * dpr).round(),
+            border_size: (style.axis_border_size as f64 * dpr).max(1.0).floor(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RightAxisLabelGeometry {
+    y_mid: f64,
+    y_top: f64,
+    y_bottom: f64,
+    x_inside: f64,
+    x_outside: f64,
+    text_x_css: f64,
+    text_y_css: f64,
+    radius: f64,
+    border_size: f64,
+    tick_size: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RightAxisLabelWidthMode {
+    TextFit,
+    AxisFull,
+}
+
+fn right_axis_label_height_bmp(
+    metrics: &RightAxisLabelMetrics,
+    dpr: f64,
+    extra_tb_padding: f64,
+) -> f64 {
+    let total_h = metrics.fs + (metrics.padding_tb + extra_tb_padding) * 2.0;
+    let tick_h_bmp = dpr.floor().max(1.0) as i32;
+    let mut total_h_bmp = total_h.round() as i32;
+    if total_h_bmp % 2 != tick_h_bmp % 2 {
+        total_h_bmp += 1;
+    }
+    total_h_bmp.max(1) as f64
+}
+
+fn compute_right_axis_label_geometry(
+    axis_w: f64,
+    pane_h: f64,
+    y_coord_phys: f64,
+    text_w_phys: f64,
+    dpr: f64,
+    metrics: &RightAxisLabelMetrics,
+    extra_tb_padding: f64,
+    width_mode: RightAxisLabelWidthMode,
+) -> Option<RightAxisLabelGeometry> {
+    if axis_w <= 0.0 || pane_h <= 0.0 || dpr <= 0.0 {
+        return None;
+    }
+
+    let total_h_bmp = right_axis_label_height_bmp(metrics, dpr, extra_tb_padding);
+    let total_w_raw = metrics.border_size
+        + metrics.padding_inner
+        + metrics.padding_outer
+        + text_w_phys
+        + metrics.tick_size;
+    let total_w_bmp = match width_mode {
+        RightAxisLabelWidthMode::AxisFull => axis_w.round().max(1.0),
+        RightAxisLabelWidthMode::TextFit => total_w_raw.min(axis_w).round(),
+    };
+
+    let y_mid_raw = y_coord_phys.round() - (dpr * 0.5).floor();
+    let half = total_h_bmp / 2.0;
+    let y_mid = if y_mid_raw - half < 0.0 {
+        half
+    } else if y_mid_raw + half > pane_h {
+        pane_h - half
+    } else {
+        y_mid_raw
+    };
+    let tick_h_bmp = dpr.floor().max(1.0);
+    let y_top = (y_mid + tick_h_bmp / 2.0 - total_h_bmp / 2.0).floor();
+    let y_bottom = y_top + total_h_bmp;
+
+    let x_inside = axis_w - metrics.border_size;
+    let x_outside = match width_mode {
+        RightAxisLabelWidthMode::AxisFull => 0.0,
+        RightAxisLabelWidthMode::TextFit => (x_inside - total_w_bmp).max(0.0),
+    };
+    let radius = (2.0 * dpr).round().min(total_h_bmp / 4.0).max(0.0);
+
+    Some(RightAxisLabelGeometry {
+        y_mid,
+        y_top,
+        y_bottom,
+        x_inside,
+        x_outside,
+        text_x_css: (x_inside - metrics.tick_size - metrics.padding_inner - metrics.border_size)
+            / dpr,
+        text_y_css: (y_top + y_bottom) / 2.0 / dpr,
+        radius,
+        border_size: metrics.border_size,
+        tick_size: metrics.tick_size,
+    })
+}
+
+fn draw_right_axis_label_background(
+    ctx: &CanvasRenderingContext2d,
+    geom: &RightAxisLabelGeometry,
+    bg_color: &[f32; 4],
+) {
+    ctx.set_fill_style_str(&rgba(bg_color));
+    ctx.begin_path();
+    ctx.move_to(geom.x_outside + geom.radius, geom.y_top);
+    ctx.line_to(geom.x_inside, geom.y_top);
+    ctx.line_to(geom.x_inside, geom.y_bottom);
+    ctx.line_to(geom.x_outside + geom.radius, geom.y_bottom);
+    let _ = ctx.arc_to(
+        geom.x_outside,
+        geom.y_bottom,
+        geom.x_outside,
+        geom.y_bottom - geom.radius,
+        geom.radius,
+    );
+    ctx.line_to(geom.x_outside, geom.y_top + geom.radius);
+    let _ = ctx.arc_to(
+        geom.x_outside,
+        geom.y_top,
+        geom.x_outside + geom.radius,
+        geom.y_top,
+        geom.radius,
+    );
+    ctx.close_path();
+    ctx.fill();
+}
+
+fn draw_right_axis_label_separator(
+    ctx: &CanvasRenderingContext2d,
+    axis_w: f64,
+    geom: &RightAxisLabelGeometry,
+    separator_color: &[f32; 4],
+) {
+    ctx.set_fill_style_str(&rgba(separator_color));
+    ctx.fill_rect(
+        axis_w - geom.border_size,
+        geom.y_top,
+        geom.border_size,
+        geom.y_bottom - geom.y_top,
+    );
+}
+
+fn draw_right_axis_label_tick(
+    ctx: &CanvasRenderingContext2d,
+    geom: &RightAxisLabelGeometry,
+    tick_color: &[f32; 4],
+    dpr: f64,
+) {
+    let tick_h = dpr.floor().max(1.0);
+    ctx.set_fill_style_str(&rgba(tick_color));
+    ctx.fill_rect(
+        geom.x_inside - geom.tick_size,
+        geom.y_mid.round(),
+        geom.tick_size,
+        tick_h,
+    );
+}
+
+fn draw_right_axis_label_text(
+    ctx: &CanvasRenderingContext2d,
+    text_cache: &mut TextWidthCache,
+    text: &str,
+    font_css: &str,
+    text_color: &[f32; 4],
+    geom: &RightAxisLabelGeometry,
+    dpr: f64,
+) {
+    ctx.save();
+    let _ = ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
+    ctx.set_font(font_css);
+    ctx.set_fill_style_str(&rgba(text_color));
+    ctx.set_text_align("right");
+    ctx.set_text_baseline("middle");
+    let m = text_cache.measure_full(ctx, text, font_css);
+    let _ = ctx.fill_text(
+        text,
+        geom.text_x_css,
+        geom.text_y_css + m.y_mid_correction,
+    );
+    ctx.restore();
 }
 
 fn get_2d_ctx(canvas: &HtmlCanvasElement, label: &str) -> Result<CanvasRenderingContext2d, String> {

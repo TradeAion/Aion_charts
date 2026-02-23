@@ -41,14 +41,17 @@ pub fn price_to_pane_y_phys(price: f64, vp: &Viewport, pane_ph: f64) -> f64 {
 }
 
 /// Shared Y tick-step in internal price-scale space (same policy as tick_marks.rs).
+/// `axis_ph` is the full visible price-axis height in physical pixels.
 #[inline]
-pub fn y_tick_step_internal(vp: &Viewport, pane_ph: f64, dpr: f64) -> f64 {
+pub fn y_tick_step_internal(vp: &Viewport, axis_ph: f64, dpr: f64, style: &ChartStyle) -> f64 {
     let range = vp.price_max - vp.price_min;
-    let candle_h = candle_area_height_ph(vp, pane_ph);
-    if range <= 0.0 || candle_h <= 0.0 {
+    if range <= 0.0 || axis_ph <= 0.0 || dpr <= 0.0 {
         return 0.0001;
     }
-    let target_count = (candle_h / (40.0 * dpr)).clamp(3.0, 15.0);
+    // LWC policy: row spacing is typography-driven, not a hardcoded pixel constant.
+    // tickMarkHeight = ceil(fontSize * tickMarkDensity)
+    let row_spacing_css = style.price_scale_tick_mark_spacing_css();
+    let target_count = (axis_ph / (row_spacing_css * dpr)).max(1.0);
     nice_step(range / target_count).max(0.0001)
 }
 
@@ -88,7 +91,7 @@ pub fn collect_last_values(
         return out;
     }
 
-    let step = y_tick_step_internal(vp, pane_ph, dpr);
+    let step = y_tick_step_internal(vp, pane_ph, dpr, style);
 
     // Main candlestick last value (pending-aware read via BarArray::get).
     if bars.len() > 0 {

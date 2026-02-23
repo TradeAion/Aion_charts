@@ -3752,7 +3752,8 @@ impl RayCore {
         if pane_pw <= 0.0 || pane_ph <= 0.0 {
             return;
         }
-        let provisional_y_ticks = tick_marks::compute_y_ticks(&s.engine.viewport, pane_ph, dpr);
+        let provisional_y_ticks =
+            tick_marks::compute_y_ticks(&s.engine.viewport, pane_ph, dpr, &s.engine.style);
 
         // 2. Measure price axis width using full label set, then update grid layout.
         {
@@ -3797,7 +3798,8 @@ impl RayCore {
             return;
         }
 
-        let y_ticks = tick_marks::compute_y_ticks(&s.engine.viewport, pane_ph, dpr);
+        let y_ticks =
+            tick_marks::compute_y_ticks(&s.engine.viewport, pane_ph, dpr, &s.engine.style);
         let x_ticks = tick_marks::compute_x_ticks(&s.engine.viewport, &s.engine.bars, pane_pw, dpr);
 
         // 5. Engine render — candles + volume on pane chart canvas
