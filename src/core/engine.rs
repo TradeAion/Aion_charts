@@ -259,6 +259,15 @@ impl ChartEngine {
 
     /// Resize the pane canvas / surface.
     pub fn resize(&mut self, width: u32, height: u32, dpr: f64) {
+        let width = width.max(1);
+        let height = height.max(1);
+        if self.viewport.width == width
+            && self.viewport.height == height
+            && (self.dpr - dpr).abs() < 1e-6
+        {
+            return;
+        }
+
         self.dpr = dpr;
         self.renderer.resize(width, height, dpr);
         self.viewport.resize(width, height);

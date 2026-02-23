@@ -56,13 +56,27 @@ impl PriceAxisRenderer {
     }
 
     pub fn resize(&mut self, pw: u32, ph: u32, dpr: f64) {
+        let pw = pw.max(1);
+        let ph = ph.max(1);
+        if self.pw == pw && self.ph == ph && (self.dpr - dpr).abs() < 1e-6 {
+            return;
+        }
+
         self.pw = pw;
         self.ph = ph;
         self.dpr = dpr;
-        self.base_canvas.set_width(pw.max(1));
-        self.base_canvas.set_height(ph.max(1));
-        self.top_canvas.set_width(pw.max(1));
-        self.top_canvas.set_height(ph.max(1));
+        if self.base_canvas.width() != pw {
+            self.base_canvas.set_width(pw);
+        }
+        if self.base_canvas.height() != ph {
+            self.base_canvas.set_height(ph);
+        }
+        if self.top_canvas.width() != pw {
+            self.top_canvas.set_width(pw);
+        }
+        if self.top_canvas.height() != ph {
+            self.top_canvas.set_height(ph);
+        }
         self.base_ctx.set_image_smoothing_enabled(false);
         self.top_ctx.set_image_smoothing_enabled(false);
     }

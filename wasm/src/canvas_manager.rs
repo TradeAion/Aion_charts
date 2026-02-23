@@ -19,7 +19,7 @@
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{Document, HtmlCanvasElement, HtmlDivElement, HtmlElement};
+use web_sys::{CssStyleDeclaration, Document, HtmlCanvasElement, HtmlDivElement, HtmlElement};
 
 /// A pair of canvases: base (static content) + top (dynamic/crosshair content).
 /// Matches LWC's canvasBinding + topCanvasBinding pattern.
@@ -37,8 +37,7 @@ impl CanvasPair {
 
     pub fn set_size(&self, pw: u32, ph: u32) {
         for c in [&self.base, &self.top] {
-            c.set_width(pw.max(1));
-            c.set_height(ph.max(1));
+            set_canvas_bitmap_size_if_needed(c, pw.max(1), ph.max(1));
         }
     }
 
@@ -47,11 +46,7 @@ impl CanvasPair {
     /// `css_w`, `css_h` are CSS pixel dimensions for layout.
     pub fn set_size_with_css(&self, pw: u32, ph: u32, css_w: f64, css_h: f64) {
         for c in [&self.base, &self.top] {
-            c.set_width(pw.max(1));
-            c.set_height(ph.max(1));
-            // Set explicit CSS size to prevent browser scaling blur
-            let _ = c.style().set_property("width", &format!("{}px", css_w));
-            let _ = c.style().set_property("height", &format!("{}px", css_h));
+            set_canvas_size_with_css_if_needed(c, pw.max(1), ph.max(1), css_w, css_h);
         }
     }
 }
@@ -71,19 +66,14 @@ impl PaneCanvases {
 
     pub fn set_size(&self, pw: u32, ph: u32) {
         for c in [&self.chart, &self.top] {
-            c.set_width(pw.max(1));
-            c.set_height(ph.max(1));
+            set_canvas_bitmap_size_if_needed(c, pw.max(1), ph.max(1));
         }
     }
 
     /// Set size with explicit CSS dimensions for crisp rendering.
     pub fn set_size_with_css(&self, pw: u32, ph: u32, css_w: f64, css_h: f64) {
         for c in [&self.chart, &self.top] {
-            c.set_width(pw.max(1));
-            c.set_height(ph.max(1));
-            // Set explicit CSS size to prevent browser scaling blur
-            let _ = c.style().set_property("width", &format!("{}px", css_w));
-            let _ = c.style().set_property("height", &format!("{}px", css_h));
+            set_canvas_size_with_css_if_needed(c, pw.max(1), ph.max(1), css_w, css_h);
         }
     }
 }
@@ -250,14 +240,11 @@ impl WidgetLayout {
     /// Update the grid sizing based on computed axis dimensions (CSS px).
     /// Called when axis widths/heights change (e.g. after measuring text).
     pub fn update_axis_sizes(&self, price_axis_css_w: f64, time_axis_css_h: f64) {
-        let _ = self.grid_wrapper.style().set_property(
-            "grid-template-columns",
-            &format!("1fr {}px", price_axis_css_w.round()),
-        );
-        let _ = self.grid_wrapper.style().set_property(
-            "grid-template-rows",
-            &format!("1fr {}px", time_axis_css_h.round()),
-        );
+        let cols = format!("1fr {}px", price_axis_css_w.round());
+        let rows = format!("1fr {}px", time_axis_css_h.round());
+        let style = self.grid_wrapper.style();
+        set_style_property_if_needed(&style, "grid-template-columns", &cols);
+        set_style_property_if_needed(&style, "grid-template-rows", &rows);
     }
 
     /// Update grid sizing with subpane support.
@@ -269,10 +256,9 @@ impl WidgetLayout {
         time_axis_css_h: f64,
         subpane_heights: &[f64],
     ) {
-        let _ = self.grid_wrapper.style().set_property(
-            "grid-template-columns",
-            &format!("1fr {}px", price_axis_css_w.round()),
-        );
+        let cols = format!("1fr {}px", price_axis_css_w.round());
+        let style = self.grid_wrapper.style();
+        set_style_property_if_needed(&style, "grid-template-columns", &cols);
 
         // Build rows: "1fr [1px Npx]... Mpx"
         let mut rows = String::from("1fr ");
@@ -281,21 +267,15 @@ impl WidgetLayout {
         }
         rows.push_str(&format!("{}px", time_axis_css_h.round()));
 
-        let _ = self
-            .grid_wrapper
-            .style()
-            .set_property("grid-template-rows", &rows);
+        set_style_property_if_needed(&style, "grid-template-rows", &rows);
 
         // Move time axis + corner stub to the correct last row
         let time_row = 2 + subpane_heights.len() * 2;
-        let _ = self
-            .time_axis_container
-            .style()
-            .set_property("grid-row", &time_row.to_string());
-        let _ = self
-            .corner_stub_container
-            .style()
-            .set_property("grid-row", &time_row.to_string());
+        let time_row_str = time_row.to_string();
+        let time_axis_style = self.time_axis_container.style();
+        set_style_property_if_needed(&time_axis_style, "grid-row", &time_row_str);
+        let corner_style = self.corner_stub_container.style();
+        set_style_property_if_needed(&corner_style, "grid-row", &time_row_str);
     }
 
     /// Get the pane's actual CSS size (chart area only).
@@ -356,16 +336,7 @@ impl WidgetLayout {
         let (sw, sh) = self.corner_stub_css_size();
         let spw = (sw * dpr).round() as u32;
         let sph = (sh * dpr).round() as u32;
-        self.corner_stub.set_width(spw.max(1));
-        self.corner_stub.set_height(sph.max(1));
-        let _ = self
-            .corner_stub
-            .style()
-            .set_property("width", &format!("{}px", sw));
-        let _ = self
-            .corner_stub
-            .style()
-            .set_property("height", &format!("{}px", sh));
+        set_canvas_size_with_css_if_needed(&self.corner_stub, spw.max(1), sph.max(1), sw, sh);
     }
 
     /// Resize a specific widget's canvases using exact device-pixel sizes
@@ -387,16 +358,13 @@ impl WidgetLayout {
     }
 
     pub fn resize_corner_stub_exact(&self, exact_pw: u32, exact_ph: u32, css_w: f64, css_h: f64) {
-        self.corner_stub.set_width(exact_pw.max(1));
-        self.corner_stub.set_height(exact_ph.max(1));
-        let _ = self
-            .corner_stub
-            .style()
-            .set_property("width", &format!("{}px", css_w));
-        let _ = self
-            .corner_stub
-            .style()
-            .set_property("height", &format!("{}px", css_h));
+        set_canvas_size_with_css_if_needed(
+            &self.corner_stub,
+            exact_pw.max(1),
+            exact_ph.max(1),
+            css_w,
+            css_h,
+        );
     }
 }
 
@@ -426,4 +394,56 @@ fn create_widget_container(doc: &Document, id: &str) -> Result<HtmlDivElement, J
         .map_err(|_| JsValue::from_str("failed to create div"))?;
     div.set_id(id);
     Ok(div)
+}
+
+fn set_canvas_bitmap_size_if_needed(canvas: &HtmlCanvasElement, pw: u32, ph: u32) {
+    if canvas.width() != pw {
+        canvas.set_width(pw);
+    }
+    if canvas.height() != ph {
+        canvas.set_height(ph);
+    }
+}
+
+fn set_canvas_size_with_css_if_needed(
+    canvas: &HtmlCanvasElement,
+    pw: u32,
+    ph: u32,
+    css_w: f64,
+    css_h: f64,
+) {
+    set_canvas_bitmap_size_if_needed(canvas, pw, ph);
+
+    // Keep CSS size explicit to avoid browser scaling blur, but only mutate style when needed.
+    let style = canvas.style();
+    let css_w_px = format!("{}px", css_w);
+    if style
+        .get_property_value("width")
+        .ok()
+        .as_deref()
+        != Some(css_w_px.as_str())
+    {
+        let _ = style.set_property("width", &css_w_px);
+    }
+
+    let css_h_px = format!("{}px", css_h);
+    if style
+        .get_property_value("height")
+        .ok()
+        .as_deref()
+        != Some(css_h_px.as_str())
+    {
+        let _ = style.set_property("height", &css_h_px);
+    }
+}
+
+fn set_style_property_if_needed(style: &CssStyleDeclaration, property: &str, value: &str) {
+    if style
+        .get_property_value(property)
+        .ok()
+        .as_deref()
+        != Some(value)
+    {
+        let _ = style.set_property(property, value);
+    }
 }

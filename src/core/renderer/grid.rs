@@ -42,11 +42,21 @@ impl GridRenderer {
     }
 
     pub fn resize(&mut self, pw: u32, ph: u32, dpr: f64) {
+        let pw = pw.max(1);
+        let ph = ph.max(1);
+        if self.pw == pw && self.ph == ph && (self.dpr - dpr).abs() < 1e-6 {
+            return;
+        }
+
         self.pw = pw;
         self.ph = ph;
         self.dpr = dpr;
-        self.canvas.set_width(pw.max(1));
-        self.canvas.set_height(ph.max(1));
+        if self.canvas.width() != pw {
+            self.canvas.set_width(pw);
+        }
+        if self.canvas.height() != ph {
+            self.canvas.set_height(ph);
+        }
         self.ctx.set_image_smoothing_enabled(false);
     }
 

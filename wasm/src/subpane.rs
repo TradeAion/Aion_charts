@@ -1080,25 +1080,13 @@ fn resize_canvas(canvas: &HtmlCanvasElement, dpr: f64) {
     if w > 0.0 && h > 0.0 {
         let pw = (w * dpr).round() as u32;
         let ph = (h * dpr).round() as u32;
-        canvas.set_width(pw);
-        canvas.set_height(ph);
-        // Set explicit CSS size to prevent browser scaling blur
-        let _ = canvas.style().set_property("width", &format!("{}px", w));
-        let _ = canvas.style().set_property("height", &format!("{}px", h));
+        set_canvas_size_with_css_if_needed(canvas, pw.max(1), ph.max(1), w, h);
     }
 }
 
 /// Resize canvas with explicit dimensions (for when size is read from container, not canvas).
 fn resize_canvas_with_size(canvas: &HtmlCanvasElement, pw: u32, ph: u32, css_w: f64, css_h: f64) {
-    canvas.set_width(pw.max(1));
-    canvas.set_height(ph.max(1));
-    // Set explicit CSS size to prevent browser scaling blur
-    let _ = canvas
-        .style()
-        .set_property("width", &format!("{}px", css_w));
-    let _ = canvas
-        .style()
-        .set_property("height", &format!("{}px", css_h));
+    set_canvas_size_with_css_if_needed(canvas, pw.max(1), ph.max(1), css_w, css_h);
 }
 
 fn rgba(c: &[f32; 4]) -> String {
@@ -1109,4 +1097,40 @@ fn rgba(c: &[f32; 4]) -> String {
         (c[2] * 255.0) as u8,
         c[3]
     )
+}
+
+fn set_canvas_size_with_css_if_needed(
+    canvas: &HtmlCanvasElement,
+    pw: u32,
+    ph: u32,
+    css_w: f64,
+    css_h: f64,
+) {
+    if canvas.width() != pw {
+        canvas.set_width(pw);
+    }
+    if canvas.height() != ph {
+        canvas.set_height(ph);
+    }
+
+    let style = canvas.style();
+    let css_w_px = format!("{}px", css_w);
+    if style
+        .get_property_value("width")
+        .ok()
+        .as_deref()
+        != Some(css_w_px.as_str())
+    {
+        let _ = style.set_property("width", &css_w_px);
+    }
+
+    let css_h_px = format!("{}px", css_h);
+    if style
+        .get_property_value("height")
+        .ok()
+        .as_deref()
+        != Some(css_h_px.as_str())
+    {
+        let _ = style.set_property("height", &css_h_px);
+    }
 }

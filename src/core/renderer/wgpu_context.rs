@@ -118,8 +118,14 @@ impl GpuContext {
 
     /// Reconfigure surface on resize.
     pub fn resize(&mut self, width: u32, height: u32) {
-        self.config.width = width.max(1);
-        self.config.height = height.max(1);
+        let width = width.max(1);
+        let height = height.max(1);
+        if self.config.width == width && self.config.height == height {
+            return;
+        }
+
+        self.config.width = width;
+        self.config.height = height;
         self.surface.configure(&self.device, &self.config);
     }
 }
