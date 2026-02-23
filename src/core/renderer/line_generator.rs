@@ -8,6 +8,7 @@
 //! The LineSegment approach produces proper diagonal lines that connect data
 //! points directly, rendered with anti-aliasing by the line.wgsl shader.
 
+use crate::core::renderer::baseline_utils::emit_split_segment_by_baseline;
 use crate::core::renderer::draw_list::{ColoredRect, LineSegment};
 use crate::core::renderer::transforms::{bar_to_x, price_to_y};
 use crate::core::series::{Series, SeriesType};
@@ -362,28 +363,29 @@ pub fn generate_baseline_line_segments(
     for i in 0..points.len() - 1 {
         let (x1, y1) = points[i];
         let (x2, y2) = points[i + 1];
-
-        // Determine segment color based on midpoint relative to baseline
-        let mid_y = (y1 + y2) * 0.5;
-        let color = if mid_y <= base_y {
-            top_color
-        } else {
-            bottom_color
-        };
-        let [r, g, b, a] = color;
-
-        segments.push(LineSegment {
-            x1: (x1 + correction) as f32,
-            y1: (y1 + correction) as f32,
-            x2: (x2 + correction) as f32,
-            y2: (y2 + correction) as f32,
-            width: line_w,
-            r,
-            g,
-            b,
-            a,
-            _pad: 0.0,
-        });
+        emit_split_segment_by_baseline(
+            x1 + correction,
+            y1 + correction,
+            x2 + correction,
+            y2 + correction,
+            base_y + correction,
+            top_color,
+            bottom_color,
+            |sx1, sy1, sx2, sy2, color| {
+                segments.push(LineSegment {
+                    x1: sx1 as f32,
+                    y1: sy1 as f32,
+                    x2: sx2 as f32,
+                    y2: sy2 as f32,
+                    width: line_w,
+                    r: color[0],
+                    g: color[1],
+                    b: color[2],
+                    a: color[3],
+                    _pad: 0.0,
+                });
+            },
+        );
     }
 
     segments

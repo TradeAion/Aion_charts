@@ -9,7 +9,6 @@
 use crate::core::renderer::draw_list::{ColoredRect, LineSegment};
 use crate::core::renderer::geometry_generator;
 use crate::core::renderer::traits::{ChartRenderer, RenderContext};
-use crate::core::renderer::transforms::{bar_to_x, price_to_y};
 use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
@@ -112,123 +111,6 @@ impl Canvas2DRenderer {
             self.ctx.stroke();
         }
     }
-
-    /// Draw a smooth anti-aliased line chart using Canvas2D native line primitives.
-    fn draw_line_chart_native(&self, ctx: &RenderContext) {
-        let pane_w = self.physical_width as f64;
-        let pane_h = self.physical_height as f64;
-        let vol_h = pane_h * ctx.viewport.volume_height_ratio as f64;
-        let candle_h = pane_h - vol_h;
-
-        let start = (ctx.viewport.start_bar.floor() as usize)
-            .saturating_sub(1)
-            .min(ctx.bars.len());
-        let end = ((ctx.viewport.end_bar.ceil() as usize) + 1).min(ctx.bars.len());
-
-        if end <= start || end - start < 2 {
-            return;
-        }
-
-        // Set line style
-        let line_w = (ctx.main_chart_options.line_width * ctx.v_pixel_ratio as f32)
-            .round()
-            .max(1.0);
-        let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
-
-        self.ctx
-            .set_stroke_style_str(&rgba(&ctx.main_chart_options.line_color));
-        self.ctx.set_line_width(line_w as f64);
-        self.ctx.set_line_join("round");
-        self.ctx.set_line_cap("round");
-
-        // Build path
-        self.ctx.begin_path();
-
-        let first_bar = ctx.bars.get_unchecked(start);
-        let first_x = bar_to_x(start as f64 + 0.5, ctx.viewport, pane_w).round() + correction;
-        let first_y =
-            price_to_y(first_bar.close as f64, ctx.viewport, candle_h).round() + correction;
-        self.ctx.move_to(first_x, first_y);
-
-        for i in (start + 1)..end {
-            let b = ctx.bars.get_unchecked(i);
-            let x = bar_to_x(i as f64 + 0.5, ctx.viewport, pane_w).round() + correction;
-            let y = price_to_y(b.close as f64, ctx.viewport, candle_h).round() + correction;
-            self.ctx.line_to(x, y);
-        }
-
-        self.ctx.stroke();
-    }
-
-    /// Draw a smooth anti-aliased area chart using Canvas2D native primitives.
-    fn draw_area_chart_native(&self, ctx: &RenderContext) {
-        let pane_w = self.physical_width as f64;
-        let pane_h = self.physical_height as f64;
-        let vol_h = pane_h * ctx.viewport.volume_height_ratio as f64;
-        let candle_h = pane_h - vol_h;
-
-        let start = (ctx.viewport.start_bar.floor() as usize)
-            .saturating_sub(1)
-            .min(ctx.bars.len());
-        let end = ((ctx.viewport.end_bar.ceil() as usize) + 1).min(ctx.bars.len());
-
-        if end <= start || end - start < 2 {
-            return;
-        }
-
-        // Step 1: Fill the area under the line
-        self.ctx.begin_path();
-
-        // Start at bottom-left
-        let first_x = bar_to_x(start as f64 + 0.5, ctx.viewport, pane_w).round();
-        self.ctx.move_to(first_x, candle_h);
-
-        // Draw line along the top (close prices)
-        for i in start..end {
-            let b = ctx.bars.get_unchecked(i);
-            let x = bar_to_x(i as f64 + 0.5, ctx.viewport, pane_w).round();
-            let y = price_to_y(b.close as f64, ctx.viewport, candle_h).round();
-            self.ctx.line_to(x, y);
-        }
-
-        // Close path along bottom
-        let last_x = bar_to_x((end - 1) as f64 + 0.5, ctx.viewport, pane_w).round();
-        self.ctx.line_to(last_x, candle_h);
-        self.ctx.close_path();
-
-        // Fill with gradient or solid color
-        let fill_color = ctx.main_chart_options.area_top_color;
-        self.ctx.set_fill_style_str(&rgba(&fill_color));
-        self.ctx.fill();
-
-        // Step 2: Draw the line on top
-        let line_w = (ctx.main_chart_options.line_width * ctx.v_pixel_ratio as f32)
-            .round()
-            .max(1.0);
-        let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
-
-        self.ctx
-            .set_stroke_style_str(&rgba(&ctx.main_chart_options.line_color));
-        self.ctx.set_line_width(line_w as f64);
-        self.ctx.set_line_join("round");
-        self.ctx.set_line_cap("round");
-
-        self.ctx.begin_path();
-
-        let first_bar = ctx.bars.get_unchecked(start);
-        let first_y =
-            price_to_y(first_bar.close as f64, ctx.viewport, candle_h).round() + correction;
-        self.ctx.move_to(first_x + correction, first_y);
-
-        for i in (start + 1)..end {
-            let b = ctx.bars.get_unchecked(i);
-            let x = bar_to_x(i as f64 + 0.5, ctx.viewport, pane_w).round() + correction;
-            let y = price_to_y(b.close as f64, ctx.viewport, candle_h).round() + correction;
-            self.ctx.line_to(x, y);
-        }
-
-        self.ctx.stroke();
-    }
 }
 
 impl ChartRenderer for Canvas2DRenderer {
@@ -291,12 +173,61 @@ impl ChartRenderer for Canvas2DRenderer {
 
         match ctx.main_chart_type {
             MainChartType::Line => {
-                // Use native Canvas2D line drawing for smooth anti-aliased lines
-                self.draw_line_chart_native(ctx);
+                let line_width = ctx.main_chart_options.line_width * ctx.v_pixel_ratio as f32;
+                let segments = geometry_generator::generate_line_segments(
+                    ctx.bars,
+                    ctx.viewport,
+                    ctx.main_chart_options.line_color,
+                    line_width,
+                    pane_w,
+                    pane_h,
+                );
+                self.draw_line_segments(&segments);
             }
-            MainChartType::Area | MainChartType::Baseline => {
-                // Use native Canvas2D for smooth area fill and line
-                self.draw_area_chart_native(ctx);
+            MainChartType::Area => {
+                let line_width = ctx.main_chart_options.line_width * ctx.v_pixel_ratio as f32;
+                let fill_rects = geometry_generator::generate_main_area_fill_rects(
+                    ctx.bars,
+                    ctx.viewport,
+                    ctx.main_chart_options.area_top_color,
+                    ctx.main_chart_options.area_bottom_color,
+                    pane_w,
+                    pane_h,
+                );
+                let line_segments = geometry_generator::generate_line_segments(
+                    ctx.bars,
+                    ctx.viewport,
+                    ctx.main_chart_options.line_color,
+                    line_width,
+                    pane_w,
+                    pane_h,
+                );
+                self.draw_rects(&fill_rects);
+                self.draw_line_segments(&line_segments);
+            }
+            MainChartType::Baseline => {
+                let fill_rects = geometry_generator::generate_main_baseline_fill_rects(
+                    ctx.bars,
+                    ctx.viewport,
+                    ctx.main_chart_options.baseline_value,
+                    ctx.main_chart_options.baseline_top_fill_color,
+                    ctx.main_chart_options.baseline_bottom_fill_color,
+                    pane_w,
+                    pane_h,
+                );
+                let line_segments = geometry_generator::generate_main_baseline_line_segments(
+                    ctx.bars,
+                    ctx.viewport,
+                    ctx.main_chart_options.baseline_value,
+                    ctx.main_chart_options.baseline_top_line_color,
+                    ctx.main_chart_options.baseline_bottom_line_color,
+                    ctx.main_chart_options.line_width,
+                    pane_w,
+                    pane_h,
+                    ctx.v_pixel_ratio,
+                );
+                self.draw_rects(&fill_rects);
+                self.draw_line_segments(&line_segments);
             }
             MainChartType::Candlestick => {
                 let rects = geometry_generator::generate_candle_rects(
