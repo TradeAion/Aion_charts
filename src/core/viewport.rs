@@ -151,7 +151,7 @@ impl Viewport {
         }
         // Use the first visible bar's close as reference
         let start_idx = (self.start_bar.floor() as usize).min(bars.len().saturating_sub(1));
-        self.first_value = bars.closes.value(start_idx) as f64;
+        self.first_value = bars.close(start_idx) as f64;
     }
 
     #[inline]

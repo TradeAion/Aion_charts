@@ -989,9 +989,7 @@ impl ChartRenderer for WgpuRenderer {
         let pane_h = ctx.viewport.height as f64;
 
         // Build timestamps slice for bar-index lookup
-        let ts: Vec<u64> = (0..ctx.bars.len())
-            .map(|i| ctx.bars.timestamps.value(i))
-            .collect();
+        let ts: Vec<u64> = (0..ctx.bars.len()).map(|i| ctx.bars.timestamp(i)).collect();
 
         // Generate smooth line segments + fill rects for overlays
         let (line_segments, fill_rects) =

@@ -165,8 +165,8 @@ impl TimeAxisRenderer {
         // Bar index at crosshair X — use floor() not round() (matches interaction.rs fix)
         let bar_idx = vp.bar_index_at_pixel(mx, pane_w, bars.len());
         let bar_i = bar_idx.unwrap_or(0);
-        let bar_lbl = if bar_idx.is_some() && bars.timestamps.value(bar_i) > 0 {
-            format_crosshair_time(bars.timestamps.value(bar_i))
+        let bar_lbl = if bar_idx.is_some() && bars.timestamp(bar_i) > 0 {
+            format_crosshair_time(bars.timestamp(bar_i))
         } else {
             format!("{}", bar_i)
         };

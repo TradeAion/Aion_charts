@@ -392,7 +392,7 @@ fn generate_volume_into(
 
     let mut max_vol = 0.0f32;
     for i in start..end {
-        max_vol = max_vol.max(bars.volumes.value(i));
+        max_vol = max_vol.max(bars.volume(i));
     }
     if max_vol <= 0.0 {
         return;

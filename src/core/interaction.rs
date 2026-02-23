@@ -861,10 +861,10 @@ fn magnet_snap_price(
     viewport: &Viewport,
     pane_css_h: f64,
 ) -> f64 {
-    let open = bars.opens.value(idx) as f64;
-    let high = bars.highs.value(idx) as f64;
-    let low = bars.lows.value(idx) as f64;
-    let close = bars.closes.value(idx) as f64;
+    let open = bars.open(idx) as f64;
+    let high = bars.high(idx) as f64;
+    let low = bars.low(idx) as f64;
+    let close = bars.close(idx) as f64;
 
     // Convert each OHLC price to CSS Y and find nearest to cursor
     let candidates = [open, high, low, close];
