@@ -1044,9 +1044,10 @@ fn create_canvas(doc: &Document, id: &str, z_index: u32) -> Result<HtmlCanvasEle
         .create_element("canvas")?
         .dyn_into::<HtmlCanvasElement>()?;
     canvas.set_id(id);
+    // Don't use width:100%;height:100% — set explicit CSS sizes to avoid browser scaling blur
     canvas.style().set_css_text(&format!(
-        "position:absolute;top:0;left:0;width:100%;height:100%;\
-         display:block;z-index:{};pointer-events:none;",
+        "position:absolute;top:0;left:0;\
+         display:block;z-index:{};pointer-events:none;image-rendering:pixelated;image-rendering:crisp-edges;",
         z_index
     ));
     Ok(canvas)
@@ -1063,8 +1064,13 @@ fn resize_canvas(canvas: &HtmlCanvasElement, dpr: f64) {
     let w = canvas.client_width() as f64;
     let h = canvas.client_height() as f64;
     if w > 0.0 && h > 0.0 {
-        canvas.set_width((w * dpr).round() as u32);
-        canvas.set_height((h * dpr).round() as u32);
+        let pw = (w * dpr).round() as u32;
+        let ph = (h * dpr).round() as u32;
+        canvas.set_width(pw);
+        canvas.set_height(ph);
+        // Set explicit CSS size to prevent browser scaling blur
+        let _ = canvas.style().set_property("width", &format!("{}px", w));
+        let _ = canvas.style().set_property("height", &format!("{}px", h));
     }
 }
 

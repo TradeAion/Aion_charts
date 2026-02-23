@@ -909,13 +909,20 @@ impl RayCore {
                 if s.exact_sizes.available {
                     // Use exact pixel sizes for canvas bitmap dimensions
                     let es = s.exact_sizes;
-                    s.layout.resize_pane_exact(es.pane_pw, es.pane_ph);
-                    s.layout.resize_price_axis_exact(es.price_axis_pw, es.price_axis_ph);
-                    s.layout.resize_time_axis_exact(es.time_axis_pw, es.time_axis_ph);
-                    s.layout.resize_corner_stub_exact(es.corner_stub_pw, es.corner_stub_ph);
+                    
+                    // Get CSS sizes for each widget
+                    let (pcw, pch) = s.layout.pane_css_size();
+                    let (acw, ach) = s.layout.price_axis_css_size();
+                    let (tcw, tch) = s.layout.time_axis_css_size();
+                    let (scw, sch) = s.layout.corner_stub_css_size();
+                    
+                    // Resize with both physical and CSS sizes for crisp rendering
+                    s.layout.resize_pane_exact(es.pane_pw, es.pane_ph, pcw, pch);
+                    s.layout.resize_price_axis_exact(es.price_axis_pw, es.price_axis_ph, acw, ach);
+                    s.layout.resize_time_axis_exact(es.time_axis_pw, es.time_axis_ph, tcw, tch);
+                    s.layout.resize_corner_stub_exact(es.corner_stub_pw, es.corner_stub_ph, scw, sch);
 
                     // Compute per-axis pixel ratios
-                    let (pcw, pch) = s.layout.pane_css_size();
                     let h_ratio = if pcw > 0.0 { es.pane_pw as f64 / pcw } else { dpr };
                     let v_ratio = if pch > 0.0 { es.pane_ph as f64 / pch } else { dpr };
                     s.engine.h_pixel_ratio = h_ratio;

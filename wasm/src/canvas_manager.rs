@@ -41,6 +41,19 @@ impl CanvasPair {
             c.set_height(ph.max(1));
         }
     }
+
+    /// Set size with explicit CSS dimensions for crisp rendering.
+    /// `pw`, `ph` are physical pixel dimensions (bitmap size).
+    /// `css_w`, `css_h` are CSS pixel dimensions for layout.
+    pub fn set_size_with_css(&self, pw: u32, ph: u32, css_w: f64, css_h: f64) {
+        for c in [&self.base, &self.top] {
+            c.set_width(pw.max(1));
+            c.set_height(ph.max(1));
+            // Set explicit CSS size to prevent browser scaling blur
+            let _ = c.style().set_property("width", &format!("{}px", css_w));
+            let _ = c.style().set_property("height", &format!("{}px", css_h));
+        }
+    }
 }
 
 /// The pane widget has 2 canvases: chart (z0), overlay/top (z1).
@@ -60,6 +73,17 @@ impl PaneCanvases {
         for c in [&self.chart, &self.top] {
             c.set_width(pw.max(1));
             c.set_height(ph.max(1));
+        }
+    }
+
+    /// Set size with explicit CSS dimensions for crisp rendering.
+    pub fn set_size_with_css(&self, pw: u32, ph: u32, css_w: f64, css_h: f64) {
+        for c in [&self.chart, &self.top] {
+            c.set_width(pw.max(1));
+            c.set_height(ph.max(1));
+            // Set explicit CSS size to prevent browser scaling blur
+            let _ = c.style().set_property("width", &format!("{}px", css_w));
+            let _ = c.style().set_property("height", &format!("{}px", css_h));
         }
     }
 }
@@ -314,19 +338,19 @@ impl WidgetLayout {
         let (pw, ph) = self.pane_css_size();
         let ppw = (pw * dpr).round() as u32;
         let pph = (ph * dpr).round() as u32;
-        self.pane.set_size(ppw, pph);
+        self.pane.set_size_with_css(ppw, pph, pw, ph);
 
         // Price axis canvases
         let (aw, ah) = self.price_axis_css_size();
         let apw = (aw * dpr).round() as u32;
         let aph = (ah * dpr).round() as u32;
-        self.price_axis.set_size(apw, aph);
+        self.price_axis.set_size_with_css(apw, aph, aw, ah);
 
         // Time axis canvases
         let (tw, th) = self.time_axis_css_size();
         let tpw = (tw * dpr).round() as u32;
         let tph = (th * dpr).round() as u32;
-        self.time_axis.set_size(tpw, tph);
+        self.time_axis.set_size_with_css(tpw, tph, tw, th);
 
         // Corner stub canvas
         let (sw, sh) = self.corner_stub_css_size();
@@ -334,26 +358,45 @@ impl WidgetLayout {
         let sph = (sh * dpr).round() as u32;
         self.corner_stub.set_width(spw.max(1));
         self.corner_stub.set_height(sph.max(1));
+        let _ = self
+            .corner_stub
+            .style()
+            .set_property("width", &format!("{}px", sw));
+        let _ = self
+            .corner_stub
+            .style()
+            .set_property("height", &format!("{}px", sh));
     }
 
     /// Resize a specific widget's canvases using exact device-pixel sizes
     /// reported by `ResizeObserver` with `device-pixel-content-box`.
     /// This avoids the ±1px rounding error from `round(css * dpr)`.
-    pub fn resize_pane_exact(&self, exact_pw: u32, exact_ph: u32) {
-        self.pane.set_size(exact_pw.max(1), exact_ph.max(1));
+    pub fn resize_pane_exact(&self, exact_pw: u32, exact_ph: u32, css_w: f64, css_h: f64) {
+        self.pane
+            .set_size_with_css(exact_pw.max(1), exact_ph.max(1), css_w, css_h);
     }
 
-    pub fn resize_price_axis_exact(&self, exact_pw: u32, exact_ph: u32) {
-        self.price_axis.set_size(exact_pw.max(1), exact_ph.max(1));
+    pub fn resize_price_axis_exact(&self, exact_pw: u32, exact_ph: u32, css_w: f64, css_h: f64) {
+        self.price_axis
+            .set_size_with_css(exact_pw.max(1), exact_ph.max(1), css_w, css_h);
     }
 
-    pub fn resize_time_axis_exact(&self, exact_pw: u32, exact_ph: u32) {
-        self.time_axis.set_size(exact_pw.max(1), exact_ph.max(1));
+    pub fn resize_time_axis_exact(&self, exact_pw: u32, exact_ph: u32, css_w: f64, css_h: f64) {
+        self.time_axis
+            .set_size_with_css(exact_pw.max(1), exact_ph.max(1), css_w, css_h);
     }
 
-    pub fn resize_corner_stub_exact(&self, exact_pw: u32, exact_ph: u32) {
+    pub fn resize_corner_stub_exact(&self, exact_pw: u32, exact_ph: u32, css_w: f64, css_h: f64) {
         self.corner_stub.set_width(exact_pw.max(1));
         self.corner_stub.set_height(exact_ph.max(1));
+        let _ = self
+            .corner_stub
+            .style()
+            .set_property("width", &format!("{}px", css_w));
+        let _ = self
+            .corner_stub
+            .style()
+            .set_property("height", &format!("{}px", css_h));
     }
 }
 
@@ -366,8 +409,10 @@ fn create_canvas(doc: &Document, id: &str, z_index: u32) -> Result<HtmlCanvasEle
         .map_err(|_| JsValue::from_str("failed to create canvas"))?;
 
     canvas.set_id(id);
+    // Position absolute, but don't set width/height:100% — we'll set explicit CSS sizes
+    // to avoid browser scaling blur. Initial size will be set by resize_all_canvases.
     canvas.style().set_css_text(&format!(
-        "position:absolute;top:0;left:0;width:100%;height:100%;display:block;z-index:{};pointer-events:none;",
+        "position:absolute;top:0;left:0;display:block;z-index:{};pointer-events:none;image-rendering:pixelated;image-rendering:crisp-edges;",
         z_index
     ));
 
