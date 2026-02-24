@@ -16,7 +16,7 @@ use raycore::{
 };
 
 use crate::canvas_manager::WidgetLayout;
-use crate::subpane::{PaneHeightCoordinator, SubPane};
+use crate::subpane::{PaneHeightCoordinator, SubPane, SubPaneSeparatorStyle};
 
 // ============================================================================
 // Event Listener Handle - for proper cleanup in dispose()
@@ -176,6 +176,8 @@ pub struct ChartInner {
     pub active_subpane_id: Option<u32>,
     /// Coordinates pane heights using stretch factors (PaneManager bridge).
     pub pane_coordinator: PaneHeightCoordinator,
+    /// Visual/interaction style for indicator sub-pane separators.
+    pub subpane_separator_style: SubPaneSeparatorStyle,
 }
 
 /// Helper methods that destructure `self` to satisfy the borrow checker.

@@ -34,6 +34,32 @@ use std::rc::Rc;
 
 const MIN_PANE_HEIGHT: f64 = 30.0;
 
+#[derive(Debug, Clone)]
+pub struct SubPaneSeparatorStyle {
+    pub line_thickness_css: f64,
+    pub hit_area_css: f64,
+    pub color: [f32; 4],
+    pub hover_color: [f32; 4],
+}
+
+impl SubPaneSeparatorStyle {
+    pub fn from_chart_style(style: &ChartStyle) -> Self {
+        let mut s = Self {
+            line_thickness_css: 1.0,
+            hit_area_css: 9.0,
+            color: style.axis_border_color,
+            hover_color: style.crosshair_vert_line.color,
+        };
+        s.normalize();
+        s
+    }
+
+    pub fn normalize(&mut self) {
+        self.line_thickness_css = self.line_thickness_css.clamp(1.0, 16.0);
+        self.hit_area_css = self.hit_area_css.clamp(self.line_thickness_css, 32.0);
+    }
+}
+
 // ── PaneHeightCoordinator ──────────────────────────────────────────────────
 //
 // Bridges raycore's PaneManager with the SubPane DOM-based system.
@@ -274,10 +300,13 @@ pub struct SubPane {
 
     // ── DOM containers ──
     pub separator: HtmlDivElement,
+    separator_handle: HtmlDivElement,
     pub chart_container: HtmlDivElement,
     pub axis_container: HtmlDivElement,
     drag_overlay: HtmlDivElement,
     pub grid_row: u32,
+    separator_bg_css: Rc<RefCell<String>>,
+    separator_hover_css: Rc<RefCell<String>>,
 
     // ── Chart canvases (base = data/grid, top = crosshair overlay) ──
     chart_base: HtmlCanvasElement,
@@ -325,32 +354,43 @@ impl SubPane {
         grid_row: u32,
         initial_height: f64,
         dpr: f64,
-        style: &ChartStyle,
+        _style: &ChartStyle,
+        separator_style: &SubPaneSeparatorStyle,
     ) -> Result<Self, JsValue> {
         let config = IndicatorConfig::for_type(indicator_type);
         let pane_row = grid_row + 1;
         let id_str = format!("raycore-subpane-{}", id);
 
-        // Derive separator colors from theme
-        let sep_bg = rgba(&style.axis_border_color);
+        let mut separator_style = separator_style.clone();
+        separator_style.normalize();
+        let sep_bg = rgba(&separator_style.color);
+        let hover_color = rgba(&separator_style.hover_color);
+        let separator_bg_css = Rc::new(RefCell::new(sep_bg.clone()));
+        let separator_hover_css = Rc::new(RefCell::new(hover_color));
+        let line_h = separator_style.line_thickness_css;
+        let hit_h = separator_style.hit_area_css;
+        let handle_top = -((hit_h - line_h) * 0.5);
 
         // ── Separator ──────────────────────────────────────────────────
         let separator = doc.create_element("div")?.dyn_into::<HtmlDivElement>()?;
         separator.set_id(&format!("{}-sep", id_str));
         separator.style().set_css_text(&format!(
             "grid-column:1/3;grid-row:{row};\
-             height:1px;background:{bg};\
+             height:{line_h:.3}px;background:{bg};\
              position:relative;z-index:10;",
             row = grid_row,
+            line_h = line_h,
             bg = sep_bg,
         ));
         grid_wrapper.append_child(&separator)?;
 
         let handle = doc.create_element("div")?.dyn_into::<HtmlDivElement>()?;
-        handle.style().set_css_text(
-            "position:absolute;top:-4px;left:0;right:0;height:9px;\
+        handle.style().set_css_text(&format!(
+            "position:absolute;top:{top:.3}px;left:0;right:0;height:{height:.3}px;\
              cursor:ns-resize;background:transparent;z-index:51;",
-        );
+            top = handle_top,
+            height = hit_h,
+        ));
         separator.append_child(&handle)?;
 
         let drag_overlay = doc.create_element("div")?.dyn_into::<HtmlDivElement>()?;
@@ -430,13 +470,13 @@ impl SubPane {
         }));
         let mut closures: Vec<Closure<dyn FnMut(MouseEvent)>> = Vec::new();
 
-        // Hover highlight -- use vertical crosshair color from theme
-        let hover_color = rgba(&style.crosshair_vert_line.color);
+        // Hover highlight
         {
             let sep = separator.clone();
-            let hc = hover_color.clone();
+            let hover_bg = separator_hover_css.clone();
             let c = Closure::wrap(Box::new(move |_: MouseEvent| {
-                let _ = sep.style().set_property("background", &hc);
+                let bg = hover_bg.borrow();
+                let _ = sep.style().set_property("background", bg.as_str());
             }) as Box<dyn FnMut(MouseEvent)>);
             handle.add_event_listener_with_callback("mouseenter", c.as_ref().unchecked_ref())?;
             closures.push(c);
@@ -444,10 +484,11 @@ impl SubPane {
         {
             let sep = separator.clone();
             let ds = drag_state.clone();
-            let sbg = sep_bg.clone();
+            let base_bg = separator_bg_css.clone();
             let c = Closure::wrap(Box::new(move |_: MouseEvent| {
                 if !ds.borrow().active {
-                    let _ = sep.style().set_property("background", &sbg);
+                    let bg = base_bg.borrow();
+                    let _ = sep.style().set_property("background", bg.as_str());
                 }
             }) as Box<dyn FnMut(MouseEvent)>);
             handle.add_event_listener_with_callback("mouseleave", c.as_ref().unchecked_ref())?;
@@ -494,11 +535,12 @@ impl SubPane {
             let ds = drag_state.clone();
             let ov = drag_overlay.clone();
             let sep = separator.clone();
-            let sbg = sep_bg.clone();
+            let base_bg = separator_bg_css.clone();
             let c = Closure::wrap(Box::new(move |_: MouseEvent| {
                 ds.borrow_mut().active = false;
                 let _ = ov.style().set_property("display", "none");
-                let _ = sep.style().set_property("background", &sbg);
+                let bg = base_bg.borrow();
+                let _ = sep.style().set_property("background", bg.as_str());
             }) as Box<dyn FnMut(MouseEvent)>);
             drag_overlay.add_event_listener_with_callback("mouseup", c.as_ref().unchecked_ref())?;
             closures.push(c);
@@ -518,10 +560,13 @@ impl SubPane {
             indicator_type: indicator_type.to_string(),
             config,
             separator,
+            separator_handle: handle,
             chart_container,
             axis_container,
             drag_overlay,
             grid_row,
+            separator_bg_css,
+            separator_hover_css,
             chart_base,
             chart_base_ctx,
             chart_top,
@@ -554,6 +599,31 @@ impl SubPane {
     /// Set the height directly.
     pub fn set_height(&self, height: f64) {
         self.shared_height.set(height.max(MIN_PANE_HEIGHT));
+    }
+
+    pub fn apply_separator_style(&self, style: &SubPaneSeparatorStyle) {
+        let mut style = style.clone();
+        style.normalize();
+        let base = rgba(&style.color);
+        let hover = rgba(&style.hover_color);
+        *self.separator_bg_css.borrow_mut() = base.clone();
+        *self.separator_hover_css.borrow_mut() = hover;
+
+        let line_h = style.line_thickness_css;
+        let hit_h = style.hit_area_css;
+        let handle_top = -((hit_h - line_h) * 0.5);
+
+        let _ = self
+            .separator
+            .style()
+            .set_property("height", &format!("{line_h:.3}px"));
+        let _ = self.separator.style().set_property("background", &base);
+        let _ = self.separator_handle.style().set_css_text(&format!(
+            "position:absolute;top:{top:.3}px;left:0;right:0;height:{height:.3}px;\
+             cursor:ns-resize;background:transparent;z-index:51;",
+            top = handle_top,
+            height = hit_h,
+        ));
     }
 
     /// Get a clone of the shared height cell (for coordinator integration).

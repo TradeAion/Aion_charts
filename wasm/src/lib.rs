@@ -35,12 +35,13 @@ use wasm_bindgen::JsCast;
 mod canvas_manager;
 mod chart_inner;
 mod subpane;
+mod workspace;
 
 use canvas_manager::WidgetLayout;
 use chart_inner::{
     event_css_pos, wheel_css_pos, ChartInner, EventListenerRegistry, ExactPixelSizes, SharedInner,
 };
-use subpane::{IndicatorConfig, PaneHeightCoordinator, SubPane};
+use subpane::{IndicatorConfig, PaneHeightCoordinator, SubPane, SubPaneSeparatorStyle};
 
 fn init_logging() {
     console_error_panic_hook::set_once();
@@ -334,6 +335,7 @@ impl RayCore {
             next_subpane_id: 1,
             active_subpane_id: None,
             pane_coordinator,
+            subpane_separator_style: SubPaneSeparatorStyle::from_chart_style(&style),
         }));
 
         let mut closures: Vec<Closure<dyn FnMut(web_sys::Event)>> = Vec::new();
@@ -1802,6 +1804,48 @@ impl RayCore {
         self.inner.borrow_mut().engine.style.font_family = family.to_string();
     }
 
+    /// Set indicator sub-pane separator visible line thickness (CSS px).
+    pub fn set_subpane_separator_thickness(&mut self, thickness_css: f64) {
+        let mut s = self.inner.borrow_mut();
+        s.subpane_separator_style.line_thickness_css = thickness_css;
+        s.subpane_separator_style.normalize();
+        let sep_style = s.subpane_separator_style.clone();
+        for sp in &s.subpanes {
+            sp.apply_separator_style(&sep_style);
+        }
+    }
+
+    /// Set indicator sub-pane separator drag hit-area thickness (CSS px).
+    pub fn set_subpane_separator_hit_area(&mut self, hit_area_css: f64) {
+        let mut s = self.inner.borrow_mut();
+        s.subpane_separator_style.hit_area_css = hit_area_css;
+        s.subpane_separator_style.normalize();
+        let sep_style = s.subpane_separator_style.clone();
+        for sp in &s.subpanes {
+            sp.apply_separator_style(&sep_style);
+        }
+    }
+
+    /// Set indicator sub-pane separator line color (RGBA, 0.0-1.0).
+    pub fn set_subpane_separator_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        let mut s = self.inner.borrow_mut();
+        s.subpane_separator_style.color = [r, g, b, a];
+        let sep_style = s.subpane_separator_style.clone();
+        for sp in &s.subpanes {
+            sp.apply_separator_style(&sep_style);
+        }
+    }
+
+    /// Set indicator sub-pane separator hover/active color (RGBA, 0.0-1.0).
+    pub fn set_subpane_separator_hover_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        let mut s = self.inner.borrow_mut();
+        s.subpane_separator_style.hover_color = [r, g, b, a];
+        let sep_style = s.subpane_separator_style.clone();
+        for sp in &s.subpanes {
+            sp.apply_separator_style(&sep_style);
+        }
+    }
+
     /// Set the bar width ratio (0.0-1.0, default 0.8).
     pub fn set_bar_width_ratio(&mut self, ratio: f32) {
         self.inner.borrow_mut().engine.style.bar_width_ratio = ratio.clamp(0.1, 1.0);
@@ -2542,6 +2586,7 @@ impl RayCore {
                 initial_height,
                 dpr,
                 &s.engine.style,
+                &s.subpane_separator_style,
             ) {
                 Ok(sp) => sp,
                 Err(e) => {

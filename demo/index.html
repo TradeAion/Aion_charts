@@ -105,48 +105,6 @@
       touch-action: none;
     }
 
-    #chart-container.split-layout {
-      display: grid;
-      background: #24242c;
-    }
-
-    .chart-host {
-      width: 100%;
-      height: 100%;
-      min-height: 0;
-      min-width: 0;
-      position: relative;
-      overflow: hidden;
-      background: #171717;
-    }
-
-    .chart-divider {
-      background: #2b2b35;
-      position: relative;
-      z-index: 5;
-      touch-action: none;
-      user-select: none;
-    }
-
-    .chart-divider::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(180deg, transparent, rgba(255,255,255,0.08), transparent);
-      opacity: 0.8;
-      pointer-events: none;
-    }
-
-    .chart-divider.vertical {
-      width: 6px;
-      cursor: col-resize;
-    }
-
-    .chart-divider.horizontal {
-      height: 6px;
-      cursor: row-resize;
-    }
-
     #hud {
       position: absolute;
       top: 8px;
@@ -471,7 +429,7 @@
   </div>
 
   <script type="module">
-    import init, { RayCore, ChartGroup } from './pkg/raycore_wasm.js?v=20260224-chart-group-pass-02';
+    import init, { RayCore, ChartGroup, ChartWorkspace } from './pkg/raycore_wasm.js?v=20260224-workspace-style-api-v1';
 
     const errorBanner = document.getElementById('error-banner');
     const loading = document.getElementById('loading');
@@ -513,25 +471,83 @@
       syncDataRange: document.getElementById('cfg-sync-data-range'),
     };
 
+    // Shared divider/drag-handle style used by both:
+    // 1) multi-layout split dividers (ChartWorkspace)
+    // 2) indicator sub-pane separators (RayCore subpanes)
+    const dividerStyleConfig = {
+      lineThickness: 1.0,
+      hitArea: 8.0,
+      color: [0.18, 0.18, 0.22, 1.0],
+      activeColor: [0.102, 0.737, 0.612, 0.55],
+      paneBackground: [0.09, 0.09, 0.09, 1.0],
+      activePaneBorderColor: [0.102, 0.737, 0.612, 0.45],
+      activePaneBorderWidth: 1.0,
+    };
+
     let core = null;
-    let secondaryCore = null;
+    let workspace = null;
     let group = null;
-    let primaryPaneId = null;
-    let secondaryPaneId = null;
+    const paneCores = new Map();
+    const paneToGroup = new Map();
+    const groupToPane = new Map();
     let syncGuard = false;
-    let splitMode = 'single';
-    let splitRatio = 0.5;
-    let splitDragCleanup = null;
     let rafId = 0;
     let currentRenderer = null;
-    let lastPrimaryRangeKey = '';
-    let lastSecondaryRangeKey = '';
-    let lastPrimaryCrosshairKey = '';
-    let lastSecondaryCrosshairKey = '';
+    let splitTemplate = 'single';
 
     function forEachCore(fn) {
-      if (core) fn(core, 'primary');
-      if (secondaryCore) fn(secondaryCore, 'secondary');
+      for (const [paneId, paneCore] of paneCores.entries()) {
+        fn(paneCore, paneId);
+      }
+    }
+
+    function activePaneId() {
+      return workspace ? workspace.active_pane_id() : null;
+    }
+
+    function activeCore() {
+      const paneId = activePaneId();
+      if (paneId === null) return core;
+      return paneCores.get(paneId) || core;
+    }
+
+    function updateCorePointer() {
+      // Intentionally no-op: legacy controls still target the primary pane.
+    }
+
+    function registerGroupPane(layoutPaneId, groupPaneId) {
+      paneToGroup.set(layoutPaneId, groupPaneId);
+      groupToPane.set(groupPaneId, layoutPaneId);
+    }
+
+    function clearGroupMaps() {
+      paneToGroup.clear();
+      groupToPane.clear();
+    }
+
+    function applyWorkspaceStyle(targetWorkspace) {
+      if (!targetWorkspace) return;
+      const d = dividerStyleConfig.color;
+      const da = dividerStyleConfig.activeColor;
+      const bg = dividerStyleConfig.paneBackground;
+      const ab = dividerStyleConfig.activePaneBorderColor;
+      targetWorkspace.set_split_divider_thickness(dividerStyleConfig.lineThickness);
+      targetWorkspace.set_split_divider_hit_area(dividerStyleConfig.hitArea);
+      targetWorkspace.set_split_divider_color(d[0], d[1], d[2], d[3]);
+      targetWorkspace.set_split_divider_active_color(da[0], da[1], da[2], da[3]);
+      targetWorkspace.set_workspace_pane_background_color(bg[0], bg[1], bg[2], bg[3]);
+      targetWorkspace.set_workspace_active_pane_border_color(ab[0], ab[1], ab[2], ab[3]);
+      targetWorkspace.set_workspace_active_pane_border_width(dividerStyleConfig.activePaneBorderWidth);
+    }
+
+    function applySubpaneSeparatorStyle(targetCore) {
+      if (!targetCore) return;
+      const c = dividerStyleConfig.color;
+      const h = dividerStyleConfig.activeColor;
+      targetCore.set_subpane_separator_thickness(dividerStyleConfig.lineThickness);
+      targetCore.set_subpane_separator_hit_area(dividerStyleConfig.hitArea);
+      targetCore.set_subpane_separator_color(c[0], c[1], c[2], c[3]);
+      targetCore.set_subpane_separator_hover_color(h[0], h[1], h[2], h[3]);
     }
 
     function hexToRgba01(hex) {
@@ -541,6 +557,83 @@
       const g = ((v >> 8) & 255) / 255;
       const b = (v & 255) / 255;
       return [r, g, b, 1.0];
+    }
+
+    function createSeededRng(seed) {
+      let s = seed >>> 0;
+      return () => {
+        s = (s * 1664525 + 1013904223) >>> 0;
+        return s / 4294967296;
+      };
+    }
+
+    function buildSharedDemoData() {
+      const numBars = 600;
+      const intervalMs = 60_000;
+      const nowMs = Date.now();
+      const startMs = nowMs - numBars * intervalMs;
+      const rand = createSeededRng(0xC0FFEE);
+
+      const open = new Float32Array(numBars);
+      const high = new Float32Array(numBars);
+      const low = new Float32Array(numBars);
+      const close = new Float32Array(numBars);
+      const volume = new Float32Array(numBars);
+      const timestamps = new BigUint64Array(numBars);
+
+      let price = 42000.0;
+      for (let i = 0; i < numBars; i++) {
+        const ts = BigInt(startMs + i * intervalMs);
+        const drift = (rand() - 0.48) * price * 0.0035;
+        const nextClose = price + drift;
+        const wickTop = Math.abs(drift) * (0.4 + rand() * 0.8);
+        const wickBottom = Math.abs(drift) * (0.4 + rand() * 0.8);
+        const o = price;
+        const c = nextClose;
+        const h = Math.max(o, c) + wickTop;
+        const l = Math.min(o, c) - wickBottom;
+
+        open[i] = o;
+        high[i] = h;
+        low[i] = l;
+        close[i] = c;
+        volume[i] = 100 + rand() * 900;
+        timestamps[i] = ts;
+
+        price = nextClose;
+      }
+
+      return {
+        numBars,
+        intervalMs,
+        startMs,
+        open,
+        high,
+        low,
+        close,
+        volume,
+        timestamps,
+      };
+    }
+
+    let sharedDemoData = null;
+    function ensureSharedDemoData() {
+      if (!sharedDemoData) {
+        sharedDemoData = buildSharedDemoData();
+      }
+      return sharedDemoData;
+    }
+
+    function loadSharedDemo(coreInstance) {
+      const demo = ensureSharedDemoData();
+      coreInstance.set_data_arrays(
+        demo.open,
+        demo.high,
+        demo.low,
+        demo.close,
+        demo.volume,
+        demo.timestamps
+      );
     }
 
     function applyLwcConfig() {
@@ -581,161 +674,27 @@
     }
 
     function applyGroupIdentityConfig() {
-      if (!core) return;
+      if (paneCores.size === 0) return;
       const symbol = cfg.groupSymbol.value.trim() || 'DEMO';
       const interval = cfg.groupInterval.value;
-      core.set_symbol(symbol);
-      core.set_interval(interval);
-      if (group && primaryPaneId !== null) {
-        const targets = group.update_symbol(primaryPaneId, symbol);
-        if (secondaryCore && targets.includes(secondaryPaneId)) {
-          secondaryCore.set_symbol(symbol);
-        }
-        const intervalTargets = group.update_interval(primaryPaneId, interval);
-        if (secondaryCore && intervalTargets.includes(secondaryPaneId)) {
-          secondaryCore.set_interval(interval);
+      forEachCore((paneCore) => {
+        paneCore.set_symbol(symbol);
+        paneCore.set_interval(interval);
+      });
+      if (group) {
+        const sourceLayoutPane = activePaneId() ?? paneCores.keys().next().value;
+        const sourceGroupPane = paneToGroup.get(sourceLayoutPane);
+        if (sourceGroupPane !== undefined) {
+          group.update_symbol(sourceGroupPane, symbol);
+          group.update_interval(sourceGroupPane, interval);
         }
       }
-    }
-
-    function resetSyncKeys() {
-      lastPrimaryRangeKey = '';
-      lastSecondaryRangeKey = '';
-      lastPrimaryCrosshairKey = '';
-      lastSecondaryCrosshairKey = '';
-    }
-
-    function splitIsActive() {
-      return splitMode !== 'single';
     }
 
     function updateSplitButtons() {
-      splitButtons.single.classList.toggle('active', splitMode === 'single');
-      splitButtons.vertical.classList.toggle('active', splitMode === 'vertical');
-      splitButtons.horizontal.classList.toggle('active', splitMode === 'horizontal');
-    }
-
-    function clamp(value, min, max) {
-      return Math.min(max, Math.max(min, value));
-    }
-
-    function applySplitGridTemplate() {
-      if (!splitIsActive()) return;
-      const primaryPercent = clamp(splitRatio, 0.15, 0.85) * 100;
-      const secondaryPercent = 100 - primaryPercent;
-      if (splitMode === 'vertical') {
-        container.style.gridTemplateColumns = `${primaryPercent.toFixed(2)}% 6px ${secondaryPercent.toFixed(2)}%`;
-        container.style.gridTemplateRows = '1fr';
-      } else {
-        container.style.gridTemplateRows = `${primaryPercent.toFixed(2)}% 6px ${secondaryPercent.toFixed(2)}%`;
-        container.style.gridTemplateColumns = '1fr';
-      }
-    }
-
-    function attachDividerDrag(divider) {
-      if (splitDragCleanup) {
-        splitDragCleanup();
-        splitDragCleanup = null;
-      }
-
-      let dragging = false;
-      let pointerId = null;
-      let previousCursor = '';
-      let previousUserSelect = '';
-
-      const onPointerMove = (event) => {
-        if (!dragging) return;
-        const rect = container.getBoundingClientRect();
-        if (splitMode === 'vertical' && rect.width > 0) {
-          splitRatio = clamp((event.clientX - rect.left) / rect.width, 0.15, 0.85);
-        } else if (splitMode === 'horizontal' && rect.height > 0) {
-          splitRatio = clamp((event.clientY - rect.top) / rect.height, 0.15, 0.85);
-        }
-        applySplitGridTemplate();
-      };
-
-      const stopDrag = () => {
-        if (!dragging) return;
-        dragging = false;
-        pointerId = null;
-        document.body.style.userSelect = previousUserSelect;
-        document.body.style.cursor = previousCursor;
-      };
-
-      const onPointerDown = (event) => {
-        if (event.button !== 0) return;
-        dragging = true;
-        pointerId = event.pointerId;
-        previousUserSelect = document.body.style.userSelect;
-        previousCursor = document.body.style.cursor;
-        document.body.style.userSelect = 'none';
-        document.body.style.cursor = splitMode === 'vertical' ? 'col-resize' : 'row-resize';
-        divider.setPointerCapture(pointerId);
-        event.preventDefault();
-      };
-
-      const onPointerUp = (event) => {
-        if (pointerId !== null && event.pointerId === pointerId) {
-          stopDrag();
-        }
-      };
-
-      divider.addEventListener('pointerdown', onPointerDown);
-      divider.addEventListener('pointermove', onPointerMove);
-      divider.addEventListener('pointerup', onPointerUp);
-      divider.addEventListener('pointercancel', stopDrag);
-      divider.addEventListener('lostpointercapture', stopDrag);
-
-      splitDragCleanup = () => {
-        divider.removeEventListener('pointerdown', onPointerDown);
-        divider.removeEventListener('pointermove', onPointerMove);
-        divider.removeEventListener('pointerup', onPointerUp);
-        divider.removeEventListener('pointercancel', stopDrag);
-        divider.removeEventListener('lostpointercapture', stopDrag);
-      };
-    }
-
-    function prepareHosts() {
-      const keep = new Set(['loading', 'hud']);
-      Array.from(container.children).forEach((el) => {
-        if (!keep.has(el.id)) el.remove();
-      });
-
-      if (splitDragCleanup) {
-        splitDragCleanup();
-        splitDragCleanup = null;
-      }
-
-      const primaryHost = document.createElement('div');
-      primaryHost.id = 'chart-host-primary';
-      primaryHost.className = 'chart-host';
-      let secondaryHost = null;
-
-      if (!splitIsActive()) {
-        container.classList.remove('split-layout', 'vertical', 'horizontal');
-        container.style.gridTemplateColumns = '';
-        container.style.gridTemplateRows = '';
-        container.appendChild(primaryHost);
-        return { primaryHost, secondaryHost };
-      }
-
-      container.classList.add('split-layout', splitMode);
-      container.classList.remove(splitMode === 'vertical' ? 'horizontal' : 'vertical');
-
-      const divider = document.createElement('div');
-      divider.className = `chart-divider ${splitMode === 'vertical' ? 'vertical' : 'horizontal'}`;
-
-      container.appendChild(primaryHost);
-      container.appendChild(divider);
-
-      secondaryHost = document.createElement('div');
-      secondaryHost.id = 'chart-host-secondary';
-      secondaryHost.className = 'chart-host';
-      container.appendChild(secondaryHost);
-      applySplitGridTemplate();
-      attachDividerDrag(divider);
-
-      return { primaryHost, secondaryHost };
+      splitButtons.single.classList.toggle('active', splitTemplate === 'single');
+      splitButtons.vertical.classList.toggle('active', splitTemplate === 'vertical');
+      splitButtons.horizontal.classList.toggle('active', splitTemplate === 'horizontal');
     }
 
     cfgToggleBtn.addEventListener('click', () => {
@@ -788,6 +747,7 @@
     let activeDrawTool = 'none';
     for (const [btnId, tool] of Object.entries(drawBtns)) {
       document.getElementById(btnId).addEventListener('click', () => {
+        updateCorePointer();
         const newTool = activeDrawTool === tool ? 'none' : tool;
         activeDrawTool = newTool;
         for (const [bid, _] of Object.entries(drawBtns)) {
@@ -797,10 +757,12 @@
       });
     }
     document.getElementById('draw-clear').addEventListener('click', () => {
+      updateCorePointer();
       if (core) core.clear_drawings();
     });
     // Keyboard: forward to WASM core for handling
     document.addEventListener('keydown', (e) => {
+      updateCorePointer();
       if (!core) return;
       
       // Let WASM handle the key
@@ -841,7 +803,7 @@
     let activeChartType = 'candlestick';
 
     function setChartType(type) {
-      if (!core || activeChartType === type) return;
+      if (paneCores.size === 0 || activeChartType === type) return;
       activeChartType = type;
       forEachCore((chartCore) => chartCore.set_chart_type(type));
       // Update button states
@@ -855,19 +817,75 @@
       document.getElementById(btnId).addEventListener('click', () => setChartType(type));
     }
 
-    async function setSplitMode(mode) {
-      if (!['single', 'vertical', 'horizontal'].includes(mode)) return;
-      if (splitMode === mode) return;
-      splitMode = mode;
+    async function splitActive(direction) {
+      if (!workspace || !group || !currentRenderer) return;
+      updateCorePointer();
+      const sourcePaneId = workspace.active_pane_id();
+      const sourceCore = activeCore();
+      if (!sourceCore) return;
+
+      let newPaneId;
+      try {
+        newPaneId = workspace.split_active(direction);
+      } catch (e) {
+        console.error('Split failed:', e);
+        return;
+      }
+      const hostId = workspace.pane_host_id(newPaneId);
+      if (!hostId) return;
+
+      const newCore = await RayCore.create_with(hostId, currentRenderer);
+      applySubpaneSeparatorStyle(newCore);
+      loadSharedDemo(newCore);
+      newCore.set_chart_type(activeChartType);
+
+      const sourceRange = sourceCore.visible_range();
+      if (sourceRange.length === 2) {
+        newCore.set_visible_range(sourceRange[0], sourceRange[1]);
+      }
+
+      const symbol = sourceCore.symbol() || cfg.groupSymbol.value.trim() || 'DEMO';
+      const interval = sourceCore.interval() || cfg.groupInterval.value;
+      newCore.set_symbol(symbol);
+      newCore.set_interval(interval);
+
+      paneCores.set(newPaneId, newCore);
+
+      const sourceGroupPaneId = paneToGroup.get(sourcePaneId);
+      const newGroupPaneId = group.add_pane(symbol, interval);
+      registerGroupPane(newPaneId, newGroupPaneId);
+      for (const existingGroupPaneId of groupToPane.keys()) {
+        if (existingGroupPaneId !== newGroupPaneId) {
+          group.link_panes(newGroupPaneId, existingGroupPaneId);
+        }
+      }
+      if (sourceGroupPaneId !== undefined) {
+        group.link_panes(sourceGroupPaneId, newGroupPaneId);
+      }
+
+      splitTemplate = direction;
+      updateSplitButtons();
+      applyLwcConfig();
+      updateCorePointer();
+    }
+
+    splitButtons.single.addEventListener('click', async () => {
+      splitTemplate = 'single';
       updateSplitButtons();
       if (currentRenderer) {
         await createChart(currentRenderer);
       }
-    }
-
-    splitButtons.single.addEventListener('click', () => setSplitMode('single'));
-    splitButtons.vertical.addEventListener('click', () => setSplitMode('vertical'));
-    splitButtons.horizontal.addEventListener('click', () => setSplitMode('horizontal'));
+    });
+    splitButtons.vertical.addEventListener('click', async () => {
+      splitTemplate = 'vertical';
+      updateSplitButtons();
+      await splitActive('vertical');
+    });
+    splitButtons.horizontal.addEventListener('click', async () => {
+      splitTemplate = 'horizontal';
+      updateSplitButtons();
+      await splitActive('horizontal');
+    });
 
     function showError(msg) {
       errorBanner.textContent = 'Error: ' + msg;
@@ -889,40 +907,54 @@
     async function createChart(renderer) {
       // Tear down previous instance
       if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
-      if (core) { core.dispose(); core.free(); core = null; }
-      if (secondaryCore) { secondaryCore.dispose(); secondaryCore.free(); secondaryCore = null; }
+      splitTemplate = 'single';
+      updateSplitButtons();
+      if (workspace) { workspace.dispose(); workspace.free(); workspace = null; }
+      for (const paneCore of paneCores.values()) {
+        paneCore.dispose();
+        paneCore.free();
+      }
+      paneCores.clear();
+      core = null;
       group = null;
-      primaryPaneId = null;
-      secondaryPaneId = null;
-      resetSyncKeys();
+      clearGroupMaps();
 
-      const hosts = prepareHosts();
+      const keep = new Set(['loading', 'hud']);
+      Array.from(container.children).forEach((el) => {
+        if (!keep.has(el.id)) el.remove();
+      });
+      container.classList.remove('split-layout', 'vertical', 'horizontal');
+      container.style.gridTemplateColumns = '';
+      container.style.gridTemplateRows = '';
+
+      const workspaceRoot = document.createElement('div');
+      workspaceRoot.id = 'chart-workspace-root';
+      workspaceRoot.style.cssText = 'position:absolute;inset:0;min-width:0;min-height:0;overflow:hidden;';
+      container.appendChild(workspaceRoot);
 
       loading.textContent = 'Switching to ' + renderer + '…';
       loading.style.display = 'flex';
       errorBanner.style.display = 'none';
 
       try {
-        core = await RayCore.create_with(hosts.primaryHost.id, renderer);
+        workspace = new ChartWorkspace('chart-workspace-root');
+        applyWorkspaceStyle(workspace);
+        const rootPaneId = workspace.root_pane_id();
+        const rootHostId = workspace.pane_host_id(rootPaneId);
+        core = await RayCore.create_with(rootHostId, renderer);
+        applySubpaneSeparatorStyle(core);
+        paneCores.set(rootPaneId, core);
+
         currentRenderer = core.renderer_name();
         updateBadge(currentRenderer);
         updateToggleButtons(currentRenderer);
 
-        core.demo_mode();
+        loadSharedDemo(core);
         core.set_chart_type(activeChartType);
 
-        if (splitIsActive() && hosts.secondaryHost) {
-          secondaryCore = await RayCore.create_with(hosts.secondaryHost.id, renderer);
-          secondaryCore.demo_mode();
-          secondaryCore.set_chart_type(activeChartType);
-        }
-
         group = new ChartGroup();
-        primaryPaneId = group.add_pane(cfg.groupSymbol.value.trim() || 'DEMO', cfg.groupInterval.value);
-        if (secondaryCore) {
-          secondaryPaneId = group.add_pane(cfg.groupSymbol.value.trim() || 'DEMO', cfg.groupInterval.value);
-          group.link_panes(primaryPaneId, secondaryPaneId);
-        }
+        const rootGroupPaneId = group.add_pane(cfg.groupSymbol.value.trim() || 'DEMO', cfg.groupInterval.value);
+        registerGroupPane(rootPaneId, rootGroupPaneId);
         applyGroupSyncConfig();
         applyGroupIdentityConfig();
 
@@ -934,10 +966,8 @@
           '<br><span style="color:#666;font-size:10px">Keys: ←→ scroll | ↑↓ zoom price | +/- zoom time | Home/End jump | 0 fit | Del remove | Esc cancel</span>';
 
         // ── Studies & Overlays ──────────────────────────────────────────────
-        const numBars = 600;
-        const nowMs = Date.now();
-        const intervalMs = 60000;
-        const startMs = nowMs - numBars * intervalMs;
+        const demo = ensureSharedDemoData();
+        const numBars = demo.numBars;
 
         // ── Study management ────────────────────────────────────────────────
         // Track study IDs and their line series overlays
@@ -970,6 +1000,8 @@
         };
 
         function createStudyAndOverlay(type) {
+          updateCorePointer();
+          if (!core) return;
           const study = studies[type];
           if (study.id !== null) return; // already created
 
@@ -1089,6 +1121,8 @@
         };
 
         function toggleIndicatorPane(type) {
+          updateCorePointer();
+          if (!core) return;
           const pane = indicatorPanes[type];
           if (pane.paneId !== null) {
             // Remove the pane
@@ -1127,11 +1161,15 @@
 
         // ── Real-time streaming simulation ──────────────────────────────────
         let streamInterval = null;
-        let lastBarTs = BigInt(startMs + (numBars - 1) * intervalMs);
-        let lastClose = 42000.0; // approximate starting price
+        let lastBarTs = ensureSharedDemoData().timestamps[numBars - 1];
+        let lastClose = ensureSharedDemoData().close[numBars - 1];
         const streamBtn = document.getElementById('stream-toggle');
 
         function simulateTick() {
+          updateCorePointer();
+          const sourceCore = activeCore();
+          if (!sourceCore) return;
+
           // Random walk for price
           const change = (Math.random() - 0.48) * lastClose * 0.003;
           const newClose = lastClose + change;
@@ -1146,9 +1184,13 @@
           if (elapsed >= 3000) {
             lastBarTs = barTs;
           }
-          core.upsert_bar(barTs, lastClose, newHigh, newLow, newClose, volume);
-          if (secondaryCore && cfg.syncDataRange.checked) {
-            secondaryCore.upsert_bar(barTs, lastClose, newHigh, newLow, newClose, volume);
+          sourceCore.upsert_bar(barTs, lastClose, newHigh, newLow, newClose, volume);
+          if (cfg.syncDataRange.checked) {
+            for (const paneCore of paneCores.values()) {
+              if (paneCore !== sourceCore) {
+                paneCore.upsert_bar(barTs, lastClose, newHigh, newLow, newClose, volume);
+              }
+            }
           }
 
           lastClose = newClose;
@@ -1172,6 +1214,8 @@
         const priceLineBtn = document.getElementById('priceline-toggle');
 
         priceLineBtn.addEventListener('click', () => {
+          updateCorePointer();
+          if (!core) return;
           if (priceLineIds.length > 0) {
             // Remove all price lines
             for (const id of priceLineIds) {
@@ -1209,6 +1253,8 @@
         const markersBtn = document.getElementById('markers-toggle');
 
         markersBtn.addEventListener('click', () => {
+          updateCorePointer();
+          if (!core) return;
           if (markersAdded) {
             // Clear all markers (series_id 0 = candlestick data)
             core.clear_all_markers();
@@ -1264,117 +1310,97 @@
         document.getElementById('scale-normal').classList.add('active');
 
         function runGroupSync() {
-          if (!group || !core || !secondaryCore || primaryPaneId === null || secondaryPaneId === null || syncGuard) {
+          if (!group || !workspace || paneCores.size < 2 || syncGuard) {
             return;
           }
+          updateCorePointer();
+          const sourceLayoutPaneId = workspace.active_pane_id();
+          const sourceCore = paneCores.get(sourceLayoutPaneId);
+          const sourceGroupPaneId = paneToGroup.get(sourceLayoutPaneId);
+          if (!sourceCore || sourceGroupPaneId === undefined) {
+            return;
+          }
+
           syncGuard = true;
           try {
             if (cfg.syncSymbol.checked) {
-              const symbol = core.symbol();
+              const symbol = sourceCore.symbol();
               if (symbol) {
-                const targets = group.update_symbol(primaryPaneId, symbol);
-                if (targets.includes(secondaryPaneId)) {
-                  secondaryCore.set_symbol(symbol);
+                const targets = group.update_symbol(sourceGroupPaneId, symbol);
+                for (const targetGroupPaneIdRaw of targets) {
+                  const targetGroupPaneId = Number(targetGroupPaneIdRaw);
+                  const targetLayoutPaneId = groupToPane.get(targetGroupPaneId);
+                  const targetCore = targetLayoutPaneId !== undefined ? paneCores.get(targetLayoutPaneId) : null;
+                  if (targetCore) {
+                    targetCore.set_symbol(symbol);
+                  }
                 }
               }
             }
 
             if (cfg.syncInterval.checked) {
-              const interval = core.interval();
+              const interval = sourceCore.interval();
               if (interval) {
-                const targets = group.update_interval(primaryPaneId, interval);
-                if (targets.includes(secondaryPaneId)) {
-                  secondaryCore.set_interval(interval);
+                const targets = group.update_interval(sourceGroupPaneId, interval);
+                for (const targetGroupPaneIdRaw of targets) {
+                  const targetGroupPaneId = Number(targetGroupPaneIdRaw);
+                  const targetLayoutPaneId = groupToPane.get(targetGroupPaneId);
+                  const targetCore = targetLayoutPaneId !== undefined ? paneCores.get(targetLayoutPaneId) : null;
+                  if (targetCore) {
+                    targetCore.set_interval(interval);
+                  }
                 }
               }
             }
 
             if (cfg.syncTime.checked) {
-              const primaryRange = core.visible_range();
-              const secondaryRange = secondaryCore.visible_range();
-              const primaryKey = `${primaryRange[0].toFixed(4)}|${primaryRange[1].toFixed(4)}`;
-              const secondaryKey = `${secondaryRange[0].toFixed(4)}|${secondaryRange[1].toFixed(4)}`;
-
-              if (primaryKey !== lastPrimaryRangeKey) {
-                const targets = group.update_time_range(primaryPaneId, primaryRange[0], primaryRange[1]);
-                if (targets.includes(secondaryPaneId)) {
-                  secondaryCore.set_visible_range(primaryRange[0], primaryRange[1]);
+              const sourceRange = sourceCore.visible_range();
+              const targets = group.update_time_range(sourceGroupPaneId, sourceRange[0], sourceRange[1]);
+              for (const targetGroupPaneIdRaw of targets) {
+                const targetGroupPaneId = Number(targetGroupPaneIdRaw);
+                const targetLayoutPaneId = groupToPane.get(targetGroupPaneId);
+                const targetCore = targetLayoutPaneId !== undefined ? paneCores.get(targetLayoutPaneId) : null;
+                if (targetCore) {
+                  targetCore.set_visible_range(sourceRange[0], sourceRange[1]);
                 }
-                lastPrimaryRangeKey = primaryKey;
-                lastSecondaryRangeKey = primaryKey;
-              } else if (secondaryKey !== lastSecondaryRangeKey) {
-                const targets = group.update_time_range(secondaryPaneId, secondaryRange[0], secondaryRange[1]);
-                if (targets.includes(primaryPaneId)) {
-                  core.set_visible_range(secondaryRange[0], secondaryRange[1]);
-                }
-                lastPrimaryRangeKey = secondaryKey;
-                lastSecondaryRangeKey = secondaryKey;
               }
             }
 
             if (cfg.syncCrosshair.checked) {
-              const primaryCrosshair = core.crosshair_state();
-              const secondaryCrosshair = secondaryCore.crosshair_state();
-              const primaryMagnet = core.crosshair_mode() === 'magnet_ohlc' ? 1 : 0;
-              const secondaryMagnet = secondaryCore.crosshair_mode() === 'magnet_ohlc' ? 1 : 0;
-              const primaryState = [
-                primaryCrosshair[0],
-                primaryCrosshair[1],
-                primaryCrosshair[2],
-                primaryCrosshair[3],
-                primaryCrosshair[4],
-                primaryMagnet,
+              const sourceCrosshair = sourceCore.crosshair_state();
+              const sourceMagnet = sourceCore.crosshair_mode() === 'magnet_ohlc' ? 1 : 0;
+              const sourceState = [
+                sourceCrosshair[0],
+                sourceCrosshair[1],
+                sourceCrosshair[2],
+                sourceCrosshair[3],
+                sourceCrosshair[4],
+                sourceMagnet,
               ];
-              const secondaryState = [
-                secondaryCrosshair[0],
-                secondaryCrosshair[1],
-                secondaryCrosshair[2],
-                secondaryCrosshair[3],
-                secondaryCrosshair[4],
-                secondaryMagnet,
-              ];
-              const primaryKey = primaryState.map((v) => Number(v).toFixed(4)).join('|');
-              const secondaryKey = secondaryState.map((v) => Number(v).toFixed(4)).join('|');
-
-              if (primaryState[0] > 0.5 && primaryKey !== lastPrimaryCrosshairKey) {
-                const targets = group.update_crosshair(primaryPaneId, primaryState);
-                if (targets.includes(secondaryPaneId)) {
-                  secondaryCore.set_crosshair_state(
-                    primaryState[0] > 0.5,
-                    primaryState[1],
-                    primaryState[2],
-                    primaryState[3],
-                    primaryState[4],
-                    primaryState[5] > 0.5 ? 'magnet_ohlc' : 'normal'
-                  );
+              if (sourceState[0] > 0.5) {
+                const targets = group.update_crosshair(sourceGroupPaneId, sourceState);
+                for (const targetGroupPaneIdRaw of targets) {
+                  const targetGroupPaneId = Number(targetGroupPaneIdRaw);
+                  const targetLayoutPaneId = groupToPane.get(targetGroupPaneId);
+                  const targetCore = targetLayoutPaneId !== undefined ? paneCores.get(targetLayoutPaneId) : null;
+                  if (targetCore) {
+                    targetCore.set_crosshair_state(
+                      sourceState[0] > 0.5,
+                      sourceState[1],
+                      sourceState[2],
+                      sourceState[3],
+                      sourceState[4],
+                      sourceState[5] > 0.5 ? 'magnet_ohlc' : 'normal'
+                    );
+                  }
                 }
-                lastPrimaryCrosshairKey = primaryKey;
-                lastSecondaryCrosshairKey = primaryKey;
-              } else if (secondaryState[0] > 0.5 && secondaryKey !== lastSecondaryCrosshairKey) {
-                const targets = group.update_crosshair(secondaryPaneId, secondaryState);
-                if (targets.includes(primaryPaneId)) {
-                  core.set_crosshair_state(
-                    secondaryState[0] > 0.5,
-                    secondaryState[1],
-                    secondaryState[2],
-                    secondaryState[3],
-                    secondaryState[4],
-                    secondaryState[5] > 0.5 ? 'magnet_ohlc' : 'normal'
-                  );
-                }
-                lastPrimaryCrosshairKey = secondaryKey;
-                lastSecondaryCrosshairKey = secondaryKey;
               }
             }
 
             if (cfg.syncDataRange.checked) {
-              const primaryDataRange = core.data_range();
-              if (primaryDataRange.length === 2) {
-                group.update_data_range(primaryPaneId, primaryDataRange[0], primaryDataRange[1]);
-              }
-              const secondaryDataRange = secondaryCore.data_range();
-              if (secondaryDataRange.length === 2) {
-                group.update_data_range(secondaryPaneId, secondaryDataRange[0], secondaryDataRange[1]);
+              const sourceDataRange = sourceCore.data_range();
+              if (sourceDataRange.length === 2) {
+                group.update_data_range(sourceGroupPaneId, sourceDataRange[0], sourceDataRange[1]);
               }
             }
           } catch (e) {
@@ -1387,8 +1413,8 @@
         function frame() {
           rafId = requestAnimationFrame(frame);
           try {
-            if (core) core.render();
-            if (secondaryCore) secondaryCore.render();
+            updateCorePointer();
+            forEachCore((paneCore) => paneCore.render());
             runGroupSync();
           } catch (e) {
             console.error('Render error:', e);
