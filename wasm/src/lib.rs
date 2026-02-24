@@ -20,10 +20,12 @@
 
 use raycore::{
     generate_sample_data, tick_marks, AreaSeriesOptions, Bar, BarSeriesOptions,
-    BaselineSeriesOptions, Canvas2DRenderer, ChartEngine, ChartStyle, GpuContext, HistogramPoint,
-    HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint, LineSeriesOptions, LineStyle,
-    MarkerPosition, MarkerShape, OhlcPoint, OverlayRenderer, PriceAxisRenderer, PriceLineOptions,
-    RendererBackend, SeriesId, SeriesMarker, TimeAxisRenderer, Viewport, WgpuRenderer,
+    BaselineSeriesOptions, Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup,
+    ChartPaneId, ChartStyle, CrosshairMagnetMode, CrosshairSnapshot, DataRange, GpuContext,
+    HistogramPoint, HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint,
+    LineSeriesOptions, LineStyle, MarkerPosition, MarkerShape, OhlcPoint, OverlayRenderer,
+    PriceAxisRenderer, PriceLineOptions, RendererBackend, SeriesId, SeriesMarker, TimeAxisRenderer,
+    TimeRange, Viewport, WgpuRenderer,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -150,6 +152,23 @@ where
     }
 }
 
+fn parse_crosshair_mode(mode: &str) -> raycore::CrosshairMode {
+    match mode {
+        "normal" => raycore::CrosshairMode::Normal,
+        "magnet_ohlc" | "ohlc" => raycore::CrosshairMode::MagnetOHLC,
+        "magnet" => raycore::CrosshairMode::Magnet,
+        _ => raycore::CrosshairMode::Normal,
+    }
+}
+
+fn crosshair_mode_key(mode: raycore::CrosshairMode) -> &'static str {
+    match mode {
+        raycore::CrosshairMode::Normal => "normal",
+        raycore::CrosshairMode::Magnet => "magnet",
+        raycore::CrosshairMode::MagnetOHLC => "magnet_ohlc",
+    }
+}
+
 fn js_err(message: impl Into<String>) -> JsValue {
     JsValue::from_str(&message.into())
 }
@@ -185,6 +204,8 @@ fn ensure_finite_fields(ctx: &str, fields: &[(&str, f32)]) -> Result<(), JsValue
 #[wasm_bindgen]
 pub struct RayCore {
     inner: SharedInner,
+    symbol: String,
+    interval: String,
     _closures: Vec<Closure<dyn FnMut(web_sys::Event)>>,
     _wheel_closures: Vec<Closure<dyn FnMut(web_sys::WheelEvent)>>,
     _touch_closures: Vec<Closure<dyn FnMut(web_sys::TouchEvent)>>,
@@ -1152,6 +1173,8 @@ impl RayCore {
 
         Ok(RayCore {
             inner,
+            symbol: "DEMO".to_string(),
+            interval: "1m".to_string(),
             _closures: closures,
             _wheel_closures: wheel_closures,
             _touch_closures: touch_closures,
@@ -1290,6 +1313,17 @@ impl RayCore {
         self.inner.borrow_mut().engine.zoom_to_range(start, end);
     }
 
+    /// Set visible bar range using fractional bar indices.
+    pub fn set_visible_range(&mut self, start: f64, end: f64) {
+        let mut s = self.inner.borrow_mut();
+        let should_fit = !s.engine.viewport.price_locked;
+        s.engine.viewport.set_range(start, end);
+        if should_fit {
+            let raycore::ChartEngine { viewport, bars, .. } = &mut s.engine;
+            viewport.auto_fit_price(bars);
+        }
+    }
+
     pub fn visible_range(&self) -> Vec<f64> {
         let s = self.inner.borrow();
         vec![s.engine.viewport.start_bar, s.engine.viewport.end_bar]
@@ -1302,10 +1336,92 @@ impl RayCore {
     pub fn set_crosshair_mode(&mut self, mode: &str) {
         let mut s = self.inner.borrow_mut();
         s.engine.crosshair.mode = match mode {
-            "normal" => raycore::CrosshairMode::Normal,
-            "magnet_ohlc" | "magnet" => raycore::CrosshairMode::MagnetOHLC,
-            _ => raycore::CrosshairMode::Normal,
+            "magnet" => raycore::CrosshairMode::MagnetOHLC,
+            _ => parse_crosshair_mode(mode),
         };
+    }
+
+    pub fn crosshair_mode(&self) -> String {
+        let s = self.inner.borrow();
+        crosshair_mode_key(s.engine.crosshair.mode).to_string()
+    }
+
+    /// Returns `[active, x, y, bar_index, price]`.
+    pub fn crosshair_state(&self) -> Vec<f64> {
+        let s = self.inner.borrow();
+        let bar_index = s
+            .engine
+            .crosshair
+            .bar_index
+            .map(|idx| idx as f64)
+            .unwrap_or(-1.0);
+        vec![
+            if s.engine.crosshair.active { 1.0 } else { 0.0 },
+            s.engine.crosshair.x,
+            s.engine.crosshair.y,
+            bar_index,
+            s.engine.crosshair.price,
+        ]
+    }
+
+    /// Set crosshair state for synchronized groups.
+    pub fn set_crosshair_state(
+        &mut self,
+        active: bool,
+        x: f64,
+        y: f64,
+        bar_index: f64,
+        price: f64,
+        mode: &str,
+    ) {
+        let mut s = self.inner.borrow_mut();
+        let (pw, ph) = s.layout.pane_css_size();
+
+        s.engine.crosshair.active = active;
+        s.engine.crosshair.mode = parse_crosshair_mode(mode);
+        s.engine.crosshair.x = x;
+        s.engine.crosshair.y = y;
+        s.engine.crosshair.bar_index = if bar_index.is_finite() && bar_index >= 0.0 {
+            Some(bar_index as usize)
+        } else if pw > 0.0 {
+            s.engine.viewport.bar_index_for_crosshair(x, pw)
+        } else {
+            None
+        };
+        if price.is_finite() {
+            s.engine.crosshair.price = price;
+        } else if ph > 0.0 {
+            let candle_h = ph * s.engine.viewport.candle_height_frac();
+            s.engine.crosshair.price = s.engine.viewport.pixel_to_price(y, candle_h);
+        }
+    }
+
+    pub fn set_symbol(&mut self, symbol: &str) {
+        self.symbol = symbol.to_string();
+    }
+
+    pub fn symbol(&self) -> String {
+        self.symbol.clone()
+    }
+
+    pub fn set_interval(&mut self, interval: &str) {
+        self.interval = interval.to_string();
+    }
+
+    pub fn interval(&self) -> String {
+        self.interval.clone()
+    }
+
+    /// Data timestamp range as `[from_ts, to_ts]`, or empty if no bars.
+    pub fn data_range(&self) -> Vec<f64> {
+        let s = self.inner.borrow();
+        let len = s.engine.bars.len();
+        if len == 0 {
+            return Vec::new();
+        }
+        let first = s.engine.bars.timestamp(0) as f64;
+        let last = s.engine.bars.timestamp(len - 1) as f64;
+        vec![first, last]
     }
 
     // ── Drawing tools ─────────────────────────────────────────────────────────
@@ -4186,4 +4302,203 @@ impl RayCore {
 
         log::info!("RayCore disposed: all event listeners removed");
     }
+}
+
+#[wasm_bindgen]
+pub struct ChartGroup {
+    inner: NativeChartGroup,
+}
+
+#[wasm_bindgen]
+impl ChartGroup {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: NativeChartGroup::new(),
+        }
+    }
+
+    pub fn add_pane(&mut self, symbol: &str, interval: &str) -> u32 {
+        self.inner.add_pane(symbol, interval).0 as u32
+    }
+
+    pub fn remove_pane(&mut self, pane_id: u32) -> bool {
+        self.inner.remove_pane(ChartPaneId(pane_id as u64))
+    }
+
+    pub fn pane_count(&self) -> usize {
+        self.inner.pane_count()
+    }
+
+    pub fn set_auto_link(&mut self, enabled: bool) {
+        self.inner.set_auto_link(enabled);
+    }
+
+    pub fn link_panes(&mut self, a: u32, b: u32) -> bool {
+        self.inner
+            .link_panes(&ChartPaneId(a as u64), &ChartPaneId(b as u64))
+    }
+
+    pub fn unlink_panes(&mut self, a: u32, b: u32) -> bool {
+        self.inner
+            .unlink_panes(&ChartPaneId(a as u64), &ChartPaneId(b as u64))
+    }
+
+    pub fn set_sync(&mut self, feature: &str, enabled: bool) -> Result<(), JsValue> {
+        self.inner.try_set_sync(feature, enabled).map_err(js_err)
+    }
+
+    pub fn set_sync_for_pane(
+        &mut self,
+        pane_id: u32,
+        feature: &str,
+        enabled: bool,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .set_sync_for_pane(ChartPaneId(pane_id as u64), feature, enabled)
+            .map_err(js_err)
+    }
+
+    pub fn set_sync_for_link(
+        &mut self,
+        pane_a: u32,
+        pane_b: u32,
+        feature: &str,
+        enabled: bool,
+    ) -> Result<(), JsValue> {
+        self.inner
+            .set_sync_for_link(
+                ChartPaneId(pane_a as u64),
+                ChartPaneId(pane_b as u64),
+                feature,
+                enabled,
+            )
+            .map_err(js_err)
+    }
+
+    pub fn update_symbol(&mut self, source: u32, symbol: &str) -> js_sys::Array {
+        ids_to_js_array(
+            self.inner
+                .update_symbol(ChartPaneId(source as u64), symbol.to_string()),
+        )
+    }
+
+    pub fn update_interval(&mut self, source: u32, interval: &str) -> js_sys::Array {
+        ids_to_js_array(
+            self.inner
+                .update_interval(ChartPaneId(source as u64), interval.to_string()),
+        )
+    }
+
+    /// `crosshair` format: `[active, x, y, bar_index, price, magnet]`.
+    /// `magnet`: 0 = normal, 1 = OHLC magnet.
+    pub fn update_crosshair(&mut self, source: u32, crosshair: &[f64]) -> js_sys::Array {
+        if crosshair.len() < 6 {
+            return js_sys::Array::new();
+        }
+        let snapshot = CrosshairSnapshot {
+            active: crosshair[0] > 0.5,
+            x: crosshair[1],
+            y: crosshair[2],
+            bar_index: if crosshair[3].is_finite() && crosshair[3] >= 0.0 {
+                Some(crosshair[3])
+            } else {
+                None
+            },
+            price: if crosshair[4].is_finite() {
+                Some(crosshair[4])
+            } else {
+                None
+            },
+            magnet: if crosshair[5] > 0.5 {
+                CrosshairMagnetMode::Ohlc
+            } else {
+                CrosshairMagnetMode::Normal
+            },
+        };
+        ids_to_js_array(
+            self.inner
+                .update_crosshair(ChartPaneId(source as u64), snapshot),
+        )
+    }
+
+    pub fn update_time_range(
+        &mut self,
+        source: u32,
+        start_bar: f64,
+        end_bar: f64,
+    ) -> js_sys::Array {
+        ids_to_js_array(
+            self.inner
+                .update_time_range(ChartPaneId(source as u64), TimeRange { start_bar, end_bar }),
+        )
+    }
+
+    pub fn update_data_range(
+        &mut self,
+        source: u32,
+        from_timestamp: f64,
+        to_timestamp: f64,
+    ) -> js_sys::Array {
+        let from = if from_timestamp.is_finite() && from_timestamp >= 0.0 {
+            Some(from_timestamp as u64)
+        } else {
+            None
+        };
+        let to = if to_timestamp.is_finite() && to_timestamp >= 0.0 {
+            Some(to_timestamp as u64)
+        } else {
+            None
+        };
+        ids_to_js_array(self.inner.update_data_range(
+            ChartPaneId(source as u64),
+            DataRange {
+                from_timestamp: from,
+                to_timestamp: to,
+            },
+        ))
+    }
+
+    pub fn pane_symbol(&self, pane_id: u32) -> String {
+        self.inner
+            .pane(ChartPaneId(pane_id as u64))
+            .map(|p| p.symbol.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn pane_interval(&self, pane_id: u32) -> String {
+        self.inner
+            .pane(ChartPaneId(pane_id as u64))
+            .map(|p| p.interval.clone())
+            .unwrap_or_default()
+    }
+
+    /// Returns `[start_bar, end_bar]`, or empty if pane is missing.
+    pub fn pane_time_range(&self, pane_id: u32) -> Vec<f64> {
+        if let Some(p) = self.inner.pane(ChartPaneId(pane_id as u64)) {
+            vec![p.time_range.start_bar, p.time_range.end_bar]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Returns `[from_timestamp, to_timestamp]`, or empty if unavailable.
+    pub fn pane_data_range(&self, pane_id: u32) -> Vec<f64> {
+        if let Some(p) = self.inner.pane(ChartPaneId(pane_id as u64)) {
+            match (p.data_range.from_timestamp, p.data_range.to_timestamp) {
+                (Some(from), Some(to)) => vec![from as f64, to as f64],
+                _ => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+fn ids_to_js_array(ids: Vec<ChartPaneId>) -> js_sys::Array {
+    let out = js_sys::Array::new_with_length(ids.len() as u32);
+    for (i, id) in ids.into_iter().enumerate() {
+        out.set(i as u32, JsValue::from_f64(id.0 as f64));
+    }
+    out
 }

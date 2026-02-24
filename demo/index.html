@@ -105,6 +105,22 @@
       touch-action: none;
     }
 
+    #chart-container.split-2 {
+      display: grid;
+      grid-template-rows: 1fr 1fr;
+      gap: 1px;
+      background: #24242c;
+    }
+
+    .chart-host {
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      position: relative;
+      overflow: hidden;
+      background: #171717;
+    }
+
     #hud {
       position: absolute;
       top: 8px;
@@ -162,7 +178,8 @@
     }
 
     .cfg-controls select,
-    .cfg-controls input[type="number"] {
+    .cfg-controls input[type="number"],
+    .cfg-controls input[type="text"] {
       background: #1f1f26;
       color: #d0d0d0;
       border: 1px solid #353544;
@@ -175,6 +192,10 @@
     .cfg-controls input[type="number"] {
       width: 60px;
       min-width: 60px;
+    }
+
+    .cfg-controls input[type="text"] {
+      min-width: 90px;
     }
 
     .cfg-controls input[type="color"] {
@@ -285,6 +306,7 @@
     <button class="toggle-btn" id="chart-area" title="Area chart">Area</button>
     <span style="color:#444;margin:0 4px">|</span>
     <button class="toggle-btn active" id="crosshair-settings-toggle" title="Show/hide crosshair and live-price config">LWC Config</button>
+    <button class="toggle-btn" id="split-toggle" title="Toggle 2-way split view">Split x2</button>
     <span style="color:#444;margin:0 4px">|</span>
     <button class="toggle-btn" id="draw-trendline" title="Trend Line">Line</button>
     <button class="toggle-btn" id="draw-rectangle" title="Rectangle">Rect</button>
@@ -390,10 +412,38 @@
         <label class="cfg-check"><input type="checkbox" id="cfg-last-label-visible" checked>Label</label>
       </div>
     </div>
+
+    <div class="cfg-divider"></div>
+    <h2>Chart Group</h2>
+
+    <div class="cfg-row">
+      <label for="cfg-group-symbol">Symbol</label>
+      <div class="cfg-controls">
+        <input type="text" id="cfg-group-symbol" value="BTCUSDT">
+        <label for="cfg-group-interval">Interval</label>
+        <select id="cfg-group-interval">
+          <option value="1m" selected>1m</option>
+          <option value="5m">5m</option>
+          <option value="15m">15m</option>
+          <option value="1h">1h</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="cfg-row">
+      <label>Sync</label>
+      <div class="cfg-controls">
+        <label class="cfg-check"><input type="checkbox" id="cfg-sync-symbol" checked>Symbol</label>
+        <label class="cfg-check"><input type="checkbox" id="cfg-sync-interval" checked>Interval</label>
+        <label class="cfg-check"><input type="checkbox" id="cfg-sync-crosshair" checked>Crosshair</label>
+        <label class="cfg-check"><input type="checkbox" id="cfg-sync-time" checked>Time</label>
+        <label class="cfg-check"><input type="checkbox" id="cfg-sync-data-range" checked>DataRange</label>
+      </div>
+    </div>
   </div>
 
   <script type="module">
-    import init, { RayCore } from './pkg/raycore_wasm.js?v=20260224-lwc-visual-metrics-pass-14';
+    import init, { RayCore, ChartGroup } from './pkg/raycore_wasm.js?v=20260224-chart-group-pass-01';
 
     const errorBanner = document.getElementById('error-banner');
     const loading = document.getElementById('loading');
@@ -403,6 +453,7 @@
     const container = document.getElementById('chart-container');
     const cfgPanel = document.getElementById('lwc-config-panel');
     const cfgToggleBtn = document.getElementById('crosshair-settings-toggle');
+    const splitToggleBtn = document.getElementById('split-toggle');
 
     const cfg = {
       crosshairMode: document.getElementById('cfg-crosshair-mode'),
@@ -421,7 +472,33 @@
       lastWidth: document.getElementById('cfg-last-width'),
       lastVisible: document.getElementById('cfg-last-visible'),
       lastLabelVisible: document.getElementById('cfg-last-label-visible'),
+      groupSymbol: document.getElementById('cfg-group-symbol'),
+      groupInterval: document.getElementById('cfg-group-interval'),
+      syncSymbol: document.getElementById('cfg-sync-symbol'),
+      syncInterval: document.getElementById('cfg-sync-interval'),
+      syncCrosshair: document.getElementById('cfg-sync-crosshair'),
+      syncTime: document.getElementById('cfg-sync-time'),
+      syncDataRange: document.getElementById('cfg-sync-data-range'),
     };
+
+    let core = null;
+    let secondaryCore = null;
+    let group = null;
+    let primaryPaneId = null;
+    let secondaryPaneId = null;
+    let syncGuard = false;
+    let splitEnabled = false;
+    let rafId = 0;
+    let currentRenderer = null;
+    let lastPrimaryRangeKey = '';
+    let lastSecondaryRangeKey = '';
+    let lastPrimaryCrosshairKey = '';
+    let lastSecondaryCrosshairKey = '';
+
+    function forEachCore(fn) {
+      if (core) fn(core, 'primary');
+      if (secondaryCore) fn(secondaryCore, 'secondary');
+    }
 
     function hexToRgba01(hex) {
       const clean = hex.replace('#', '');
@@ -433,31 +510,88 @@
     }
 
     function applyLwcConfig() {
+      forEachCore((chartCore) => {
+        chartCore.set_crosshair_mode(cfg.crosshairMode.value);
+
+        chartCore.set_crosshair_line_style('vert', cfg.vertStyle.value);
+        chartCore.set_crosshair_line_width('vert', Number(cfg.vertWidth.value) || 1);
+        chartCore.set_crosshair_line_visible('vert', cfg.vertVisible.checked);
+        chartCore.set_crosshair_label_visible('vert', cfg.vertLabelVisible.checked);
+
+        chartCore.set_crosshair_line_style('horz', cfg.horzStyle.value);
+        chartCore.set_crosshair_line_width('horz', Number(cfg.horzWidth.value) || 1);
+        chartCore.set_crosshair_line_visible('horz', cfg.horzVisible.checked);
+        chartCore.set_crosshair_label_visible('horz', cfg.horzLabelVisible.checked);
+
+        const [cr, cg, cb, ca] = hexToRgba01(cfg.crosshairColor.value);
+        chartCore.set_crosshair_line_color('both', cr, cg, cb, ca);
+        const [br, bg, bb, ba] = hexToRgba01(cfg.crosshairLabelBg.value);
+        chartCore.set_crosshair_line_label_bg_color('both', br, bg, bb, ba);
+        const [tr, tg, tb, ta] = hexToRgba01(cfg.crosshairLabelText.value);
+        chartCore.set_crosshair_label_text_color(tr, tg, tb, ta);
+
+        chartCore.set_last_price_line_style(cfg.lastStyle.value);
+        chartCore.set_last_price_line_width(Number(cfg.lastWidth.value) || 1);
+        chartCore.set_last_price_line_visible(cfg.lastVisible.checked);
+        chartCore.set_last_price_label_visible(cfg.lastLabelVisible.checked);
+      });
+    }
+
+    function applyGroupSyncConfig() {
+      if (!group) return;
+      group.set_sync('symbol', cfg.syncSymbol.checked);
+      group.set_sync('interval', cfg.syncInterval.checked);
+      group.set_sync('crosshair', cfg.syncCrosshair.checked);
+      group.set_sync('time', cfg.syncTime.checked);
+      group.set_sync('data_range', cfg.syncDataRange.checked);
+    }
+
+    function applyGroupIdentityConfig() {
       if (!core) return;
+      const symbol = cfg.groupSymbol.value.trim() || 'DEMO';
+      const interval = cfg.groupInterval.value;
+      core.set_symbol(symbol);
+      core.set_interval(interval);
+      if (group && primaryPaneId !== null) {
+        const targets = group.update_symbol(primaryPaneId, symbol);
+        if (secondaryCore && targets.includes(secondaryPaneId)) {
+          secondaryCore.set_symbol(symbol);
+        }
+        const intervalTargets = group.update_interval(primaryPaneId, interval);
+        if (secondaryCore && intervalTargets.includes(secondaryPaneId)) {
+          secondaryCore.set_interval(interval);
+        }
+      }
+    }
 
-      core.set_crosshair_mode(cfg.crosshairMode.value);
+    function resetSyncKeys() {
+      lastPrimaryRangeKey = '';
+      lastSecondaryRangeKey = '';
+      lastPrimaryCrosshairKey = '';
+      lastSecondaryCrosshairKey = '';
+    }
 
-      core.set_crosshair_line_style('vert', cfg.vertStyle.value);
-      core.set_crosshair_line_width('vert', Number(cfg.vertWidth.value) || 1);
-      core.set_crosshair_line_visible('vert', cfg.vertVisible.checked);
-      core.set_crosshair_label_visible('vert', cfg.vertLabelVisible.checked);
+    function prepareHosts() {
+      const keep = new Set(['loading', 'hud']);
+      Array.from(container.children).forEach((el) => {
+        if (!keep.has(el.id)) el.remove();
+      });
 
-      core.set_crosshair_line_style('horz', cfg.horzStyle.value);
-      core.set_crosshair_line_width('horz', Number(cfg.horzWidth.value) || 1);
-      core.set_crosshair_line_visible('horz', cfg.horzVisible.checked);
-      core.set_crosshair_label_visible('horz', cfg.horzLabelVisible.checked);
+      container.classList.toggle('split-2', splitEnabled);
 
-      const [cr, cg, cb, ca] = hexToRgba01(cfg.crosshairColor.value);
-      core.set_crosshair_line_color('both', cr, cg, cb, ca);
-      const [br, bg, bb, ba] = hexToRgba01(cfg.crosshairLabelBg.value);
-      core.set_crosshair_line_label_bg_color('both', br, bg, bb, ba);
-      const [tr, tg, tb, ta] = hexToRgba01(cfg.crosshairLabelText.value);
-      core.set_crosshair_label_text_color(tr, tg, tb, ta);
+      const primaryHost = document.createElement('div');
+      primaryHost.id = 'chart-host-primary';
+      primaryHost.className = 'chart-host';
+      container.appendChild(primaryHost);
 
-      core.set_last_price_line_style(cfg.lastStyle.value);
-      core.set_last_price_line_width(Number(cfg.lastWidth.value) || 1);
-      core.set_last_price_line_visible(cfg.lastVisible.checked);
-      core.set_last_price_label_visible(cfg.lastLabelVisible.checked);
+      let secondaryHost = null;
+      if (splitEnabled) {
+        secondaryHost = document.createElement('div');
+        secondaryHost.id = 'chart-host-secondary';
+        secondaryHost.className = 'chart-host';
+        container.appendChild(secondaryHost);
+      }
+      return { primaryHost, secondaryHost };
     }
 
     cfgToggleBtn.addEventListener('click', () => {
@@ -465,12 +599,40 @@
       cfgToggleBtn.classList.toggle('active', !hidden);
     });
 
-    Object.values(cfg).forEach((el) => {
+    [
+      cfg.crosshairMode,
+      cfg.vertStyle,
+      cfg.vertWidth,
+      cfg.vertVisible,
+      cfg.vertLabelVisible,
+      cfg.horzStyle,
+      cfg.horzWidth,
+      cfg.horzVisible,
+      cfg.horzLabelVisible,
+      cfg.crosshairColor,
+      cfg.crosshairLabelBg,
+      cfg.crosshairLabelText,
+      cfg.lastStyle,
+      cfg.lastWidth,
+      cfg.lastVisible,
+      cfg.lastLabelVisible,
+    ].forEach((el) => {
       el.addEventListener('change', applyLwcConfig);
       if (el.tagName === 'INPUT') {
         el.addEventListener('input', applyLwcConfig);
       }
     });
+
+    [
+      cfg.syncSymbol,
+      cfg.syncInterval,
+      cfg.syncCrosshair,
+      cfg.syncTime,
+      cfg.syncDataRange,
+    ].forEach((el) => el.addEventListener('change', applyGroupSyncConfig));
+
+    cfg.groupSymbol.addEventListener('change', applyGroupIdentityConfig);
+    cfg.groupInterval.addEventListener('change', applyGroupIdentityConfig);
 
     // Drawing tool buttons
     const drawBtns = {
@@ -537,7 +699,7 @@
     function setChartType(type) {
       if (!core || activeChartType === type) return;
       activeChartType = type;
-      core.set_chart_type(type);
+      forEachCore((chartCore) => chartCore.set_chart_type(type));
       // Update button states
       for (const [btnId, t] of Object.entries(chartTypeBtns)) {
         document.getElementById(btnId).classList.toggle('active', t === type);
@@ -549,15 +711,19 @@
       document.getElementById(btnId).addEventListener('click', () => setChartType(type));
     }
 
+    splitToggleBtn.addEventListener('click', async () => {
+      splitEnabled = !splitEnabled;
+      splitToggleBtn.classList.toggle('active', splitEnabled);
+      if (currentRenderer) {
+        await createChart(currentRenderer);
+      }
+    });
+
     function showError(msg) {
       errorBanner.textContent = 'Error: ' + msg;
       errorBanner.style.display = 'block';
       loading.style.display = 'none';
     }
-
-    let core = null;
-    let rafId = 0;
-    let currentRenderer = null;
 
     function updateBadge(rName) {
       badge.textContent = rName === 'webgpu' ? 'WebGPU' : 'Canvas 2D';
@@ -574,25 +740,43 @@
       // Tear down previous instance
       if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
       if (core) { core.dispose(); core.free(); core = null; }
+      if (secondaryCore) { secondaryCore.dispose(); secondaryCore.free(); secondaryCore = null; }
+      group = null;
+      primaryPaneId = null;
+      secondaryPaneId = null;
+      resetSyncKeys();
 
-      // Clear container DOM (RayCore appends its own elements)
-      // Keep fixed UI overlays inside the chart container.
-      const keep = new Set(['loading', 'hud']);
-      Array.from(container.children).forEach(el => {
-        if (!keep.has(el.id)) el.remove();
-      });
+      const hosts = prepareHosts();
 
       loading.textContent = 'Switching to ' + renderer + '…';
       loading.style.display = 'flex';
       errorBanner.style.display = 'none';
 
       try {
-        core = await RayCore.create_with('chart-container', renderer);
+        core = await RayCore.create_with(hosts.primaryHost.id, renderer);
         currentRenderer = core.renderer_name();
         updateBadge(currentRenderer);
         updateToggleButtons(currentRenderer);
 
         core.demo_mode();
+        core.set_chart_type(activeChartType);
+
+        if (splitEnabled && hosts.secondaryHost) {
+          secondaryCore = await RayCore.create_with(hosts.secondaryHost.id, renderer);
+          secondaryCore.demo_mode();
+          secondaryCore.set_chart_type(activeChartType);
+        }
+
+        group = new ChartGroup();
+        primaryPaneId = group.add_pane(cfg.groupSymbol.value.trim() || 'DEMO', cfg.groupInterval.value);
+        if (secondaryCore) {
+          secondaryPaneId = group.add_pane(cfg.groupSymbol.value.trim() || 'DEMO', cfg.groupInterval.value);
+          group.link_panes(primaryPaneId, secondaryPaneId);
+        }
+        applyGroupSyncConfig();
+        applyGroupIdentityConfig();
+
+        splitToggleBtn.classList.toggle('active', splitEnabled);
         loading.style.display = 'none';
         applyLwcConfig();
 
@@ -813,6 +997,9 @@
             lastBarTs = barTs;
           }
           core.upsert_bar(barTs, lastClose, newHigh, newLow, newClose, volume);
+          if (secondaryCore && cfg.syncDataRange.checked) {
+            secondaryCore.upsert_bar(barTs, lastClose, newHigh, newLow, newClose, volume);
+          }
 
           lastClose = newClose;
         }
@@ -913,7 +1100,7 @@
 
         function setScaleMode(mode) {
           activeScaleMode = mode;
-          core.set_price_scale_mode(mode);
+          forEachCore((chartCore) => chartCore.set_price_scale_mode(mode));
           for (const [btnId, m] of Object.entries(scaleButtons)) {
             document.getElementById(btnId).classList.toggle('active', m === mode);
           }
@@ -926,9 +1113,134 @@
         // Mark Normal as active by default
         document.getElementById('scale-normal').classList.add('active');
 
+        function runGroupSync() {
+          if (!group || !core || !secondaryCore || primaryPaneId === null || secondaryPaneId === null || syncGuard) {
+            return;
+          }
+          syncGuard = true;
+          try {
+            if (cfg.syncSymbol.checked) {
+              const symbol = core.symbol();
+              if (symbol) {
+                const targets = group.update_symbol(primaryPaneId, symbol);
+                if (targets.includes(secondaryPaneId)) {
+                  secondaryCore.set_symbol(symbol);
+                }
+              }
+            }
+
+            if (cfg.syncInterval.checked) {
+              const interval = core.interval();
+              if (interval) {
+                const targets = group.update_interval(primaryPaneId, interval);
+                if (targets.includes(secondaryPaneId)) {
+                  secondaryCore.set_interval(interval);
+                }
+              }
+            }
+
+            if (cfg.syncTime.checked) {
+              const primaryRange = core.visible_range();
+              const secondaryRange = secondaryCore.visible_range();
+              const primaryKey = `${primaryRange[0].toFixed(4)}|${primaryRange[1].toFixed(4)}`;
+              const secondaryKey = `${secondaryRange[0].toFixed(4)}|${secondaryRange[1].toFixed(4)}`;
+
+              if (primaryKey !== lastPrimaryRangeKey) {
+                const targets = group.update_time_range(primaryPaneId, primaryRange[0], primaryRange[1]);
+                if (targets.includes(secondaryPaneId)) {
+                  secondaryCore.set_visible_range(primaryRange[0], primaryRange[1]);
+                }
+                lastPrimaryRangeKey = primaryKey;
+                lastSecondaryRangeKey = primaryKey;
+              } else if (secondaryKey !== lastSecondaryRangeKey) {
+                const targets = group.update_time_range(secondaryPaneId, secondaryRange[0], secondaryRange[1]);
+                if (targets.includes(primaryPaneId)) {
+                  core.set_visible_range(secondaryRange[0], secondaryRange[1]);
+                }
+                lastPrimaryRangeKey = secondaryKey;
+                lastSecondaryRangeKey = secondaryKey;
+              }
+            }
+
+            if (cfg.syncCrosshair.checked) {
+              const primaryCrosshair = core.crosshair_state();
+              const secondaryCrosshair = secondaryCore.crosshair_state();
+              const primaryMagnet = core.crosshair_mode() === 'magnet_ohlc' ? 1 : 0;
+              const secondaryMagnet = secondaryCore.crosshair_mode() === 'magnet_ohlc' ? 1 : 0;
+              const primaryState = [
+                primaryCrosshair[0],
+                primaryCrosshair[1],
+                primaryCrosshair[2],
+                primaryCrosshair[3],
+                primaryCrosshair[4],
+                primaryMagnet,
+              ];
+              const secondaryState = [
+                secondaryCrosshair[0],
+                secondaryCrosshair[1],
+                secondaryCrosshair[2],
+                secondaryCrosshair[3],
+                secondaryCrosshair[4],
+                secondaryMagnet,
+              ];
+              const primaryKey = primaryState.map((v) => Number(v).toFixed(4)).join('|');
+              const secondaryKey = secondaryState.map((v) => Number(v).toFixed(4)).join('|');
+
+              if (primaryState[0] > 0.5 && primaryKey !== lastPrimaryCrosshairKey) {
+                const targets = group.update_crosshair(primaryPaneId, primaryState);
+                if (targets.includes(secondaryPaneId)) {
+                  secondaryCore.set_crosshair_state(
+                    primaryState[0] > 0.5,
+                    primaryState[1],
+                    primaryState[2],
+                    primaryState[3],
+                    primaryState[4],
+                    primaryState[5] > 0.5 ? 'magnet_ohlc' : 'normal'
+                  );
+                }
+                lastPrimaryCrosshairKey = primaryKey;
+                lastSecondaryCrosshairKey = primaryKey;
+              } else if (secondaryState[0] > 0.5 && secondaryKey !== lastSecondaryCrosshairKey) {
+                const targets = group.update_crosshair(secondaryPaneId, secondaryState);
+                if (targets.includes(primaryPaneId)) {
+                  core.set_crosshair_state(
+                    secondaryState[0] > 0.5,
+                    secondaryState[1],
+                    secondaryState[2],
+                    secondaryState[3],
+                    secondaryState[4],
+                    secondaryState[5] > 0.5 ? 'magnet_ohlc' : 'normal'
+                  );
+                }
+                lastPrimaryCrosshairKey = secondaryKey;
+                lastSecondaryCrosshairKey = secondaryKey;
+              }
+            }
+
+            if (cfg.syncDataRange.checked) {
+              const primaryDataRange = core.data_range();
+              if (primaryDataRange.length === 2) {
+                group.update_data_range(primaryPaneId, primaryDataRange[0], primaryDataRange[1]);
+              }
+              const secondaryDataRange = secondaryCore.data_range();
+              if (secondaryDataRange.length === 2) {
+                group.update_data_range(secondaryPaneId, secondaryDataRange[0], secondaryDataRange[1]);
+              }
+            }
+          } catch (e) {
+            console.warn('Group sync error', e);
+          } finally {
+            syncGuard = false;
+          }
+        }
+
         function frame() {
           rafId = requestAnimationFrame(frame);
-          try { core.render(); } catch (e) {
+          try {
+            if (core) core.render();
+            if (secondaryCore) secondaryCore.render();
+            runGroupSync();
+          } catch (e) {
             console.error('Render error:', e);
           }
         }

@@ -63,6 +63,7 @@
 //! - **Web**: Chrome, Firefox, Safari via WebGPU (with Canvas2D fallback)
 
 pub mod core;
+pub mod group;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Re-exports: Core Data Types
@@ -180,6 +181,22 @@ pub use crate::core::kinetic_animation::{KineticAnimation, ScrollState};
 pub use crate::core::crosshair::{
     Crosshair as GlobalCrosshair, CrosshairMode as GlobalCrosshairMode, CrosshairPaneView,
 };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Re-exports: Chart Grouping & Sync
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Native chart-group owner with link-based multi-pane synchronization.
+pub use crate::group::chart_group::ChartGroup;
+
+/// Group pane state and identifiers.
+pub use crate::group::pane::{
+    ChartPane as GroupPane, ChartPaneId, CrosshairMagnetMode, CrosshairSnapshot, DataRange,
+    TimeRange,
+};
+
+/// Feature-level synchronization policy manager.
+pub use crate::group::sync_manager::{LinkKey as GroupLinkKey, SyncFeature, SyncManager};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Re-exports: Demo/Sample Data
