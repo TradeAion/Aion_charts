@@ -93,7 +93,7 @@ pub use crate::core::renderer::traits::{
 
 /// Theme configuration system — presets, custom themes, CSS variable output.
 pub use crate::core::renderer::theme::{
-    ThemeConfig, ThemeColors, ThemeCrosshair, ThemeDrawingDefaults, ThemeIndicatorPalette,
+    ThemeColors, ThemeConfig, ThemeCrosshair, ThemeDrawingDefaults, ThemeIndicatorPalette,
     ThemeLastPriceLine, ThemeLayout, ThemePreset, ThemeSeriesDefaults, ThemeSubpaneSeparator,
     ThemeTypography, ThemeWorkspace,
 };

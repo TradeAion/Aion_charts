@@ -108,7 +108,8 @@ mod tests {
         let bar_spacing_special_case_from = 2.5;
         let bar_spacing_special_case_to = 4.0;
         let bar_spacing_special_case_coeff = 3.0;
-        if bar_spacing >= bar_spacing_special_case_from && bar_spacing <= bar_spacing_special_case_to
+        if bar_spacing >= bar_spacing_special_case_from
+            && bar_spacing <= bar_spacing_special_case_to
         {
             return (bar_spacing_special_case_coeff * pixel_ratio).floor();
         }
@@ -158,8 +159,18 @@ mod tests {
                 bw = parity_fix(bw, ww);
                 let border = border_width(ratio, bw);
 
-                assert!(ww >= ratio.floor(), "wick too thin for spacing={}, ratio={}", spacing, ratio);
-                assert!(ww <= bw, "wick wider than body for spacing={}, ratio={}", spacing, ratio);
+                assert!(
+                    ww >= ratio.floor(),
+                    "wick too thin for spacing={}, ratio={}",
+                    spacing,
+                    ratio
+                );
+                assert!(
+                    ww <= bw,
+                    "wick wider than body for spacing={}, ratio={}",
+                    spacing,
+                    ratio
+                );
                 assert!(
                     bw >= ratio.floor(),
                     "body below minimum for spacing={}, ratio={}",

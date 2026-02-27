@@ -135,12 +135,9 @@ impl Canvas2DRenderer {
             first.bottom_a,
         ];
 
-        let gradient = self.ctx.create_linear_gradient(
-            0.0,
-            min_top as f64,
-            0.0,
-            first.bottom as f64,
-        );
+        let gradient =
+            self.ctx
+                .create_linear_gradient(0.0, min_top as f64, 0.0, first.bottom as f64);
         let _ = gradient.add_color_stop(0.0, &rgba(&top));
         let _ = gradient.add_color_stop(1.0, &rgba(&bottom));
 

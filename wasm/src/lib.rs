@@ -197,6 +197,310 @@ fn js_get_bool(obj: &JsValue, key: &str) -> Option<bool> {
     js_get(obj, key).and_then(|v| v.as_bool())
 }
 
+/// Walk a nested object path, returning `None` on the first missing segment.
+fn js_get_path(obj: &JsValue, path: &[&str]) -> Option<JsValue> {
+    let mut cur = obj.clone();
+    for key in path {
+        cur = js_get(&cur, key)?;
+    }
+    Some(cur)
+}
+
+/// Accept plain objects or JSON strings for options payloads.
+fn normalize_options(options: JsValue) -> JsValue {
+    if let Some(raw) = options.as_string() {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return JsValue::UNDEFINED;
+        }
+        return js_sys::JSON::parse(trimmed).unwrap_or(JsValue::UNDEFINED);
+    }
+    options
+}
+
+fn clamp01(v: f32) -> f32 {
+    v.clamp(0.0, 1.0)
+}
+
+fn parse_rgb_component(token: &str) -> Option<f32> {
+    let t = token.trim();
+    if t.is_empty() {
+        return None;
+    }
+    if let Some(stripped) = t.strip_suffix('%') {
+        let v = stripped.trim().parse::<f32>().ok()? / 100.0;
+        return Some(clamp01(v));
+    }
+    let mut v = t.parse::<f32>().ok()?;
+    if v > 1.0 {
+        v /= 255.0;
+    }
+    Some(clamp01(v))
+}
+
+fn parse_alpha_component(token: &str) -> Option<f32> {
+    let t = token.trim();
+    if t.is_empty() {
+        return None;
+    }
+    if let Some(stripped) = t.strip_suffix('%') {
+        let v = stripped.trim().parse::<f32>().ok()? / 100.0;
+        return Some(clamp01(v));
+    }
+    let mut v = t.parse::<f32>().ok()?;
+    if v > 1.0 {
+        v /= 255.0;
+    }
+    Some(clamp01(v))
+}
+
+fn parse_hex_byte(token: &str) -> Option<u8> {
+    u8::from_str_radix(token, 16).ok()
+}
+
+fn parse_hex_color(token: &str) -> Option<[f32; 4]> {
+    let hex = token.strip_prefix('#')?;
+    match hex.len() {
+        3 => {
+            let r = parse_hex_byte(&hex[0..1].repeat(2))? as f32 / 255.0;
+            let g = parse_hex_byte(&hex[1..2].repeat(2))? as f32 / 255.0;
+            let b = parse_hex_byte(&hex[2..3].repeat(2))? as f32 / 255.0;
+            Some([r, g, b, 1.0])
+        }
+        4 => {
+            let r = parse_hex_byte(&hex[0..1].repeat(2))? as f32 / 255.0;
+            let g = parse_hex_byte(&hex[1..2].repeat(2))? as f32 / 255.0;
+            let b = parse_hex_byte(&hex[2..3].repeat(2))? as f32 / 255.0;
+            let a = parse_hex_byte(&hex[3..4].repeat(2))? as f32 / 255.0;
+            Some([r, g, b, a])
+        }
+        6 => {
+            let r = parse_hex_byte(&hex[0..2])? as f32 / 255.0;
+            let g = parse_hex_byte(&hex[2..4])? as f32 / 255.0;
+            let b = parse_hex_byte(&hex[4..6])? as f32 / 255.0;
+            Some([r, g, b, 1.0])
+        }
+        8 => {
+            let r = parse_hex_byte(&hex[0..2])? as f32 / 255.0;
+            let g = parse_hex_byte(&hex[2..4])? as f32 / 255.0;
+            let b = parse_hex_byte(&hex[4..6])? as f32 / 255.0;
+            let a = parse_hex_byte(&hex[6..8])? as f32 / 255.0;
+            Some([r, g, b, a])
+        }
+        _ => None,
+    }
+}
+
+fn parse_rgb_function(token: &str) -> Option<[f32; 4]> {
+    let lowered = token.trim().to_ascii_lowercase();
+    if !lowered.starts_with("rgb(") && !lowered.starts_with("rgba(") {
+        return None;
+    }
+    let open = token.find('(')?;
+    let close = token.rfind(')')?;
+    if close <= open {
+        return None;
+    }
+    let inner = token[open + 1..close].replace('/', ",");
+    let parts: Vec<&str> = inner
+        .split(',')
+        .flat_map(|chunk| chunk.split_whitespace())
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let r = parse_rgb_component(parts[0])?;
+    let g = parse_rgb_component(parts[1])?;
+    let b = parse_rgb_component(parts[2])?;
+    let a = if parts.len() >= 4 {
+        parse_alpha_component(parts[3])?
+    } else {
+        1.0
+    };
+    Some([r, g, b, a])
+}
+
+fn normalize_css_color(token: &str) -> Option<String> {
+    let window = web_sys::window()?;
+    let document = window.document()?;
+    let el = document
+        .create_element("span")
+        .ok()?
+        .dyn_into::<web_sys::HtmlElement>()
+        .ok()?;
+    let style = el.style();
+    let _ = style.set_property("color", "");
+    if style.set_property("color", token).is_err() {
+        return None;
+    }
+    let normalized = style.get_property_value("color").ok()?;
+    let normalized = normalized.trim().to_string();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+fn parse_css_color(token: &str) -> Option<[f32; 4]> {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.eq_ignore_ascii_case("transparent") {
+        return Some([0.0, 0.0, 0.0, 0.0]);
+    }
+    if let Some(color) = parse_hex_color(trimmed) {
+        return Some(color);
+    }
+    if let Some(color) = parse_rgb_function(trimmed) {
+        return Some(color);
+    }
+    if let Some(normalized) = normalize_css_color(trimmed) {
+        if let Some(color) = parse_rgb_function(&normalized) {
+            return Some(color);
+        }
+        if let Some(color) = parse_hex_color(&normalized) {
+            return Some(color);
+        }
+    }
+    None
+}
+
+fn parse_color_js(value: &JsValue) -> Option<[f32; 4]> {
+    if value.is_undefined() || value.is_null() {
+        return None;
+    }
+
+    if js_sys::Array::is_array(value) {
+        let arr = js_sys::Array::from(value);
+        if arr.length() < 3 {
+            return None;
+        }
+        let mut r = arr.get(0).as_f64()? as f32;
+        let mut g = arr.get(1).as_f64()? as f32;
+        let mut b = arr.get(2).as_f64()? as f32;
+        let mut a = arr.get(3).as_f64().unwrap_or(1.0) as f32;
+        if r > 1.0 || g > 1.0 || b > 1.0 {
+            r /= 255.0;
+            g /= 255.0;
+            b /= 255.0;
+        }
+        if a > 1.0 {
+            a /= 255.0;
+        }
+        return Some([clamp01(r), clamp01(g), clamp01(b), clamp01(a)]);
+    }
+
+    if let (Some(r), Some(g), Some(b)) = (
+        js_get_f64(value, "r").or_else(|| js_get_f64(value, "red")),
+        js_get_f64(value, "g").or_else(|| js_get_f64(value, "green")),
+        js_get_f64(value, "b").or_else(|| js_get_f64(value, "blue")),
+    ) {
+        let mut rr = r as f32;
+        let mut gg = g as f32;
+        let mut bb = b as f32;
+        let mut aa = js_get_f64(value, "a")
+            .or_else(|| js_get_f64(value, "alpha"))
+            .unwrap_or(1.0) as f32;
+        if rr > 1.0 || gg > 1.0 || bb > 1.0 {
+            rr /= 255.0;
+            gg /= 255.0;
+            bb /= 255.0;
+        }
+        if aa > 1.0 {
+            aa /= 255.0;
+        }
+        return Some([clamp01(rr), clamp01(gg), clamp01(bb), clamp01(aa)]);
+    }
+
+    value.as_string().and_then(|s| parse_css_color(&s))
+}
+
+fn parse_line_style_js(value: &JsValue) -> Option<LineStyle> {
+    if let Some(style) = value.as_string() {
+        return Some(LineStyle::from_str(style.trim()));
+    }
+    if let Some(raw) = value.as_f64() {
+        let key = raw.round() as i32;
+        return Some(match key {
+            1 => LineStyle::Dotted,
+            2 => LineStyle::Dashed,
+            3 => LineStyle::LargeDashed,
+            4 => LineStyle::SparseDotted,
+            _ => LineStyle::Solid,
+        });
+    }
+    None
+}
+
+fn parse_crosshair_mode_js(value: &JsValue) -> Option<raycore::CrosshairMode> {
+    if let Some(mode) = value.as_string() {
+        return Some(parse_crosshair_mode(mode.trim()));
+    }
+    if let Some(raw) = value.as_f64() {
+        let key = raw.round() as i32;
+        return Some(match key {
+            1 => raycore::CrosshairMode::Magnet,
+            2 => raycore::CrosshairMode::MagnetOHLC,
+            _ => raycore::CrosshairMode::Normal,
+        });
+    }
+    None
+}
+
+fn parse_price_scale_mode_js(value: &JsValue) -> Option<raycore::PriceScaleMode> {
+    if let Some(mode) = value.as_string() {
+        return Some(raycore::PriceScaleMode::from_str(mode.trim()));
+    }
+    if let Some(raw) = value.as_f64() {
+        let key = raw.round() as i32;
+        return Some(match key {
+            1 => raycore::PriceScaleMode::Logarithmic,
+            2 => raycore::PriceScaleMode::Percentage,
+            3 => raycore::PriceScaleMode::IndexedTo100,
+            _ => raycore::PriceScaleMode::Normal,
+        });
+    }
+    None
+}
+
+#[derive(Clone, Copy, Default)]
+struct CrosshairLinePatch {
+    color: Option<[f32; 4]>,
+    width: Option<f64>,
+    style: Option<LineStyle>,
+    visible: Option<bool>,
+    label_visible: Option<bool>,
+    label_bg_color: Option<[f32; 4]>,
+}
+
+fn parse_crosshair_line_patch(obj: Option<JsValue>) -> CrosshairLinePatch {
+    let Some(line_obj) = obj else {
+        return CrosshairLinePatch::default();
+    };
+
+    let color = js_get(&line_obj, "color").and_then(|v| parse_color_js(&v));
+    let width = js_get_f64(&line_obj, "width")
+        .filter(|v| v.is_finite())
+        .map(|v| v.max(1.0));
+    let style = js_get(&line_obj, "style").and_then(|v| parse_line_style_js(&v));
+    let visible = js_get_bool(&line_obj, "visible");
+    let label_visible = js_get_bool(&line_obj, "labelVisible");
+    let label_bg_color = js_get(&line_obj, "labelBackgroundColor").and_then(|v| parse_color_js(&v));
+
+    CrosshairLinePatch {
+        color,
+        width,
+        style,
+        visible,
+        label_visible,
+        label_bg_color,
+    }
+}
+
 fn ensure_equal_len(name_a: &str, len_a: usize, name_b: &str, len_b: usize) -> Result<(), JsValue> {
     if len_a != len_b {
         Err(js_err(format!(
@@ -233,7 +537,7 @@ pub struct RayCore {
     _closures: Vec<Closure<dyn FnMut(web_sys::Event)>>,
     _wheel_closures: Vec<Closure<dyn FnMut(web_sys::WheelEvent)>>,
     _touch_closures: Vec<Closure<dyn FnMut(web_sys::TouchEvent)>>,
-    _resize_closure: Option<Closure<dyn FnMut(js_sys::Array)>>,
+    _resize_closure: Option<Closure<dyn Fn(js_sys::Array)>>,
     _resize_observer: Option<web_sys::ResizeObserver>,
     /// Long-press timer ID (from setTimeout), shared with closures.
     _long_press_timer: Rc<RefCell<Option<i32>>>,
@@ -1083,9 +1387,14 @@ impl RayCore {
             let price_ref = price_container_for_ro.clone();
             let time_ref = time_container_for_ro.clone();
 
-            let cb = Closure::<dyn FnMut(js_sys::Array)>::wrap(Box::new(
+            let cb = Closure::<dyn Fn(js_sys::Array)>::wrap(Box::new(
                 move |entries: js_sys::Array| {
-                    let mut s = inner.borrow_mut();
+                    // ResizeObserver can fire again while a previous callback is
+                    // still processing on some browsers. Use try_borrow_mut so
+                    // re-entrant notifications are dropped instead of panicking.
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     let dpr = get_dpr();
                     s.engine.dpr = dpr;
 
@@ -1234,6 +1543,8 @@ impl RayCore {
         container: JsValue,
         options: JsValue,
     ) -> Result<RayCore, JsValue> {
+        let options = normalize_options(options);
+
         // Resolve container: HTMLElement or string ID
         let container_id = if container.is_string() {
             container.as_string().unwrap_or_default()
@@ -1299,32 +1610,7 @@ impl RayCore {
             chart.interval = interval;
         }
 
-        // Apply crosshair mode
-        if let Some(crosshair_obj) = js_get(&options, "crosshair") {
-            if let Some(mode) = js_get_str(&crosshair_obj, "mode") {
-                let mode = parse_crosshair_mode(&mode);
-                chart.inner.borrow_mut().engine.crosshair.mode = mode;
-            }
-        }
-
-        // Apply price scale options
-        if let Some(ps_obj) = js_get(&options, "priceScale") {
-            if let Some(mode_str) = js_get_str(&ps_obj, "mode") {
-                let mode = match mode_str.as_str() {
-                    "logarithmic" | "log" => raycore::PriceScaleMode::Logarithmic,
-                    "percentage" | "percent" => raycore::PriceScaleMode::Percentage,
-                    "indexedTo100" | "indexed" => raycore::PriceScaleMode::IndexedTo100,
-                    _ => raycore::PriceScaleMode::Normal,
-                };
-                chart.inner.borrow_mut().engine.viewport.set_price_scale_mode(mode);
-            }
-            if let Some(margins_obj) = js_get(&ps_obj, "margins") {
-                let top = js_get_f64(&margins_obj, "top").unwrap_or(0.1);
-                let bottom = js_get_f64(&margins_obj, "bottom").unwrap_or(0.1);
-                chart.inner.borrow_mut().engine.viewport.scale_margin_top = top;
-                chart.inner.borrow_mut().engine.viewport.scale_margin_bottom = bottom;
-            }
-        }
+        chart.apply_lwc_compat_options(&options);
 
         // Apply CSS variables from theme
         chart.apply_css_variables();
@@ -1337,9 +1623,11 @@ impl RayCore {
     /// Accepts the same options shape as `create_chart()`. Only provided
     /// fields are updated; omitted fields keep their current values.
     pub fn apply_options(&mut self, options: JsValue) {
+        let options = normalize_options(options);
         if options.is_undefined() || options.is_null() {
             return;
         }
+        let mut css_changed = false;
 
         // Theme
         if let Some(theme_val) = js_get(&options, "theme") {
@@ -1355,7 +1643,7 @@ impl RayCore {
                 }
                 let style = self.theme_config.to_chart_style();
                 self.inner.borrow_mut().engine.style = style;
-                self.apply_css_variables();
+                css_changed = true;
             }
         }
 
@@ -1377,13 +1665,7 @@ impl RayCore {
             );
         }
 
-        // Crosshair
-        if let Some(crosshair_obj) = js_get(&options, "crosshair") {
-            if let Some(mode) = js_get_str(&crosshair_obj, "mode") {
-                let mode = parse_crosshair_mode(&mode);
-                self.inner.borrow_mut().engine.crosshair.mode = mode;
-            }
-        }
+        css_changed = self.apply_lwc_compat_options(&options) || css_changed;
 
         // Auto render
         if let Some(auto) = js_get_bool(&options, "autoRender") {
@@ -1396,7 +1678,298 @@ impl RayCore {
             }
         }
 
+        if css_changed {
+            self.apply_css_variables();
+        }
         self.mark_dirty();
+    }
+
+    /// Apply Lightweight Charts style-compatible nested options directly to
+    /// RayCore style/runtime state. Returns true when theme CSS variables
+    /// should be refreshed.
+    fn apply_lwc_compat_options(&mut self, options: &JsValue) -> bool {
+        if options.is_undefined() || options.is_null() {
+            return false;
+        }
+
+        let layout_bg = js_get_path(options, &["layout", "background", "color"])
+            .or_else(|| js_get_path(options, &["layout", "background"]))
+            .and_then(|v| parse_color_js(&v));
+        let layout_text = js_get_path(options, &["layout", "textColor"]).and_then(|v| parse_color_js(&v));
+        let layout_font_family = js_get_path(options, &["layout", "fontFamily"])
+            .and_then(|v| v.as_string())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let layout_font_size = js_get_path(options, &["layout", "fontSize"])
+            .and_then(|v| v.as_f64())
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .map(|v| v as f32);
+
+        let mut grid_color = js_get_path(options, &["grid", "vertLines", "color"])
+            .or_else(|| js_get_path(options, &["grid", "horzLines", "color"]))
+            .or_else(|| js_get_path(options, &["grid", "color"]))
+            .and_then(|v| parse_color_js(&v));
+        let grid_vert_visible =
+            js_get_path(options, &["grid", "vertLines", "visible"]).and_then(|v| v.as_bool());
+        let grid_horz_visible =
+            js_get_path(options, &["grid", "horzLines", "visible"]).and_then(|v| v.as_bool());
+        let grid_visible = if grid_vert_visible.is_some() || grid_horz_visible.is_some() {
+            Some(grid_vert_visible.unwrap_or(true) || grid_horz_visible.unwrap_or(true))
+        } else {
+            None
+        };
+
+        let axis_border_color = js_get_path(options, &["rightPriceScale", "borderColor"])
+            .or_else(|| js_get_path(options, &["timeScale", "borderColor"]))
+            .or_else(|| js_get_path(options, &["priceScale", "borderColor"]))
+            .and_then(|v| parse_color_js(&v));
+        let right_border_visible = js_get_path(options, &["rightPriceScale", "borderVisible"])
+            .or_else(|| js_get_path(options, &["priceScale", "borderVisible"]))
+            .and_then(|v| v.as_bool());
+        let time_border_visible =
+            js_get_path(options, &["timeScale", "borderVisible"]).and_then(|v| v.as_bool());
+        let axis_border_visible = if right_border_visible.is_some() || time_border_visible.is_some()
+        {
+            Some(right_border_visible.unwrap_or(true) || time_border_visible.unwrap_or(true))
+        } else {
+            None
+        };
+
+        let crosshair_mode = js_get_path(options, &["crosshair", "mode"])
+            .or_else(|| js_get(options, "crosshairMode"))
+            .and_then(|v| parse_crosshair_mode_js(&v));
+        let vert_patch = parse_crosshair_line_patch(js_get_path(options, &["crosshair", "vertLine"]));
+        let horz_patch = parse_crosshair_line_patch(js_get_path(options, &["crosshair", "horzLine"]));
+        let crosshair_label_text = js_get_path(options, &["crosshair", "labelTextColor"])
+            .or_else(|| js_get_path(options, &["crosshair", "label_text_color"]))
+            .and_then(|v| parse_color_js(&v));
+
+        let price_scale_mode = js_get_path(options, &["priceScale", "mode"])
+            .or_else(|| js_get_path(options, &["rightPriceScale", "mode"]))
+            .and_then(|v| parse_price_scale_mode_js(&v));
+        let margins_obj = js_get_path(options, &["priceScale", "margins"])
+            .or_else(|| js_get_path(options, &["priceScale", "scaleMargins"]))
+            .or_else(|| js_get_path(options, &["rightPriceScale", "margins"]))
+            .or_else(|| js_get_path(options, &["rightPriceScale", "scaleMargins"]));
+        let margin_top = margins_obj
+            .as_ref()
+            .and_then(|m| js_get_f64(m, "top"))
+            .filter(|v| v.is_finite());
+        let margin_bottom = margins_obj
+            .as_ref()
+            .and_then(|m| js_get_f64(m, "bottom"))
+            .filter(|v| v.is_finite());
+
+        let candles_obj = js_get(options, "candles").or_else(|| js_get(options, "candlestick"));
+        let bullish_color = candles_obj
+            .as_ref()
+            .and_then(|o| js_get(o, "upColor"))
+            .and_then(|v| parse_color_js(&v));
+        let bearish_color = candles_obj
+            .as_ref()
+            .and_then(|o| js_get(o, "downColor"))
+            .and_then(|v| parse_color_js(&v));
+        let wick_bullish_color = candles_obj
+            .as_ref()
+            .and_then(|o| js_get(o, "wickUpColor").or_else(|| js_get(o, "borderUpColor")))
+            .and_then(|v| parse_color_js(&v))
+            .or(bullish_color);
+        let wick_bearish_color = candles_obj
+            .as_ref()
+            .and_then(|o| js_get(o, "wickDownColor").or_else(|| js_get(o, "borderDownColor")))
+            .and_then(|v| parse_color_js(&v))
+            .or(bearish_color);
+
+        {
+            let mut s = self.inner.borrow_mut();
+            if let Some(mode) = crosshair_mode {
+                s.engine.crosshair.mode = mode;
+            }
+            if let Some(mode) = price_scale_mode {
+                s.engine.viewport.set_price_scale_mode(mode);
+            }
+            if let Some(top) = margin_top {
+                s.engine.viewport.scale_margin_top = top;
+            }
+            if let Some(bottom) = margin_bottom {
+                s.engine.viewport.scale_margin_bottom = bottom;
+            }
+
+            {
+                let style = &mut s.engine.style;
+
+                if let Some(color) = layout_bg {
+                    style.bg_color = color;
+                    style.axis_bg_color = color;
+                }
+                if let Some(color) = layout_text {
+                    style.axis_text_color = color;
+                }
+                if let Some(family) = layout_font_family.as_ref() {
+                    style.font_family = family.clone();
+                }
+                if let Some(size) = layout_font_size {
+                    style.font_size = size;
+                }
+
+                if let Some(color) = grid_color {
+                    style.grid_color = color;
+                }
+                if let Some(visible) = grid_visible {
+                    if visible {
+                        if style.grid_color[3] <= 0.0 {
+                            style.grid_color[3] = 0.5;
+                        }
+                    } else {
+                        style.grid_color[3] = 0.0;
+                    }
+                    grid_color = Some(style.grid_color);
+                }
+
+                if let Some(color) = axis_border_color {
+                    style.axis_border_color = color;
+                }
+                if let Some(visible) = axis_border_visible {
+                    style.axis_border_visible = visible;
+                }
+
+                if let Some(color) = vert_patch.color {
+                    style.crosshair_vert_line.color = color;
+                }
+                if let Some(width) = vert_patch.width {
+                    style.crosshair_vert_line.width = width;
+                }
+                if let Some(line_style) = vert_patch.style {
+                    style.crosshair_vert_line.style = line_style;
+                }
+                if let Some(visible) = vert_patch.visible {
+                    style.crosshair_vert_line.visible = visible;
+                }
+                if let Some(visible) = vert_patch.label_visible {
+                    style.crosshair_vert_line.label_visible = visible;
+                }
+                if let Some(color) = vert_patch.label_bg_color {
+                    style.crosshair_vert_line.label_bg_color = color;
+                }
+
+                if let Some(color) = horz_patch.color {
+                    style.crosshair_horz_line.color = color;
+                }
+                if let Some(width) = horz_patch.width {
+                    style.crosshair_horz_line.width = width;
+                }
+                if let Some(line_style) = horz_patch.style {
+                    style.crosshair_horz_line.style = line_style;
+                }
+                if let Some(visible) = horz_patch.visible {
+                    style.crosshair_horz_line.visible = visible;
+                }
+                if let Some(visible) = horz_patch.label_visible {
+                    style.crosshair_horz_line.label_visible = visible;
+                }
+                if let Some(color) = horz_patch.label_bg_color {
+                    style.crosshair_horz_line.label_bg_color = color;
+                }
+                if let Some(color) = crosshair_label_text {
+                    style.crosshair_label_text = color;
+                }
+
+                if let Some(color) = bullish_color {
+                    style.bullish_color = color;
+                }
+                if let Some(color) = bearish_color {
+                    style.bearish_color = color;
+                }
+                if let Some(color) = wick_bullish_color {
+                    style.wick_bullish_color = color;
+                }
+                if let Some(color) = wick_bearish_color {
+                    style.wick_bearish_color = color;
+                }
+            }
+        }
+
+        let mut css_changed = false;
+
+        if let Some(color) = layout_bg {
+            self.theme_config.colors.background = color;
+            css_changed = true;
+        }
+        if let Some(color) = layout_text {
+            self.theme_config.colors.axis_text = color;
+            css_changed = true;
+        }
+        if let Some(family) = layout_font_family {
+            self.theme_config.typography.font_family = family;
+            css_changed = true;
+        }
+        if let Some(size) = layout_font_size {
+            self.theme_config.typography.font_size = size;
+            css_changed = true;
+        }
+        if let Some(color) = grid_color {
+            self.theme_config.colors.grid = color;
+            css_changed = true;
+        }
+        if let Some(color) = axis_border_color {
+            self.theme_config.colors.axis_border = color;
+            css_changed = true;
+        }
+        if let Some(color) = bullish_color {
+            self.theme_config.colors.bullish = color;
+            css_changed = true;
+        }
+        if let Some(color) = bearish_color {
+            self.theme_config.colors.bearish = color;
+            css_changed = true;
+        }
+        if let Some(color) = wick_bullish_color {
+            self.theme_config.colors.wick_bullish = color;
+            css_changed = true;
+        }
+        if let Some(color) = wick_bearish_color {
+            self.theme_config.colors.wick_bearish = color;
+            css_changed = true;
+        }
+
+        if let Some(color) = vert_patch.color.or(horz_patch.color) {
+            self.theme_config.crosshair.line_color = color;
+            css_changed = true;
+        }
+        if let Some(width) = vert_patch.width.or(horz_patch.width) {
+            self.theme_config.crosshair.line_width = width;
+            css_changed = true;
+        }
+        if let Some(line_style) = vert_patch.style.or(horz_patch.style) {
+            self.theme_config.crosshair.line_style = line_style;
+            css_changed = true;
+        }
+        if let Some(visible) = vert_patch.visible {
+            self.theme_config.crosshair.vert_visible = visible;
+            css_changed = true;
+        }
+        if let Some(visible) = horz_patch.visible {
+            self.theme_config.crosshair.horz_visible = visible;
+            css_changed = true;
+        }
+        if let Some(visible) = vert_patch.label_visible {
+            self.theme_config.crosshair.vert_label_visible = visible;
+            css_changed = true;
+        }
+        if let Some(visible) = horz_patch.label_visible {
+            self.theme_config.crosshair.horz_label_visible = visible;
+            css_changed = true;
+        }
+        if let Some(color) = vert_patch.label_bg_color.or(horz_patch.label_bg_color) {
+            self.theme_config.crosshair.label_bg = color;
+            css_changed = true;
+        }
+        if let Some(color) = crosshair_label_text {
+            self.theme_config.crosshair.label_text = color;
+            css_changed = true;
+        }
+
+        css_changed
     }
 
     // ── Event System ─────────────────────────────────────────────────────────
@@ -2015,6 +2588,18 @@ impl RayCore {
     /// Set the axis border (separator line) color (RGBA 0-1).
     pub fn set_axis_border_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
         self.inner.borrow_mut().engine.style.axis_border_color = [r, g, b, a];
+    }
+
+    /// Set chart and axis background color (RGBA 0-1).
+    pub fn set_background_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        let color = [r, g, b, a];
+        {
+            let mut s = self.inner.borrow_mut();
+            s.engine.style.bg_color = color;
+            s.engine.style.axis_bg_color = color;
+        }
+        self.theme_config.colors.background = color;
+        self.apply_css_variables();
     }
 
     /// Show or hide the axis border line. Layout is unaffected.
@@ -4250,7 +4835,9 @@ impl RayCore {
         self._closures.clear();
         self._wheel_closures.clear();
         self._touch_closures.clear();
-        self._resize_closure = None;
+        // Keep the ResizeObserver callback alive until final drop so any
+        // already-queued observer notifications do not call into a dropped
+        // wasm closure. Observer has already been disconnected above.
 
         // 5. Clean up subpane event listeners
         {

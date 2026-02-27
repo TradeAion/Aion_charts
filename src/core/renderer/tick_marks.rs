@@ -5,10 +5,8 @@
 //!
 //! Supports all PriceScaleMode variants: Normal, Logarithmic, Percentage, IndexedTo100.
 
+use crate::core::constants::{X_TICK_MAX_COUNT, X_TICK_MIN_COUNT, X_TICK_TARGET_SPACING_CSS};
 use crate::core::formatters::{format_timestamp, nice_step};
-use crate::core::constants::{
-    X_TICK_MAX_COUNT, X_TICK_MIN_COUNT, X_TICK_TARGET_SPACING_CSS,
-};
 use crate::core::renderer::traits::{ChartStyle, TickMark};
 use crate::core::renderer::value_projection::{format_scale_value, y_tick_step_internal};
 use crate::core::viewport::Viewport;
