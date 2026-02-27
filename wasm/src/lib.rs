@@ -22,7 +22,7 @@ use raycore::{
     BaselineSeriesOptions, Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup,
     ChartPaneId, ChartStyle, CrosshairMagnetMode, CrosshairSnapshot, DataRange, GpuContext,
     HistogramPoint, HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint,
-    LineSeriesOptions, LineStyle, MarkerPosition, MarkerShape, OhlcPoint, OverlayRenderer,
+    LineSeriesOptions, LineStyle, MainChartType, MarkerPosition, MarkerShape, OhlcPoint, OverlayRenderer,
     PriceAxisRenderer, PriceLineOptions, RendererBackend, SeriesId, SeriesMarker, TimeAxisRenderer,
     TimeRange, Viewport, WgpuRenderer,
 };
@@ -195,6 +195,55 @@ fn js_get_f64(obj: &JsValue, key: &str) -> Option<f64> {
 /// Get a bool property from a JS object.
 fn js_get_bool(obj: &JsValue, key: &str) -> Option<bool> {
     js_get(obj, key).and_then(|v| v.as_bool())
+}
+
+fn resolve_synced_crosshair_state(
+    viewport: &Viewport,
+    pane_width: f64,
+    pane_height: f64,
+    fallback_x: f64,
+    fallback_y: f64,
+    bar_index: Option<usize>,
+    price: Option<f64>,
+) -> (f64, f64, Option<usize>, f64) {
+    let resolved_bar_index = bar_index.or_else(|| {
+        if pane_width > 0.0 {
+            viewport.bar_index_for_crosshair(fallback_x, pane_width)
+        } else {
+            None
+        }
+    });
+
+    let x = if let Some(idx) = resolved_bar_index {
+        if pane_width > 0.0 {
+            viewport.bar_center_css(idx, pane_width)
+        } else {
+            fallback_x
+        }
+    } else {
+        fallback_x
+    };
+
+    let resolved_price = if let Some(p) = price {
+        p
+    } else if pane_height > 0.0 {
+        let candle_h = pane_height * viewport.candle_height_frac();
+        viewport.pixel_to_price(fallback_y, candle_h)
+    } else {
+        0.0
+    };
+
+    let y = if pane_height > 0.0 {
+        if price.is_some() {
+            viewport.price_to_css_y(resolved_price, pane_height)
+        } else {
+            fallback_y
+        }
+    } else {
+        fallback_y
+    };
+
+    (x, y, resolved_bar_index, resolved_price)
 }
 
 /// Walk a nested object path, returning `None` on the first missing segment.
@@ -1865,6 +1914,11 @@ impl RayCore {
             .as_ref()
             .and_then(|o| js_get_f64(o, "hitArea").or_else(|| js_get_f64(o, "hit_area")))
             .filter(|v| v.is_finite() && *v > 0.0);
+        let auto_scroll = js_get_bool(options, "autoScroll")
+            .or_else(|| js_get_bool(options, "auto_scroll"));
+        let chart_type = js_get(options, "chartType")
+            .or_else(|| js_get(options, "chart_type"))
+            .and_then(|v| v.as_string());
 
         {
             let mut s = self.inner.borrow_mut();
@@ -1874,11 +1928,23 @@ impl RayCore {
             if let Some(mode) = price_scale_mode {
                 s.engine.viewport.set_price_scale_mode(mode);
             }
+            if let Some(auto) = auto_scroll {
+                s.engine.viewport.auto_scroll = auto;
+            }
             if let Some(top) = margin_top {
                 s.engine.viewport.scale_margin_top = top;
             }
             if let Some(bottom) = margin_bottom {
                 s.engine.viewport.scale_margin_bottom = bottom;
+            }
+            if let Some(chart_type_key) = chart_type.as_deref() {
+                let next_chart_type = MainChartType::from_str(chart_type_key);
+                if s.engine.main_chart_options.chart_type != next_chart_type {
+                    s.engine.set_main_chart_type(next_chart_type);
+                    s.engine.event_bus.emit(raycore::ChartEvent::ChartTypeChange {
+                        chart_type: next_chart_type.as_str().to_string(),
+                    });
+                }
             }
 
             {
@@ -2394,37 +2460,70 @@ impl RayCore {
 
         s.engine.crosshair.active = active;
         s.engine.crosshair.mode = parse_crosshair_mode(mode);
-        let resolved_bar_index = if bar_index.is_finite() && bar_index >= 0.0 {
-            Some(bar_index as usize)
-        } else if pw > 0.0 {
-            s.engine.viewport.bar_index_for_crosshair(x, pw)
-        } else {
-            None
-        };
+        let (resolved_x, resolved_y, resolved_bar_index, resolved_price) =
+            resolve_synced_crosshair_state(
+                &s.engine.viewport,
+                pw,
+                ph,
+                x,
+                y,
+                if bar_index.is_finite() && bar_index >= 0.0 {
+                    Some(bar_index as usize)
+                } else {
+                    None
+                },
+                if price.is_finite() { Some(price) } else { None },
+            );
         s.engine.crosshair.bar_index = resolved_bar_index;
-        s.engine.crosshair.x = if let Some(idx) = resolved_bar_index {
-            if pw > 0.0 {
-                s.engine.viewport.bar_center_css(idx, pw)
-            } else {
-                x
-            }
-        } else {
-            x
-        };
-        if price.is_finite() {
-            s.engine.crosshair.price = price;
-            s.engine.crosshair.y = if ph > 0.0 {
-                s.engine.viewport.price_to_css_y(price, ph)
-            } else {
-                y
-            };
-        } else if ph > 0.0 {
-            let candle_h = ph * s.engine.viewport.candle_height_frac();
-            s.engine.crosshair.price = s.engine.viewport.pixel_to_price(y, candle_h);
-            s.engine.crosshair.y = y;
-        } else {
-            s.engine.crosshair.y = y;
-        }
+        s.engine.crosshair.x = resolved_x;
+        s.engine.crosshair.y = resolved_y;
+        s.engine.crosshair.price = resolved_price;
+        self.dirty.set(true);
+    }
+
+    /// Set crosshair state for synchronized panes by semantic values only.
+    /// This keeps the target pane snapped to its own viewport/grid.
+    pub fn set_crosshair_sync_state(
+        &mut self,
+        active: bool,
+        bar_index: f64,
+        price: f64,
+        mode: &str,
+    ) {
+        let mut s = self.inner.borrow_mut();
+        let (pw, ph) = s.layout.pane_css_size();
+
+        s.engine.crosshair.active = active;
+        s.engine.crosshair.mode = parse_crosshair_mode(mode);
+
+        let (resolved_x, resolved_y, resolved_bar_index, resolved_price) =
+            resolve_synced_crosshair_state(
+                &s.engine.viewport,
+                pw,
+                ph,
+                0.0,
+                0.0,
+                if bar_index.is_finite() && bar_index >= 0.0 {
+                    Some(bar_index as usize)
+                } else {
+                    None
+                },
+                if price.is_finite() { Some(price) } else { None },
+            );
+
+        s.engine.crosshair.bar_index = resolved_bar_index;
+        s.engine.crosshair.x = resolved_x;
+        s.engine.crosshair.y = resolved_y;
+        s.engine.crosshair.price = resolved_price;
+        self.dirty.set(true);
+    }
+
+    /// Hide crosshair immediately.
+    pub fn clear_crosshair(&mut self) {
+        let mut s = self.inner.borrow_mut();
+        s.engine.crosshair.active = false;
+        s.engine.crosshair.bar_index = None;
+        self.dirty.set(true);
     }
 
     pub fn set_symbol(&mut self, symbol: &str) {
@@ -5270,4 +5369,60 @@ fn ids_to_js_array(ids: Vec<ChartPaneId>) -> js_sys::Array {
         out.set(i as u32, JsValue::from_f64(id.0 as f64));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_synced_crosshair_state;
+    use raycore::Viewport;
+
+    #[test]
+    fn synced_crosshair_uses_bar_and_price_projection() {
+        let mut viewport = Viewport::new(1000, 600);
+        viewport.set_range(10.0, 110.0);
+        viewport.price_min = 10.0;
+        viewport.price_max = 110.0;
+        let pane_w = 1000.0;
+        let pane_h = 600.0;
+
+        let (x, y, bar_index, price) = resolve_synced_crosshair_state(
+            &viewport,
+            pane_w,
+            pane_h,
+            0.0,
+            0.0,
+            Some(59),
+            Some(80.0),
+        );
+
+        assert_eq!(bar_index, Some(59));
+        assert!((price - 80.0).abs() < f64::EPSILON);
+        assert!((x - viewport.bar_center_css(59, pane_w)).abs() < 0.001);
+        assert!((y - viewport.price_to_css_y(80.0, pane_h)).abs() < 0.001);
+    }
+
+    #[test]
+    fn synced_crosshair_falls_back_to_pixel_inference() {
+        let mut viewport = Viewport::new(800, 400);
+        viewport.set_range(0.0, 100.0);
+        viewport.price_min = 0.0;
+        viewport.price_max = 100.0;
+
+        let fallback_x = 400.0;
+        let fallback_y = 120.0;
+        let (x, y, bar_index, price) = resolve_synced_crosshair_state(
+            &viewport,
+            800.0,
+            400.0,
+            fallback_x,
+            fallback_y,
+            None,
+            None,
+        );
+
+        assert_eq!(x, fallback_x);
+        assert_eq!(y, fallback_y);
+        assert!(bar_index.is_some());
+        assert!(price.is_finite());
+    }
 }
