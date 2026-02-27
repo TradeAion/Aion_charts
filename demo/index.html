@@ -413,6 +413,7 @@
     <span style="color:#444;margin:0 4px">|</span>
     <!-- Extras -->
     <button class="toggle-btn" id="stream-toggle" title="Start/stop real-time bar simulation">&#x25B6; Live</button>
+    <button class="toggle-btn active" id="autoscroll-toggle" title="Toggle auto-scroll: when enabled the chart follows new bars; disable to watch history while live data streams in">Auto-Scroll</button>
     <span style="color:#444;margin:0 4px">|</span>
     <button class="toggle-btn" id="priceline-toggle" title="Add/remove custom price line">PriceLine</button>
     <button class="toggle-btn" id="markers-toggle" title="Add/remove series markers">Markers</button>
@@ -556,7 +557,7 @@
     // still work but will log deprecation warnings.
     // ═══════════════════════════════════════════════════════════════════════
 
-    import init, { RayCore, ChartGroup, ChartWorkspace } from './pkg/raycore_wasm.js?v=20260227-fix-interaction-reset-canvas-lock';
+    import init, { RayCore, ChartGroup, ChartWorkspace } from './pkg/raycore_wasm.js?v=20260227-autoscroll-toggle-label-center';
 
     // ── DOM refs ─────────────────────────────────────────────────────────────
     const errorBanner  = document.getElementById('error-banner');
@@ -1451,6 +1452,19 @@
             streamBtn.textContent = '\u23F8 Live';
             streamBtn.classList.add('active');
           }
+        });
+
+        // ── Auto-scroll toggle ────────────────────────────────────────────────
+        // When ON (default) the chart follows new bars as they print.
+        // When OFF the viewport is fully static during live streaming so the
+        // user can inspect history without being interrupted.
+        const autoScrollBtn = document.getElementById('autoscroll-toggle');
+        let autoScrollEnabled = true;
+
+        autoScrollBtn.addEventListener('click', () => {
+          autoScrollEnabled = !autoScrollEnabled;
+          forEachCore((c) => c.set_auto_scroll(autoScrollEnabled));
+          autoScrollBtn.classList.toggle('active', autoScrollEnabled);
         });
 
         // ── Price lines ───────────────────────────────────────────────────────

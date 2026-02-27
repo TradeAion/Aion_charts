@@ -712,6 +712,31 @@ export declare class RayCore {
    */
   set_price_scale_margins(top: number, bottom: number): void;
 
+  /**
+   * Enable or disable auto-scroll when new bars arrive during live streaming.
+   *
+   * When `true` (default) the viewport advances by 1 bar each time a new bar
+   * is appended and the chart is already showing the latest data — identical
+   * to LWC's `shiftVisibleRangeOnNewBar` behaviour.
+   *
+   * When `false` the viewport is never moved by incoming data regardless of
+   * scroll position, giving the user a fully static view during live updates.
+   *
+   * @example
+   * ```ts
+   * // Disable auto-scroll so the user can freely inspect history
+   * // while live data accumulates off-screen to the right.
+   * chart.set_auto_scroll(false);
+   *
+   * // Re-enable — the chart will scroll again on the next new bar.
+   * chart.set_auto_scroll(true);
+   * ```
+   */
+  set_auto_scroll(enabled: boolean): void;
+
+  /** Return whether auto-scroll is currently enabled. */
+  get_auto_scroll(): boolean;
+
   // ── Crosshair ──────────────────────────────────────────────────────────────
 
   /** Current crosshair mode string (`"normal"` or `"magnet_ohlc"`). */

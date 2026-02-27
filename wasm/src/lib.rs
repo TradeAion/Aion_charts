@@ -2253,6 +2253,24 @@ impl RayCore {
         s.engine.viewport.price_invalidated = true;
     }
 
+    /// Enable or disable auto-scroll on new bars.
+    ///
+    /// When `true` (default) the viewport advances by 1 bar each time a new bar
+    /// is appended and the chart is already showing the latest data — identical
+    /// to LWC's `shiftVisibleRangeOnNewBar` behaviour.
+    ///
+    /// When `false` the viewport never moves during live streaming regardless of
+    /// the current scroll position, giving the user a fully static view even
+    /// while data is updating in real time.
+    pub fn set_auto_scroll(&mut self, enabled: bool) {
+        self.inner.borrow_mut().engine.viewport.auto_scroll = enabled;
+    }
+
+    /// Return whether auto-scroll is currently enabled.
+    pub fn get_auto_scroll(&self) -> bool {
+        self.inner.borrow().engine.viewport.auto_scroll
+    }
+
     /// Set the price scale mode.
     ///
     /// Accepted values: "normal", "logarithmic" (or "log"), "percentage" (or "percent"),

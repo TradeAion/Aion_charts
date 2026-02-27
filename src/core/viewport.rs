@@ -97,6 +97,11 @@ pub struct Viewport {
     pub volume_height_ratio: f32,
     /// True if price axis is locked by user.
     pub price_locked: bool,
+    /// When true (default) the viewport advances by 1 bar whenever a new bar
+    /// is appended and the previous last bar was visible — identical to LWC's
+    /// `shiftVisibleRangeOnNewBar` option.  Set to false to keep the viewport
+    /// completely stationary during live streaming regardless of position.
+    pub auto_scroll: bool,
     /// LWC scaleMargins.top — fraction of chart height reserved above data (default 0.2).
     pub scale_margin_top: f64,
     /// LWC scaleMargins.bottom — fraction of chart height reserved below data (default 0.1).
@@ -122,6 +127,7 @@ impl Viewport {
             height,
             volume_height_ratio: DEFAULT_VOLUME_HEIGHT_RATIO as f32,
             price_locked: false,
+            auto_scroll: true,
             scale_margin_top: DEFAULT_SCALE_MARGIN_TOP,
             scale_margin_bottom: DEFAULT_SCALE_MARGIN_BOTTOM,
             price_invalidated: true,

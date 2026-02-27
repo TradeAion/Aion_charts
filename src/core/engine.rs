@@ -655,15 +655,17 @@ impl ChartEngine {
         // Update studies with new data
         self.studies.update_studies(&self.bars);
 
-        // LWC-style viewport advance: if the previous last bar was inside the
-        // visible range, shift the viewport right by exactly 1 bar so the new
-        // bar comes into view at the same position the old last bar occupied.
-        // When the user has panned away the new bar accumulates off-screen to
-        // the right and the viewport is left completely untouched — no hard
-        // set_range() reset, no interruption of active drag/zoom interactions.
+        // LWC-style viewport advance: if auto_scroll is enabled AND the previous
+        // last bar was inside the visible range, shift the viewport right by
+        // exactly 1 bar so the new bar comes into view at the same position the
+        // old last bar occupied.
+        // When auto_scroll is disabled the viewport is never touched here —
+        // giving the user a fully static view during live streaming.
+        // When auto_scroll is enabled but the user has panned away, the new bar
+        // accumulates off-screen to the right and the viewport is left untouched.
         let len = self.bars.len() as f64;
         let old_last_bar = len - 2.0; // index of bar that was last before this append
-        if self.viewport.end_bar > old_last_bar {
+        if self.viewport.auto_scroll && self.viewport.end_bar > old_last_bar {
             self.viewport.start_bar += 1.0;
             self.viewport.end_bar += 1.0;
             // price_invalidated = true tells the render loop to call auto_fit_price
