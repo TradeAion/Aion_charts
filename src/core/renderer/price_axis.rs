@@ -620,12 +620,18 @@ fn compute_right_axis_label_geometry(
         RightAxisLabelWidthMode::TextFit => (x_inside + total_w_bmp).min(axis_w),
     };
     let (text_x_css, text_align_right) = match width_mode {
-        // For full-width labels (crosshair/live), anchor text near the right edge
-        // to reduce excess right-side empty space.
-        RightAxisLabelWidthMode::AxisFull => (
-            (axis_w - metrics.padding_outer.max(0.0)).max(0.0) / dpr,
-            true,
-        ),
+        // Full-width labels (crosshair / live-price): center the text
+        // horizontally within the label box [x_inside, axis_w].
+        // Previously the text was anchored at `axis_w - padding_outer` with
+        // align="right", which pushed it to the extreme right and left a large
+        // blank gap on the left side of the pill.
+        RightAxisLabelWidthMode::AxisFull => {
+            let center_x_phys = (x_inside + axis_w) / 2.0;
+            let text_left_phys = (center_x_phys - text_w_phys / 2.0)
+                // never overlap the tick + inner-padding zone
+                .max(x_inside + metrics.tick_size + metrics.padding_inner);
+            (text_left_phys / dpr, false) // "left" align at manually centred position
+        }
         RightAxisLabelWidthMode::TextFit => (
             (x_inside + metrics.tick_size + metrics.padding_inner) / dpr,
             false,
