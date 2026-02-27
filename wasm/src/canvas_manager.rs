@@ -165,7 +165,7 @@ impl WidgetLayout {
         price_axis_container.append_child(&price_axis.base)?;
         price_axis_container.append_child(&price_axis.top)?;
 
-        // ── Time axis container — bottom row, spans full width (incl. under price axis) ──
+        // ── Time axis container — bottom row, full width (including under right axis) ──
         let time_axis_container = create_widget_container(&doc, "raycore-time-axis")?;
         time_axis_container.style().set_css_text(
             "position:relative;overflow:hidden;\
@@ -216,7 +216,7 @@ impl WidgetLayout {
         set_style_property_if_needed(&style, "grid-template-columns", &cols);
         set_style_property_if_needed(&style, "grid-template-rows", &rows);
 
-        // Default (no subpanes): time axis is row 2 and price axis spans rows 1..3.
+        // Default (no subpanes): time axis is row 2 and spans full width; price axis spans full height.
         let time_axis_style = self.time_axis_container.style();
         set_style_property_if_needed(&time_axis_style, "grid-row", "2");
         set_style_property_if_needed(&time_axis_style, "grid-column", "1/3");
@@ -247,7 +247,7 @@ impl WidgetLayout {
 
         set_style_property_if_needed(&style, "grid-template-rows", &rows);
 
-        // Move time axis to the last row and keep it full-width.
+        // Move time axis to the last row and keep it full width.
         let time_row = 2 + subpane_heights.len() * 2;
         let time_row_str = time_row.to_string();
         let time_axis_style = self.time_axis_container.style();
