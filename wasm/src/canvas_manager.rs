@@ -35,6 +35,7 @@ impl CanvasPair {
         Ok(Self { base, top })
     }
 
+    #[allow(dead_code)]
     pub fn set_size(&self, pw: u32, ph: u32) {
         for c in [&self.base, &self.top] {
             set_canvas_bitmap_size_if_needed(c, pw.max(1), ph.max(1));
@@ -64,6 +65,7 @@ impl PaneCanvases {
         Ok(Self { chart, top })
     }
 
+    #[allow(dead_code)]
     pub fn set_size(&self, pw: u32, ph: u32) {
         for c in [&self.chart, &self.top] {
             set_canvas_bitmap_size_if_needed(c, pw.max(1), ph.max(1));
@@ -417,33 +419,18 @@ fn set_canvas_size_with_css_if_needed(
     // Keep CSS size explicit to avoid browser scaling blur, but only mutate style when needed.
     let style = canvas.style();
     let css_w_px = format!("{}px", css_w);
-    if style
-        .get_property_value("width")
-        .ok()
-        .as_deref()
-        != Some(css_w_px.as_str())
-    {
+    if style.get_property_value("width").ok().as_deref() != Some(css_w_px.as_str()) {
         let _ = style.set_property("width", &css_w_px);
     }
 
     let css_h_px = format!("{}px", css_h);
-    if style
-        .get_property_value("height")
-        .ok()
-        .as_deref()
-        != Some(css_h_px.as_str())
-    {
+    if style.get_property_value("height").ok().as_deref() != Some(css_h_px.as_str()) {
         let _ = style.set_property("height", &css_h_px);
     }
 }
 
 fn set_style_property_if_needed(style: &CssStyleDeclaration, property: &str, value: &str) {
-    if style
-        .get_property_value(property)
-        .ok()
-        .as_deref()
-        != Some(value)
-    {
+    if style.get_property_value(property).ok().as_deref() != Some(value) {
         let _ = style.set_property(property, value);
     }
 }

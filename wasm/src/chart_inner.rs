@@ -3,16 +3,16 @@
 //! This module contains `ChartInner`, the internal state shared between
 //! event closures and the public RayCore API. Helper methods here handle
 //! the borrow checker dance of destructuring to access multiple fields.
+#![allow(dead_code)]
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use raycore::{
-    Canvas2DRenderer, ChartEngine, HitZone, InteractionHandler, OverlayRenderer, PriceAxisRenderer,
-    TimeAxisRenderer,
+    ChartEngine, HitZone, InteractionHandler, OverlayRenderer, PriceAxisRenderer, TimeAxisRenderer,
 };
 
 use crate::canvas_manager::WidgetLayout;
@@ -275,6 +275,19 @@ impl ChartInner {
             &engine.bars,
             dpr,
         );
+
+        // Emit crosshair move event
+        if engine.crosshair.active {
+            let bar_idx = engine.crosshair.bar_index;
+            let timestamp = bar_idx.and_then(|idx| engine.bars.get(idx).map(|b| b.timestamp));
+            engine.event_bus.emit(raycore::ChartEvent::CrosshairMove {
+                x,
+                y,
+                bar_index: bar_idx,
+                price: engine.crosshair.price,
+                timestamp,
+            });
+        }
     }
 
     pub fn on_pointer_down(&mut self, x: f64, y: f64, zone: HitZone) {
@@ -415,12 +428,36 @@ impl ChartInner {
         }
 
         let _ = (pw, ph); // suppress unused warning
+                          // Capture click state BEFORE pointer_up clears it
+        let was_pressed = self.interaction.pressed;
+        let was_drag = self.interaction.drag_active;
+        let click_x = self.interaction.last_move_x;
+        let click_y = self.interaction.last_move_y;
+
         let Self {
             interaction,
             engine,
             ..
         } = self;
         interaction.pointer_up(&mut engine.viewport, &engine.bars, now_ms);
+
+        // Emit click event if it was a tap/click (pressed, not a drag)
+        if was_pressed && !was_drag {
+            let candle_css_h = ph * engine.viewport.candle_height_frac();
+            let price = engine.viewport.pixel_to_price(click_y, candle_css_h);
+            let bar_f = engine.viewport.pixel_to_bar(click_x, pw);
+            let bar_index = if bar_f >= 0.0 && (bar_f.round() as usize) < engine.bars.len() {
+                Some(bar_f.round() as usize)
+            } else {
+                None
+            };
+            engine.event_bus.emit(raycore::ChartEvent::Click {
+                x: click_x,
+                y: click_y,
+                bar_index,
+                price,
+            });
+        }
     }
 
     pub fn on_pane_wheel(&mut self, x: f64, dx: f64, dy: f64, dm: u32) {
@@ -431,6 +468,14 @@ impl ChartInner {
             ..
         } = self;
         interaction.pane_wheel(x, dx, dy, dm, pw, &mut engine.viewport, &engine.bars);
+
+        // Emit visible range change after zoom/pan
+        engine
+            .event_bus
+            .emit(raycore::ChartEvent::VisibleRangeChange {
+                start_bar: engine.viewport.start_bar,
+                end_bar: engine.viewport.end_bar,
+            });
     }
 
     pub fn on_price_axis_move(&mut self, y: f64) {

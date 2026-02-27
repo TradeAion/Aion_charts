@@ -65,11 +65,12 @@ struct WorkspaceDividerStyle {
 
 impl Default for WorkspaceDividerStyle {
     fn default() -> Self {
+        let theme = raycore::ThemeConfig::default();
         Self {
             thickness_css: 1.0,
             hit_area_css: 9.0,
-            color: [0.18, 0.18, 0.22, 1.0],
-            active_color: [0.102, 0.737, 0.612, 0.55],
+            color: theme.workspace.divider_color,
+            active_color: theme.workspace.divider_active_color,
         }
     }
 }
@@ -90,9 +91,10 @@ struct WorkspacePaneStyle {
 
 impl Default for WorkspacePaneStyle {
     fn default() -> Self {
+        let theme = raycore::ThemeConfig::default();
         Self {
-            background_color: [0.09, 0.09, 0.09, 1.0],
-            active_border_color: [0.102, 0.737, 0.612, 0.45],
+            background_color: theme.workspace.pane_background,
+            active_border_color: theme.workspace.pane_active_border,
             active_border_width_css: 1.0,
         }
     }
@@ -366,16 +368,16 @@ impl WorkspaceInner {
                 let first_slot = document
                     .create_element("div")?
                     .dyn_into::<HtmlDivElement>()?;
-                first_slot.style().set_css_text(
-                    "min-width:0;min-height:0;overflow:hidden;position:relative;",
-                );
+                first_slot
+                    .style()
+                    .set_css_text("min-width:0;min-height:0;overflow:hidden;position:relative;");
 
                 let second_slot = document
                     .create_element("div")?
                     .dyn_into::<HtmlDivElement>()?;
-                second_slot.style().set_css_text(
-                    "min-width:0;min-height:0;overflow:hidden;position:relative;",
-                );
+                second_slot
+                    .style()
+                    .set_css_text("min-width:0;min-height:0;overflow:hidden;position:relative;");
 
                 let divider = document
                     .create_element("div")?
@@ -452,7 +454,10 @@ impl WorkspaceInner {
             if view.direction == SplitDirection::Vertical {
                 let _ = view.wrapper.style().set_property("flex-direction", "row");
             } else {
-                let _ = view.wrapper.style().set_property("flex-direction", "column");
+                let _ = view
+                    .wrapper
+                    .style()
+                    .set_property("flex-direction", "column");
             }
         }
     }
@@ -660,10 +665,8 @@ impl ChartWorkspace {
         let pointer_up = Closure::wrap(Box::new(move |event: PointerEvent| {
             inner_up.borrow_mut().on_pointer_up(event);
         }) as Box<dyn FnMut(PointerEvent)>);
-        window_target.add_event_listener_with_callback(
-            "pointerup",
-            pointer_up.as_ref().unchecked_ref(),
-        )?;
+        window_target
+            .add_event_listener_with_callback("pointerup", pointer_up.as_ref().unchecked_ref())?;
 
         let inner_cancel = inner.clone();
         let pointer_cancel = Closure::wrap(Box::new(move |event: PointerEvent| {
@@ -762,7 +765,9 @@ impl ChartWorkspace {
     }
 
     pub fn set_workspace_active_pane_border_width(&mut self, width_css: f64) {
-        self.inner.borrow_mut().set_active_pane_border_width(width_css);
+        self.inner
+            .borrow_mut()
+            .set_active_pane_border_width(width_css);
     }
 
     pub fn dispose(&mut self) {

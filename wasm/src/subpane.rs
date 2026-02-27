@@ -15,6 +15,7 @@
 //!   - Coordinated separator dragging (resizing one pane affects neighbors)
 //!   - Minimum height enforcement
 //!   - Time axis always visible at bottom
+#![allow(dead_code)]
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -226,56 +227,55 @@ pub struct IndicatorConfig {
 impl IndicatorConfig {
     /// Create a configuration for a known indicator type.
     /// Falls back to sensible defaults for unknown types.
+    /// Colors are drawn from the theme's indicator palette.
     pub fn for_type(indicator_type: &str) -> Self {
+        let theme = raycore::ThemeConfig::default();
+        let p = &theme.indicator_palette;
+        // Palette indices: 0=Blue, 1=Amber, 2=Purple, 3=Red, 4=Green, 5=Grey
+        let blue = theme.indicator_color(0);
+        let amber = theme.indicator_color(1);
+        let purple = theme.indicator_color(2);
+        let red = theme.indicator_color(3);
+        let grey = theme.indicator_color(5);
+
         match indicator_type {
             "rsi" => Self {
-                colors: vec![[0.608, 0.349, 0.714, 1.0]], // Purple
+                colors: vec![purple],
                 price_min: 0.0,
                 price_max: 100.0,
                 auto_scale: false,
                 reference_levels: vec![30.0, 70.0],
             },
             "stochastic" => Self {
-                colors: vec![
-                    [0.161, 0.384, 1.0, 1.0], // Blue (%K)
-                    [1.0, 0.627, 0.0, 1.0],   // Orange (%D)
-                ],
+                colors: vec![blue, amber],
                 price_min: 0.0,
                 price_max: 100.0,
                 auto_scale: false,
                 reference_levels: vec![20.0, 80.0],
             },
             "atr" => Self {
-                colors: vec![[0.9, 0.3, 0.3, 1.0]], // Red
+                colors: vec![red],
                 price_min: 0.0,
                 price_max: 1000.0,
                 auto_scale: true,
                 reference_levels: vec![],
             },
             "macd" => Self {
-                colors: vec![
-                    [0.161, 0.384, 1.0, 1.0], // Blue (MACD line)
-                    [1.0, 0.627, 0.0, 1.0],   // Orange (signal)
-                    [0.5, 0.5, 0.5, 0.6],     // Grey (histogram)
-                ],
+                colors: vec![blue, amber, grey],
                 price_min: -100.0,
                 price_max: 100.0,
                 auto_scale: true,
                 reference_levels: vec![0.0],
             },
             "bollinger" => Self {
-                colors: vec![
-                    [0.161, 0.384, 1.0, 1.0], // Blue (middle)
-                    [0.5, 0.5, 0.5, 0.6],     // Grey (upper)
-                    [0.5, 0.5, 0.5, 0.6],     // Grey (lower)
-                ],
+                colors: vec![blue, grey, grey],
                 price_min: 0.0,
                 price_max: 1000.0,
                 auto_scale: true,
                 reference_levels: vec![],
             },
             _ => Self {
-                colors: vec![[0.5, 0.5, 0.5, 1.0]],
+                colors: vec![p.fallback],
                 price_min: 0.0,
                 price_max: 1000.0,
                 auto_scale: true,
@@ -934,7 +934,11 @@ impl SubPane {
 
         // Data lines
         for (i, line) in self.data.iter().enumerate() {
-            let color = self.colors.get(i).copied().unwrap_or([0.5, 0.5, 0.5, 1.0]);
+            let color = self
+                .colors
+                .get(i)
+                .copied()
+                .unwrap_or(raycore::ThemeConfig::default().indicator_palette.fallback);
             self.draw_data_line(line, &color, main_viewport, css_w, css_h, dpr);
         }
     }
@@ -1053,7 +1057,7 @@ impl SubPane {
             let font = format!(
                 "{}px {}",
                 t.font_size,
-                "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif"
+                raycore::core::renderer::theme::FONT_FAMILY
             );
             ctx.set_font(&font);
             ctx.set_fill_style_str(&rgba(&[t.r, t.g, t.b, t.a]));
@@ -1187,22 +1191,12 @@ fn set_canvas_size_with_css_if_needed(
 
     let style = canvas.style();
     let css_w_px = format!("{}px", css_w);
-    if style
-        .get_property_value("width")
-        .ok()
-        .as_deref()
-        != Some(css_w_px.as_str())
-    {
+    if style.get_property_value("width").ok().as_deref() != Some(css_w_px.as_str()) {
         let _ = style.set_property("width", &css_w_px);
     }
 
     let css_h_px = format!("{}px", css_h);
-    if style
-        .get_property_value("height")
-        .ok()
-        .as_deref()
-        != Some(css_h_px.as_str())
-    {
+    if style.get_property_value("height").ok().as_deref() != Some(css_h_px.as_str()) {
         let _ = style.set_property("height", &css_h_px);
     }
 }

@@ -34,6 +34,8 @@ use wasm_bindgen::JsCast;
 
 mod canvas_manager;
 mod chart_inner;
+mod event_emitter;
+mod render_frame;
 mod subpane;
 mod workspace;
 
@@ -41,6 +43,7 @@ use canvas_manager::WidgetLayout;
 use chart_inner::{
     event_css_pos, wheel_css_pos, ChartInner, EventListenerRegistry, ExactPixelSizes, SharedInner,
 };
+use event_emitter::{chart_event_to_js, EventEmitter};
 use subpane::{IndicatorConfig, PaneHeightCoordinator, SubPane, SubPaneSeparatorStyle};
 
 fn init_logging() {
@@ -174,6 +177,49 @@ fn js_err(message: impl Into<String>) -> JsValue {
     JsValue::from_str(&message.into())
 }
 
+/// Emit a deprecation warning to the browser console (once per method name).
+fn deprecation_warn(method: &str, alternative: &str) {
+    // Use thread_local for warn-once tracking (WASM is single-threaded)
+    thread_local! {
+        static WARNED: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
+    }
+    WARNED.with(|set| {
+        let mut set = set.borrow_mut();
+        if set.insert(method.to_string()) {
+            let msg = format!(
+                "RayCore: {}() is deprecated. Use {} instead. This method will be removed in a future version.",
+                method, alternative
+            );
+            web_sys::console::warn_1(&JsValue::from_str(&msg));
+        }
+    });
+}
+
+/// Get a property from a JS object, returning None if undefined/null or if the object is not valid.
+fn js_get(obj: &JsValue, key: &str) -> Option<JsValue> {
+    if obj.is_undefined() || obj.is_null() {
+        return None;
+    }
+    js_sys::Reflect::get(obj, &JsValue::from_str(key))
+        .ok()
+        .filter(|v| !v.is_undefined() && !v.is_null())
+}
+
+/// Get a string property from a JS object.
+fn js_get_str(obj: &JsValue, key: &str) -> Option<String> {
+    js_get(obj, key).and_then(|v| v.as_string())
+}
+
+/// Get a f64 property from a JS object.
+fn js_get_f64(obj: &JsValue, key: &str) -> Option<f64> {
+    js_get(obj, key).and_then(|v| v.as_f64())
+}
+
+/// Get a bool property from a JS object.
+fn js_get_bool(obj: &JsValue, key: &str) -> Option<bool> {
+    js_get(obj, key).and_then(|v| v.as_bool())
+}
+
 fn ensure_equal_len(name_a: &str, len_a: usize, name_b: &str, len_b: usize) -> Result<(), JsValue> {
     if len_a != len_b {
         Err(js_err(format!(
@@ -218,12 +264,28 @@ pub struct RayCore {
     _last_tap_time: Rc<RefCell<f64>>,
     /// Registry for tracking event listeners for cleanup.
     _event_registry: EventListenerRegistry,
+    /// JS event emitter for on/off/once callbacks (Rc for RAF closure sharing).
+    event_emitter: Rc<RefCell<EventEmitter>>,
+    /// Active theme configuration.
+    theme_config: raycore::ThemeConfig,
+    /// Whether auto-render (internal RAF loop) is active.
+    auto_render: bool,
+    /// RAF closure slot for auto-render mode. Stored as Rc so the closure
+    /// can reference the same slot when rescheduling itself each frame.
+    _raf_closure: Option<Rc<RefCell<Option<Closure<dyn FnMut()>>>>>,
+    /// Current RAF ID for cancellation.
+    _raf_id: Rc<Cell<i32>>,
+    /// Dirty flag — set on any mutation, cleared after render.
+    dirty: Rc<Cell<bool>>,
 }
 
 #[wasm_bindgen]
 impl RayCore {
     /// Create a new RayCore instance inside a container div.
+    ///
+    /// **Deprecated:** Use `create_chart(container, options)` instead.
     pub async fn create(container_id: &str) -> Result<RayCore, JsValue> {
+        deprecation_warn("create", "RayCore.create_chart(container, options)");
         let preferred = if webgpu_available() {
             "webgpu"
         } else {
@@ -1146,6 +1208,13 @@ impl RayCore {
                     }
 
                     sync_widget_sizes(&mut *s, dpr, true);
+
+                    // Emit resize event
+                    let (cw, ch) = s.layout.container_css_size();
+                    s.engine.event_bus.emit(raycore::ChartEvent::Resize {
+                        width: cw,
+                        height: ch,
+                    });
                 },
             ));
             let observer = web_sys::ResizeObserver::new(cb.as_ref().unchecked_ref())?;
@@ -1185,6 +1254,12 @@ impl RayCore {
             _long_press_timer: long_press_timer,
             _last_tap_time: last_tap_time,
             _event_registry: EventListenerRegistry::new(),
+            event_emitter: Rc::new(RefCell::new(EventEmitter::new())),
+            theme_config: raycore::ThemeConfig::default(),
+            auto_render: false,
+            _raf_closure: None,
+            _raf_id: Rc::new(Cell::new(0)),
+            dirty: Rc::new(Cell::new(false)),
         })
     }
 
@@ -1201,6 +1276,285 @@ impl RayCore {
             arr.push(&JsValue::from_str("webgpu"));
         }
         arr
+    }
+
+    // ── Modern API ───────────────────────────────────────────────────────────
+
+    /// Create a new RayCore instance with a full options object.
+    ///
+    /// `container` can be an `HTMLElement` reference or a string container ID.
+    /// `options` is an optional JS object:
+    /// ```js
+    /// {
+    ///   theme: "dark" | "light" | { colors: {...}, crosshair: {...}, ... },
+    ///   renderer: "auto" | "webgpu" | "canvas2d",
+    ///   autoRender: true,
+    ///   symbol: "BTCUSD",
+    ///   interval: "1D",
+    ///   watermark: "",
+    ///   crosshair: { mode: "normal" | "magnet_ohlc" },
+    ///   priceScale: { mode: "normal", margins: { top: 0.1, bottom: 0.1 } },
+    /// }
+    /// ```
+    pub async fn create_chart(
+        container: JsValue,
+        options: JsValue,
+    ) -> Result<RayCore, JsValue> {
+        // Resolve container: HTMLElement or string ID
+        let container_id = if container.is_string() {
+            container.as_string().unwrap_or_default()
+        } else if let Some(el) = container.dyn_ref::<web_sys::HtmlElement>() {
+            // If element has an ID, use it. Otherwise assign a temporary one.
+            let id = el.id();
+            if id.is_empty() {
+                let generated = format!("raycore-{}", js_sys::Date::now() as u64);
+                el.set_id(&generated);
+                generated
+            } else {
+                id
+            }
+        } else {
+            return Err(js_err("container must be an HTMLElement or a string ID"));
+        };
+
+        // Parse renderer option
+        let renderer = js_get_str(&options, "renderer").unwrap_or_else(|| "auto".to_string());
+        let preferred = match renderer.as_str() {
+            "webgpu" => "webgpu",
+            "canvas2d" => "canvas2d",
+            _ => {
+                if webgpu_available() {
+                    "webgpu"
+                } else {
+                    "canvas2d"
+                }
+            }
+        };
+
+        // Create via existing path
+        let mut chart = Self::create_with(&container_id, preferred).await?;
+
+        // Apply theme
+        if let Some(theme_val) = js_get(&options, "theme") {
+            if let Some(theme_str) = theme_val.as_string() {
+                match theme_str.as_str() {
+                    "light" => {
+                        chart.theme_config = raycore::ThemeConfig::light();
+                        let style = chart.theme_config.to_chart_style();
+                        chart.inner.borrow_mut().engine.style = style;
+                    }
+                    _ => {} // "dark" is already default
+                }
+            }
+        }
+
+        // Apply auto-render
+        let auto_render = js_get_bool(&options, "autoRender").unwrap_or(true);
+        chart.auto_render = auto_render;
+        if auto_render {
+            chart.start_auto_render_internal();
+        }
+
+        // Apply symbol
+        if let Some(symbol) = js_get_str(&options, "symbol") {
+            chart.symbol = symbol;
+        }
+
+        // Apply interval
+        if let Some(interval) = js_get_str(&options, "interval") {
+            chart.interval = interval;
+        }
+
+        // Apply watermark
+        if let Some(watermark) = js_get_str(&options, "watermark") {
+            chart.inner.borrow_mut().engine.style.watermark_text = watermark;
+        }
+
+        // Apply crosshair mode
+        if let Some(crosshair_obj) = js_get(&options, "crosshair") {
+            if let Some(mode) = js_get_str(&crosshair_obj, "mode") {
+                let mode = parse_crosshair_mode(&mode);
+                chart.inner.borrow_mut().engine.crosshair.mode = mode;
+            }
+        }
+
+        // Apply price scale options
+        if let Some(ps_obj) = js_get(&options, "priceScale") {
+            if let Some(mode_str) = js_get_str(&ps_obj, "mode") {
+                let mode = match mode_str.as_str() {
+                    "logarithmic" | "log" => raycore::PriceScaleMode::Logarithmic,
+                    "percentage" | "percent" => raycore::PriceScaleMode::Percentage,
+                    "indexedTo100" | "indexed" => raycore::PriceScaleMode::IndexedTo100,
+                    _ => raycore::PriceScaleMode::Normal,
+                };
+                chart.inner.borrow_mut().engine.viewport.set_price_scale_mode(mode);
+            }
+            if let Some(margins_obj) = js_get(&ps_obj, "margins") {
+                let top = js_get_f64(&margins_obj, "top").unwrap_or(0.1);
+                let bottom = js_get_f64(&margins_obj, "bottom").unwrap_or(0.1);
+                chart.inner.borrow_mut().engine.viewport.scale_margin_top = top;
+                chart.inner.borrow_mut().engine.viewport.scale_margin_bottom = bottom;
+            }
+        }
+
+        // Apply CSS variables from theme
+        chart.apply_css_variables();
+
+        Ok(chart)
+    }
+
+    /// Apply partial options update at runtime.
+    ///
+    /// Accepts the same options shape as `create_chart()`. Only provided
+    /// fields are updated; omitted fields keep their current values.
+    pub fn apply_options(&mut self, options: JsValue) {
+        if options.is_undefined() || options.is_null() {
+            return;
+        }
+
+        // Theme
+        if let Some(theme_val) = js_get(&options, "theme") {
+            if let Some(theme_str) = theme_val.as_string() {
+                match theme_str.as_str() {
+                    "dark" => {
+                        self.theme_config = raycore::ThemeConfig::dark();
+                    }
+                    "light" => {
+                        self.theme_config = raycore::ThemeConfig::light();
+                    }
+                    _ => {}
+                }
+                let style = self.theme_config.to_chart_style();
+                // Preserve watermark text
+                let wm = self.inner.borrow().engine.style.watermark_text.clone();
+                self.inner.borrow_mut().engine.style = style;
+                self.inner.borrow_mut().engine.style.watermark_text = wm;
+                self.apply_css_variables();
+            }
+        }
+
+        // Watermark
+        if let Some(wm) = js_get_str(&options, "watermark") {
+            self.inner.borrow_mut().engine.style.watermark_text = wm;
+        }
+
+        // Symbol
+        if let Some(symbol) = js_get_str(&options, "symbol") {
+            self.symbol = symbol.clone();
+            self.inner.borrow_mut().engine.event_bus.emit(
+                raycore::ChartEvent::SymbolChange { symbol },
+            );
+        }
+
+        // Interval
+        if let Some(interval) = js_get_str(&options, "interval") {
+            self.interval = interval.clone();
+            self.inner.borrow_mut().engine.event_bus.emit(
+                raycore::ChartEvent::IntervalChange { interval },
+            );
+        }
+
+        // Crosshair
+        if let Some(crosshair_obj) = js_get(&options, "crosshair") {
+            if let Some(mode) = js_get_str(&crosshair_obj, "mode") {
+                let mode = parse_crosshair_mode(&mode);
+                self.inner.borrow_mut().engine.crosshair.mode = mode;
+            }
+        }
+
+        // Auto render
+        if let Some(auto) = js_get_bool(&options, "autoRender") {
+            if auto && !self.auto_render {
+                self.auto_render = true;
+                self.start_auto_render_internal();
+            } else if !auto && self.auto_render {
+                self.auto_render = false;
+                self.stop_auto_render_internal();
+            }
+        }
+
+        self.mark_dirty();
+    }
+
+    // ── Event System ─────────────────────────────────────────────────────────
+
+    /// Register an event callback.
+    ///
+    /// ```js
+    /// chart.on("crosshairMove", (event) => {
+    ///   console.log(event.x, event.y, event.price);
+    /// });
+    /// ```
+    ///
+    /// Valid event names: crosshairMove, visibleRangeChange, click,
+    /// drawingCreated, drawingSelected, symbolChange, intervalChange,
+    /// priceScaleChange, chartTypeChange, resize, error.
+    pub fn on(&mut self, event: &str, callback: js_sys::Function) {
+        self.event_emitter.borrow_mut().on(event, callback);
+    }
+
+    /// Remove a specific event callback.
+    pub fn off(&mut self, event: &str, callback: js_sys::Function) {
+        self.event_emitter.borrow_mut().off(event, &callback);
+    }
+
+    /// Register a one-shot event callback (auto-removes after first call).
+    pub fn once(&mut self, event: &str, callback: js_sys::Function) {
+        self.event_emitter.borrow_mut().once(event, callback);
+    }
+
+    // ── Auto-Render ──────────────────────────────────────────────────────────
+
+    /// Start the auto-render RAF loop.
+    pub fn start_auto_render(&mut self) {
+        if !self.auto_render {
+            self.auto_render = true;
+            self.start_auto_render_internal();
+        }
+    }
+
+    /// Stop the auto-render RAF loop. Caller must manually call render().
+    pub fn stop_auto_render(&mut self) {
+        if self.auto_render {
+            self.auto_render = false;
+            self.stop_auto_render_internal();
+        }
+    }
+
+    /// Returns whether auto-render is currently active.
+    pub fn is_auto_render(&self) -> bool {
+        self.auto_render
+    }
+
+    /// Get the current theme preset name ("dark", "light", or "custom").
+    pub fn theme(&self) -> String {
+        // Check if it matches a known preset
+        let dark = raycore::ThemeConfig::dark();
+        if self.theme_config.colors.background == dark.colors.background
+            && self.theme_config.colors.bullish == dark.colors.bullish
+        {
+            "dark".to_string()
+        } else {
+            let light = raycore::ThemeConfig::light();
+            if self.theme_config.colors.background == light.colors.background {
+                "light".to_string()
+            } else {
+                "custom".to_string()
+            }
+        }
+    }
+
+    /// Get current CSS variables as a JS object.
+    pub fn get_css_variables(&self) -> JsValue {
+        let obj = js_sys::Object::new();
+        for (key, value) in self.theme_config.to_css_variables() {
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str(&key),
+                &JsValue::from_str(&value),
+            );
+        }
+        obj.into()
     }
 
     // ── Data loading ─────────────────────────────────────────────────────────
@@ -1242,6 +1596,7 @@ impl RayCore {
             .engine
             .set_data(bars)
             .map_err(js_err)?;
+        self.dirty.set(true);
         log::info!("set_data_arrays: {} bars", count);
         Ok(())
     }
@@ -1324,6 +1679,12 @@ impl RayCore {
             let raycore::ChartEngine { viewport, bars, .. } = &mut s.engine;
             viewport.auto_fit_price(bars);
         }
+        let sb = s.engine.viewport.start_bar;
+        let eb = s.engine.viewport.end_bar;
+        s.engine.event_bus.emit(raycore::ChartEvent::VisibleRangeChange {
+            start_bar: sb,
+            end_bar: eb,
+        });
     }
 
     pub fn visible_range(&self) -> Vec<f64> {
@@ -1400,6 +1761,10 @@ impl RayCore {
 
     pub fn set_symbol(&mut self, symbol: &str) {
         self.symbol = symbol.to_string();
+        self.inner.borrow_mut().engine.event_bus.emit(
+            raycore::ChartEvent::SymbolChange { symbol: symbol.to_string() },
+        );
+        self.dirty.set(true);
     }
 
     pub fn symbol(&self) -> String {
@@ -1408,6 +1773,10 @@ impl RayCore {
 
     pub fn set_interval(&mut self, interval: &str) {
         self.interval = interval.to_string();
+        self.inner.borrow_mut().engine.event_bus.emit(
+            raycore::ChartEvent::IntervalChange { interval: interval.to_string() },
+        );
+        self.dirty.set(true);
     }
 
     pub fn interval(&self) -> String {
@@ -1609,41 +1978,65 @@ impl RayCore {
     }
 
     // ── Runtime Style Configuration API ────────────────────────────────────────
+    // NOTE: These individual setter methods are maintained for backward compatibility.
+    // For new code, prefer `apply_options({ theme: { colors: { ... } } })` instead.
+    // These methods will emit a one-time deprecation warning to the browser console.
 
     /// Set the chart background color (RGBA, 0.0-1.0).
+    ///
+    /// **Deprecated:** Use `applyOptions({ theme: { colors: { background: [r,g,b,a] } } })`.
     pub fn set_background_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        deprecation_warn("set_background_color", "applyOptions({ theme: ... })");
         let mut s = self.inner.borrow_mut();
         s.engine.style.bg_color = [r, g, b, a];
         s.engine.style.axis_bg_color = [r, g, b, a]; // sync axis bg
     }
 
     /// Set the grid line color (RGBA, 0.0-1.0).
+    ///
+    /// **Deprecated:** Use `applyOptions({ theme: ... })`.
     pub fn set_grid_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        deprecation_warn("set_grid_color", "applyOptions({ theme: ... })");
         self.inner.borrow_mut().engine.style.grid_color = [r, g, b, a];
     }
 
     /// Set the axis border color (RGBA, 0.0-1.0).
+    ///
+    /// **Deprecated:** Use `applyOptions({ theme: ... })`.
     pub fn set_axis_border_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        deprecation_warn("set_axis_border_color", "applyOptions({ theme: ... })");
         self.inner.borrow_mut().engine.style.axis_border_color = [r, g, b, a];
     }
 
     /// Set the axis text color (RGBA, 0.0-1.0).
+    ///
+    /// **Deprecated:** Use `applyOptions({ theme: ... })`.
     pub fn set_axis_text_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        deprecation_warn("set_axis_text_color", "applyOptions({ theme: ... })");
         self.inner.borrow_mut().engine.style.axis_text_color = [r, g, b, a];
     }
 
     /// Set the crosshair line color (RGBA, 0.0-1.0).
+    ///
+    /// **Deprecated:** Use `applyOptions({ theme: ... })`.
     pub fn set_crosshair_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        deprecation_warn("set_crosshair_color", "applyOptions({ theme: ... })");
         self.set_crosshair_line_color("both", r, g, b, a);
     }
 
     /// Set the crosshair label background color (RGBA, 0.0-1.0).
+    ///
+    /// **Deprecated:** Use `applyOptions({ theme: ... })`.
     pub fn set_crosshair_label_bg_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        deprecation_warn("set_crosshair_label_bg_color", "applyOptions({ theme: ... })");
         self.set_crosshair_line_label_bg_color("both", r, g, b, a);
     }
 
     /// Set the crosshair label text color (RGBA, 0.0-1.0).
+    ///
+    /// **Deprecated:** Use `applyOptions({ theme: ... })`.
     pub fn set_crosshair_label_text_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        deprecation_warn("set_crosshair_label_text_color", "applyOptions({ theme: ... })");
         self.inner.borrow_mut().engine.style.crosshair_label_text = [r, g, b, a];
     }
 
@@ -1866,12 +2259,12 @@ impl RayCore {
     /// "indexed_to_100" (or "indexedTo100", "indexed").
     pub fn set_price_scale_mode(&mut self, mode: &str) {
         use raycore::PriceScaleMode;
-        let mode = PriceScaleMode::from_str(mode);
-        self.inner
-            .borrow_mut()
-            .engine
-            .viewport
-            .set_price_scale_mode(mode);
+        let parsed = PriceScaleMode::from_str(mode);
+        let mut s = self.inner.borrow_mut();
+        s.engine.viewport.set_price_scale_mode(parsed);
+        s.engine.event_bus.emit(raycore::ChartEvent::PriceScaleChange {
+            mode: mode.to_string(),
+        });
     }
 
     // ── Main Chart Type API ────────────────────────────────────────────────────
@@ -1883,7 +2276,11 @@ impl RayCore {
     pub fn set_chart_type(&mut self, chart_type: &str) {
         use raycore::MainChartType;
         let ct = MainChartType::from_str(chart_type);
-        self.inner.borrow_mut().engine.set_main_chart_type(ct);
+        let mut s = self.inner.borrow_mut();
+        s.engine.set_main_chart_type(ct);
+        s.engine.event_bus.emit(raycore::ChartEvent::ChartTypeChange {
+            chart_type: ct.as_str().to_string(),
+        });
         log::info!("set_chart_type: {}", ct.as_str());
     }
 
@@ -2027,7 +2424,7 @@ impl RayCore {
             color: [color_r, color_g, color_b, color_a],
             size: size as f64,
             text: text.to_string(),
-            text_color: [1.0, 1.0, 1.0, 0.9],
+            text_color: raycore::ThemeConfig::default().series_defaults.marker_text_color,
             id: 0, // will be assigned
         };
         let id = self
@@ -2109,7 +2506,7 @@ impl RayCore {
                 color,
                 size,
                 text: String::new(),
-                text_color: [1.0, 1.0, 1.0, 0.9],
+                text_color: raycore::ThemeConfig::default().series_defaults.marker_text_color,
                 id: 0,
             });
         }
@@ -2608,7 +3005,7 @@ impl RayCore {
                                 .colors
                                 .get(i)
                                 .copied()
-                                .unwrap_or([0.5, 0.5, 0.5, 1.0]),
+                                .unwrap_or(raycore::ThemeConfig::default().indicator_palette.fallback),
                         );
                     }
                 }
@@ -3440,7 +3837,7 @@ impl RayCore {
                             .colors
                             .get(i)
                             .copied()
-                            .unwrap_or([0.5, 0.5, 0.5, 1.0])
+                            .unwrap_or(raycore::ThemeConfig::default().indicator_palette.fallback)
                     })
                     .collect();
 
@@ -3852,6 +4249,13 @@ impl RayCore {
 
     /// Render one frame. Call from requestAnimationFrame.
     pub fn render(&mut self) {
+        render_frame::do_render_frame(&self.inner, &self.dirty, &self.event_emitter);
+    }
+
+    /// Original render body — superseded by render_frame::do_render_frame().
+    /// Kept temporarily during migration. Will be removed once verified.
+    #[allow(dead_code)]
+    fn _render_legacy(&mut self) {
         let mut s = self.inner.borrow_mut();
 
         // Detect DPR changes (browser zoom) that may not trigger ResizeObserver
@@ -4214,7 +4618,7 @@ impl RayCore {
                                     .colors
                                     .get(i)
                                     .copied()
-                                    .unwrap_or([0.5, 0.5, 0.5, 1.0])
+                                    .unwrap_or(raycore::ThemeConfig::default().indicator_palette.fallback)
                             })
                             .collect();
                         subpane.set_data(data, colors);
@@ -4259,6 +4663,13 @@ impl RayCore {
 
         // 10. Corner stub — background + borders (LWC: PriceAxisStub)
         Self::render_corner_stub(&s.layout, &s.engine.style, dpr);
+
+        // 11. Clear dirty flag
+        drop(s);
+        self.dirty.set(false);
+
+        // 12. Flush events from core EventBus to JS callbacks
+        self.flush_events();
     }
 
     /// Render the corner stub (bottom-right intersection of time axis row + price axis column).
@@ -4309,6 +4720,125 @@ impl RayCore {
         ctx.fill_rect(0.0, 0.0, border_size, h);
     }
 
+    // ── Private helpers ────────────────────────────────────────────────────────
+
+    /// Mark the chart as needing a re-render (for auto-render mode).
+    fn mark_dirty(&self) {
+        self.dirty.set(true);
+    }
+
+    /// Apply CSS custom properties from the current theme to the container element.
+    fn apply_css_variables(&self) {
+        let vars = self.theme_config.to_css_variables();
+        let s = self.inner.borrow();
+        let container = s.layout.container();
+        let style = container.style();
+        for (key, value) in &vars {
+            let _ = style.set_property(key, value);
+        }
+    }
+
+    /// Drain the core EventBus and forward events to JS callbacks.
+    fn flush_events(&self) {
+        let events: Vec<raycore::ChartEvent> = {
+            let mut s = self.inner.borrow_mut();
+            s.engine.event_bus.drain().collect()
+        };
+        let mut emitter = self.event_emitter.borrow_mut();
+        for event in &events {
+            let js_event = chart_event_to_js(event);
+            emitter.emit(event.name(), &js_event);
+        }
+    }
+
+    /// Start the internal requestAnimationFrame loop.
+    ///
+    /// Uses a self-scheduling RAF callback that checks the dirty flag
+    /// and calls the render pipeline when needed. The closure captures
+     /// `SharedInner` directly to avoid borrow-checker issues with `&mut self`.
+     fn start_auto_render_internal(&mut self) {
+        // Already running?
+        if self._raf_closure.is_some() {
+            return;
+        }
+
+        let inner = Rc::clone(&self.inner);
+        let dirty = Rc::clone(&self.dirty);
+        let raf_id = Rc::clone(&self._raf_id);
+        let event_emitter = Rc::clone(&self.event_emitter);
+
+        // Self-referencing closure pattern for RAF:
+        //
+        //  1. Allocate a shared slot: Rc<RefCell<Option<Closure>>>
+        //  2. The closure captures a clone of that Rc
+        //  3. Store the closure INTO the slot (not take it out!) so the clone
+        //     the closure holds always has Some(closure) for rescheduling
+        //  4. Store the Rc itself on self to keep the closure alive
+        //
+        // If we called `.take()` on the slot (old bug) the clone inside the
+        // closure would see None and the loop would fire exactly once.
+        let closure_slot: Rc<RefCell<Option<Closure<dyn FnMut()>>>> =
+            Rc::new(RefCell::new(None));
+
+        // Clone captured by the closure for self-rescheduling
+        let slot_for_reschedule = Rc::clone(&closure_slot);
+
+        let tick_closure = Closure::wrap(Box::new(move || {
+            // Always render every frame in auto-render mode.
+            // The dirty flag is NOT used as a render gate here because interaction
+            // closures (pointer move, wheel, drag) don't hold a reference to `dirty`
+            // and therefore can never mark it — any dirty-guard would prevent
+            // interactions from ever producing a new frame.
+            render_frame::do_render_frame(&inner, &dirty, &event_emitter);
+
+            // Reschedule: read the closure from the shared slot and pass it to RAF.
+            if let Some(window) = web_sys::window() {
+                if let Some(c) = slot_for_reschedule.borrow().as_ref() {
+                    if let Ok(id) = window.request_animation_frame(c.as_ref().unchecked_ref()) {
+                        raf_id.set(id);
+                    }
+                }
+            }
+        }) as Box<dyn FnMut()>);
+
+        // Kick off the first frame BEFORE storing the closure so we have a
+        // valid JS function reference to pass to request_animation_frame.
+        if let Some(window) = web_sys::window() {
+            if let Ok(id) = window.request_animation_frame(tick_closure.as_ref().unchecked_ref()) {
+                self._raf_id.set(id);
+            }
+        }
+
+        // Keep the closure INSIDE the slot so slot_for_reschedule (captured
+        // by the closure) can find it on every tick.
+        *closure_slot.borrow_mut() = Some(tick_closure);
+
+        // Store the Rc on self — this keeps the closure alive for the lifetime
+        // of RayCore and allows stop_auto_render_internal to drop it.
+        self._raf_closure = Some(closure_slot);
+        self.dirty.set(true);
+    }
+
+    /// Stop the internal requestAnimationFrame loop.
+    fn stop_auto_render_internal(&mut self) {
+        // Cancel the pending RAF callback (prevents one extra frame after stop)
+        let raf_id = self._raf_id.get();
+        if raf_id != 0 {
+            if let Some(window) = web_sys::window() {
+                let _ = window.cancel_animation_frame(raf_id);
+            }
+            self._raf_id.set(0);
+        }
+
+        // Drop the closure by clearing the slot, then the Rc.
+        // The closure captures slot_for_reschedule which holds the same Rc,
+        // so clearing the slot breaks the reference cycle.
+        if let Some(slot) = &self._raf_closure {
+            slot.borrow_mut().take(); // drop the Closure, breaking the cycle
+        }
+        self._raf_closure = None;
+    }
+
     /// Dispose: remove all event listeners, disconnect resize observer, and clean up resources.
     ///
     /// IMPORTANT: Call this when destroying the chart to prevent memory leaks.
@@ -4329,6 +4859,10 @@ impl RayCore {
 
         // 3. Remove all tracked event listeners
         self._event_registry.remove_all();
+
+        // 3b. Stop auto-render and clean up event emitter
+        self.stop_auto_render_internal();
+        self.event_emitter.borrow_mut().remove_all_listeners();
 
         // 4. Clear closure vectors (closures will be dropped, but DOM refs are now removed)
         self._closures.clear();
