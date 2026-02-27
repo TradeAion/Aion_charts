@@ -219,42 +219,7 @@ pub fn generate_area_line_segments(
 
     let line_w = (opts.line_width * v_ratio).round().max(1.0) as f32;
 
-    let vol_h = pane_h * viewport.volume_height_ratio as f64;
-    let candle_h = pane_h - vol_h;
-
-    let mut points: Vec<(f64, f64)> = Vec::with_capacity(data.len());
-
-    for i in 0..data.len() {
-        let pt = data.get(i);
-        let bar_idx = match timestamp_to_bar_index(pt.timestamp, bar_timestamps) {
-            Some(bi) => bi,
-            None => i as f64,
-        };
-
-        if bar_idx < viewport.start_bar - 2.0 || bar_idx > viewport.end_bar + 2.0 {
-            if !points.is_empty() || i + 1 < data.len() {
-                let next_visible = if i + 1 < data.len() {
-                    let next_ts = data.get(i + 1).timestamp;
-                    if let Some(next_bi) = timestamp_to_bar_index(next_ts, bar_timestamps) {
-                        next_bi >= viewport.start_bar - 2.0 && next_bi <= viewport.end_bar + 2.0
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-                if !next_visible && (points.is_empty() || bar_idx < viewport.start_bar - 2.0) {
-                    continue;
-                }
-            } else {
-                continue;
-            }
-        }
-
-        let px_x = bar_to_x(bar_idx + 0.5, viewport, pane_w).round();
-        let px_y = price_to_y(pt.value as f64, viewport, candle_h).round();
-        points.push((px_x, px_y));
-    }
+    let points = generate_line_series_points(series, viewport, bar_timestamps, pane_w, pane_h);
 
     if points.len() < 2 {
         return Vec::new();
@@ -317,39 +282,7 @@ pub fn generate_baseline_line_segments(
 
     let base_y = price_to_y(opts.base_value, viewport, candle_h).round();
 
-    let mut points: Vec<(f64, f64)> = Vec::with_capacity(data.len());
-
-    for i in 0..data.len() {
-        let pt = data.get(i);
-        let bar_idx = match timestamp_to_bar_index(pt.timestamp, bar_timestamps) {
-            Some(bi) => bi,
-            None => i as f64,
-        };
-
-        if bar_idx < viewport.start_bar - 2.0 || bar_idx > viewport.end_bar + 2.0 {
-            if !points.is_empty() || i + 1 < data.len() {
-                let next_visible = if i + 1 < data.len() {
-                    let next_ts = data.get(i + 1).timestamp;
-                    if let Some(next_bi) = timestamp_to_bar_index(next_ts, bar_timestamps) {
-                        next_bi >= viewport.start_bar - 2.0 && next_bi <= viewport.end_bar + 2.0
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-                if !next_visible && (points.is_empty() || bar_idx < viewport.start_bar - 2.0) {
-                    continue;
-                }
-            } else {
-                continue;
-            }
-        }
-
-        let px_x = bar_to_x(bar_idx + 0.5, viewport, pane_w).round();
-        let px_y = price_to_y(pt.value as f64, viewport, candle_h).round();
-        points.push((px_x, px_y));
-    }
+    let points = generate_line_series_points(series, viewport, bar_timestamps, pane_w, pane_h);
 
     if points.len() < 2 {
         return Vec::new();
@@ -544,39 +477,7 @@ pub fn generate_area_fill_rects(
     };
 
     // Pre-compute (px_x, px_y) pairs for visible points
-    let mut points: Vec<(f64, f64)> = Vec::with_capacity(data.len());
-
-    for i in 0..data.len() {
-        let pt = data.get(i);
-        let bar_idx = match timestamp_to_bar_index(pt.timestamp, bar_timestamps) {
-            Some(bi) => bi,
-            None => i as f64,
-        };
-
-        if bar_idx < viewport.start_bar - 2.0 || bar_idx > viewport.end_bar + 2.0 {
-            if !points.is_empty() || i + 1 < data.len() {
-                let next_visible = if i + 1 < data.len() {
-                    let next_ts = data.get(i + 1).timestamp;
-                    if let Some(next_bi) = timestamp_to_bar_index(next_ts, bar_timestamps) {
-                        next_bi >= viewport.start_bar - 2.0 && next_bi <= viewport.end_bar + 2.0
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-                if !next_visible && (points.is_empty() || bar_idx < viewport.start_bar - 2.0) {
-                    continue;
-                }
-            } else {
-                continue;
-            }
-        }
-
-        let px_x = bar_to_x(bar_idx + 0.5, viewport, pane_w).round();
-        let px_y = price_to_y(pt.value as f64, viewport, candle_h).round();
-        points.push((px_x, px_y));
-    }
+    let points = generate_line_series_points(series, viewport, bar_timestamps, pane_w, pane_h);
 
     if points.is_empty() {
         return Vec::new();
@@ -698,42 +599,7 @@ pub fn generate_area_line_rects(
     let line_w = (opts.line_width * v_ratio).round().max(1.0);
     let half_w = (line_w * 0.5).floor();
 
-    let vol_h = pane_h * viewport.volume_height_ratio as f64;
-    let candle_h = pane_h - vol_h;
-
-    let mut points: Vec<(f64, f64)> = Vec::with_capacity(data.len());
-
-    for i in 0..data.len() {
-        let pt = data.get(i);
-        let bar_idx = match timestamp_to_bar_index(pt.timestamp, bar_timestamps) {
-            Some(bi) => bi,
-            None => i as f64,
-        };
-
-        if bar_idx < viewport.start_bar - 2.0 || bar_idx > viewport.end_bar + 2.0 {
-            if !points.is_empty() || i + 1 < data.len() {
-                let next_visible = if i + 1 < data.len() {
-                    let next_ts = data.get(i + 1).timestamp;
-                    if let Some(next_bi) = timestamp_to_bar_index(next_ts, bar_timestamps) {
-                        next_bi >= viewport.start_bar - 2.0 && next_bi <= viewport.end_bar + 2.0
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-                if !next_visible && (points.is_empty() || bar_idx < viewport.start_bar - 2.0) {
-                    continue;
-                }
-            } else {
-                continue;
-            }
-        }
-
-        let px_x = bar_to_x(bar_idx + 0.5, viewport, pane_w).round();
-        let px_y = price_to_y(pt.value as f64, viewport, candle_h).round();
-        points.push((px_x, px_y));
-    }
+    let points = generate_line_series_points(series, viewport, bar_timestamps, pane_w, pane_h);
 
     if points.len() < 2 {
         return Vec::new();
@@ -1038,39 +904,7 @@ pub fn generate_baseline_fill_rects(
     let base_y = price_to_y(opts.base_value, viewport, candle_h).round();
 
     // Pre-compute pixel positions for visible points
-    let mut points: Vec<(f64, f64)> = Vec::with_capacity(data.len());
-
-    for i in 0..data.len() {
-        let pt = data.get(i);
-        let bar_idx = match timestamp_to_bar_index(pt.timestamp, bar_timestamps) {
-            Some(bi) => bi,
-            None => i as f64,
-        };
-
-        if bar_idx < viewport.start_bar - 2.0 || bar_idx > viewport.end_bar + 2.0 {
-            if !points.is_empty() || i + 1 < data.len() {
-                let next_visible = if i + 1 < data.len() {
-                    let next_ts = data.get(i + 1).timestamp;
-                    if let Some(next_bi) = timestamp_to_bar_index(next_ts, bar_timestamps) {
-                        next_bi >= viewport.start_bar - 2.0 && next_bi <= viewport.end_bar + 2.0
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-                if !next_visible && (points.is_empty() || bar_idx < viewport.start_bar - 2.0) {
-                    continue;
-                }
-            } else {
-                continue;
-            }
-        }
-
-        let px_x = bar_to_x(bar_idx + 0.5, viewport, pane_w).round();
-        let px_y = price_to_y(pt.value as f64, viewport, candle_h).round();
-        points.push((px_x, px_y));
-    }
+    let points = generate_line_series_points(series, viewport, bar_timestamps, pane_w, pane_h);
 
     if points.is_empty() {
         return Vec::new();
@@ -1214,39 +1048,7 @@ pub fn generate_baseline_line_rects(
 
     let base_y = price_to_y(opts.base_value, viewport, candle_h).round();
 
-    let mut points: Vec<(f64, f64)> = Vec::with_capacity(data.len());
-
-    for i in 0..data.len() {
-        let pt = data.get(i);
-        let bar_idx = match timestamp_to_bar_index(pt.timestamp, bar_timestamps) {
-            Some(bi) => bi,
-            None => i as f64,
-        };
-
-        if bar_idx < viewport.start_bar - 2.0 || bar_idx > viewport.end_bar + 2.0 {
-            if !points.is_empty() || i + 1 < data.len() {
-                let next_visible = if i + 1 < data.len() {
-                    let next_ts = data.get(i + 1).timestamp;
-                    if let Some(next_bi) = timestamp_to_bar_index(next_ts, bar_timestamps) {
-                        next_bi >= viewport.start_bar - 2.0 && next_bi <= viewport.end_bar + 2.0
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-                if !next_visible && (points.is_empty() || bar_idx < viewport.start_bar - 2.0) {
-                    continue;
-                }
-            } else {
-                continue;
-            }
-        }
-
-        let px_x = bar_to_x(bar_idx + 0.5, viewport, pane_w).round();
-        let px_y = price_to_y(pt.value as f64, viewport, candle_h).round();
-        points.push((px_x, px_y));
-    }
+    let points = generate_line_series_points(series, viewport, bar_timestamps, pane_w, pane_h);
 
     if points.len() < 2 {
         return Vec::new();
