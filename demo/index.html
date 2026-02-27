@@ -391,6 +391,9 @@
     <span style="color:#444;margin:0 4px">|</span>
     <!-- Drawing tools -->
     <button class="toggle-btn" id="draw-trendline" title="Trend Line">Line</button>
+    <button class="toggle-btn" id="draw-hline" title="Horizontal Line">H-Line</button>
+    <button class="toggle-btn" id="draw-vline" title="Vertical Line">V-Line</button>
+    <button class="toggle-btn" id="draw-ray" title="Ray">Ray</button>
     <button class="toggle-btn" id="draw-rectangle" title="Rectangle">Rect</button>
     <button class="toggle-btn" id="draw-fibonacci" title="Fibonacci Retracement">Fib</button>
     <button class="toggle-btn" id="draw-scale" title="Price Range / Scale">Scale</button>
@@ -918,8 +921,11 @@
 
     // ── Drawing tools ─────────────────────────────────────────────────────────
     const drawBtns = {
-      'draw-trendline': 'trend_line',
-      'draw-rectangle': 'rectangle',
+      'draw-trendline':  'trend_line',
+      'draw-hline':      'horizontal_line',
+      'draw-vline':      'vertical_line',
+      'draw-ray':        'ray',
+      'draw-rectangle':  'rectangle',
       'draw-fibonacci':  'fibonacci',
       'draw-scale':      'scale',
       'draw-brush':      'brush',
