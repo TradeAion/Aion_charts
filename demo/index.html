@@ -891,21 +891,115 @@
     $('macd-pane-btn').onclick = () => togglePane('macd');
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Live Streaming
+    // Live Streaming — realistic tick-by-tick candle builder
     // ═══════════════════════════════════════════════════════════════════════
-    let lastTs = demoData.timestamps[demoData.timestamps.length - 1];
-    let lastClose = demoData.close[demoData.close.length - 1];
-    let barOpen = lastClose;
+
+    // --- Tick-by-tick market simulator ---
+    // Produces realistic price movement using GBM with microstructure:
+    //   - Momentum (short-term autocorrelation)
+    //   - Mean-reversion (pulls price back toward a slow-moving anchor)
+    //   - Variable volatility regimes
+    //   - Proper candle building: open set once, H/L accumulated, close updated
+
+    const BAR_DURATION_MS = 5000;   // 5 seconds per candle
+    const TICK_INTERVAL_MS = 80;    // ~12 ticks per second
+
+    // Simulator state
+    let simPrice = demoData.close[demoData.close.length - 1];  // continue from last bar
+    let simAnchor = simPrice;           // slow-moving mean-reversion target
+    let simMomentum = 0;                // short-term momentum carry
+    let simVolRegime = 1.0;             // volatility multiplier (regime switching)
+    let simVolTimer = 0;                // ticks until next regime switch
+
+    // Current bar accumulator
+    let barTimestamp = BigInt(Date.now());
+    let barOpen = simPrice;
+    let barHigh = simPrice;
+    let barLow = simPrice;
+    let barClose = simPrice;
+    let barVolume = 0;
+    let barTickCount = 0;
+
+    // Box-Muller for normal distribution (much more realistic than uniform)
+    let _bmSpare = null;
+    function randNormal() {
+      if (_bmSpare !== null) { const v = _bmSpare; _bmSpare = null; return v; }
+      let u, v, s;
+      do { u = Math.random() * 2 - 1; v = Math.random() * 2 - 1; s = u * u + v * v; } while (s >= 1 || s === 0);
+      const f = Math.sqrt(-2 * Math.log(s) / s);
+      _bmSpare = v * f;
+      return u * f;
+    }
 
     function tick() {
       if (!core) return;
-      const change = (Math.random() - 0.48) * lastClose * 0.003;
-      const newClose = lastClose + change;
       const now = BigInt(Date.now());
-      if (Number(now - lastTs) >= 3000) { lastTs = now; barOpen = lastClose; }
-      core.upsert_bar(lastTs, barOpen, Math.max(newClose, barOpen) + Math.abs(change) * 0.5,
-                      Math.min(newClose, barOpen) - Math.abs(change) * 0.5, newClose, 100 + Math.random() * 500);
-      lastClose = newClose;
+
+      // --- New bar? ---
+      if (Number(now - barTimestamp) >= BAR_DURATION_MS) {
+        // Finalize the completed bar one last time (ensures last state is flushed)
+        // Then start a fresh bar
+        barTimestamp = now;
+        barOpen = simPrice;
+        barHigh = simPrice;
+        barLow = simPrice;
+        barClose = simPrice;
+        barVolume = 0;
+        barTickCount = 0;
+      }
+
+      // --- Volatility regime switching ---
+      simVolTimer--;
+      if (simVolTimer <= 0) {
+        // Switch regime every 30-120 ticks (~2.5-10 seconds)
+        simVolTimer = 30 + Math.floor(Math.random() * 90);
+        // Regimes: calm (0.5x), normal (1x), active (1.8x), spike (3x)
+        const r = Math.random();
+        if (r < 0.40)      simVolRegime = 0.5;   // calm
+        else if (r < 0.75) simVolRegime = 1.0;   // normal
+        else if (r < 0.92) simVolRegime = 1.8;   // active
+        else                simVolRegime = 3.0;   // spike
+      }
+
+      // --- Price tick ---
+      const baseVol = simPrice * 0.00015;   // ~0.015% per tick base volatility
+      const vol = baseVol * simVolRegime;
+
+      // Mean-reversion pull (weak, toward slow anchor)
+      const reversion = (simAnchor - simPrice) * 0.002;
+
+      // Momentum (autocorrelation — trends persist briefly)
+      const momentumDecay = 0.92;
+      const shock = randNormal() * vol;
+      simMomentum = simMomentum * momentumDecay + shock;
+
+      // Combine forces
+      simPrice += simMomentum + reversion;
+
+      // Drift the anchor slowly (random walk at much lower vol)
+      simAnchor += randNormal() * baseVol * 0.3;
+
+      // Clamp sanity (price can't go negative)
+      if (simPrice < 1) simPrice = 1;
+
+      // --- Update bar accumulator ---
+      barClose = simPrice;
+      if (simPrice > barHigh) barHigh = simPrice;
+      if (simPrice < barLow) barLow = simPrice;
+
+      // Volume: each tick adds a random amount, more during high volatility
+      barVolume += (50 + Math.random() * 200) * simVolRegime;
+      barTickCount++;
+
+      // --- Push to chart ---
+      core.upsert_bar(
+        barTimestamp,
+        barOpen,
+        barHigh,
+        barLow,
+        barClose,
+        barVolume
+      );
     }
 
     $('stream-toggle').onclick = () => {
@@ -915,7 +1009,7 @@
         $('stream-toggle').textContent = '▶ Live';
         $('stream-toggle').classList.remove('active');
       } else {
-        streamInterval = setInterval(tick, 200);
+        streamInterval = setInterval(tick, TICK_INTERVAL_MS);
         $('stream-toggle').textContent = '⏸ Live';
         $('stream-toggle').classList.add('active');
       }
