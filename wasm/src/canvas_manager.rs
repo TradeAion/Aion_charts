@@ -21,6 +21,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CssStyleDeclaration, Document, HtmlCanvasElement, HtmlDivElement, HtmlElement};
 
+use crate::utils;
+
 /// A pair of canvases: base (static content) + top (dynamic/crosshair content).
 /// Matches LWC's canvasBinding + topCanvasBinding pattern.
 pub struct CanvasPair {
@@ -30,16 +32,9 @@ pub struct CanvasPair {
 
 impl CanvasPair {
     fn new(doc: &Document, prefix: &str) -> Result<Self, JsValue> {
-        let base = create_canvas(doc, &format!("{}-base", prefix), 0)?;
-        let top = create_canvas(doc, &format!("{}-top", prefix), 1)?;
+        let base = utils::create_canvas(doc, &format!("{}-base", prefix), 0)?;
+        let top = utils::create_canvas(doc, &format!("{}-top", prefix), 1)?;
         Ok(Self { base, top })
-    }
-
-    #[allow(dead_code)]
-    pub fn set_size(&self, pw: u32, ph: u32) {
-        for c in [&self.base, &self.top] {
-            set_canvas_bitmap_size_if_needed(c, pw.max(1), ph.max(1));
-        }
     }
 
     /// Set size with explicit CSS dimensions for crisp rendering.
@@ -47,7 +42,7 @@ impl CanvasPair {
     /// `css_w`, `css_h` are CSS pixel dimensions for layout.
     pub fn set_size_with_css(&self, pw: u32, ph: u32, css_w: f64, css_h: f64) {
         for c in [&self.base, &self.top] {
-            set_canvas_size_with_css_if_needed(c, pw.max(1), ph.max(1), css_w, css_h);
+            utils::set_canvas_size_with_css(c, pw.max(1), ph.max(1), css_w, css_h);
         }
     }
 }
@@ -60,22 +55,15 @@ pub struct PaneCanvases {
 
 impl PaneCanvases {
     fn new(doc: &Document) -> Result<Self, JsValue> {
-        let chart = create_canvas(doc, "raycore-pane-chart", 0)?;
-        let top = create_canvas(doc, "raycore-pane-top", 1)?;
+        let chart = utils::create_canvas(doc, "raycore-pane-chart", 0)?;
+        let top = utils::create_canvas(doc, "raycore-pane-top", 1)?;
         Ok(Self { chart, top })
-    }
-
-    #[allow(dead_code)]
-    pub fn set_size(&self, pw: u32, ph: u32) {
-        for c in [&self.chart, &self.top] {
-            set_canvas_bitmap_size_if_needed(c, pw.max(1), ph.max(1));
-        }
     }
 
     /// Set size with explicit CSS dimensions for crisp rendering.
     pub fn set_size_with_css(&self, pw: u32, ph: u32, css_w: f64, css_h: f64) {
         for c in [&self.chart, &self.top] {
-            set_canvas_size_with_css_if_needed(c, pw.max(1), ph.max(1), css_w, css_h);
+            utils::set_canvas_size_with_css(c, pw.max(1), ph.max(1), css_w, css_h);
         }
     }
 }
@@ -209,7 +197,7 @@ impl WidgetLayout {
         );
         grid_wrapper.append_child(&corner_stub_container)?;
 
-        let corner_stub = create_canvas(&doc, "raycore-corner-stub-canvas", 0)?;
+        let corner_stub = utils::create_canvas(&doc, "raycore-corner-stub-canvas", 0)?;
         corner_stub_container.append_child(&corner_stub)?;
 
         Ok(Self {
@@ -338,7 +326,7 @@ impl WidgetLayout {
         let (sw, sh) = self.corner_stub_css_size();
         let spw = (sw * dpr).round() as u32;
         let sph = (sh * dpr).round() as u32;
-        set_canvas_size_with_css_if_needed(&self.corner_stub, spw.max(1), sph.max(1), sw, sh);
+        utils::set_canvas_size_with_css(&self.corner_stub, spw.max(1), sph.max(1), sw, sh);
     }
 
     /// Resize a specific widget's canvases using exact device-pixel sizes
@@ -360,7 +348,7 @@ impl WidgetLayout {
     }
 
     pub fn resize_corner_stub_exact(&self, exact_pw: u32, exact_ph: u32, css_w: f64, css_h: f64) {
-        set_canvas_size_with_css_if_needed(
+        utils::set_canvas_size_with_css(
             &self.corner_stub,
             exact_pw.max(1),
             exact_ph.max(1),
@@ -372,23 +360,6 @@ impl WidgetLayout {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-fn create_canvas(doc: &Document, id: &str, z_index: u32) -> Result<HtmlCanvasElement, JsValue> {
-    let canvas = doc
-        .create_element("canvas")?
-        .dyn_into::<HtmlCanvasElement>()
-        .map_err(|_| JsValue::from_str("failed to create canvas"))?;
-
-    canvas.set_id(id);
-    // Position absolute, but don't set width/height:100% — we'll set explicit CSS sizes
-    // to avoid browser scaling blur. Initial size will be set by resize_all_canvases.
-    canvas.style().set_css_text(&format!(
-        "position:absolute;top:0;left:0;display:block;z-index:{};pointer-events:none;image-rendering:pixelated;image-rendering:crisp-edges;",
-        z_index
-    ));
-
-    Ok(canvas)
-}
-
 fn create_widget_container(doc: &Document, id: &str) -> Result<HtmlDivElement, JsValue> {
     let div = doc
         .create_element("div")?
@@ -396,37 +367,6 @@ fn create_widget_container(doc: &Document, id: &str) -> Result<HtmlDivElement, J
         .map_err(|_| JsValue::from_str("failed to create div"))?;
     div.set_id(id);
     Ok(div)
-}
-
-fn set_canvas_bitmap_size_if_needed(canvas: &HtmlCanvasElement, pw: u32, ph: u32) {
-    if canvas.width() != pw {
-        canvas.set_width(pw);
-    }
-    if canvas.height() != ph {
-        canvas.set_height(ph);
-    }
-}
-
-fn set_canvas_size_with_css_if_needed(
-    canvas: &HtmlCanvasElement,
-    pw: u32,
-    ph: u32,
-    css_w: f64,
-    css_h: f64,
-) {
-    set_canvas_bitmap_size_if_needed(canvas, pw, ph);
-
-    // Keep CSS size explicit to avoid browser scaling blur, but only mutate style when needed.
-    let style = canvas.style();
-    let css_w_px = format!("{}px", css_w);
-    if style.get_property_value("width").ok().as_deref() != Some(css_w_px.as_str()) {
-        let _ = style.set_property("width", &css_w_px);
-    }
-
-    let css_h_px = format!("{}px", css_h);
-    if style.get_property_value("height").ok().as_deref() != Some(css_h_px.as_str()) {
-        let _ = style.set_property("height", &css_h_px);
-    }
 }
 
 fn set_style_property_if_needed(style: &CssStyleDeclaration, property: &str, value: &str) {

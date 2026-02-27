@@ -112,16 +112,8 @@ struct WorkspaceStyleConfig {
     pane: WorkspacePaneStyle,
 }
 
-fn clamp01(v: f32) -> f32 {
-    v.clamp(0.0, 1.0)
-}
-
 fn rgba_css(color: [f32; 4]) -> String {
-    let r = (clamp01(color[0]) * 255.0).round() as u8;
-    let g = (clamp01(color[1]) * 255.0).round() as u8;
-    let b = (clamp01(color[2]) * 255.0).round() as u8;
-    let a = clamp01(color[3]);
-    format!("rgba({r},{g},{b},{a:.4})")
+    crate::utils::rgba_css(&color)
 }
 
 struct WorkspaceInner {

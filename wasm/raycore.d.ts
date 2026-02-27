@@ -474,11 +474,6 @@ export declare class RayCore {
   ): Promise<RayCore>;
 
   /**
-   * @deprecated Use `RayCore.create_chart(container, options)` instead.
-   */
-  static create(container_id: string): Promise<RayCore>;
-
-  /**
    * @deprecated Use `RayCore.create_chart(container, { renderer })` instead.
    */
   static create_with(container_id: string, renderer: string): Promise<RayCore>;
@@ -795,9 +790,6 @@ export declare class RayCore {
    * @param target — `"vert"`, `"horz"`, or `"both"`.
    */
   set_crosshair_line_label_bg_color(target: string, r: number, g: number, b: number, a: number): void;
-
-  /** Set crosshair label text colour (RGBA 0–1). */
-  set_crosshair_label_text_color(r: number, g: number, b: number, a: number): void;
 
   // ── Last-price line ────────────────────────────────────────────────────────
 
@@ -1164,26 +1156,6 @@ export declare class RayCore {
 
   /** Set the axis label font size (CSS px). */
   set_font_size(size: number): void;
-
-  // ── Deprecated individual colour setters ──────────────────────────────────
-
-  /** @deprecated Use `apply_options({ theme: { colors: { background } } })`. */
-  set_background_color(r: number, g: number, b: number, a: number): void;
-
-  /** @deprecated Use `apply_options({ theme: { colors: { grid } } })`. */
-  set_grid_color(r: number, g: number, b: number, a: number): void;
-
-  /** @deprecated Use `apply_options({ theme: { colors: { text } } })`. */
-  set_axis_text_color(r: number, g: number, b: number, a: number): void;
-
-  /** @deprecated Use `apply_options({ theme: { colors: { axis_border } } })`. */
-  set_axis_border_color(r: number, g: number, b: number, a: number): void;
-
-  /** @deprecated Use `apply_options({ theme: ... })`. */
-  set_crosshair_color(r: number, g: number, b: number, a: number): void;
-
-  /** @deprecated Use `apply_options({ theme: ... })`. */
-  set_crosshair_label_bg_color(r: number, g: number, b: number, a: number): void;
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────────
 

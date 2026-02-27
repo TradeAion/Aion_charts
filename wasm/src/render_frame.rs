@@ -448,24 +448,12 @@ fn render_corner_stub(layout: &WidgetLayout, style: &ChartStyle, dpr: f64) {
     };
 
     // Background
-    let bg = format!(
-        "rgba({},{},{},{})",
-        (style.bg_color[0] * 255.0) as u8,
-        (style.bg_color[1] * 255.0) as u8,
-        (style.bg_color[2] * 255.0) as u8,
-        style.bg_color[3],
-    );
+    let bg = crate::utils::rgba_css(&style.bg_color);
     ctx.set_fill_style_str(&bg);
     ctx.fill_rect(0.0, 0.0, w, h);
 
     // Border color
-    let border = format!(
-        "rgba({},{},{},{})",
-        (style.axis_border_color[0] * 255.0) as u8,
-        (style.axis_border_color[1] * 255.0) as u8,
-        (style.axis_border_color[2] * 255.0) as u8,
-        style.axis_border_color[3],
-    );
+    let border = crate::utils::rgba_css(&style.axis_border_color);
     ctx.set_fill_style_str(&border);
 
     let border_size = (style.axis_border_size as f64 * dpr).max(1.0).floor();
