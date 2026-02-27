@@ -3,20 +3,20 @@
   "version": "0.1.0",
   "type": "module",
   "description": "High-performance WebGPU/Canvas2D charting engine — WASM build",
-  "main": "raycore_wasm.js",
-  "module": "raycore_wasm.js",
-  "types": "raycore.d.ts",
+  "main": "./wasm/pkg/raycore_wasm.js",
+  "module": "./wasm/pkg/raycore_wasm.js",
+  "types": "./wasm/pkg/raycore_wasm.d.ts",
   "exports": {
     ".": {
-      "types": "./raycore.d.ts",
-      "import": "./raycore_wasm.js"
+      "types": "./wasm/pkg/raycore_wasm.d.ts",
+      "import": "./wasm/pkg/raycore_wasm.js"
     },
-    "./raycore_wasm_bg.wasm": "./raycore_wasm_bg.wasm"
+    "./raycore_wasm_bg.wasm": "./wasm/pkg/raycore_wasm_bg.wasm"
   },
   "files": [
-    "raycore_wasm_bg.wasm",
-    "raycore_wasm.js",
-    "raycore.d.ts"
+    "wasm/pkg/raycore_wasm_bg.wasm",
+    "wasm/pkg/raycore_wasm.js",
+    "wasm/pkg/raycore_wasm.d.ts"
   ],
   "license": "SEE LICENSE IN LICENSE",
   "keywords": [
