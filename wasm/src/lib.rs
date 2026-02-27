@@ -1291,7 +1291,6 @@ impl RayCore {
     ///   autoRender: true,
     ///   symbol: "BTCUSD",
     ///   interval: "1D",
-    ///   watermark: "",
     ///   crosshair: { mode: "normal" | "magnet_ohlc" },
     ///   priceScale: { mode: "normal", margins: { top: 0.1, bottom: 0.1 } },
     /// }
@@ -1365,11 +1364,6 @@ impl RayCore {
             chart.interval = interval;
         }
 
-        // Apply watermark
-        if let Some(watermark) = js_get_str(&options, "watermark") {
-            chart.inner.borrow_mut().engine.style.watermark_text = watermark;
-        }
-
         // Apply crosshair mode
         if let Some(crosshair_obj) = js_get(&options, "crosshair") {
             if let Some(mode) = js_get_str(&crosshair_obj, "mode") {
@@ -1425,18 +1419,12 @@ impl RayCore {
                     _ => {}
                 }
                 let style = self.theme_config.to_chart_style();
-                // Preserve watermark text
-                let wm = self.inner.borrow().engine.style.watermark_text.clone();
                 self.inner.borrow_mut().engine.style = style;
-                self.inner.borrow_mut().engine.style.watermark_text = wm;
                 self.apply_css_variables();
             }
         }
 
-        // Watermark
-        if let Some(wm) = js_get_str(&options, "watermark") {
-            self.inner.borrow_mut().engine.style.watermark_text = wm;
-        }
+
 
         // Symbol
         if let Some(symbol) = js_get_str(&options, "symbol") {
@@ -1972,11 +1960,6 @@ impl RayCore {
         self.inner.borrow_mut().engine.drawings.remove_all_scale();
     }
 
-    /// Set watermark text displayed centered on the chart pane.
-    pub fn set_watermark(&mut self, text: &str) {
-        self.inner.borrow_mut().engine.style.watermark_text = text.to_string();
-    }
-
     // ── Runtime Style Configuration API ────────────────────────────────────────
     // NOTE: These individual setter methods are maintained for backward compatibility.
     // For new code, prefer `apply_options({ theme: { colors: { ... } } })` instead.
@@ -2180,11 +2163,6 @@ impl RayCore {
         let mut s = self.inner.borrow_mut();
         s.engine.style.bullish_volume_color = [up_r, up_g, up_b, up_a];
         s.engine.style.bearish_volume_color = [down_r, down_g, down_b, down_a];
-    }
-
-    /// Set the watermark text color (RGBA, 0.0-1.0).
-    pub fn set_watermark_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
-        self.inner.borrow_mut().engine.style.watermark_color = [r, g, b, a];
     }
 
     /// Set the font size for axis labels (in CSS pixels).
@@ -4429,7 +4407,7 @@ impl RayCore {
             if is_webgpu {
                 let mut all_drawings = base_drawings;
                 all_drawings.extend(top_drawings);
-                // Clear and render base layer first (watermark, legend, drawings, crosshair)
+                // Clear and render base layer (legend, drawings, crosshair)
                 overlay.render_with_drawings(
                     &main_crosshair,
                     &engine.style,

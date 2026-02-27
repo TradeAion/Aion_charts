@@ -42,7 +42,6 @@ export interface ThemeColors {
   grid?: RgbaColor;
   axis_border?: RgbaColor;
   text?: RgbaColor;
-  watermark?: RgbaColor;
   bullish?: RgbaColor;
   bearish?: RgbaColor;
   volume_bullish?: RgbaColor;
@@ -137,12 +136,10 @@ export interface CreateChartOptions {
    * @default true
    */
   autoRender?: boolean;
-  /** Symbol string shown in watermark / header (e.g. "BTCUSD"). */
+  /** Symbol string shown in the header (e.g. "BTCUSD"). */
   symbol?: string;
   /** Interval string (e.g. "1D", "4H", "15m"). */
   interval?: string;
-  /** Watermark text centred on the chart pane. */
-  watermark?: string;
   crosshair?: CrosshairOptions;
   priceScale?: PriceScaleOptions;
 }
@@ -260,7 +257,6 @@ export interface RayCoreCssVariables {
   '--raycore-bearish': string;
   '--raycore-grid': string;
   '--raycore-border': string;
-  '--raycore-watermark': string;
   '--raycore-crosshair': string;
   '--raycore-crosshair-label-bg': string;
   '--raycore-crosshair-label-text': string;
@@ -494,7 +490,7 @@ export declare class RayCore {
    * @example
    * ```ts
    * chart.apply_options({ theme: 'light' });
-   * chart.apply_options({ crosshair: { mode: 'magnet_ohlc' }, watermark: 'ETH/USD' });
+   * chart.apply_options({ crosshair: { mode: 'magnet_ohlc' } });
    * ```
    */
   apply_options(options: CreateChartOptions): void;
@@ -820,13 +816,8 @@ export declare class RayCore {
   /** Show/hide the last-price axis label. */
   set_last_price_label_visible(visible: boolean): void;
 
-  // ── Watermark ──────────────────────────────────────────────────────────────
 
-  /** Set the centred watermark text. */
-  set_watermark(text: string): void;
 
-  /** Set the watermark text colour (RGBA 0–1). */
-  set_watermark_color(r: number, g: number, b: number, a: number): void;
 
   // ── Candle / volume colors ─────────────────────────────────────────────────
 

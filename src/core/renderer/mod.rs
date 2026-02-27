@@ -11,7 +11,7 @@
 //! - wgpu_context.rs: GPU device/surface management
 //! - price_axis.rs: dedicated PriceAxisRenderer
 //! - time_axis.rs: dedicated TimeAxisRenderer
-//! - overlay.rs: crosshair lines + watermark on pane top canvas
+//! - overlay.rs: crosshair lines, legend, and drawings on pane top canvas
 
 pub mod theme;
 pub mod traits;

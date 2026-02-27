@@ -74,15 +74,11 @@ pub const CROSSHAIR: [f32; 4] = [ch(0x95), ch(0x98), ch(0xA1), 1.0];
 pub const CROSSHAIR_LABEL_BG: [f32; 4] = [ch(0x13), ch(0x17), ch(0x22), 1.0];
 /// Crosshair label text.
 pub const CROSSHAIR_LABEL_TEXT: [f32; 4] = [0.9, 0.9, 0.9, 1.0];
-/// Watermark text color.
-pub const WATERMARK: [f32; 4] = [0.15, 0.16, 0.18, 1.0];
 /// Font family (LWC default).
 pub const FONT_FAMILY: &str =
     "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
 /// Axis label font size in CSS px.
 pub const FONT_SIZE: f32 = 12.0;
-/// Watermark font size in CSS px.
-pub const FONT_SIZE_WATERMARK: f32 = 48.0;
 /// Bar width as fraction of bar slot (0.0-1.0).
 pub const BAR_WIDTH_RATIO: f32 = 0.8;
 /// Axis border width in CSS px.
@@ -132,11 +128,8 @@ pub fn default_style() -> ChartStyle {
             style: LineStyle::Dashed,
             label_visible: true,
         },
-        watermark_color: WATERMARK,
-        watermark_text: String::new(),
         font_family: FONT_FAMILY.into(),
         font_size: FONT_SIZE,
-        font_size_watermark: FONT_SIZE_WATERMARK,
         bar_width_ratio: BAR_WIDTH_RATIO,
         axis_border_size: AXIS_BORDER_SIZE,
         axis_tick_length: AXIS_TICK_LENGTH,
@@ -182,8 +175,6 @@ pub struct ThemeColors {
     pub axis_border: [f32; 4],
     /// Axis label text color.
     pub axis_text: [f32; 4],
-    /// Watermark text color.
-    pub watermark: [f32; 4],
 }
 
 /// Crosshair appearance configuration.
@@ -216,8 +207,6 @@ pub struct ThemeTypography {
     pub font_family: String,
     /// Base font size for axis labels in CSS px.
     pub font_size: f32,
-    /// Watermark font size in CSS px.
-    pub font_size_watermark: f32,
 }
 
 /// Layout sizing constants.
@@ -388,7 +377,6 @@ impl ThemeConfig {
                 grid: GRID,
                 axis_border: AXIS_BORDER,
                 axis_text: AXIS_TEXT,
-                watermark: WATERMARK,
             },
             crosshair: ThemeCrosshair {
                 line_color: CROSSHAIR,
@@ -404,7 +392,6 @@ impl ThemeConfig {
             typography: ThemeTypography {
                 font_family: FONT_FAMILY.into(),
                 font_size: FONT_SIZE,
-                font_size_watermark: FONT_SIZE_WATERMARK,
             },
             layout: ThemeLayout {
                 bar_width_ratio: BAR_WIDTH_RATIO,
@@ -490,7 +477,6 @@ impl ThemeConfig {
                 grid: [ch(0xE0), ch(0xE3), ch(0xEB), 0.4], // #E0E3EB @ 40%
                 axis_border: [ch(0xE0), ch(0xE3), ch(0xEB), 1.0], // #E0E3EB
                 axis_text: [ch(0x78), ch(0x7B), ch(0x86), 1.0], // #787B86
-                watermark: [ch(0xE0), ch(0xE3), ch(0xEB), 1.0], // #E0E3EB
             },
             crosshair: ThemeCrosshair {
                 line_color: [ch(0x75), ch(0x86), ch(0x96), 1.0], // #758696
@@ -506,7 +492,6 @@ impl ThemeConfig {
             typography: ThemeTypography {
                 font_family: FONT_FAMILY.into(),
                 font_size: FONT_SIZE,
-                font_size_watermark: FONT_SIZE_WATERMARK,
             },
             layout: ThemeLayout {
                 bar_width_ratio: BAR_WIDTH_RATIO,
@@ -623,11 +608,8 @@ impl ThemeConfig {
                 style: self.last_price_line.style,
                 label_visible: self.last_price_line.label_visible,
             },
-            watermark_color: self.colors.watermark,
-            watermark_text: String::new(),
             font_family: self.typography.font_family.clone(),
             font_size: self.typography.font_size,
-            font_size_watermark: self.typography.font_size_watermark,
             bar_width_ratio: self.layout.bar_width_ratio,
             axis_border_size: self.layout.axis_border_size,
             axis_tick_length: self.layout.axis_tick_length,
@@ -707,10 +689,6 @@ impl ThemeConfig {
             Self::color_to_css(&self.colors.axis_border),
         ));
         vars.push((
-            "--raycore-watermark".into(),
-            Self::color_to_css(&self.colors.watermark),
-        ));
-        vars.push((
             "--raycore-crosshair".into(),
             Self::color_to_css(&self.crosshair.line_color),
         ));
@@ -776,7 +754,6 @@ mod tests {
             legacy.crosshair_label_text,
             theme_style.crosshair_label_text
         );
-        assert_eq!(legacy.watermark_color, theme_style.watermark_color);
         assert_eq!(legacy.font_family, theme_style.font_family);
         assert_eq!(legacy.font_size, theme_style.font_size);
         assert_eq!(legacy.bar_width_ratio, theme_style.bar_width_ratio);

@@ -1,4 +1,4 @@
-//! OverlayRenderer — pane top canvas: crosshair, watermark, legend, drawings.
+//! OverlayRenderer — pane top canvas: crosshair, legend, drawings.
 //!
 //! Sits on the pane's top canvas (z-index:2).
 //! No longer draws axes or crosshair labels — those are on their own widget canvases.
@@ -114,9 +114,6 @@ impl OverlayRenderer {
         let ph = self.ph as f64;
         self.ctx.clear_rect(0.0, 0.0, pw, ph);
 
-        // Watermark: below everything
-        self.render_watermark(style);
-
         // Legend: OHLCV values in top-left corner
         if let Some(bars) = bars {
             self.render_legend(crosshair, style, bars);
@@ -214,43 +211,6 @@ impl OverlayRenderer {
         for geom in drawings {
             Self::draw_geometry_on(ctx, geom);
         }
-    }
-
-    /// Render a watermark centered on the pane.
-    /// Drawn on the top canvas, below drawings and crosshair.
-    /// LWC pattern: text-watermark pane-renderer with auto-zoom shrink.
-    pub fn render_watermark(&mut self, style: &ChartStyle) {
-        let text = &style.watermark_text;
-        if text.is_empty() {
-            return;
-        }
-
-        let pw = self.pw as f64;
-        let ph = self.ph as f64;
-        let dpr = self.dpr;
-
-        // Compute font size in physical px
-        let fs = style.font_size_watermark as f64 * dpr;
-        let font = format!("bold {}px {}", fs.round(), style.font_family);
-        self.ctx.set_font(&font);
-        self.ctx.set_fill_style_str(&rgba(&style.watermark_color));
-        self.ctx.set_text_align("center");
-        self.ctx.set_text_baseline("middle");
-
-        // Measure text, auto-shrink if wider than pane
-        let text_w = self.text_cache.measure(&self.ctx, text, &font);
-        let zoom = if text_w > pw && text_w > 0.0 {
-            pw / text_w
-        } else {
-            1.0
-        };
-
-        self.ctx.save();
-        // Translate to center of pane, then scale for zoom
-        self.ctx.translate(pw / 2.0, ph / 2.0).unwrap_or(());
-        self.ctx.scale(zoom, zoom).unwrap_or(());
-        let _ = self.ctx.fill_text(text, 0.0, 0.0);
-        self.ctx.restore();
     }
 
     /// Render OHLCV legend in the top-left corner of the pane.

@@ -69,14 +69,10 @@ pub struct ChartStyle {
     pub crosshair_label_text: [f32; 4],
     /// Live price line options for main/overlay series.
     pub last_price_line: LastPriceLineStyle,
-    pub watermark_color: [f32; 4],
-    /// Watermark text displayed centered on the pane.
-    pub watermark_text: String,
     /// Font family — LWC default: `-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif`.
     pub font_family: String,
     /// Layout font size in CSS px (LWC default: 12).
     pub font_size: f32,
-    pub font_size_watermark: f32,
     /// Bar width as fraction of bar slot (0.0-1.0). 0.8 = 80%.
     pub bar_width_ratio: f32,
 
