@@ -50,18 +50,18 @@ pub const fn ch(v: u8) -> f32 {
 
 /// Main chart & axis background.
 pub const BG: [f32; 4] = [ch(0x17), ch(0x17), ch(0x17), 1.0];
-/// Bullish candle body.
-pub const BULLISH: [f32; 4] = [ch(0x1A), ch(0xBC), ch(0x9C), 1.0];
-/// Bearish candle body.
-pub const BEARISH: [f32; 4] = [ch(0xE7), ch(0x4C), ch(0x3C), 1.0];
+/// Bullish candle body — vibrant emerald green (#22C55E).
+pub const BULLISH: [f32; 4] = [ch(0x22), ch(0xC5), ch(0x5E), 1.0];
+/// Bearish candle body — vibrant rose red (#F43F5E).
+pub const BEARISH: [f32; 4] = [ch(0xF4), ch(0x3F), ch(0x5E), 1.0];
 /// Bullish volume (same hue, lower alpha).
-pub const BULLISH_VOLUME: [f32; 4] = [ch(0x1A), ch(0xBC), ch(0x9C), 0.35];
+pub const BULLISH_VOLUME: [f32; 4] = [ch(0x22), ch(0xC5), ch(0x5E), 0.35];
 /// Bearish volume.
-pub const BEARISH_VOLUME: [f32; 4] = [ch(0xE7), ch(0x4C), ch(0x3C), 0.35];
+pub const BEARISH_VOLUME: [f32; 4] = [ch(0xF4), ch(0x3F), ch(0x5E), 0.35];
 /// Bullish wick.
-pub const WICK_BULLISH: [f32; 4] = [ch(0x1A), ch(0xBC), ch(0x9C), 0.9];
+pub const WICK_BULLISH: [f32; 4] = [ch(0x22), ch(0xC5), ch(0x5E), 0.9];
 /// Bearish wick.
-pub const WICK_BEARISH: [f32; 4] = [ch(0xE7), ch(0x4C), ch(0x3C), 0.9];
+pub const WICK_BEARISH: [f32; 4] = [ch(0xF4), ch(0x3F), ch(0x5E), 0.9];
 /// Grid line color.
 pub const GRID: [f32; 4] = [0.2, 0.2, 0.24, 0.4];
 /// Axis border / tick color.
@@ -406,24 +406,24 @@ impl ThemeConfig {
                 label_visible: true,
             },
             series_defaults: ThemeSeriesDefaults {
-                // TradingView blue #2962FF
-                line_color: [0.161, 0.384, 1.0, 1.0],
-                area_line_color: [0.161, 0.384, 1.0, 1.0],
-                area_top_fill: [0.161, 0.384, 1.0, 0.28],
-                area_bottom_fill: [0.161, 0.384, 1.0, 0.0],
-                // Teal/red pair (#26a69a / #ef5350)
-                histogram_color: [0.149, 0.651, 0.604, 1.0],
-                bar_up_color: [0.149, 0.651, 0.604, 1.0],
-                bar_down_color: [0.937, 0.325, 0.314, 1.0],
+                // Vibrant blue #3B82F6 (Tailwind blue-500)
+                line_color: [0.231, 0.510, 0.965, 1.0],
+                area_line_color: [0.231, 0.510, 0.965, 1.0],
+                area_top_fill: [0.231, 0.510, 0.965, 0.28],
+                area_bottom_fill: [0.231, 0.510, 0.965, 0.0],
+                // Vibrant emerald/rose pair to match candles
+                histogram_color: [0.133, 0.773, 0.369, 1.0], // #22C55E
+                bar_up_color: [0.133, 0.773, 0.369, 1.0],    // #22C55E
+                bar_down_color: [0.957, 0.247, 0.369, 1.0],  // #F43F5E
                 // Baseline
-                baseline_top_line: [0.149, 0.651, 0.604, 1.0],
-                baseline_bottom_line: [0.937, 0.325, 0.314, 1.0],
-                baseline_top_fill_1: [0.149, 0.651, 0.604, 0.28],
-                baseline_top_fill_2: [0.149, 0.651, 0.604, 0.05],
-                baseline_bottom_fill_1: [0.937, 0.325, 0.314, 0.05],
-                baseline_bottom_fill_2: [0.937, 0.325, 0.314, 0.28],
+                baseline_top_line: [0.133, 0.773, 0.369, 1.0],
+                baseline_bottom_line: [0.957, 0.247, 0.369, 1.0],
+                baseline_top_fill_1: [0.133, 0.773, 0.369, 0.28],
+                baseline_top_fill_2: [0.133, 0.773, 0.369, 0.05],
+                baseline_bottom_fill_1: [0.957, 0.247, 0.369, 0.05],
+                baseline_bottom_fill_2: [0.957, 0.247, 0.369, 0.28],
                 // Markers & price lines
-                marker_color: [0.161, 0.384, 1.0, 1.0],
+                marker_color: [0.231, 0.510, 0.965, 1.0],
                 marker_text_color: [1.0, 1.0, 1.0, 0.9],
                 price_line_color: [0.5, 0.5, 0.5, 1.0],
                 price_line_text_color: [1.0, 1.0, 1.0, 0.9],
