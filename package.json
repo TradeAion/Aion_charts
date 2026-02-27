@@ -1,15 +1,34 @@
 {
   "name": "raycore-wasm",
-  "type": "module",
-  "description": "RayCore WASM entry point — thin JS interop layer",
   "version": "0.1.0",
+  "type": "module",
+  "description": "High-performance WebGPU/Canvas2D charting engine — WASM build",
+  "main": "raycore_wasm.js",
+  "module": "raycore_wasm.js",
+  "types": "raycore.d.ts",
+  "exports": {
+    ".": {
+      "types": "./raycore.d.ts",
+      "import": "./raycore_wasm.js"
+    },
+    "./raycore_wasm_bg.wasm": "./raycore_wasm_bg.wasm"
+  },
   "files": [
     "raycore_wasm_bg.wasm",
     "raycore_wasm.js",
-    "raycore_wasm.d.ts"
+    "raycore.d.ts"
   ],
-  "main": "raycore_wasm.js",
-  "types": "raycore_wasm.d.ts",
+  "license": "SEE LICENSE IN LICENSE",
+  "keywords": [
+    "chart",
+    "charting",
+    "webgpu",
+    "canvas",
+    "trading",
+    "wasm",
+    "financial",
+    "candlestick"
+  ],
   "sideEffects": [
     "./snippets/*"
   ]
