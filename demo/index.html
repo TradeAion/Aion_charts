@@ -512,6 +512,45 @@
         </div>
       </div>
 
+      <!-- Axes & Grid -->
+      <div class="settings-section">
+        <h3>Axes &amp; Grid</h3>
+        <div class="setting-row">
+          <span class="setting-label">Border Color</span>
+          <div class="setting-control">
+            <input type="color" class="setting-input" id="cfg-axis-border-color" value="#2a2a30">
+          </div>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Border</span>
+          <div class="setting-control">
+            <label style="font-size:10px;display:flex;align-items:center;gap:4px">
+              <input type="checkbox" class="setting-input" id="cfg-axis-border-visible" checked> Visible
+            </label>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Tick Marks</span>
+          <div class="setting-control">
+            <label style="font-size:10px;display:flex;align-items:center;gap:4px">
+              <input type="checkbox" class="setting-input" id="cfg-axis-ticks-visible" checked> Visible
+            </label>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Text Color</span>
+          <div class="setting-control">
+            <input type="color" class="setting-input" id="cfg-axis-text-color" value="#787b86">
+          </div>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Grid Color</span>
+          <div class="setting-control">
+            <input type="color" class="setting-input" id="cfg-grid-color" value="#2a2a30">
+          </div>
+        </div>
+      </div>
+
       <!-- Typography -->
       <div class="settings-section">
         <h3>Typography</h3>
@@ -735,6 +774,16 @@
       core.set_price_scale_mode($('cfg-scale-mode').value);
       core.set_price_scale_margins(parseFloat($('cfg-margin-top').value), parseFloat($('cfg-margin-bottom').value));
 
+      // Axes & Grid
+      const axisBorder = hexToRgba($('cfg-axis-border-color').value);
+      core.set_axis_border_color(axisBorder[0], axisBorder[1], axisBorder[2], axisBorder[3]);
+      core.set_axis_border_visible($('cfg-axis-border-visible').checked);
+      core.set_axis_ticks_visible($('cfg-axis-ticks-visible').checked);
+      const axisText = hexToRgba($('cfg-axis-text-color').value);
+      core.set_axis_text_color(axisText[0], axisText[1], axisText[2], axisText[3]);
+      const gridCol = hexToRgba($('cfg-grid-color').value);
+      core.set_grid_color(gridCol[0], gridCol[1], gridCol[2], 0.4);
+
       // Typography
       core.set_font_size(parseFloat($('cfg-font-size').value));
       core.set_font_family($('cfg-font-family').value);
@@ -756,6 +805,8 @@
       'cfg-vert-line', 'cfg-vert-label', 'cfg-horz-line', 'cfg-horz-label',
       'cfg-last-line', 'cfg-last-label', 'cfg-last-style', 'cfg-last-width',
       'cfg-scale-mode', 'cfg-margin-top', 'cfg-margin-bottom',
+      'cfg-axis-border-color', 'cfg-axis-border-visible', 'cfg-axis-ticks-visible',
+      'cfg-axis-text-color', 'cfg-grid-color',
       'cfg-font-size', 'cfg-font-family',
       'cfg-sep-color', 'cfg-sep-hover', 'cfg-sep-thickness',
     ];
