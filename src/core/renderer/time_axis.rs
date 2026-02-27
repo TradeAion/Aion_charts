@@ -93,8 +93,7 @@ impl TimeAxisRenderer {
         if style.axis_border_visible {
             self.base_ctx
                 .set_fill_style_str(&rgba(&style.axis_border_color));
-            self.base_ctx
-                .fill_rect(0.0, 0.0, pane_w.min(w), border_size);
+            self.base_ctx.fill_rect(0.0, 0.0, w, border_size);
         }
 
         // Tick marks (small vertical bars below the border)

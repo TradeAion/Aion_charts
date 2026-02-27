@@ -7,8 +7,8 @@
 //!   │  [grid canvas]      │  [base canvas│
 //!   │  [chart canvas]     │   top canvas]│
 //!   │  [overlay canvas]   │              │
-//!   ├─────────────────────┴──────────────┤
-//!   │         Time Axis                  │
+//!   ├────────────────────────────────────┤
+//!   │         Time Axis (full width)     │
 //!   │  [base canvas | top canvas]        │
 //!   └────────────────────────────────────┘
 //!
@@ -79,16 +79,11 @@ pub struct WidgetLayout {
     pub pane_container: HtmlDivElement,
     pub price_axis_container: HtmlDivElement,
     pub time_axis_container: HtmlDivElement,
-    /// Corner stub — bottom-right intersection of time axis row + price axis column.
-    /// Matches LWC's PriceAxisStub widget.
-    pub corner_stub_container: HtmlDivElement,
 
     // ── Canvases per widget ──
     pub pane: PaneCanvases,
     pub price_axis: CanvasPair,
     pub time_axis: CanvasPair,
-    /// Corner stub canvas (single layer — just bg + borders).
-    pub corner_stub: HtmlCanvasElement,
 }
 
 impl WidgetLayout {
@@ -153,12 +148,13 @@ impl WidgetLayout {
         pane_container.append_child(&pane.chart)?;
         pane_container.append_child(&pane.top)?;
 
-        // ── Price axis container — grid[1,0] (right of pane) ──
+        // ── Price axis container — right side, spans full chart height ──
         let price_axis_container = create_widget_container(&doc, "raycore-price-axis")?;
         price_axis_container.style().set_css_text(
             "position:relative;overflow:hidden;\
-             grid-column:2;grid-row:1;\
+             grid-column:2;grid-row:1/3;\
              min-width:0;min-height:0;\
+             z-index:2;\
              cursor:ns-resize;\
              touch-action:none;\
              -webkit-user-select:none;user-select:none;",
@@ -169,13 +165,13 @@ impl WidgetLayout {
         price_axis_container.append_child(&price_axis.base)?;
         price_axis_container.append_child(&price_axis.top)?;
 
-        // ── Time axis container — grid[1,1] (bottom of pane, NOT spanning price axis) ──
-        // LWC: time axis td is sized to paneWidth only; corner stub is separate.
+        // ── Time axis container — bottom row, spans full width (incl. under price axis) ──
         let time_axis_container = create_widget_container(&doc, "raycore-time-axis")?;
         time_axis_container.style().set_css_text(
             "position:relative;overflow:hidden;\
-             grid-column:1;grid-row:2;\
+             grid-column:1/3;grid-row:2;\
              min-width:0;min-height:0;\
+             z-index:3;\
              cursor:ew-resize;\
              touch-action:none;\
              -webkit-user-select:none;user-select:none;",
@@ -186,31 +182,15 @@ impl WidgetLayout {
         time_axis_container.append_child(&time_axis.base)?;
         time_axis_container.append_child(&time_axis.top)?;
 
-        // ── Corner stub — grid[2,2] (bottom-right intersection) ──
-        // LWC: PriceAxisStub draws bg + border at intersection.
-        let corner_stub_container = create_widget_container(&doc, "raycore-corner-stub")?;
-        corner_stub_container.style().set_css_text(
-            "position:relative;overflow:hidden;\
-             grid-column:2;grid-row:2;\
-             min-width:0;min-height:0;\
-             cursor:default;",
-        );
-        grid_wrapper.append_child(&corner_stub_container)?;
-
-        let corner_stub = utils::create_canvas(&doc, "raycore-corner-stub-canvas", 0)?;
-        corner_stub_container.append_child(&corner_stub)?;
-
         Ok(Self {
             container,
             grid_wrapper,
             pane_container,
             price_axis_container,
             time_axis_container,
-            corner_stub_container,
             pane,
             price_axis,
             time_axis,
-            corner_stub,
         })
     }
 
@@ -235,6 +215,14 @@ impl WidgetLayout {
         let style = self.grid_wrapper.style();
         set_style_property_if_needed(&style, "grid-template-columns", &cols);
         set_style_property_if_needed(&style, "grid-template-rows", &rows);
+
+        // Default (no subpanes): time axis is row 2 and price axis spans rows 1..3.
+        let time_axis_style = self.time_axis_container.style();
+        set_style_property_if_needed(&time_axis_style, "grid-row", "2");
+        set_style_property_if_needed(&time_axis_style, "grid-column", "1/3");
+
+        let price_axis_style = self.price_axis_container.style();
+        set_style_property_if_needed(&price_axis_style, "grid-row", "1/3");
     }
 
     /// Update grid sizing with subpane support.
@@ -259,13 +247,15 @@ impl WidgetLayout {
 
         set_style_property_if_needed(&style, "grid-template-rows", &rows);
 
-        // Move time axis + corner stub to the correct last row
+        // Move time axis to the last row and keep it full-width.
         let time_row = 2 + subpane_heights.len() * 2;
         let time_row_str = time_row.to_string();
         let time_axis_style = self.time_axis_container.style();
         set_style_property_if_needed(&time_axis_style, "grid-row", &time_row_str);
-        let corner_style = self.corner_stub_container.style();
-        set_style_property_if_needed(&corner_style, "grid-row", &time_row_str);
+        set_style_property_if_needed(&time_axis_style, "grid-column", "1/3");
+
+        let price_axis_style = self.price_axis_container.style();
+        set_style_property_if_needed(&price_axis_style, "grid-row", "1");
     }
 
     /// Get the pane's actual CSS size (chart area only).
@@ -292,14 +282,6 @@ impl WidgetLayout {
         )
     }
 
-    /// Get the corner stub container's CSS size.
-    pub fn corner_stub_css_size(&self) -> (f64, f64) {
-        (
-            self.corner_stub_container.client_width() as f64,
-            self.corner_stub_container.client_height() as f64,
-        )
-    }
-
     /// Resize all widget canvases to their container sizes at the given DPR.
     /// Uses fallback `round(css * dpr)` sizing. Prefer `resize_canvases_exact`
     /// when device-pixel-content-box sizes are available from ResizeObserver.
@@ -321,12 +303,6 @@ impl WidgetLayout {
         let tpw = (tw * dpr).round() as u32;
         let tph = (th * dpr).round() as u32;
         self.time_axis.set_size_with_css(tpw, tph, tw, th);
-
-        // Corner stub canvas
-        let (sw, sh) = self.corner_stub_css_size();
-        let spw = (sw * dpr).round() as u32;
-        let sph = (sh * dpr).round() as u32;
-        utils::set_canvas_size_with_css(&self.corner_stub, spw.max(1), sph.max(1), sw, sh);
     }
 
     /// Resize a specific widget's canvases using exact device-pixel sizes
@@ -345,16 +321,6 @@ impl WidgetLayout {
     pub fn resize_time_axis_exact(&self, exact_pw: u32, exact_ph: u32, css_w: f64, css_h: f64) {
         self.time_axis
             .set_size_with_css(exact_pw.max(1), exact_ph.max(1), css_w, css_h);
-    }
-
-    pub fn resize_corner_stub_exact(&self, exact_pw: u32, exact_ph: u32, css_w: f64, css_h: f64) {
-        utils::set_canvas_size_with_css(
-            &self.corner_stub,
-            exact_pw.max(1),
-            exact_ph.max(1),
-            css_w,
-            css_h,
-        );
     }
 }
 

@@ -153,8 +153,6 @@ pub struct ExactPixelSizes {
     pub price_axis_ph: u32,
     pub time_axis_pw: u32,
     pub time_axis_ph: u32,
-    pub corner_stub_pw: u32,
-    pub corner_stub_ph: u32,
 }
 
 /// Internal chart state shared between event closures and the public API.

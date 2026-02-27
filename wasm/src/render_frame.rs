@@ -10,9 +10,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use raycore::{tick_marks, ChartStyle};
-
-use crate::canvas_manager::WidgetLayout;
+use raycore::tick_marks;
 use crate::chart_inner::{ChartInner, SharedInner};
 use crate::event_emitter::{chart_event_to_js, EventEmitter};
 use crate::subpane::IndicatorConfig;
@@ -406,14 +404,11 @@ pub(crate) fn do_render_frame(
         }
     }
 
-    // 10. Corner stub — background + borders (LWC: PriceAxisStub)
-    render_corner_stub(&s.layout, &s.engine.style, dpr);
-
-    // 11. Clear dirty flag + release borrow
+    // 10. Clear dirty flag + release borrow
     drop(s);
     dirty.set(false);
 
-    // 12. Flush events from core EventBus to JS callbacks
+    // 11. Flush events from core EventBus to JS callbacks
     if let Ok(mut s) = inner.try_borrow_mut() {
         let events: Vec<raycore::ChartEvent> = s.engine.event_bus.drain().collect();
         drop(s);
@@ -425,42 +420,4 @@ pub(crate) fn do_render_frame(
             }
         }
     }
-}
-
-/// Render the corner stub (bottom-right intersection of time axis row + price axis column).
-/// LWC: PriceAxisStub draws bg + horizontal border at top + vertical border at left.
-fn render_corner_stub(layout: &WidgetLayout, style: &ChartStyle, dpr: f64) {
-    use wasm_bindgen::JsCast;
-
-    let canvas = &layout.corner_stub;
-    let w = canvas.width() as f64;
-    let h = canvas.height() as f64;
-    if w <= 0.0 || h <= 0.0 {
-        return;
-    }
-
-    let ctx = match canvas.get_context("2d").ok().flatten() {
-        Some(c) => match c.dyn_into::<web_sys::CanvasRenderingContext2d>() {
-            Ok(ctx) => ctx,
-            Err(_) => return,
-        },
-        None => return,
-    };
-
-    // Background
-    let bg = crate::utils::rgba_css(&style.bg_color);
-    ctx.set_fill_style_str(&bg);
-    ctx.fill_rect(0.0, 0.0, w, h);
-
-    // Border color
-    let border = crate::utils::rgba_css(&style.axis_border_color);
-    ctx.set_fill_style_str(&border);
-
-    let border_size = (style.axis_border_size as f64 * dpr).max(1.0).floor();
-
-    // Horizontal border at top (continuation of time axis border)
-    ctx.fill_rect(0.0, 0.0, w, border_size);
-
-    // Vertical border at left (continuation of price axis border)
-    ctx.fill_rect(0.0, 0.0, border_size, h);
 }

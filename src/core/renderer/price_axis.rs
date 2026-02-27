@@ -177,8 +177,7 @@ impl PriceAxisRenderer {
         if style.axis_border_visible {
             self.base_ctx
                 .set_fill_style_str(&rgba(&style.axis_border_color));
-            self.base_ctx
-                .fill_rect(0.0, 0.0, border_size, pane_h.min(h));
+            self.base_ctx.fill_rect(0.0, 0.0, border_size, h);
         }
 
         // Tick marks (small horizontal bars at the border edge)

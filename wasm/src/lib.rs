@@ -77,8 +77,6 @@ fn has_exact_widget_sizes(s: &ChartInner) -> bool {
         && es.price_axis_ph > 0
         && es.time_axis_pw > 0
         && es.time_axis_ph > 0
-        && es.corner_stub_pw > 0
-        && es.corner_stub_ph > 0
 }
 
 /// Synchronize all widget canvases + renderers from current layout sizes.
@@ -92,15 +90,12 @@ fn sync_widget_sizes(s: &mut ChartInner, dpr: f64, prefer_exact: bool) {
         let (pcw, pch) = s.layout.pane_css_size();
         let (acw, ach) = s.layout.price_axis_css_size();
         let (tcw, tch) = s.layout.time_axis_css_size();
-        let (scw, sch) = s.layout.corner_stub_css_size();
 
         s.layout.resize_pane_exact(es.pane_pw, es.pane_ph, pcw, pch);
         s.layout
             .resize_price_axis_exact(es.price_axis_pw, es.price_axis_ph, acw, ach);
         s.layout
             .resize_time_axis_exact(es.time_axis_pw, es.time_axis_ph, tcw, tch);
-        s.layout
-            .resize_corner_stub_exact(es.corner_stub_pw, es.corner_stub_ph, scw, sch);
 
         let h_ratio = if pcw > 0.0 {
             es.pane_pw as f64 / pcw
@@ -1053,24 +1048,6 @@ impl RayCore {
             closures.push(cb);
         }
 
-        // ── CORNER STUB events (on container div) ──
-        let corner_el: web_sys::Element = {
-            let borrow = inner.borrow();
-            borrow.layout.corner_stub_container.clone().unchecked_into()
-        };
-        // corner stub: pointerenter
-        {
-            let inner = Rc::clone(&inner);
-            let cb =
-                Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
-                    let mut s = inner.borrow_mut();
-                    s.on_pointer_enter(HitZone::None);
-                }));
-            corner_el
-                .add_event_listener_with_callback("pointerenter", cb.as_ref().unchecked_ref())?;
-            closures.push(cb);
-        }
-
         // ── ResizeObserver on widget containers (device-pixel-content-box) ──
         //
         // LWC (fancy-canvas) uses ResizeObserver with `device-pixel-content-box`
@@ -1078,7 +1055,7 @@ impl RayCore {
         // This eliminates the ±1px rounding error from `round(css * dpr)`
         // that causes blur at non-integer zoom levels.
         //
-        // We observe all four widget containers and store their exact sizes.
+        // We observe pane + price-axis + time-axis containers and store exact sizes.
         // On each callback we also resize canvases and renderers.
 
         let container_el: web_sys::HtmlElement = {
@@ -1099,17 +1076,12 @@ impl RayCore {
             let borrow = inner.borrow();
             borrow.layout.time_axis_container.clone().unchecked_into()
         };
-        let corner_container_for_ro: web_sys::Element = {
-            let borrow = inner.borrow();
-            borrow.layout.corner_stub_container.clone().unchecked_into()
-        };
 
         let (resize_closure, resize_observer) = {
             let inner = Rc::clone(&inner);
             let pane_ref = pane_container_for_ro.clone();
             let price_ref = price_container_for_ro.clone();
             let time_ref = time_container_for_ro.clone();
-            let corner_ref = corner_container_for_ro.clone();
 
             let cb = Closure::<dyn FnMut(js_sys::Array)>::wrap(Box::new(
                 move |entries: js_sys::Array| {
@@ -1170,9 +1142,6 @@ impl RayCore {
                             } else if target == time_ref {
                                 s.exact_sizes.time_axis_pw = exact_w;
                                 s.exact_sizes.time_axis_ph = exact_h;
-                            } else if target == corner_ref {
-                                s.exact_sizes.corner_stub_pw = exact_w;
-                                s.exact_sizes.corner_stub_ph = exact_h;
                             }
                             s.exact_sizes.available = true;
                         }
@@ -1201,11 +1170,6 @@ impl RayCore {
                 observe_with_dpcb.call2(&JsValue::NULL, observer.as_ref(), &price_container_for_ro);
             let _ =
                 observe_with_dpcb.call2(&JsValue::NULL, observer.as_ref(), &time_container_for_ro);
-            let _ = observe_with_dpcb.call2(
-                &JsValue::NULL,
-                observer.as_ref(),
-                &corner_container_for_ro,
-            );
 
             // Also observe the outer container for general layout changes
             observer.observe(&container_el.clone().unchecked_into());
