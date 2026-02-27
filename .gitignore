@@ -3,6 +3,11 @@
 /pkg
 *.wasm
 
+# Stale root-level wasm-pack outputs (only wasm/pkg/ should have these)
+/raycore_wasm*.js
+/raycore_wasm*.d.ts
+/nul
+
 # Debug/log files
 debug.log
 *.log
