@@ -1785,6 +1785,36 @@ impl RayCore {
             .filter(|v| v.is_finite())
             .map(|v| v.clamp(0.1, 1.0) as f32);
 
+        let line_obj = js_get(options, "lineSeries").or_else(|| js_get(options, "line"));
+        let line_color = line_obj
+            .as_ref()
+            .and_then(|o| js_get(o, "color").or_else(|| js_get(o, "lineColor")))
+            .and_then(|v| parse_color_js(&v));
+        let line_width = line_obj
+            .as_ref()
+            .and_then(|o| js_get_f64(o, "lineWidth").or_else(|| js_get_f64(o, "width")))
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .map(|v| v as f32);
+
+        let area_obj = js_get(options, "areaSeries").or_else(|| js_get(options, "area"));
+        let area_line_color = area_obj
+            .as_ref()
+            .and_then(|o| js_get(o, "lineColor").or_else(|| js_get(o, "color")))
+            .and_then(|v| parse_color_js(&v));
+        let area_top_color = area_obj
+            .as_ref()
+            .and_then(|o| js_get(o, "topColor"))
+            .and_then(|v| parse_color_js(&v));
+        let area_bottom_color = area_obj
+            .as_ref()
+            .and_then(|o| js_get(o, "bottomColor"))
+            .and_then(|v| parse_color_js(&v));
+        let area_line_width = area_obj
+            .as_ref()
+            .and_then(|o| js_get_f64(o, "lineWidth").or_else(|| js_get_f64(o, "width")))
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .map(|v| v as f32);
+
         let volume_obj = js_get(options, "volume");
         let volume_color = volume_obj
             .as_ref()
@@ -1965,6 +1995,25 @@ impl RayCore {
                 }
             }
 
+            if let Some(color) = line_color {
+                s.engine.main_chart_options.line_color = color;
+            }
+            if let Some(width) = line_width {
+                s.engine.main_chart_options.line_width = width;
+            }
+            if let Some(color) = area_line_color {
+                s.engine.main_chart_options.line_color = color;
+            }
+            if let Some(color) = area_top_color {
+                s.engine.main_chart_options.area_top_color = color;
+            }
+            if let Some(color) = area_bottom_color {
+                s.engine.main_chart_options.area_bottom_color = color;
+            }
+            if let Some(width) = area_line_width {
+                s.engine.main_chart_options.line_width = width;
+            }
+
             let mut separator_style_changed = false;
             if let Some(color) = separator_color {
                 s.subpane_separator_style.color = color;
@@ -2043,6 +2092,24 @@ impl RayCore {
         }
         if let Some(color) = bearish_volume_color {
             self.theme_config.colors.bearish_volume = color;
+            css_changed = true;
+        }
+        if let Some(color) = line_color {
+            self.theme_config.series_defaults.line_color = color;
+            self.theme_config.series_defaults.area_line_color = color;
+            css_changed = true;
+        }
+        if let Some(color) = area_line_color {
+            self.theme_config.series_defaults.line_color = color;
+            self.theme_config.series_defaults.area_line_color = color;
+            css_changed = true;
+        }
+        if let Some(color) = area_top_color {
+            self.theme_config.series_defaults.area_top_fill = color;
+            css_changed = true;
+        }
+        if let Some(color) = area_bottom_color {
+            self.theme_config.series_defaults.area_bottom_fill = color;
             css_changed = true;
         }
 
@@ -2858,7 +2925,7 @@ impl RayCore {
     /// Set the main chart type.
     ///
     /// Accepted values: "candlestick", "candles", "ohlc", "bars", "line", "area",
-    /// "heikin_ashi", "ha", "baseline".
+    /// "heikin_ashi", "ha".
     pub fn set_chart_type(&mut self, chart_type: &str) {
         use raycore::MainChartType;
         let ct = MainChartType::from_str(chart_type);

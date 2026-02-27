@@ -246,30 +246,6 @@ impl ChartRenderer for Canvas2DRenderer {
                 self.draw_area_segments(&area_segments);
                 self.draw_line_segments(&line_segments);
             }
-            MainChartType::Baseline => {
-                let fill_rects = geometry_generator::generate_main_baseline_fill_rects(
-                    ctx.bars,
-                    ctx.viewport,
-                    ctx.main_chart_options.baseline_value,
-                    ctx.main_chart_options.baseline_top_fill_color,
-                    ctx.main_chart_options.baseline_bottom_fill_color,
-                    pane_w,
-                    pane_h,
-                );
-                let line_segments = geometry_generator::generate_main_baseline_line_segments(
-                    ctx.bars,
-                    ctx.viewport,
-                    ctx.main_chart_options.baseline_value,
-                    ctx.main_chart_options.baseline_top_line_color,
-                    ctx.main_chart_options.baseline_bottom_line_color,
-                    ctx.main_chart_options.line_width,
-                    pane_w,
-                    pane_h,
-                    ctx.v_pixel_ratio,
-                );
-                self.draw_rects(&fill_rects);
-                self.draw_line_segments(&line_segments);
-            }
             MainChartType::Candlestick => {
                 let rects = geometry_generator::generate_candle_rects(
                     ctx.bars,
@@ -346,7 +322,7 @@ impl ChartRenderer for Canvas2DRenderer {
                 ctx.v_pixel_ratio,
             );
 
-        // Draw fill rects first (area/baseline fills behind lines)
+        // Draw fill rects first (area fills behind lines)
         self.draw_rects(&fill_rects);
 
         // Draw smooth line segments on top using native Canvas2D strokes

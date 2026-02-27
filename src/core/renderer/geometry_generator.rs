@@ -13,7 +13,6 @@
 //! All candle sizing uses LWC-matching algorithms from series.rs.
 //! Tick computation is in tick_marks.rs (shared with axis renderers).
 
-use crate::core::renderer::baseline_utils::emit_split_segment_by_baseline;
 use crate::core::renderer::draw_list::{ColoredRect, DrawList};
 use crate::core::renderer::series::CandleSizing;
 use crate::core::renderer::traits::{ChartStyle, TickMark};
@@ -745,30 +744,6 @@ fn generate_area_fill_into(
 
 use crate::core::renderer::draw_list::{AreaSegment, LineSegment};
 
-fn generate_main_close_points(
-    bars: &crate::core::data::BarArray,
-    viewport: &Viewport,
-    pane_w: f64,
-    candle_h: f64,
-) -> Vec<(f64, f64)> {
-    let start = (viewport.start_bar.floor() as usize)
-        .saturating_sub(1)
-        .min(bars.len());
-    let end = ((viewport.end_bar.ceil() as usize) + 1).min(bars.len());
-    if start >= end {
-        return Vec::new();
-    }
-
-    let mut points = Vec::with_capacity(end - start);
-    for i in start..end {
-        let b = bars.get_unchecked(i);
-        let x = bar_to_x(i as f64 + 0.5, viewport, pane_w).round();
-        let y = price_to_y(b.close as f64, viewport, candle_h).round();
-        points.push((x, y));
-    }
-    points
-}
-
 /// Generate main-series close points for area rendering with monotonic X.
 /// This collapses duplicate X pixels (zoomed-out bars mapping to same column)
 /// so area fills cannot self-overlap and produce dark patches.
@@ -821,26 +796,6 @@ fn generate_main_area_points(
     points
 }
 
-#[inline]
-fn strip_bounds(points: &[(f64, f64)], i: usize) -> Option<(f64, f64)> {
-    let x = points[i].0;
-    let left = if i == 0 {
-        x
-    } else {
-        ((points[i - 1].0 + x) * 0.5).round()
-    };
-    let right = if i + 1 == points.len() {
-        x
-    } else {
-        ((x + points[i + 1].0) * 0.5).round()
-    };
-    if right <= left {
-        None
-    } else {
-        Some((left, right))
-    }
-}
-
 /// Generate line segments for the GPU line pipeline (smooth anti-aliased lines).
 pub fn generate_line_segments(
     bars: &crate::core::data::BarArray,
@@ -888,123 +843,6 @@ pub fn generate_line_segments(
         });
     }
 
-    segments
-}
-
-/// Generate two-tone fill rects for the main baseline chart.
-pub fn generate_main_baseline_fill_rects(
-    bars: &crate::core::data::BarArray,
-    viewport: &Viewport,
-    baseline_value: f32,
-    top_fill_color: [f32; 4],
-    bottom_fill_color: [f32; 4],
-    pane_w: f64,
-    pane_h: f64,
-) -> Vec<ColoredRect> {
-    let vol_h = pane_h * viewport.volume_height_ratio as f64;
-    let candle_h = pane_h - vol_h;
-    let base_y = price_to_y(baseline_value as f64, viewport, candle_h).round();
-    let points = generate_main_close_points(bars, viewport, pane_w, candle_h);
-    if points.is_empty() {
-        return Vec::new();
-    }
-
-    let mut rects = Vec::with_capacity(points.len());
-    for i in 0..points.len() {
-        let (_, y0) = points[i];
-        let (left, right) = match strip_bounds(&points, i) {
-            Some(bounds) => bounds,
-            None => continue,
-        };
-        let strip_w = right - left;
-        if strip_w <= 0.0 {
-            continue;
-        }
-
-        if y0 < base_y {
-            let h = base_y - y0;
-            if h > 0.5 {
-                rects.push(ColoredRect {
-                    x: left as f32,
-                    y: y0 as f32,
-                    w: strip_w as f32,
-                    h: h as f32,
-                    r: top_fill_color[0],
-                    g: top_fill_color[1],
-                    b: top_fill_color[2],
-                    a: top_fill_color[3],
-                });
-            }
-        } else if y0 > base_y {
-            let h = y0 - base_y;
-            if h > 0.5 {
-                rects.push(ColoredRect {
-                    x: left as f32,
-                    y: base_y as f32,
-                    w: strip_w as f32,
-                    h: h as f32,
-                    r: bottom_fill_color[0],
-                    g: bottom_fill_color[1],
-                    b: bottom_fill_color[2],
-                    a: bottom_fill_color[3],
-                });
-            }
-        }
-    }
-    rects
-}
-
-/// Generate two-tone line segments for the main baseline chart.
-pub fn generate_main_baseline_line_segments(
-    bars: &crate::core::data::BarArray,
-    viewport: &Viewport,
-    baseline_value: f32,
-    top_line_color: [f32; 4],
-    bottom_line_color: [f32; 4],
-    line_width: f32,
-    pane_w: f64,
-    pane_h: f64,
-    v_ratio: f64,
-) -> Vec<LineSegment> {
-    let vol_h = pane_h * viewport.volume_height_ratio as f64;
-    let candle_h = pane_h - vol_h;
-    let base_y = price_to_y(baseline_value as f64, viewport, candle_h).round();
-    let points = generate_main_close_points(bars, viewport, pane_w, candle_h);
-    if points.len() < 2 {
-        return Vec::new();
-    }
-
-    let width = (line_width * v_ratio as f32).round().max(1.0);
-    let correction = if (width as i32) % 2 == 1 { 0.5 } else { 0.0 };
-
-    let mut segments = Vec::with_capacity(points.len() - 1);
-    for i in 0..(points.len() - 1) {
-        let (x1, y1) = points[i];
-        let (x2, y2) = points[i + 1];
-        emit_split_segment_by_baseline(
-            x1 + correction,
-            y1 + correction,
-            x2 + correction,
-            y2 + correction,
-            base_y + correction,
-            top_line_color,
-            bottom_line_color,
-            |sx1, sy1, sx2, sy2, color| {
-                segments.push(LineSegment {
-                    x1: sx1 as f32,
-                    y1: sy1 as f32,
-                    x2: sx2 as f32,
-                    y2: sy2 as f32,
-                    width,
-                    r: color[0],
-                    g: color[1],
-                    b: color[2],
-                    a: color[3],
-                    _pad: 0.0,
-                });
-            },
-        );
-    }
     segments
 }
 

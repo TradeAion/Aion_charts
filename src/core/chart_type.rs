@@ -12,7 +12,6 @@
 //! | `Line` | Simple line connecting close prices |
 //! | `Area` | Filled area below the close line |
 //! | `HeikinAshi` | Heikin-Ashi candles (smoothed) |
-//! | `Baseline` | Line with two-tone fill above/below baseline |
 //!
 //! # Example
 //!
@@ -38,8 +37,6 @@ pub enum MainChartType {
     Area,
     /// Heikin-Ashi candles (smoothed trend visualization).
     HeikinAshi,
-    /// Line with gradient fill above/below a baseline value.
-    Baseline,
 }
 
 impl MainChartType {
@@ -51,7 +48,6 @@ impl MainChartType {
             "line" => Self::Line,
             "area" => Self::Area,
             "heikin_ashi" | "heikinashi" | "ha" => Self::HeikinAshi,
-            "baseline" => Self::Baseline,
             _ => Self::Candlestick,
         }
     }
@@ -64,7 +60,6 @@ impl MainChartType {
             Self::Line => "line",
             Self::Area => "area",
             Self::HeikinAshi => "heikin_ashi",
-            Self::Baseline => "baseline",
         }
     }
 
@@ -76,7 +71,6 @@ impl MainChartType {
             Self::Line => "Line",
             Self::Area => "Area",
             Self::HeikinAshi => "Heikin-Ashi",
-            Self::Baseline => "Baseline",
         }
     }
 
@@ -98,7 +92,6 @@ impl MainChartType {
             Self::Line,
             Self::Area,
             Self::HeikinAshi,
-            Self::Baseline,
         ]
     }
 }
@@ -133,17 +126,6 @@ pub struct MainChartOptions {
     /// Fill color for Area chart type (bottom/fade).
     pub area_bottom_color: [f32; 4],
 
-    // ── Baseline options ──
-    /// Baseline value (for Baseline chart type).
-    pub baseline_value: f32,
-    /// Color above the baseline.
-    pub baseline_top_fill_color: [f32; 4],
-    /// Color below the baseline.
-    pub baseline_bottom_fill_color: [f32; 4],
-    /// Line color above baseline.
-    pub baseline_top_line_color: [f32; 4],
-    /// Line color below baseline.
-    pub baseline_bottom_line_color: [f32; 4],
 }
 
 impl Default for MainChartOptions {
@@ -163,12 +145,6 @@ impl Default for MainChartOptions {
             line_width: 2.0,
             area_top_color: theme.series_defaults.area_top_fill,
             area_bottom_color: theme.series_defaults.area_bottom_fill,
-            // Baseline defaults
-            baseline_value: 0.0,
-            baseline_top_fill_color: [up[0], up[1], up[2], 0.3],
-            baseline_bottom_fill_color: [down[0], down[1], down[2], 0.3],
-            baseline_top_line_color: up,
-            baseline_bottom_line_color: down,
         }
     }
 }
@@ -196,7 +172,6 @@ mod tests {
             MainChartType::HeikinAshi
         );
         assert_eq!(MainChartType::from_str("ha"), MainChartType::HeikinAshi);
-        assert_eq!(MainChartType::from_str("baseline"), MainChartType::Baseline);
         assert_eq!(
             MainChartType::from_str("unknown"),
             MainChartType::Candlestick
@@ -223,6 +198,6 @@ mod tests {
 
     #[test]
     fn test_all_chart_types_count() {
-        assert_eq!(MainChartType::all().len(), 6);
+        assert_eq!(MainChartType::all().len(), 5);
     }
 }
