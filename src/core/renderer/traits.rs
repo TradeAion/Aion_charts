@@ -83,6 +83,12 @@ pub struct ChartStyle {
     pub axis_tick_length: f32,
     /// Price-scale tick mark density (LWC: `priceScale.tickMarkDensity`, default 2.5).
     pub price_scale_tick_mark_density: f32,
+    /// Whether to draw axis tick marks (the small perpendicular lines).
+    /// When false, layout stays the same but tick lines are not rendered.
+    pub axis_ticks_visible: bool,
+    /// Whether to draw the axis border line.
+    /// When false, layout stays the same but the border line is not rendered.
+    pub axis_border_visible: bool,
 }
 
 impl ChartStyle {

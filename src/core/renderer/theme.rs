@@ -134,6 +134,8 @@ pub fn default_style() -> ChartStyle {
         axis_border_size: AXIS_BORDER_SIZE,
         axis_tick_length: AXIS_TICK_LENGTH,
         price_scale_tick_mark_density: DEFAULT_PRICE_SCALE_TICK_MARK_DENSITY as f32,
+        axis_ticks_visible: true,
+        axis_border_visible: true,
     }
 }
 
@@ -614,6 +616,8 @@ impl ThemeConfig {
             axis_border_size: self.layout.axis_border_size,
             axis_tick_length: self.layout.axis_tick_length,
             price_scale_tick_mark_density: self.layout.price_scale_tick_mark_density,
+            axis_ticks_visible: true,
+            axis_border_visible: true,
         }
     }
 

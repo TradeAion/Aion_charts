@@ -174,25 +174,29 @@ impl PriceAxisRenderer {
 
         // Border line at left edge (LWC: right price scale border is at its left)
         let border_size = (style.axis_border_size as f64 * dpr).max(1.0).floor();
-        self.base_ctx
-            .set_fill_style_str(&rgba(&style.axis_border_color));
-        self.base_ctx
-            .fill_rect(0.0, 0.0, border_size, pane_h.min(h));
+        if style.axis_border_visible {
+            self.base_ctx
+                .set_fill_style_str(&rgba(&style.axis_border_color));
+            self.base_ctx
+                .fill_rect(0.0, 0.0, border_size, pane_h.min(h));
+        }
 
         // Tick marks (small horizontal bars at the border edge)
         let tick_length = (style.axis_tick_length as f64 * dpr).round();
         let tick_height = (1.0 * dpr).floor().max(1.0);
         let tick_offset = (dpr * 0.5).floor();
 
-        self.base_ctx
-            .set_fill_style_str(&rgba(&style.axis_border_color));
-        for t in ticks {
-            if t.pixel < 0.0 || t.pixel > pane_h {
-                continue;
-            }
-            let y = t.pixel.round();
+        if style.axis_ticks_visible {
             self.base_ctx
-                .fill_rect(0.0, y - tick_offset, tick_length, tick_height);
+                .set_fill_style_str(&rgba(&style.axis_border_color));
+            for t in ticks {
+                if t.pixel < 0.0 || t.pixel > pane_h {
+                    continue;
+                }
+                let y = t.pixel.round();
+                self.base_ctx
+                    .fill_rect(0.0, y - tick_offset, tick_length, tick_height);
+            }
         }
 
         // Tick labels — draw in media (CSS) coordinate space for sharp text.

@@ -2046,6 +2046,38 @@ impl RayCore {
         self.inner.borrow_mut().engine.style.font_family = family.to_string();
     }
 
+    // ── Axis / Grid appearance ──────────────────────────────────────────
+
+    /// Set the axis border (separator line) color (RGBA 0-1).
+    pub fn set_axis_border_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        self.inner.borrow_mut().engine.style.axis_border_color = [r, g, b, a];
+    }
+
+    /// Show or hide the axis border line. Layout is unaffected.
+    pub fn set_axis_border_visible(&mut self, visible: bool) {
+        self.inner.borrow_mut().engine.style.axis_border_visible = visible;
+    }
+
+    /// Show or hide axis tick marks. Layout is unaffected.
+    pub fn set_axis_ticks_visible(&mut self, visible: bool) {
+        self.inner.borrow_mut().engine.style.axis_ticks_visible = visible;
+    }
+
+    /// Set the grid line color (RGBA 0-1).
+    pub fn set_grid_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        self.inner.borrow_mut().engine.style.grid_color = [r, g, b, a];
+    }
+
+    /// Set the axis label text color (RGBA 0-1).
+    pub fn set_axis_text_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        self.inner.borrow_mut().engine.style.axis_text_color = [r, g, b, a];
+    }
+
+    /// Set the price scale tick mark density multiplier.
+    pub fn set_price_scale_tick_density(&mut self, density: f32) {
+        self.inner.borrow_mut().engine.style.price_scale_tick_mark_density = density;
+    }
+
     /// Set indicator sub-pane separator visible line thickness (CSS px).
     pub fn set_subpane_separator_thickness(&mut self, thickness_css: f64) {
         let mut s = self.inner.borrow_mut();
