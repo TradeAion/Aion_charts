@@ -91,7 +91,7 @@ pub enum HitPart {
 ///   - Body (interior) → default (pass-through to pan)
 ///
 /// For trend lines / fib / scale:
-///   - Anchor → grab/move
+///   - Anchor → pointer (clickable feel)
 ///   - Body → move
 pub fn cursor_for_drawing_hit(
     tool: DrawingTool,
@@ -114,7 +114,7 @@ pub fn cursor_for_drawing_hit(
                 }
                 DrawingTool::HorizontalLine => "ns-resize", // vertical drag
                 DrawingTool::VerticalLine => "ew-resize",   // horizontal drag
-                _ => "grab",                                // trend line, fib, scale, ray anchors
+                _ => "pointer",                             // trend line, fib, scale, ray anchors
             }
         }
         HitPart::Edge => {

@@ -434,6 +434,8 @@ impl RayCore {
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
                     let (x, y) = event_css_pos(&pe, &pane_c);
+                    let shift_pressed = pe.shift_key();
+                    let ctrl_pressed = pe.ctrl_key() || pe.meta_key(); // meta for Mac Cmd
                     let mut s = inner.borrow_mut();
 
                     // Detect touch on every move (not just pointerdown)
@@ -441,7 +443,7 @@ impl RayCore {
 
                     // Ensure zone is set (fixes missing pointerenter on page load)
                     s.on_pointer_enter(HitZone::Chart);
-                    s.on_pane_pointer_move(x, y);
+                    s.on_pane_pointer_move(x, y, shift_pressed, ctrl_pressed);
 
                     let cursor = s.cursor_css();
                     let is_dragging =
@@ -1837,8 +1839,8 @@ impl RayCore {
                 true
             }
 
-            // Zoom time axis
-            "+" | "=" => {
+            // Zoom time axis (only without Ctrl — let browser handle Ctrl+/- for page zoom)
+            "+" | "=" if !ctrl => {
                 // Zoom in: reduce visible range
                 let mid = (s.engine.viewport.start_bar + s.engine.viewport.end_bar) / 2.0;
                 let half_range =
@@ -1847,7 +1849,7 @@ impl RayCore {
                 s.engine.viewport.end_bar = mid + half_range;
                 true
             }
-            "-" | "_" => {
+            "-" | "_" if !ctrl => {
                 // Zoom out: increase visible range
                 let mid = (s.engine.viewport.start_bar + s.engine.viewport.end_bar) / 2.0;
                 let half_range =

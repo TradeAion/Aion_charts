@@ -206,6 +206,58 @@ impl DrawingManager {
         }
     }
 
+    /// Get the first anchor point of the drawing being created (for snap calculations).
+    /// Returns None if not creating or no anchors exist yet.
+    pub fn creation_first_anchor(&self) -> Option<(f64, f64)> {
+        let id = self.creating_id?;
+        let d = self.get(id)?;
+        let anchors = d.anchors();
+        if anchors.is_empty() {
+            return None;
+        }
+        Some((anchors[0].point.bar_index, anchors[0].point.price))
+    }
+
+    /// Get the tool type of the drawing being created.
+    pub fn creation_tool(&self) -> Option<DrawingTool> {
+        let id = self.creating_id?;
+        self.get(id).map(|d| d.tool())
+    }
+
+    /// Get the "opposite" anchor for angle snapping during single-anchor drag.
+    /// When dragging anchor N, returns anchor 0 if N > 0, else anchor 1.
+    /// Returns None if not dragging a single anchor or drawing has < 2 anchors.
+    pub fn drag_opposite_anchor(&self, id: u64) -> Option<(f64, f64)> {
+        let d = self.get(id)?;
+        let anchors = d.anchors();
+        if anchors.len() < 2 {
+            return None;
+        }
+        match d.state() {
+            DrawingState::Dragging {
+                anchor_index: Some(ai),
+                ..
+            } => {
+                // Return the "other" anchor for angle reference
+                let other_idx = if ai == 0 { 1 } else { 0 };
+                if other_idx < anchors.len() {
+                    Some((
+                        anchors[other_idx].point.bar_index,
+                        anchors[other_idx].point.price,
+                    ))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Get the tool type of a drawing by ID.
+    pub fn tool_of(&self, id: u64) -> Option<DrawingTool> {
+        self.get(id).map(|d| d.tool())
+    }
+
     /// Finalize the current creation step (mouse release / click).
     /// Returns true if the drawing is now complete.
     pub fn finalize_creation_step(&mut self, bar_index: f64, price: f64) -> bool {

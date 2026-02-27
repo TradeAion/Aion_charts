@@ -201,16 +201,39 @@ impl ChartInner {
         interaction.pointer_leave(zone, &mut engine.crosshair);
     }
 
-    pub fn on_pane_pointer_move(&mut self, x: f64, y: f64) {
+    pub fn on_pane_pointer_move(
+        &mut self,
+        x: f64,
+        y: f64,
+        shift_pressed: bool,
+        ctrl_pressed: bool,
+    ) {
         let (pw, ph) = self.layout.pane_css_size();
         let dpr = self.engine.dpr;
 
         // Pre-compute logical coords from viewport (before any mutable drawing borrow)
-        let bar = self.engine.viewport.pixel_to_bar(x, pw);
+        let mut bar = self.engine.viewport.pixel_to_bar(x, pw);
         // Use candle area height for drawing coordinates — matches price_to_css_y().
         // Candles occupy the top (1 - volume_ratio) of the pane; volume is below.
         let candle_css_h = ph * self.engine.viewport.candle_height_frac();
-        let price = self.engine.viewport.pixel_to_price(y, candle_css_h);
+        let mut price = self.engine.viewport.pixel_to_price(y, candle_css_h);
+
+        // Ctrl-key OHLC magnet snapping (works during drawing creation/drag)
+        if ctrl_pressed {
+            let bar_idx = bar.round() as usize;
+            if bar_idx < self.engine.bars.len() {
+                // Snap to nearest OHLC price
+                price = snap_to_ohlc_price(
+                    &self.engine.bars,
+                    bar_idx,
+                    y,
+                    &self.engine.viewport,
+                    candle_css_h,
+                );
+                // Also snap bar to integer index for cleaner anchoring
+                bar = bar_idx as f64;
+            }
+        }
 
         let mut is_drawing_drag = false;
         let mut hover_cursor: Option<&'static str> = None;
@@ -219,14 +242,70 @@ impl ChartInner {
         {
             let drawings = &mut self.engine.drawings;
             if drawings.is_creating() {
-                drawings.update_creation_preview(bar, price);
+                // Shift-key angle snapping (45° increments) for line-based tools
+                let (final_bar, final_price) = if shift_pressed {
+                    // Only apply angle snap for line-based tools (not Brush, HLine, VLine)
+                    let tool = drawings.creation_tool();
+                    let should_snap = matches!(
+                        tool,
+                        Some(raycore::DrawingTool::TrendLine)
+                            | Some(raycore::DrawingTool::Ray)
+                            | Some(raycore::DrawingTool::Fibonacci)
+                            | Some(raycore::DrawingTool::Scale)
+                            | Some(raycore::DrawingTool::Rectangle)
+                    );
+                    if should_snap {
+                        if let Some((anchor_bar, anchor_price)) = drawings.creation_first_anchor() {
+                            snap_to_angle_45(anchor_bar, anchor_price, bar, price, pw, candle_css_h)
+                        } else {
+                            (bar, price)
+                        }
+                    } else {
+                        (bar, price)
+                    }
+                } else {
+                    (bar, price)
+                };
+                drawings.update_creation_preview(final_bar, final_price);
                 // Still fall through so crosshair updates
             } else if let Some(id) = drawings.selected_id {
                 if matches!(
                     drawings.get(id).map(|d| d.state()),
                     Some(raycore::core::drawings::types::DrawingState::Dragging { .. })
                 ) {
-                    drawings.update_drag(id, bar, price);
+                    // Apply angle snapping during anchor drag too
+                    let (final_bar, final_price) = if shift_pressed {
+                        let tool = drawings.tool_of(id);
+                        let should_snap = matches!(
+                            tool,
+                            Some(raycore::DrawingTool::TrendLine)
+                                | Some(raycore::DrawingTool::Ray)
+                                | Some(raycore::DrawingTool::Fibonacci)
+                                | Some(raycore::DrawingTool::Scale)
+                                | Some(raycore::DrawingTool::Rectangle)
+                        );
+                        if should_snap {
+                            if let Some((anchor_bar, anchor_price)) =
+                                drawings.drag_opposite_anchor(id)
+                            {
+                                snap_to_angle_45(
+                                    anchor_bar,
+                                    anchor_price,
+                                    bar,
+                                    price,
+                                    pw,
+                                    candle_css_h,
+                                )
+                            } else {
+                                (bar, price)
+                            }
+                        } else {
+                            (bar, price)
+                        }
+                    } else {
+                        (bar, price)
+                    };
+                    drawings.update_drag(id, final_bar, final_price);
                     is_drawing_drag = true;
                 }
             }
@@ -582,4 +661,87 @@ pub fn wheel_css_pos(e: &web_sys::WheelEvent, el: &web_sys::Element) -> (f64, f6
         e.client_x() as f64 - rect.left(),
         e.client_y() as f64 - rect.top(),
     )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Drawing Snap Helpers
+// ═══════════════════════════════════════════════════════════════════════════════
+
+use std::f64::consts::PI;
+
+/// Snap endpoint to nearest 45° angle from anchor point.
+///
+/// Works in screen-space (CSS pixels) to ensure visual angles are correct,
+/// then converts back to logical bar/price coordinates.
+///
+/// Snaps to: 0°, 45°, 90°, 135°, 180°, 225°, 270°, 315° (8 directions)
+fn snap_to_angle_45(
+    anchor_bar: f64,
+    anchor_price: f64,
+    target_bar: f64,
+    target_price: f64,
+    pane_css_w: f64,
+    candle_css_h: f64,
+) -> (f64, f64) {
+    // We need to work in a normalized coordinate space where 1 unit in X
+    // equals 1 unit in Y visually. Otherwise angles would be skewed.
+    // Use the pane aspect ratio to normalize.
+
+    let bar_range = 100.0; // Approximate visible bars (scale factor, cancels out)
+    let price_range = 1000.0; // Approximate visible price range (cancels out)
+
+    // Compute aspect ratio: pixels per bar vs pixels per price unit
+    let px_per_bar = pane_css_w / bar_range;
+    let px_per_price = candle_css_h / price_range;
+
+    // Convert to normalized screen space
+    let dx_screen = (target_bar - anchor_bar) * px_per_bar;
+    let dy_screen = (anchor_price - target_price) * px_per_price; // Y inverted in screen space
+
+    // Calculate angle and snap to nearest 45°
+    let angle = dy_screen.atan2(dx_screen);
+    let snapped_angle = (angle / (PI / 4.0)).round() * (PI / 4.0);
+
+    // Preserve distance in screen space
+    let distance = (dx_screen * dx_screen + dy_screen * dy_screen).sqrt();
+
+    // Compute snapped screen deltas
+    let snapped_dx_screen = distance * snapped_angle.cos();
+    let snapped_dy_screen = distance * snapped_angle.sin();
+
+    // Convert back to bar/price coordinates
+    let snapped_bar = anchor_bar + snapped_dx_screen / px_per_bar;
+    let snapped_price = anchor_price - snapped_dy_screen / px_per_price; // Y inverted
+
+    (snapped_bar, snapped_price)
+}
+
+/// Snap to nearest OHLC price for a given bar index.
+///
+/// Finds the O/H/L/C value whose CSS Y is closest to the cursor Y position.
+fn snap_to_ohlc_price(
+    bars: &raycore::BarArray,
+    bar_idx: usize,
+    cursor_css_y: f64,
+    viewport: &raycore::Viewport,
+    candle_css_h: f64,
+) -> f64 {
+    let open = bars.open(bar_idx) as f64;
+    let high = bars.high(bar_idx) as f64;
+    let low = bars.low(bar_idx) as f64;
+    let close = bars.close(bar_idx) as f64;
+
+    // Convert each OHLC price to CSS Y and find nearest to cursor
+    let candidates = [open, high, low, close];
+    let mut best_price = close;
+    let mut best_dist = f64::MAX;
+    for &price in &candidates {
+        let py = viewport.price_to_css_y(price, candle_css_h);
+        let dist = (py - cursor_css_y).abs();
+        if dist < best_dist {
+            best_dist = dist;
+            best_price = price;
+        }
+    }
+    best_price
 }
