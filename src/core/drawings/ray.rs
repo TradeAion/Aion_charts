@@ -120,7 +120,7 @@ impl Ray {
             let pane_pw = pane_css_w * dpr;
             let pane_ph = pane_css_h * dpr;
 
-            for (i, anchor) in self.anchors.iter().enumerate() {
+            for (_i, anchor) in self.anchors.iter().enumerate() {
                 let ax = (anchor.point.bar_index - vp.start_bar + 0.5) / visible_bars * pane_pw;
                 let ay = vp.price_to_css_y(anchor.point.price, pane_css_h) * dpr;
 
@@ -134,7 +134,7 @@ impl Ray {
                         cx: ax,
                         cy: ay,
                         radius: anchor_r,
-                        fill: [1.0, 1.0, 1.0, 0.9],
+                        fill: super::default_anchor_color(),
                         border: self.style.color,
                         border_width: 2.0 * dpr,
                     });

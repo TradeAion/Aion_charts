@@ -23,6 +23,14 @@ use crate::core::viewport::Viewport;
 use drawing::Drawing;
 use types::*;
 
+/// Returns the default anchor circle fill color from the theme.
+/// Used by all drawing geometry methods for consistent anchor appearance.
+pub fn default_anchor_color() -> [f32; 4] {
+    crate::core::renderer::theme::ThemeConfig::default()
+        .drawing_defaults
+        .anchor_color
+}
+
 /// Manages all drawings on the chart.
 pub struct DrawingManager {
     /// All drawings, ordered by creation time.

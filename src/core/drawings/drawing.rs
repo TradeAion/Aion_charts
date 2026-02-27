@@ -192,7 +192,7 @@ pub fn generate_anchor_circles(
                 cx: bx,
                 cy: by,
                 radius: (a.hit_radius * avg_ratio).round(),
-                fill: [1.0, 1.0, 1.0, 1.0], // white fill
+                fill: super::default_anchor_color(),
                 border: *color,
                 border_width: (1.0 * avg_ratio).floor().max(1.0),
             }

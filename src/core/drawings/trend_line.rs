@@ -22,13 +22,7 @@ impl TrendLineDrawing {
         Self {
             id,
             state: DrawingState::Creating { step: 1 },
-            style: DrawingStyle {
-                color: [0.35, 0.55, 0.95, 1.0],
-                line_width: 1.0,
-                fill_color: None,
-                dash: None,
-                font_size: 11.0,
-            },
+            style: DrawingStyle::default(),
             anchors: vec![
                 AnchorPoint::new(bar_index, price),
                 AnchorPoint::new(bar_index, price), // preview anchor

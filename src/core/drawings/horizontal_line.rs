@@ -107,7 +107,7 @@ impl HorizontalLine {
                 cx: center_x,
                 cy: y_phys,
                 radius: anchor_r,
-                fill: [1.0, 1.0, 1.0, 0.9],
+                fill: super::default_anchor_color(),
                 border: self.style.color,
                 border_width: 2.0 * dpr,
             });

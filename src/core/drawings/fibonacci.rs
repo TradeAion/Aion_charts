@@ -31,13 +31,9 @@ impl FibonacciDrawing {
         Self {
             id,
             state: DrawingState::Creating { step: 1 },
-            style: DrawingStyle {
-                color: [0.95, 0.75, 0.25, 1.0], // gold
-                line_width: 1.0,
-                fill_color: Some([0.95, 0.75, 0.25, 0.05]),
-                dash: None,
-                font_size: 10.0,
-            },
+            style: DrawingStyle::fibonacci_from_theme(
+                &crate::core::renderer::theme::ThemeConfig::default(),
+            ),
             anchors: vec![
                 AnchorPoint::new(bar_index, price),
                 AnchorPoint::new(bar_index, price),

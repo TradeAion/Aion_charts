@@ -183,12 +183,56 @@ pub struct DrawingStyle {
 
 impl Default for DrawingStyle {
     fn default() -> Self {
+        // Delegate to theme defaults for the standard drawing color.
+        let theme = crate::core::renderer::theme::ThemeConfig::default();
+        Self::from_theme(&theme)
+    }
+}
+
+impl DrawingStyle {
+    /// Create a DrawingStyle from theme drawing defaults.
+    pub fn from_theme(theme: &crate::core::renderer::theme::ThemeConfig) -> Self {
         Self {
-            color: [0.35, 0.55, 0.95, 1.0], // blue
+            color: theme.drawing_defaults.color,
             line_width: 1.0,
             fill_color: None,
             dash: None,
-            font_size: 11.0,
+            font_size: theme.drawing_defaults.font_size,
+        }
+    }
+
+    /// Create a DrawingStyle for rectangle drawings from theme.
+    pub fn rectangle_from_theme(theme: &crate::core::renderer::theme::ThemeConfig) -> Self {
+        let mut c = theme.drawing_defaults.color;
+        c[3] = 0.15; // fill alpha
+        Self {
+            color: theme.drawing_defaults.color,
+            line_width: 1.0,
+            fill_color: Some(c),
+            dash: None,
+            font_size: theme.drawing_defaults.font_size,
+        }
+    }
+
+    /// Create a DrawingStyle for Fibonacci drawings from theme.
+    pub fn fibonacci_from_theme(theme: &crate::core::renderer::theme::ThemeConfig) -> Self {
+        Self {
+            color: theme.drawing_defaults.fibonacci_color,
+            line_width: 1.0,
+            fill_color: Some(theme.drawing_defaults.fibonacci_fill),
+            dash: None,
+            font_size: theme.drawing_defaults.fibonacci_font_size,
+        }
+    }
+
+    /// Create a DrawingStyle for Scale/measurement drawings from theme.
+    pub fn scale_from_theme(theme: &crate::core::renderer::theme::ThemeConfig) -> Self {
+        Self {
+            color: theme.drawing_defaults.scale_color,
+            line_width: 1.0,
+            fill_color: Some(theme.drawing_defaults.scale_fill),
+            dash: None,
+            font_size: theme.drawing_defaults.font_size,
         }
     }
 }

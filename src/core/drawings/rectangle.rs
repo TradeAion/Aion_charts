@@ -22,13 +22,9 @@ impl RectangleDrawing {
         Self {
             id,
             state: DrawingState::Creating { step: 1 },
-            style: DrawingStyle {
-                color: [0.35, 0.55, 0.95, 1.0],
-                line_width: 1.0,
-                fill_color: Some([0.35, 0.55, 0.95, 0.15]),
-                dash: None,
-                font_size: 11.0,
-            },
+            style: DrawingStyle::rectangle_from_theme(
+                &crate::core::renderer::theme::ThemeConfig::default(),
+            ),
             anchors: vec![
                 AnchorPoint::new(bar_index, price),
                 AnchorPoint::new(bar_index, price),

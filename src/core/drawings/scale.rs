@@ -21,13 +21,9 @@ impl ScaleDrawing {
         Self {
             id,
             state: DrawingState::Creating { step: 1 },
-            style: DrawingStyle {
-                color: [0.6, 0.8, 0.4, 1.0], // green
-                line_width: 1.0,
-                fill_color: Some([0.6, 0.8, 0.4, 0.1]),
-                dash: None,
-                font_size: 11.0,
-            },
+            style: DrawingStyle::scale_from_theme(
+                &crate::core::renderer::theme::ThemeConfig::default(),
+            ),
             anchors: vec![
                 AnchorPoint::new(bar_index, price),
                 AnchorPoint::new(bar_index, price),
