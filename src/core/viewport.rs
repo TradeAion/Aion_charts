@@ -55,7 +55,7 @@ struct LogFormula {
 
 impl LogFormula {
     /// Create a log formula adapted to the given price range.
-    fn for_range(min: f64, max: f64) -> Self {
+    fn for_range(min: f64, _max: f64) -> Self {
         // LWC uses a complex adaptive formula. Simplified version:
         // For prices that can go to zero or negative, we need an offset.
         let _min_pos = min.max(1e-10);
@@ -402,9 +402,14 @@ impl Viewport {
 
     pub fn pan_clamped(&mut self, delta_bars: f64, data_len: usize) {
         let span = self.end_bar - self.start_bar;
-        let half = span * 0.5;
-        let lo = -half;
-        let hi = data_len as f64 + half - span;
+        // LWC-style boundaries: allow scrolling until only MIN_VISIBLE_BARS of
+        // real data remain on screen in either direction (fixLeftEdge /
+        // fixRightEdge both false, MinVisibleBarsCount = MIN_VISIBLE_BARS).
+        // Old formula used span*0.5 which locked the canvas at half a screen
+        // from the data edge — far too restrictive compared to LWC.
+        let min_vis = MIN_VISIBLE_BARS.min(data_len as f64);
+        let lo = min_vis - span; // scroll left until only min_vis bars visible
+        let hi = data_len as f64 - min_vis; // scroll right until only min_vis bars visible
 
         let new_start = (self.start_bar + delta_bars).clamp(lo, hi);
         self.start_bar = new_start;
@@ -413,12 +418,14 @@ impl Viewport {
     }
 
     /// Clamp viewport so it doesn't scroll too far past data boundaries.
-    /// Allows half a screen of whitespace on each side.
+    /// LWC-style: allows scrolling until only MIN_VISIBLE_BARS of data remain
+    /// visible on screen in either direction (matches LWC's MinVisibleBarsCount
+    /// logic with fixLeftEdge/fixRightEdge both false).
     pub fn clamp_to_data(&mut self, data_len: usize) {
         let span = self.end_bar - self.start_bar;
-        let half = span * 0.5;
-        let lo = -half;
-        let hi = data_len as f64 + half - span;
+        let min_vis = MIN_VISIBLE_BARS.min(data_len as f64);
+        let lo = min_vis - span;
+        let hi = data_len as f64 - min_vis;
         if self.start_bar < lo {
             self.start_bar = lo;
             self.end_bar = lo + span;

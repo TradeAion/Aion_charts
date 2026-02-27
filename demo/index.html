@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>Chart Core — Demo</title>
+  <title>RayCore — Modern API Demo</title>
   <style>
     * {
       margin: 0;
@@ -29,6 +29,12 @@
       height: 100vh;
       height: 100dvh;
       overflow: hidden;
+      transition: background 0.2s;
+    }
+
+    body.light-theme {
+      background: #f0f0f0;
+      color: #333;
     }
 
     header {
@@ -39,12 +45,22 @@
       align-items: center;
       gap: 14px;
       flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+
+    body.light-theme header {
+      background: #ffffff;
+      border-bottom-color: #ddd;
     }
 
     header h1 {
       font-size: 15px;
       color: #e0e0e0;
       font-weight: 600;
+    }
+
+    body.light-theme header h1 {
+      color: #111;
     }
 
     #renderer-badge {
@@ -73,9 +89,20 @@
       transition: background 0.15s, color 0.15s;
     }
 
+    body.light-theme .toggle-btn {
+      background: #eaeaea;
+      color: #444;
+      border-color: #ccc;
+    }
+
     .toggle-btn:hover {
       background: #2a2a34;
       color: #ddd;
+    }
+
+    body.light-theme .toggle-btn:hover {
+      background: #ddd;
+      color: #111;
     }
 
     .toggle-btn:disabled {
@@ -89,22 +116,33 @@
       border-color: #1abc9c44;
     }
 
+    body.light-theme .toggle-btn.active {
+      background: #e0f7f2;
+      color: #0e9e80;
+      border-color: #0e9e8044;
+    }
+
+    /* theme btn special */
+    #theme-toggle {
+      font-size: 12px;
+    }
+
     .toggle-group {
       display: flex;
       gap: 4px;
       margin-left: auto;
     }
 
-    /* The container — RayCore creates canvases inside it */
+    /* The container — RayCore mounts inside it */
     #chart-container {
       flex: 1;
       position: relative;
       overflow: hidden;
       min-height: 0;
-      min-height: 200px;
       touch-action: none;
     }
 
+    /* HUD — top-left overlay with live price & status */
     #hud {
       position: absolute;
       top: 8px;
@@ -116,6 +154,33 @@
       z-index: 10;
     }
 
+    #hud .hud-price {
+      font-size: 13px;
+      color: #1abc9c;
+      font-weight: 600;
+    }
+
+    body.light-theme #hud {
+      color: #888;
+    }
+
+    body.light-theme #hud .hud-price {
+      color: #0a8a6a;
+    }
+
+    /* Event log strip — bottom of HUD */
+    #hud .hud-events {
+      color: #444;
+      font-size: 10px;
+      margin-top: 4px;
+      max-width: 320px;
+    }
+
+    body.light-theme #hud .hud-events {
+      color: #aaa;
+    }
+
+    /* Config panel */
     #lwc-config-panel {
       position: fixed;
       top: 54px;
@@ -131,6 +196,11 @@
       backdrop-filter: blur(4px);
     }
 
+    body.light-theme #lwc-config-panel {
+      background: #ffffffee;
+      border-color: #ccc;
+    }
+
     #lwc-config-panel.hidden {
       display: none;
     }
@@ -139,6 +209,10 @@
       font-size: 12px;
       color: #ddd;
       margin-bottom: 8px;
+    }
+
+    body.light-theme #lwc-config-panel h2 {
+      color: #333;
     }
 
     .cfg-row {
@@ -173,6 +247,14 @@
       min-width: 84px;
     }
 
+    body.light-theme .cfg-controls select,
+    body.light-theme .cfg-controls input[type="number"],
+    body.light-theme .cfg-controls input[type="text"] {
+      background: #f0f0f0;
+      color: #222;
+      border-color: #bbb;
+    }
+
     .cfg-controls input[type="number"] {
       width: 60px;
       min-width: 60px;
@@ -204,6 +286,10 @@
       margin: 8px 0;
     }
 
+    body.light-theme .cfg-divider {
+      background: #e0e0e0;
+    }
+
     #error-banner {
       display: none;
       background: #2a1010;
@@ -225,6 +311,10 @@
       color: #666;
       letter-spacing: 0.05em;
       z-index: 20;
+    }
+
+    body.light-theme #loading {
+      background: #f0f0f0dd;
     }
 
     /* ── Mobile responsiveness ── */
@@ -281,25 +371,32 @@
 <body>
   <div id="error-banner"></div>
   <header>
-    <h1>Chart Core</h1>
+    <h1>RayCore</h1>
     <span id="renderer-badge">…</span>
     <span style="color:#444;margin:0 4px">|</span>
+    <!-- Theme toggle — uses apply_options({ theme: 'light' / 'dark' }) -->
+    <button class="toggle-btn" id="theme-toggle" title="Toggle dark/light theme">☀ Light</button>
+    <span style="color:#444;margin:0 4px">|</span>
+    <!-- Chart types -->
     <button class="toggle-btn active" id="chart-candlestick" title="Candlestick chart">Candle</button>
     <button class="toggle-btn" id="chart-ohlc" title="OHLC bars">OHLC</button>
     <button class="toggle-btn" id="chart-line" title="Line chart (close prices)">Line</button>
     <button class="toggle-btn" id="chart-area" title="Area chart">Area</button>
     <span style="color:#444;margin:0 4px">|</span>
-    <button class="toggle-btn active" id="crosshair-settings-toggle" title="Show/hide crosshair and live-price config">LWC Config</button>
+    <!-- Config + layout -->
+    <button class="toggle-btn active" id="crosshair-settings-toggle" title="Show/hide crosshair and live-price config">Config</button>
     <button class="toggle-btn active" id="split-single-btn" title="Single chart template">Single</button>
     <button class="toggle-btn" id="split-vertical-btn" title="Vertical split (left/right)">Vertical</button>
     <button class="toggle-btn" id="split-horizontal-btn" title="Horizontal split (top/bottom)">Horizontal</button>
     <span style="color:#444;margin:0 4px">|</span>
+    <!-- Drawing tools -->
     <button class="toggle-btn" id="draw-trendline" title="Trend Line">Line</button>
     <button class="toggle-btn" id="draw-rectangle" title="Rectangle">Rect</button>
     <button class="toggle-btn" id="draw-fibonacci" title="Fibonacci Retracement">Fib</button>
     <button class="toggle-btn" id="draw-scale" title="Price Range / Scale">Scale</button>
     <button class="toggle-btn" id="draw-clear" title="Clear all drawings">Clear</button>
     <span style="color:#444;margin:0 4px">|</span>
+    <!-- Overlay studies -->
     <button class="toggle-btn" id="sma-toggle" title="Toggle SMA-20 study">SMA</button>
     <button class="toggle-btn" id="ema-toggle" title="Toggle EMA-20 study">EMA</button>
     <button class="toggle-btn" id="rsi-toggle" title="Toggle RSI-14 study">RSI</button>
@@ -309,26 +406,38 @@
     <button class="toggle-btn" id="atr-toggle" title="Toggle ATR-14">ATR</button>
     <button class="toggle-btn" id="vwap-toggle" title="Toggle VWAP">VWAP</button>
     <span style="color:#444;margin:0 4px">|</span>
+    <!-- Sub-pane indicators -->
     <button class="toggle-btn" id="rsi-pane-btn" title="Add/remove RSI in sub-pane">RSI Pane</button>
     <button class="toggle-btn" id="stoch-pane-btn" title="Add/remove Stochastic in sub-pane">Stoch Pane</button>
     <button class="toggle-btn" id="atr-pane-btn" title="Add/remove ATR in sub-pane">ATR Pane</button>
     <span style="color:#444;margin:0 4px">|</span>
-    <button class="toggle-btn" id="stream-toggle" title="Start/stop real-time bar simulation">▶ Live</button>
+    <!-- Extras -->
+    <button class="toggle-btn" id="stream-toggle" title="Start/stop real-time bar simulation">&#x25B6; Live</button>
     <span style="color:#444;margin:0 4px">|</span>
     <button class="toggle-btn" id="priceline-toggle" title="Add/remove custom price line">PriceLine</button>
     <button class="toggle-btn" id="markers-toggle" title="Add/remove series markers">Markers</button>
     <span style="color:#444;margin:0 4px">|</span>
+    <!-- Price scale modes -->
     <button class="toggle-btn" id="scale-normal" title="Normal price scale">Normal</button>
     <button class="toggle-btn" id="scale-log" title="Logarithmic price scale">Log</button>
     <button class="toggle-btn" id="scale-pct" title="Percentage price scale">Pct%</button>
     <button class="toggle-btn" id="scale-idx" title="Indexed to 100">Idx100</button>
+    <!-- Renderer toggle (populated dynamically) -->
     <div class="toggle-group" id="toggle-group"></div>
   </header>
 
+  <!-- Chart mount point — RayCore creates DOM inside this element -->
   <div id="chart-container">
     <div id="loading">Initializing…</div>
-    <div id="hud"></div>
+    <!-- HUD: live price + status info (event-driven, not polled) -->
+    <div id="hud">
+      <div class="hud-price" id="hud-price"></div>
+      <div id="hud-status"></div>
+      <div class="hud-events" id="hud-events"></div>
+    </div>
   </div>
+
+  <!-- Config panel -->
   <div id="lwc-config-panel">
     <h2>Crosshair / Live Price</h2>
     <div class="cfg-row">
@@ -429,72 +538,100 @@
   </div>
 
   <script type="module">
-    import init, { RayCore, ChartGroup, ChartWorkspace } from './pkg/raycore_wasm.js?v=20260224-workspace-style-api-v1';
+    // ═══════════════════════════════════════════════════════════════════════
+    // RayCore Modern API Demo
+    //
+    // Key modernization showcased:
+    //   1. create_chart(element, { renderer, autoRender: true })
+    //      — no manual requestAnimationFrame render loop needed
+    //   2. chart.on('crosshairMove', handler)  — event-driven HUD updates
+    //   3. chart.on('error', handler)           — event-driven error display
+    //   4. chart.on('visibleRangeChange', h)    — event-driven status updates
+    //   5. chart.apply_options({ theme, crosshair: { mode } })
+    //      — runtime partial config updates
+    //   6. CSS variables: container gets --raycore-bg, --raycore-bullish, etc.
+    //      automatically from the active theme
+    //
+    // Legacy methods (set_crosshair_line_style, set_crosshair_line_color, etc.)
+    // still work but will log deprecation warnings.
+    // ═══════════════════════════════════════════════════════════════════════
 
-    const errorBanner = document.getElementById('error-banner');
-    const loading = document.getElementById('loading');
-    const hud = document.getElementById('hud');
-    const badge = document.getElementById('renderer-badge');
-    const toggleGroup = document.getElementById('toggle-group');
-    const container = document.getElementById('chart-container');
-    const cfgPanel = document.getElementById('lwc-config-panel');
+    import init, { RayCore, ChartGroup, ChartWorkspace } from './pkg/raycore_wasm.js?v=20260227-fix-interaction-reset-canvas-lock';
+
+    // ── DOM refs ─────────────────────────────────────────────────────────────
+    const errorBanner  = document.getElementById('error-banner');
+    const loading      = document.getElementById('loading');
+    const hudPrice     = document.getElementById('hud-price');
+    const hudStatus    = document.getElementById('hud-status');
+    const hudEvents    = document.getElementById('hud-events');
+    const badge        = document.getElementById('renderer-badge');
+    const toggleGroup  = document.getElementById('toggle-group');
+    const container    = document.getElementById('chart-container');
+    const cfgPanel     = document.getElementById('lwc-config-panel');
     const cfgToggleBtn = document.getElementById('crosshair-settings-toggle');
+    const themeBtn     = document.getElementById('theme-toggle');
     const splitButtons = {
-      single: document.getElementById('split-single-btn'),
-      vertical: document.getElementById('split-vertical-btn'),
+      single:     document.getElementById('split-single-btn'),
+      vertical:   document.getElementById('split-vertical-btn'),
       horizontal: document.getElementById('split-horizontal-btn'),
     };
 
     const cfg = {
-      crosshairMode: document.getElementById('cfg-crosshair-mode'),
-      vertStyle: document.getElementById('cfg-vert-style'),
-      vertWidth: document.getElementById('cfg-vert-width'),
-      vertVisible: document.getElementById('cfg-vert-visible'),
-      vertLabelVisible: document.getElementById('cfg-vert-label-visible'),
-      horzStyle: document.getElementById('cfg-horz-style'),
-      horzWidth: document.getElementById('cfg-horz-width'),
-      horzVisible: document.getElementById('cfg-horz-visible'),
-      horzLabelVisible: document.getElementById('cfg-horz-label-visible'),
-      crosshairColor: document.getElementById('cfg-crosshair-color'),
-      crosshairLabelBg: document.getElementById('cfg-crosshair-label-bg'),
-      crosshairLabelText: document.getElementById('cfg-crosshair-label-text'),
-      lastStyle: document.getElementById('cfg-last-style'),
-      lastWidth: document.getElementById('cfg-last-width'),
-      lastVisible: document.getElementById('cfg-last-visible'),
-      lastLabelVisible: document.getElementById('cfg-last-label-visible'),
-      groupSymbol: document.getElementById('cfg-group-symbol'),
-      groupInterval: document.getElementById('cfg-group-interval'),
-      syncSymbol: document.getElementById('cfg-sync-symbol'),
-      syncInterval: document.getElementById('cfg-sync-interval'),
-      syncCrosshair: document.getElementById('cfg-sync-crosshair'),
-      syncTime: document.getElementById('cfg-sync-time'),
-      syncDataRange: document.getElementById('cfg-sync-data-range'),
+      crosshairMode:       document.getElementById('cfg-crosshair-mode'),
+      vertStyle:           document.getElementById('cfg-vert-style'),
+      vertWidth:           document.getElementById('cfg-vert-width'),
+      vertVisible:         document.getElementById('cfg-vert-visible'),
+      vertLabelVisible:    document.getElementById('cfg-vert-label-visible'),
+      horzStyle:           document.getElementById('cfg-horz-style'),
+      horzWidth:           document.getElementById('cfg-horz-width'),
+      horzVisible:         document.getElementById('cfg-horz-visible'),
+      horzLabelVisible:    document.getElementById('cfg-horz-label-visible'),
+      crosshairColor:      document.getElementById('cfg-crosshair-color'),
+      crosshairLabelBg:    document.getElementById('cfg-crosshair-label-bg'),
+      crosshairLabelText:  document.getElementById('cfg-crosshair-label-text'),
+      lastStyle:           document.getElementById('cfg-last-style'),
+      lastWidth:           document.getElementById('cfg-last-width'),
+      lastVisible:         document.getElementById('cfg-last-visible'),
+      lastLabelVisible:    document.getElementById('cfg-last-label-visible'),
+      groupSymbol:         document.getElementById('cfg-group-symbol'),
+      groupInterval:       document.getElementById('cfg-group-interval'),
+      syncSymbol:          document.getElementById('cfg-sync-symbol'),
+      syncInterval:        document.getElementById('cfg-sync-interval'),
+      syncCrosshair:       document.getElementById('cfg-sync-crosshair'),
+      syncTime:            document.getElementById('cfg-sync-time'),
+      syncDataRange:       document.getElementById('cfg-sync-data-range'),
     };
 
-    // Shared divider/drag-handle style used by both:
-    // 1) multi-layout split dividers (ChartWorkspace)
-    // 2) indicator sub-pane separators (RayCore subpanes)
-    const dividerStyleConfig = {
-      lineThickness: 1.0,
-      hitArea: 8.0,
-      color: [0.18, 0.18, 0.22, 1.0],
-      activeColor: [0.102, 0.737, 0.612, 0.55],
-      paneBackground: [0.09, 0.09, 0.09, 1.0],
-      activePaneBorderColor: [0.102, 0.737, 0.612, 0.45],
-      activePaneBorderWidth: 1.0,
-    };
-
-    let core = null;
-    let workspace = null;
-    let group = null;
-    const paneCores = new Map();
-    const paneToGroup = new Map();
-    const groupToPane = new Map();
-    let syncGuard = false;
-    let rafId = 0;
+    // ── Shared state ─────────────────────────────────────────────────────────
+    let core           = null;
+    let workspace      = null;
+    let group          = null;
+    const paneCores    = new Map();
+    const paneToGroup  = new Map();
+    const groupToPane  = new Map();
+    let syncGuard      = false;
+    let groupSyncRafId = 0;  // Only for multi-pane group sync (not rendering)
     let currentRenderer = null;
-    let splitTemplate = 'single';
+    let splitTemplate  = 'single';
+    let isDarkTheme    = true;
+    let activeChartType = 'candlestick';
 
+    // Recent event log (shown in HUD)
+    const eventLog = [];
+    const MAX_LOG = 3;
+
+    // ── Divider/workspace style config ───────────────────────────────────────
+    const dividerStyleConfig = {
+      lineThickness:          1.0,
+      hitArea:                8.0,
+      color:                  [0.18, 0.18, 0.22, 1.0],
+      activeColor:            [0.102, 0.737, 0.612, 0.55],
+      paneBackground:         [0.09, 0.09, 0.09, 1.0],
+      activePaneBorderColor:  [0.102, 0.737, 0.612, 0.45],
+      activePaneBorderWidth:  1.0,
+    };
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
     function forEachCore(fn) {
       for (const [paneId, paneCore] of paneCores.entries()) {
         fn(paneCore, paneId);
@@ -511,10 +648,6 @@
       return paneCores.get(paneId) || core;
     }
 
-    function updateCorePointer() {
-      // Intentionally no-op: legacy controls still target the primary pane.
-    }
-
     function registerGroupPane(layoutPaneId, groupPaneId) {
       paneToGroup.set(layoutPaneId, groupPaneId);
       groupToPane.set(groupPaneId, layoutPaneId);
@@ -525,6 +658,86 @@
       groupToPane.clear();
     }
 
+    function hexToRgba01(hex) {
+      const clean = hex.replace('#', '');
+      const v = parseInt(clean, 16);
+      return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255, 1.0];
+    }
+
+    function showError(msg) {
+      errorBanner.textContent = 'Error: ' + msg;
+      errorBanner.style.display = 'block';
+      loading.style.display = 'none';
+    }
+
+    function updateBadge(rName) {
+      badge.textContent = rName === 'webgpu' ? 'WebGPU' : 'Canvas 2D';
+      badge.className   = rName === 'webgpu' ? 'webgpu' : 'canvas2d';
+    }
+
+    function updateSplitButtons() {
+      splitButtons.single.classList.toggle('active', splitTemplate === 'single');
+      splitButtons.vertical.classList.toggle('active', splitTemplate === 'vertical');
+      splitButtons.horizontal.classList.toggle('active', splitTemplate === 'horizontal');
+    }
+
+    function logEvent(name, detail) {
+      const now = new Date().toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      eventLog.unshift(`[${now}] ${name}${detail ? ': ' + detail : ''}`);
+      if (eventLog.length > MAX_LOG) eventLog.length = MAX_LOG;
+      hudEvents.textContent = eventLog.join('\n');
+    }
+
+    // ── Event wiring for a chart instance ────────────────────────────────────
+    // Wire the modern event API to update UI. Called for every new chart instance.
+    function wireChartEvents(chartCore, isPrimary) {
+      // crosshairMove → live price in HUD (only for primary/active pane)
+      if (isPrimary) {
+        chartCore.on('crosshairMove', (e) => {
+          if (e.price && e.price > 0) {
+            hudPrice.textContent = e.price.toFixed(2);
+          } else {
+            hudPrice.textContent = '';
+          }
+        });
+
+        // visibleRangeChange → bar count in status
+        chartCore.on('visibleRangeChange', (e) => {
+          const bars = Math.round(e.endBar - e.startBar);
+          hudStatus.textContent = currentRenderer + ' | ' + bars + ' bars visible | dpr=' +
+            (window.devicePixelRatio || 1).toFixed(1);
+          logEvent('rangeChange', `bars ${Math.round(e.startBar)}-${Math.round(e.endBar)}`);
+        });
+
+        // chartTypeChange → log
+        chartCore.on('chartTypeChange', (e) => {
+          logEvent('chartType', e.chartType);
+        });
+
+        // priceScaleChange → log
+        chartCore.on('priceScaleChange', (e) => {
+          logEvent('priceScale', e.mode);
+        });
+
+        // resize → update status
+        chartCore.on('resize', (e) => {
+          hudStatus.textContent = currentRenderer + ' | dpr=' + (window.devicePixelRatio || 1).toFixed(1);
+          logEvent('resize', `${Math.round(e.width)}×${Math.round(e.height)}`);
+        });
+
+        // click → log
+        chartCore.on('click', (e) => {
+          logEvent('click', `price ${e.price ? e.price.toFixed(2) : '?'}`);
+        });
+      }
+
+      // error → show error banner (all panes)
+      chartCore.on('error', (e) => {
+        showError(e.message);
+      });
+    }
+
+    // ── Workspace & separator style helpers ──────────────────────────────────
     function applyWorkspaceStyle(targetWorkspace) {
       if (!targetWorkspace) return;
       const d = dividerStyleConfig.color;
@@ -550,96 +763,84 @@
       targetCore.set_subpane_separator_hover_color(h[0], h[1], h[2], h[3]);
     }
 
-    function hexToRgba01(hex) {
-      const clean = hex.replace('#', '');
-      const v = parseInt(clean, 16);
-      const r = ((v >> 16) & 255) / 255;
-      const g = ((v >> 8) & 255) / 255;
-      const b = (v & 255) / 255;
-      return [r, g, b, 1.0];
+    // ── Theme switching ───────────────────────────────────────────────────────
+    // Uses the modern apply_options() API — switches theme and CSS variables
+    // on all active chart panes simultaneously.
+    function setTheme(dark) {
+      isDarkTheme = dark;
+      const themeName = dark ? 'dark' : 'light';
+
+      // apply_options triggers theme switch + emits CSS variables to container
+      forEachCore((c) => c.apply_options({ theme: themeName }));
+
+      // Sync page chrome
+      document.body.classList.toggle('light-theme', !dark);
+      themeBtn.textContent = dark ? '☀ Light' : '🌙 Dark';
+      themeBtn.classList.toggle('active', !dark);
     }
 
+    themeBtn.addEventListener('click', () => setTheme(!isDarkTheme));
+
+    // ── Demo data generation ─────────────────────────────────────────────────
     function createSeededRng(seed) {
       let s = seed >>> 0;
-      return () => {
-        s = (s * 1664525 + 1013904223) >>> 0;
-        return s / 4294967296;
-      };
+      return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
     }
 
-    function buildSharedDemoData() {
-      const numBars = 600;
-      const intervalMs = 60_000;
-      const nowMs = Date.now();
-      const startMs = nowMs - numBars * intervalMs;
-      const rand = createSeededRng(0xC0FFEE);
+    let sharedDemoData = null;
 
-      const open = new Float32Array(numBars);
-      const high = new Float32Array(numBars);
-      const low = new Float32Array(numBars);
-      const close = new Float32Array(numBars);
-      const volume = new Float32Array(numBars);
+    function buildSharedDemoData() {
+      const numBars    = 600;
+      const intervalMs = 60_000;
+      const nowMs      = Date.now();
+      const startMs    = nowMs - numBars * intervalMs;
+      const rand       = createSeededRng(0xC0FFEE);
+
+      const open       = new Float32Array(numBars);
+      const high       = new Float32Array(numBars);
+      const low        = new Float32Array(numBars);
+      const close      = new Float32Array(numBars);
+      const volume     = new Float32Array(numBars);
       const timestamps = new BigUint64Array(numBars);
 
       let price = 42000.0;
       for (let i = 0; i < numBars; i++) {
-        const ts = BigInt(startMs + i * intervalMs);
-        const drift = (rand() - 0.48) * price * 0.0035;
-        const nextClose = price + drift;
-        const wickTop = Math.abs(drift) * (0.4 + rand() * 0.8);
-        const wickBottom = Math.abs(drift) * (0.4 + rand() * 0.8);
-        const o = price;
-        const c = nextClose;
-        const h = Math.max(o, c) + wickTop;
-        const l = Math.min(o, c) - wickBottom;
-
-        open[i] = o;
-        high[i] = h;
-        low[i] = l;
-        close[i] = c;
-        volume[i] = 100 + rand() * 900;
-        timestamps[i] = ts;
-
-        price = nextClose;
+        const ts       = BigInt(startMs + i * intervalMs);
+        const drift    = (rand() - 0.48) * price * 0.0035;
+        const next     = price + drift;
+        const wickT    = Math.abs(drift) * (0.4 + rand() * 0.8);
+        const wickB    = Math.abs(drift) * (0.4 + rand() * 0.8);
+        open[i]        = price;
+        close[i]       = next;
+        high[i]        = Math.max(price, next) + wickT;
+        low[i]         = Math.min(price, next) - wickB;
+        volume[i]      = 100 + rand() * 900;
+        timestamps[i]  = ts;
+        price          = next;
       }
-
-      return {
-        numBars,
-        intervalMs,
-        startMs,
-        open,
-        high,
-        low,
-        close,
-        volume,
-        timestamps,
-      };
+      return { numBars, intervalMs, startMs, open, high, low, close, volume, timestamps };
     }
 
-    let sharedDemoData = null;
     function ensureSharedDemoData() {
-      if (!sharedDemoData) {
-        sharedDemoData = buildSharedDemoData();
-      }
+      if (!sharedDemoData) sharedDemoData = buildSharedDemoData();
       return sharedDemoData;
     }
 
     function loadSharedDemo(coreInstance) {
-      const demo = ensureSharedDemoData();
-      coreInstance.set_data_arrays(
-        demo.open,
-        demo.high,
-        demo.low,
-        demo.close,
-        demo.volume,
-        demo.timestamps
-      );
+      const d = ensureSharedDemoData();
+      coreInstance.set_data_arrays(d.open, d.high, d.low, d.close, d.volume, d.timestamps);
     }
 
+    // ── LWC Config panel apply ────────────────────────────────────────────────
+    // Crosshair mode uses the modern apply_options() API.
+    // Granular sub-settings (color, width, style) still use legacy setters
+    // (they are deprecated but continue to work for full backward compat).
     function applyLwcConfig() {
       forEachCore((chartCore) => {
-        chartCore.set_crosshair_mode(cfg.crosshairMode.value);
+        // Modern: crosshair mode via apply_options
+        chartCore.apply_options({ crosshair: { mode: cfg.crosshairMode.value } });
 
+        // Legacy granular setters (deprecated but functional)
         chartCore.set_crosshair_line_style('vert', cfg.vertStyle.value);
         chartCore.set_crosshair_line_width('vert', Number(cfg.vertWidth.value) || 1);
         chartCore.set_crosshair_line_visible('vert', cfg.vertVisible.checked);
@@ -666,162 +867,122 @@
 
     function applyGroupSyncConfig() {
       if (!group) return;
-      group.set_sync('symbol', cfg.syncSymbol.checked);
-      group.set_sync('interval', cfg.syncInterval.checked);
-      group.set_sync('crosshair', cfg.syncCrosshair.checked);
-      group.set_sync('time', cfg.syncTime.checked);
+      group.set_sync('symbol',     cfg.syncSymbol.checked);
+      group.set_sync('interval',   cfg.syncInterval.checked);
+      group.set_sync('crosshair',  cfg.syncCrosshair.checked);
+      group.set_sync('time',       cfg.syncTime.checked);
       group.set_sync('data_range', cfg.syncDataRange.checked);
     }
 
     function applyGroupIdentityConfig() {
       if (paneCores.size === 0) return;
-      const symbol = cfg.groupSymbol.value.trim() || 'DEMO';
+      const symbol   = cfg.groupSymbol.value.trim() || 'DEMO';
       const interval = cfg.groupInterval.value;
       forEachCore((paneCore) => {
         paneCore.set_symbol(symbol);
         paneCore.set_interval(interval);
       });
       if (group) {
-        const sourceLayoutPane = activePaneId() ?? paneCores.keys().next().value;
-        const sourceGroupPane = paneToGroup.get(sourceLayoutPane);
-        if (sourceGroupPane !== undefined) {
-          group.update_symbol(sourceGroupPane, symbol);
-          group.update_interval(sourceGroupPane, interval);
+        const srcLayoutPane = activePaneId() ?? paneCores.keys().next().value;
+        const srcGroupPane  = paneToGroup.get(srcLayoutPane);
+        if (srcGroupPane !== undefined) {
+          group.update_symbol(srcGroupPane, symbol);
+          group.update_interval(srcGroupPane, interval);
         }
       }
     }
 
-    function updateSplitButtons() {
-      splitButtons.single.classList.toggle('active', splitTemplate === 'single');
-      splitButtons.vertical.classList.toggle('active', splitTemplate === 'vertical');
-      splitButtons.horizontal.classList.toggle('active', splitTemplate === 'horizontal');
-    }
-
+    // ── Config panel event wiring ────────────────────────────────────────────
     cfgToggleBtn.addEventListener('click', () => {
       const hidden = cfgPanel.classList.toggle('hidden');
       cfgToggleBtn.classList.toggle('active', !hidden);
     });
 
     [
-      cfg.crosshairMode,
-      cfg.vertStyle,
-      cfg.vertWidth,
-      cfg.vertVisible,
-      cfg.vertLabelVisible,
-      cfg.horzStyle,
-      cfg.horzWidth,
-      cfg.horzVisible,
-      cfg.horzLabelVisible,
-      cfg.crosshairColor,
-      cfg.crosshairLabelBg,
-      cfg.crosshairLabelText,
-      cfg.lastStyle,
-      cfg.lastWidth,
-      cfg.lastVisible,
-      cfg.lastLabelVisible,
+      cfg.crosshairMode, cfg.vertStyle, cfg.vertWidth, cfg.vertVisible, cfg.vertLabelVisible,
+      cfg.horzStyle, cfg.horzWidth, cfg.horzVisible, cfg.horzLabelVisible,
+      cfg.crosshairColor, cfg.crosshairLabelBg, cfg.crosshairLabelText,
+      cfg.lastStyle, cfg.lastWidth, cfg.lastVisible, cfg.lastLabelVisible,
     ].forEach((el) => {
       el.addEventListener('change', applyLwcConfig);
-      if (el.tagName === 'INPUT') {
-        el.addEventListener('input', applyLwcConfig);
-      }
+      if (el.tagName === 'INPUT') el.addEventListener('input', applyLwcConfig);
     });
 
-    [
-      cfg.syncSymbol,
-      cfg.syncInterval,
-      cfg.syncCrosshair,
-      cfg.syncTime,
-      cfg.syncDataRange,
-    ].forEach((el) => el.addEventListener('change', applyGroupSyncConfig));
+    [cfg.syncSymbol, cfg.syncInterval, cfg.syncCrosshair, cfg.syncTime, cfg.syncDataRange]
+      .forEach((el) => el.addEventListener('change', applyGroupSyncConfig));
 
     cfg.groupSymbol.addEventListener('change', applyGroupIdentityConfig);
     cfg.groupInterval.addEventListener('change', applyGroupIdentityConfig);
 
-    // Drawing tool buttons
+    // ── Drawing tools ─────────────────────────────────────────────────────────
     const drawBtns = {
       'draw-trendline': 'trend_line',
       'draw-rectangle': 'rectangle',
-      'draw-fibonacci': 'fibonacci',
-      'draw-scale': 'scale',
+      'draw-fibonacci':  'fibonacci',
+      'draw-scale':      'scale',
     };
     let activeDrawTool = 'none';
+
     for (const [btnId, tool] of Object.entries(drawBtns)) {
       document.getElementById(btnId).addEventListener('click', () => {
-        updateCorePointer();
         const newTool = activeDrawTool === tool ? 'none' : tool;
         activeDrawTool = newTool;
-        for (const [bid, _] of Object.entries(drawBtns)) {
+        for (const [bid] of Object.entries(drawBtns)) {
           document.getElementById(bid).classList.toggle('active', drawBtns[bid] === newTool);
         }
         if (core) core.set_drawing_tool(newTool);
       });
     }
+
     document.getElementById('draw-clear').addEventListener('click', () => {
-      updateCorePointer();
       if (core) core.clear_drawings();
     });
-    // Keyboard: forward to WASM core for handling
+
     document.addEventListener('keydown', (e) => {
-      updateCorePointer();
       if (!core) return;
-      
-      // Let WASM handle the key
       const handled = core.on_key_down(e.key, e.ctrlKey, e.shiftKey, e.altKey);
-      
-      // If Escape, also reset toolbar UI state
       if (e.key === 'Escape') {
         core.set_drawing_tool('none');
         activeDrawTool = 'none';
-        for (const [bid, _] of Object.entries(drawBtns)) {
+        for (const [bid] of Object.entries(drawBtns)) {
           document.getElementById(bid).classList.remove('active');
         }
       }
-      
-      // Prevent default browser behavior for handled keys
-      if (handled) {
-        e.preventDefault();
-      }
+      if (handled) e.preventDefault();
     });
 
-    // Right-click: sync toolbar state (scale tool exits on right-click via WASM)
     document.addEventListener('contextmenu', () => {
       if (activeDrawTool === 'scale') {
         activeDrawTool = 'none';
-        for (const [bid, _] of Object.entries(drawBtns)) {
+        for (const [bid] of Object.entries(drawBtns)) {
           document.getElementById(bid).classList.remove('active');
         }
       }
     });
 
-    // ── Chart Type Selector ─────────────────────────────────────────────────
+    // ── Chart Type selector ───────────────────────────────────────────────────
     const chartTypeBtns = {
       'chart-candlestick': 'candlestick',
-      'chart-ohlc': 'ohlc',
-      'chart-line': 'line',
-      'chart-area': 'area',
+      'chart-ohlc':        'ohlc',
+      'chart-line':        'line',
+      'chart-area':        'area',
     };
-    let activeChartType = 'candlestick';
 
-    function setChartType(type) {
-      if (paneCores.size === 0 || activeChartType === type) return;
-      activeChartType = type;
-      forEachCore((chartCore) => chartCore.set_chart_type(type));
-      // Update button states
-      for (const [btnId, t] of Object.entries(chartTypeBtns)) {
-        document.getElementById(btnId).classList.toggle('active', t === type);
-      }
+    for (const [btnId, ctype] of Object.entries(chartTypeBtns)) {
+      document.getElementById(btnId).addEventListener('click', () => {
+        activeChartType = ctype;
+        for (const [bid] of Object.entries(chartTypeBtns)) {
+          document.getElementById(bid).classList.toggle('active', chartTypeBtns[bid] === ctype);
+        }
+        forEachCore((c) => c.set_chart_type(ctype));
+      });
     }
 
-    // Wire up chart type buttons
-    for (const [btnId, type] of Object.entries(chartTypeBtns)) {
-      document.getElementById(btnId).addEventListener('click', () => setChartType(type));
-    }
-
+    // ── Multi-pane workspace split ────────────────────────────────────────────
     async function splitActive(direction) {
       if (!workspace || !group || !currentRenderer) return;
-      updateCorePointer();
       const sourcePaneId = workspace.active_pane_id();
-      const sourceCore = activeCore();
+      const sourceCore   = activeCore();
       if (!sourceCore) return;
 
       let newPaneId;
@@ -834,7 +995,13 @@
       const hostId = workspace.pane_host_id(newPaneId);
       if (!hostId) return;
 
-      const newCore = await RayCore.create_with(hostId, currentRenderer);
+      // ✦ Modern create_chart() with autoRender: true
+      const newCore = await RayCore.create_chart(hostId, {
+        renderer:    currentRenderer,
+        autoRender:  true,
+        theme:       isDarkTheme ? 'dark' : 'light',
+      });
+
       applySubpaneSeparatorStyle(newCore);
       loadSharedDemo(newCore);
       newCore.set_chart_type(activeChartType);
@@ -844,37 +1011,37 @@
         newCore.set_visible_range(sourceRange[0], sourceRange[1]);
       }
 
-      const symbol = sourceCore.symbol() || cfg.groupSymbol.value.trim() || 'DEMO';
+      const symbol   = sourceCore.symbol() || cfg.groupSymbol.value.trim() || 'DEMO';
       const interval = sourceCore.interval() || cfg.groupInterval.value;
       newCore.set_symbol(symbol);
       newCore.set_interval(interval);
 
+      // Wire events (non-primary pane: only error events)
+      wireChartEvents(newCore, false);
+
       paneCores.set(newPaneId, newCore);
 
-      const sourceGroupPaneId = paneToGroup.get(sourcePaneId);
-      const newGroupPaneId = group.add_pane(symbol, interval);
-      registerGroupPane(newPaneId, newGroupPaneId);
+      const srcGroupPane = paneToGroup.get(sourcePaneId);
+      const newGroupPane = group.add_pane(symbol, interval);
+      registerGroupPane(newPaneId, newGroupPane);
       for (const existingGroupPaneId of groupToPane.keys()) {
-        if (existingGroupPaneId !== newGroupPaneId) {
-          group.link_panes(newGroupPaneId, existingGroupPaneId);
+        if (existingGroupPaneId !== newGroupPane) {
+          group.link_panes(newGroupPane, existingGroupPaneId);
         }
       }
-      if (sourceGroupPaneId !== undefined) {
-        group.link_panes(sourceGroupPaneId, newGroupPaneId);
+      if (srcGroupPane !== undefined) {
+        group.link_panes(srcGroupPane, newGroupPane);
       }
 
       splitTemplate = direction;
       updateSplitButtons();
       applyLwcConfig();
-      updateCorePointer();
     }
 
     splitButtons.single.addEventListener('click', async () => {
       splitTemplate = 'single';
       updateSplitButtons();
-      if (currentRenderer) {
-        await createChart(currentRenderer);
-      }
+      if (currentRenderer) await createChart(currentRenderer);
     });
     splitButtons.vertical.addEventListener('click', async () => {
       splitTemplate = 'vertical';
@@ -887,37 +1054,120 @@
       await splitActive('horizontal');
     });
 
-    function showError(msg) {
-      errorBanner.textContent = 'Error: ' + msg;
-      errorBanner.style.display = 'block';
-      loading.style.display = 'none';
+    // ── Multi-chart group sync (RAF-based poll, only for multi-pane state) ────
+    // Note: rendering itself is driven by autoRender: true in each chart instance.
+    // This loop only exists to poll and distribute multi-chart sync state.
+    function runGroupSync() {
+      if (!group || !workspace || paneCores.size < 2 || syncGuard) return;
+
+      const sourceLayoutPaneId = workspace.active_pane_id();
+      const sourceCore         = paneCores.get(sourceLayoutPaneId);
+      const sourceGroupPaneId  = paneToGroup.get(sourceLayoutPaneId);
+      if (!sourceCore || sourceGroupPaneId === undefined) return;
+
+      syncGuard = true;
+      try {
+        if (cfg.syncSymbol.checked) {
+          const symbol = sourceCore.symbol();
+          if (symbol) {
+            const targets = group.update_symbol(sourceGroupPaneId, symbol);
+            for (const tgId of targets) {
+              const tid = groupToPane.get(Number(tgId));
+              const tc  = tid !== undefined ? paneCores.get(tid) : null;
+              if (tc) tc.set_symbol(symbol);
+            }
+          }
+        }
+
+        if (cfg.syncInterval.checked) {
+          const interval = sourceCore.interval();
+          if (interval) {
+            const targets = group.update_interval(sourceGroupPaneId, interval);
+            for (const tgId of targets) {
+              const tid = groupToPane.get(Number(tgId));
+              const tc  = tid !== undefined ? paneCores.get(tid) : null;
+              if (tc) tc.set_interval(interval);
+            }
+          }
+        }
+
+        if (cfg.syncTime.checked) {
+          const sourceRange = sourceCore.visible_range();
+          const targets = group.update_time_range(sourceGroupPaneId, sourceRange[0], sourceRange[1]);
+          for (const tgId of targets) {
+            const tid = groupToPane.get(Number(tgId));
+            const tc  = tid !== undefined ? paneCores.get(tid) : null;
+            if (tc) tc.set_visible_range(sourceRange[0], sourceRange[1]);
+          }
+        }
+
+        if (cfg.syncCrosshair.checked) {
+          const sourceState = sourceCore.crosshair_state();
+          if (sourceState[0] > 0.5) {
+            const targets = group.update_crosshair(sourceGroupPaneId, sourceState);
+            for (const tgId of targets) {
+              const tid = groupToPane.get(Number(tgId));
+              const tc  = tid !== undefined ? paneCores.get(tid) : null;
+              if (tc) {
+                tc.set_crosshair_state(
+                  sourceState[0] > 0.5, sourceState[1], sourceState[2], sourceState[3], sourceState[4],
+                  sourceState[5] > 0.5 ? 'magnet_ohlc' : 'normal'
+                );
+              }
+            }
+          }
+        }
+
+        if (cfg.syncDataRange.checked) {
+          const sourceDataRange = sourceCore.data_range();
+          if (sourceDataRange.length === 2) {
+            group.update_data_range(sourceGroupPaneId, sourceDataRange[0], sourceDataRange[1]);
+          }
+        }
+      } catch (e) {
+        console.warn('Group sync error', e);
+      } finally {
+        syncGuard = false;
+      }
     }
 
-    function updateBadge(rName) {
-      badge.textContent = rName === 'webgpu' ? 'WebGPU' : 'Canvas 2D';
-      badge.className = rName === 'webgpu' ? 'webgpu' : 'canvas2d';
+    function startGroupSyncLoop() {
+      if (groupSyncRafId) return;
+      function frame() {
+        groupSyncRafId = requestAnimationFrame(frame);
+        runGroupSync();
+      }
+      groupSyncRafId = requestAnimationFrame(frame);
     }
 
-    function updateToggleButtons(active) {
-      toggleGroup.querySelectorAll('.toggle-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.renderer === active);
-      });
+    function stopGroupSyncLoop() {
+      if (groupSyncRafId) {
+        cancelAnimationFrame(groupSyncRafId);
+        groupSyncRafId = 0;
+      }
     }
 
+    // ── Main chart creation ───────────────────────────────────────────────────
     async function createChart(renderer) {
       // Tear down previous instance
-      if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+      stopGroupSyncLoop();
       splitTemplate = 'single';
       updateSplitButtons();
-      if (workspace) { workspace.dispose(); workspace.free(); workspace = null; }
+
+      if (workspace) {
+        workspace.dispose();
+        workspace.free();
+        workspace = null;
+      }
       for (const paneCore of paneCores.values()) {
         paneCore.dispose();
         paneCore.free();
       }
       paneCores.clear();
-      core = null;
+      core  = null;
       group = null;
       clearGroupMaps();
+      eventLog.length = 0;
 
       const keep = new Set(['loading', 'hud']);
       Array.from(container.children).forEach((el) => {
@@ -925,23 +1175,41 @@
       });
       container.classList.remove('split-layout', 'vertical', 'horizontal');
       container.style.gridTemplateColumns = '';
-      container.style.gridTemplateRows = '';
+      container.style.gridTemplateRows    = '';
 
       const workspaceRoot = document.createElement('div');
       workspaceRoot.id = 'chart-workspace-root';
       workspaceRoot.style.cssText = 'position:absolute;inset:0;min-width:0;min-height:0;overflow:hidden;';
       container.appendChild(workspaceRoot);
 
-      loading.textContent = 'Switching to ' + renderer + '…';
+      loading.textContent = 'Creating chart with ' + renderer + '…';
       loading.style.display = 'flex';
       errorBanner.style.display = 'none';
+      hudPrice.textContent = '';
+      hudStatus.textContent = '';
 
       try {
         workspace = new ChartWorkspace('chart-workspace-root');
         applyWorkspaceStyle(workspace);
+
         const rootPaneId = workspace.root_pane_id();
         const rootHostId = workspace.pane_host_id(rootPaneId);
-        core = await RayCore.create_with(rootHostId, renderer);
+
+        // ════════════════════════════════════════════════════════════════
+        // ✦ Modern API: create_chart(element, options)
+        //   — autoRender: true  → built-in RAF loop, no manual render()
+        //   — theme              → sets initial theme + CSS variables
+        //   — renderer           → preferred backend ('auto', 'webgpu', 'canvas2d')
+        // ════════════════════════════════════════════════════════════════
+        core = await RayCore.create_chart(rootHostId, {
+          renderer:    renderer,
+          autoRender:  true,
+          theme:       isDarkTheme ? 'dark' : 'light',
+          symbol:      cfg.groupSymbol.value.trim() || 'BTCUSDT',
+          interval:    cfg.groupInterval.value,
+          watermark:   'RayCore',
+        });
+
         applySubpaneSeparatorStyle(core);
         paneCores.set(rootPaneId, core);
 
@@ -952,6 +1220,14 @@
         loadSharedDemo(core);
         core.set_chart_type(activeChartType);
 
+        // ════════════════════════════════════════════════════════════════
+        // ✦ Modern API: event subscriptions
+        //   chart.on('event', (payload) => handler)
+        //   — replaces polling / manual state checks
+        // ════════════════════════════════════════════════════════════════
+        wireChartEvents(core, true);
+
+        // Group setup
         group = new ChartGroup();
         const rootGroupPaneId = group.add_pane(cfg.groupSymbol.value.trim() || 'DEMO', cfg.groupInterval.value);
         registerGroupPane(rootPaneId, rootGroupPaneId);
@@ -962,50 +1238,49 @@
         loading.style.display = 'none';
         applyLwcConfig();
 
-        hud.innerHTML = currentRenderer + ' | 600 bars | dpr=' + (window.devicePixelRatio || 1).toFixed(1) +
-          '<br><span style="color:#666;font-size:10px">Keys: ←→ scroll | ↑↓ zoom price | +/- zoom time | Home/End jump | 0 fit | Del remove | Esc cancel</span>';
+        hudStatus.textContent = currentRenderer + ' | 600 bars | dpr=' +
+          (window.devicePixelRatio || 1).toFixed(1);
+        hudEvents.textContent = 'Events: crosshairMove, visibleRangeChange, click wired';
 
-        // ── Studies & Overlays ──────────────────────────────────────────────
-        const demo = ensureSharedDemoData();
+        // Start group sync loop (needed for multi-pane crosshair/range sync)
+        startGroupSyncLoop();
+
+        // ── Studies & Overlays ────────────────────────────────────────────
+        const demo    = ensureSharedDemoData();
         const numBars = demo.numBars;
 
-        // ── Study management ────────────────────────────────────────────────
-        // Track study IDs and their line series overlays
         const studies = {
-          sma: { id: null, seriesId: null, visible: false, btn: document.getElementById('sma-toggle') },
-          ema: { id: null, seriesId: null, visible: false, btn: document.getElementById('ema-toggle') },
-          rsi: { id: null, seriesId: null, visible: false, btn: document.getElementById('rsi-toggle') },
-          macd: { id: null, seriesIds: [], visible: false, btn: document.getElementById('macd-toggle') },
-          bollinger: { id: null, seriesIds: [], visible: false, btn: document.getElementById('bollinger-toggle') },
-          stochastic: { id: null, seriesIds: [], visible: false, btn: document.getElementById('stochastic-toggle') },
-          atr: { id: null, seriesId: null, visible: false, btn: document.getElementById('atr-toggle') },
-          vwap: { id: null, seriesId: null, visible: false, btn: document.getElementById('vwap-toggle') },
+          sma:         { id: null, seriesId: null,  seriesIds: [], visible: false, btn: document.getElementById('sma-toggle') },
+          ema:         { id: null, seriesId: null,  seriesIds: [], visible: false, btn: document.getElementById('ema-toggle') },
+          rsi:         { id: null, seriesId: null,  seriesIds: [], visible: false, btn: document.getElementById('rsi-toggle') },
+          macd:        { id: null, seriesId: null,  seriesIds: [], visible: false, btn: document.getElementById('macd-toggle') },
+          bollinger:   { id: null, seriesId: null,  seriesIds: [], visible: false, btn: document.getElementById('bollinger-toggle') },
+          stochastic:  { id: null, seriesId: null,  seriesIds: [], visible: false, btn: document.getElementById('stochastic-toggle') },
+          atr:         { id: null, seriesId: null,  seriesIds: [], visible: false, btn: document.getElementById('atr-toggle') },
+          vwap:        { id: null, seriesId: null,  seriesIds: [], visible: false, btn: document.getElementById('vwap-toggle') },
         };
 
-        // Study line colors
         const studyColors = {
-          sma:  { r: 0.161, g: 0.384, b: 1.0,   a: 1.0 },  // #2962FF blue
-          ema:  { r: 1.0,   g: 0.627, b: 0.0,   a: 1.0 },  // #FFA000 amber
-          rsi:  { r: 0.608, g: 0.349, b: 0.714, a: 1.0 },  // #9B59B6 purple
-          macd_line:   { r: 0.161, g: 0.384, b: 1.0,   a: 1.0 },  // blue
-          macd_signal: { r: 1.0,   g: 0.627, b: 0.0,   a: 1.0 },  // amber
-          macd_hist:   { r: 0.18,  g: 0.8,   b: 0.44,  a: 0.6 },  // green
-          bollinger_mid:   { r: 0.161, g: 0.384, b: 1.0,   a: 1.0 },  // blue
-          bollinger_upper: { r: 0.5,   g: 0.5,   b: 0.5,   a: 0.8 },  // gray
-          bollinger_lower: { r: 0.5,   g: 0.5,   b: 0.5,   a: 0.8 },  // gray
-          stochastic_k: { r: 0.161, g: 0.384, b: 1.0,   a: 1.0 },  // blue
-          stochastic_d: { r: 1.0,   g: 0.627, b: 0.0,   a: 1.0 },  // amber
-          atr:  { r: 0.9,   g: 0.3,   b: 0.3,   a: 1.0 },  // red
-          vwap: { r: 0.18,  g: 0.8,   b: 0.44,  a: 1.0 },  // green
+          sma:             { r: 0.161, g: 0.384, b: 1.0,   a: 1.0 },
+          ema:             { r: 1.0,   g: 0.627, b: 0.0,   a: 1.0 },
+          rsi:             { r: 0.608, g: 0.349, b: 0.714, a: 1.0 },
+          macd_line:       { r: 0.161, g: 0.384, b: 1.0,   a: 1.0 },
+          macd_signal:     { r: 1.0,   g: 0.627, b: 0.0,   a: 1.0 },
+          macd_hist:       { r: 0.18,  g: 0.8,   b: 0.44,  a: 0.6 },
+          bollinger_mid:   { r: 0.161, g: 0.384, b: 1.0,   a: 1.0 },
+          bollinger_upper: { r: 0.5,   g: 0.5,   b: 0.5,   a: 0.8 },
+          bollinger_lower: { r: 0.5,   g: 0.5,   b: 0.5,   a: 0.8 },
+          stochastic_k:    { r: 0.161, g: 0.384, b: 1.0,   a: 1.0 },
+          stochastic_d:    { r: 1.0,   g: 0.627, b: 0.0,   a: 1.0 },
+          atr:             { r: 0.9,   g: 0.3,   b: 0.3,   a: 1.0 },
+          vwap:            { r: 0.18,  g: 0.8,   b: 0.44,  a: 1.0 },
         };
 
         function createStudyAndOverlay(type) {
-          updateCorePointer();
           if (!core) return;
           const study = studies[type];
-          if (study.id !== null) return; // already created
+          if (study.id !== null) return;
 
-          // Create the study via WASM API
           study.id = core.create_study(type);
           if (study.id === 0) {
             console.warn(`Failed to create study: ${type}`);
@@ -1013,71 +1288,55 @@
             return;
           }
 
-          // Get study output and create line series overlay(s)
           if (type === 'macd') {
-            // MACD has 3 outputs: MACD line, Signal line, Histogram
-            for (let outIdx = 0; outIdx < 3; outIdx++) {
-              const output = core.get_study_output(study.id, outIdx);
+            for (let i = 0; i < 3; i++) {
+              const output = core.get_study_output(study.id, i);
               if (!output) continue;
-
-              let seriesId;
-              if (outIdx === 0) {
-                // MACD line
+              let sid;
+              if (i === 0) {
                 const c = studyColors.macd_line;
-                seriesId = core.add_line_series(c.r, c.g, c.b, c.a, 2.0, "solid");
-              } else if (outIdx === 1) {
-                // Signal line
+                sid = core.add_line_series(c.r, c.g, c.b, c.a, 2.0, 'solid');
+              } else if (i === 1) {
                 const c = studyColors.macd_signal;
-                seriesId = core.add_line_series(c.r, c.g, c.b, c.a, 1.5, "solid");
+                sid = core.add_line_series(c.r, c.g, c.b, c.a, 1.5, 'solid');
               } else {
-                // Histogram — use histogram series
                 const c = studyColors.macd_hist;
-                seriesId = core.add_histogram_series(c.r, c.g, c.b, c.a, 0.0);
+                sid = core.add_histogram_series(c.r, c.g, c.b, c.a, 0.0);
               }
-
-              // Set data from study output
-              if (outIdx < 2) {
-                core.set_series_data(seriesId, output.values, output.timestamps);
+              if (i < 2) {
+                core.set_series_data(sid, output.values, output.timestamps);
               } else {
-                // Histogram data
-                core.set_histogram_data(seriesId, output.values, output.timestamps,
+                core.set_histogram_data(sid, output.values, output.timestamps,
                   new Float32Array(0), new Float32Array(0), new Float32Array(0), new Float32Array(0));
               }
-              study.seriesIds.push(seriesId);
+              study.seriesIds.push(sid);
             }
           } else if (type === 'bollinger') {
-            // Bollinger Bands has 3 outputs: Middle (SMA), Upper, Lower
             const colors = [studyColors.bollinger_mid, studyColors.bollinger_upper, studyColors.bollinger_lower];
             const widths = [2.0, 1.0, 1.0];
-            for (let outIdx = 0; outIdx < 3; outIdx++) {
-              const output = core.get_study_output(study.id, outIdx);
+            for (let i = 0; i < 3; i++) {
+              const output = core.get_study_output(study.id, i);
               if (!output) continue;
-              const c = colors[outIdx];
-              const seriesId = core.add_line_series(c.r, c.g, c.b, c.a, widths[outIdx], "solid");
-              core.set_series_data(seriesId, output.values, output.timestamps);
-              study.seriesIds.push(seriesId);
+              const c = colors[i];
+              const sid = core.add_line_series(c.r, c.g, c.b, c.a, widths[i], 'solid');
+              core.set_series_data(sid, output.values, output.timestamps);
+              study.seriesIds.push(sid);
             }
           } else if (type === 'stochastic') {
-            // Stochastic has 2 outputs: %K, %D
             const colors = [studyColors.stochastic_k, studyColors.stochastic_d];
-            for (let outIdx = 0; outIdx < 2; outIdx++) {
-              const output = core.get_study_output(study.id, outIdx);
+            for (let i = 0; i < 2; i++) {
+              const output = core.get_study_output(study.id, i);
               if (!output) continue;
-              const c = colors[outIdx];
-              const seriesId = core.add_line_series(c.r, c.g, c.b, c.a, 2.0, "solid");
-              core.set_series_data(seriesId, output.values, output.timestamps);
-              study.seriesIds.push(seriesId);
+              const c = colors[i];
+              const sid = core.add_line_series(c.r, c.g, c.b, c.a, 2.0, 'solid');
+              core.set_series_data(sid, output.values, output.timestamps);
+              study.seriesIds.push(sid);
             }
           } else {
-            // Single-output studies (SMA, EMA, RSI, ATR, VWAP)
             const output = core.get_study_output(study.id, 0);
-            if (!output) {
-              console.warn(`No output for study ${type}`);
-              return;
-            }
-
+            if (!output) { console.warn(`No output for study ${type}`); return; }
             const c = studyColors[type];
-            study.seriesId = core.add_line_series(c.r, c.g, c.b, c.a, 2.0, "solid");
+            study.seriesId = core.add_line_series(c.r, c.g, c.b, c.a, 2.0, 'solid');
             core.set_series_data(study.seriesId, output.values, output.timestamps);
           }
 
@@ -1091,10 +1350,8 @@
             createStudyAndOverlay(type);
           } else {
             study.visible = !study.visible;
-            if (type === 'macd' || type === 'bollinger' || type === 'stochastic') {
-              for (const sid of study.seriesIds) {
-                core.set_series_visible(sid, study.visible);
-              }
+            if (['macd', 'bollinger', 'stochastic'].includes(type)) {
+              for (const sid of study.seriesIds) core.set_series_visible(sid, study.visible);
             } else {
               core.set_series_visible(study.seriesId, study.visible);
             }
@@ -1102,97 +1359,84 @@
           }
         }
 
-        // Wire up study buttons
-        studies.sma.btn.addEventListener('click', () => toggleStudy('sma'));
-        studies.ema.btn.addEventListener('click', () => toggleStudy('ema'));
-        studies.rsi.btn.addEventListener('click', () => toggleStudy('rsi'));
-        studies.macd.btn.addEventListener('click', () => toggleStudy('macd'));
-        studies.bollinger.btn.addEventListener('click', () => toggleStudy('bollinger'));
+        studies.sma.btn.addEventListener('click',        () => toggleStudy('sma'));
+        studies.ema.btn.addEventListener('click',        () => toggleStudy('ema'));
+        studies.rsi.btn.addEventListener('click',        () => toggleStudy('rsi'));
+        studies.macd.btn.addEventListener('click',       () => toggleStudy('macd'));
+        studies.bollinger.btn.addEventListener('click',  () => toggleStudy('bollinger'));
         studies.stochastic.btn.addEventListener('click', () => toggleStudy('stochastic'));
-        studies.atr.btn.addEventListener('click', () => toggleStudy('atr'));
-        studies.vwap.btn.addEventListener('click', () => toggleStudy('vwap'));
+        studies.atr.btn.addEventListener('click',        () => toggleStudy('atr'));
+        studies.vwap.btn.addEventListener('click',       () => toggleStudy('vwap'));
 
-        // ── Indicator Sub-Panes ─────────────────────────────────────────────
-        // Track sub-panes for oscillators (RSI, Stochastic, ATR)
+        // ── Indicator sub-panes ───────────────────────────────────────────────
         const indicatorPanes = {
-          rsi: { studyId: null, paneId: null, btn: document.getElementById('rsi-pane-btn') },
+          rsi:        { studyId: null, paneId: null, btn: document.getElementById('rsi-pane-btn') },
           stochastic: { studyId: null, paneId: null, btn: document.getElementById('stoch-pane-btn') },
-          atr: { studyId: null, paneId: null, btn: document.getElementById('atr-pane-btn') },
+          atr:        { studyId: null, paneId: null, btn: document.getElementById('atr-pane-btn') },
         };
 
         function toggleIndicatorPane(type) {
-          updateCorePointer();
           if (!core) return;
           const pane = indicatorPanes[type];
           if (pane.paneId !== null) {
-            // Remove the pane
             core.remove_indicator_pane(pane.paneId);
-            if (pane.studyId !== null) {
-              core.remove_study(pane.studyId);
-              pane.studyId = null;
-            }
+            if (pane.studyId !== null) { core.remove_study(pane.studyId); pane.studyId = null; }
             pane.paneId = null;
             pane.btn.classList.remove('active');
           } else {
-            // Create the study first
             pane.studyId = core.create_study(type);
-            if (pane.studyId === 0) {
-              console.warn(`Failed to create study: ${type}`);
-              pane.studyId = null;
-              return;
-            }
-            // Create the indicator pane (120px height for oscillators)
+            if (pane.studyId === 0) { console.warn(`Failed to create study: ${type}`); pane.studyId = null; return; }
             pane.paneId = core.add_indicator_pane(pane.studyId, type, 120);
             if (pane.paneId === 0) {
               console.warn(`Failed to create indicator pane: ${type}`);
               core.remove_study(pane.studyId);
               pane.studyId = null;
-              pane.paneId = null;
+              pane.paneId  = null;
               return;
             }
             pane.btn.classList.add('active');
           }
         }
 
-        // Wire up indicator pane buttons
-        indicatorPanes.rsi.btn.addEventListener('click', () => toggleIndicatorPane('rsi'));
+        indicatorPanes.rsi.btn.addEventListener('click',        () => toggleIndicatorPane('rsi'));
         indicatorPanes.stochastic.btn.addEventListener('click', () => toggleIndicatorPane('stochastic'));
-        indicatorPanes.atr.btn.addEventListener('click', () => toggleIndicatorPane('atr'));
+        indicatorPanes.atr.btn.addEventListener('click',        () => toggleIndicatorPane('atr'));
 
-        // ── Real-time streaming simulation ──────────────────────────────────
+        // ── Real-time streaming simulation ────────────────────────────────────
         let streamInterval = null;
-        let lastBarTs = ensureSharedDemoData().timestamps[numBars - 1];
-        let lastClose = ensureSharedDemoData().close[numBars - 1];
-        const streamBtn = document.getElementById('stream-toggle');
+        let lastBarTs       = ensureSharedDemoData().timestamps[numBars - 1];
+        let lastClose       = ensureSharedDemoData().close[numBars - 1];
+        // barOpen tracks the OPEN price of the current forming bar.
+        // It is fixed when the bar starts and only updated when a NEW bar begins.
+        // Previously lastClose was used as open on every tick, which changed the
+        // candle body on every 200ms update and caused visible drift while printing.
+        let barOpen         = lastClose;
+        const streamBtn     = document.getElementById('stream-toggle');
 
         function simulateTick() {
-          updateCorePointer();
           const sourceCore = activeCore();
           if (!sourceCore) return;
-
-          // Random walk for price
-          const change = (Math.random() - 0.48) * lastClose * 0.003;
+          const change   = (Math.random() - 0.48) * lastClose * 0.003;
           const newClose = lastClose + change;
-          const newHigh = Math.max(newClose, lastClose) + Math.abs(change) * 0.5;
-          const newLow = Math.min(newClose, lastClose) - Math.abs(change) * 0.5;
-          const volume = 100 + Math.random() * 500;
-
-          // Every 3 seconds, start a new bar; otherwise update the last bar
-          const now = BigInt(Date.now());
-          const elapsed = Number(now - lastBarTs);
-          const barTs = elapsed >= 3000 ? now : lastBarTs;
+          const newHigh  = Math.max(newClose, lastClose) + Math.abs(change) * 0.5;
+          const newLow   = Math.min(newClose, lastClose) - Math.abs(change) * 0.5;
+          const volume   = 100 + Math.random() * 500;
+          const now      = BigInt(Date.now());
+          const elapsed  = Number(now - lastBarTs);
+          const barTs    = elapsed >= 3000 ? now : lastBarTs;
           if (elapsed >= 3000) {
+            // New bar starting — advance the bar timestamp and fix the new bar's open
+            // to the previous bar's close so OHLC is consistent throughout the bar's life.
             lastBarTs = barTs;
+            barOpen   = lastClose;
           }
-          sourceCore.upsert_bar(barTs, lastClose, newHigh, newLow, newClose, volume);
+          // Use fixed barOpen (not the per-tick lastClose) so the candle body is stable.
+          sourceCore.upsert_bar(barTs, barOpen, newHigh, newLow, newClose, volume);
           if (cfg.syncDataRange.checked) {
             for (const paneCore of paneCores.values()) {
-              if (paneCore !== sourceCore) {
-                paneCore.upsert_bar(barTs, lastClose, newHigh, newLow, newClose, volume);
-              }
+              if (paneCore !== sourceCore) paneCore.upsert_bar(barTs, barOpen, newHigh, newLow, newClose, volume);
             }
           }
-
           lastClose = newClose;
         }
 
@@ -1200,246 +1444,110 @@
           if (streamInterval) {
             clearInterval(streamInterval);
             streamInterval = null;
-            streamBtn.textContent = '▶ Live';
+            streamBtn.textContent = '\u25B6 Live';
             streamBtn.classList.remove('active');
           } else {
             streamInterval = setInterval(simulateTick, 200);
-            streamBtn.textContent = '⏸ Live';
+            streamBtn.textContent = '\u23F8 Live';
             streamBtn.classList.add('active');
           }
         });
 
-        // ── Price Lines ─────────────────────────────────────────────────────
-        let priceLineIds = [];
+        // ── Price lines ───────────────────────────────────────────────────────
+        let priceLineIds   = [];
         const priceLineBtn = document.getElementById('priceline-toggle');
 
         priceLineBtn.addEventListener('click', () => {
-          updateCorePointer();
           if (!core) return;
           if (priceLineIds.length > 0) {
-            // Remove all price lines
-            for (const id of priceLineIds) {
-              core.remove_price_line(id);
-            }
+            for (const id of priceLineIds) core.remove_price_line(id);
             priceLineIds = [];
             priceLineBtn.classList.remove('active');
           } else {
-            // Add three price lines at different levels
-            // Get approximate price range (assume ~40000-45000 for demo BTC data)
-            const prices = [41000, 42500, 44000];
-            const colors = [
-              [0.18, 0.8, 0.44, 1.0],   // green
-              [1.0, 0.627, 0.0, 1.0],   // amber
-              [0.9, 0.3, 0.3, 1.0],     // red
-            ];
-            const styles = ['dashed', 'dotted', 'large_dashed'];
-
+            const prices  = [41000, 42500, 44000];
+            const colors  = [[0.18, 0.8, 0.44, 1.0], [1.0, 0.627, 0.0, 1.0], [0.9, 0.3, 0.3, 1.0]];
+            const styles  = ['dashed', 'dotted', 'large_dashed'];
             for (let i = 0; i < 3; i++) {
-              const id = core.create_price_line(
-                prices[i],
-                colors[i][0], colors[i][1], colors[i][2], colors[i][3],
-                1.5,
-                styles[i],
-                false // not draggable
-              );
-              priceLineIds.push(id);
+              priceLineIds.push(core.create_price_line(prices[i], colors[i][0], colors[i][1], colors[i][2], colors[i][3], 1.5, styles[i], false));
             }
             priceLineBtn.classList.add('active');
           }
         });
 
-        // ── Series Markers ──────────────────────────────────────────────────
-        let markersAdded = false;
-        const markersBtn = document.getElementById('markers-toggle');
+        // ── Series markers ────────────────────────────────────────────────────
+        let markersAdded   = false;
+        const markersBtn   = document.getElementById('markers-toggle');
 
         markersBtn.addEventListener('click', () => {
-          updateCorePointer();
           if (!core) return;
           if (markersAdded) {
-            // Clear all markers (series_id 0 = candlestick data)
             core.clear_all_markers();
             markersAdded = false;
             markersBtn.classList.remove('active');
           } else {
-            // Add markers at various positions
-            // ArrowUp markers (bullish signals) - at bars 50, 150, 300
-            core.add_marker(0, 50, 'arrow_up', 'below_bar', 0, 0.18, 0.8, 0.44, 1.0, 8, 'Buy');
-            core.add_marker(0, 150, 'arrow_up', 'below_bar', 0, 0.18, 0.8, 0.44, 1.0, 8, '');
-            core.add_marker(0, 300, 'arrow_up', 'below_bar', 0, 0.18, 0.8, 0.44, 1.0, 8, 'Entry');
-
-            // ArrowDown markers (bearish signals) - at bars 100, 250, 400
-            core.add_marker(0, 100, 'arrow_down', 'above_bar', 0, 0.9, 0.3, 0.3, 1.0, 8, 'Sell');
-            core.add_marker(0, 250, 'arrow_down', 'above_bar', 0, 0.9, 0.3, 0.3, 1.0, 8, '');
-            core.add_marker(0, 400, 'arrow_down', 'above_bar', 0, 0.9, 0.3, 0.3, 1.0, 8, 'Exit');
-
-            // Circle markers at specific prices
-            core.add_marker(0, 200, 'circle', 'above_bar', 0, 0.161, 0.384, 1.0, 1.0, 6, '');
-            core.add_marker(0, 350, 'circle', 'below_bar', 0, 1.0, 0.627, 0.0, 1.0, 6, '');
-
-            // Square markers
-            core.add_marker(0, 450, 'square', 'above_bar', 0, 0.608, 0.349, 0.714, 1.0, 5, 'Alert');
-            core.add_marker(0, 500, 'square', 'below_bar', 0, 0.608, 0.349, 0.714, 1.0, 5, '');
-
+            core.add_marker(0,  50, 'arrow_up',   'below_bar', 0, 0.18, 0.8,  0.44, 1.0, 8, 'Buy');
+            core.add_marker(0, 150, 'arrow_up',   'below_bar', 0, 0.18, 0.8,  0.44, 1.0, 8, '');
+            core.add_marker(0, 300, 'arrow_up',   'below_bar', 0, 0.18, 0.8,  0.44, 1.0, 8, 'Entry');
+            core.add_marker(0, 100, 'arrow_down', 'above_bar', 0, 0.9,  0.3,  0.3,  1.0, 8, 'Sell');
+            core.add_marker(0, 250, 'arrow_down', 'above_bar', 0, 0.9,  0.3,  0.3,  1.0, 8, '');
+            core.add_marker(0, 400, 'arrow_down', 'above_bar', 0, 0.9,  0.3,  0.3,  1.0, 8, 'Exit');
+            core.add_marker(0, 200, 'circle',     'above_bar', 0, 0.161, 0.384, 1.0, 1.0, 6, '');
+            core.add_marker(0, 350, 'circle',     'below_bar', 0, 1.0,  0.627, 0.0, 1.0, 6, '');
+            core.add_marker(0, 450, 'square',     'above_bar', 0, 0.608, 0.349, 0.714, 1.0, 5, 'Alert');
+            core.add_marker(0, 500, 'square',     'below_bar', 0, 0.608, 0.349, 0.714, 1.0, 5, '');
             markersAdded = true;
             markersBtn.classList.add('active');
           }
         });
 
-        // ── Price Scale Modes ───────────────────────────────────────────────
+        // ── Price scale modes ─────────────────────────────────────────────────
         const scaleButtons = {
           'scale-normal': 'normal',
-          'scale-log': 'logarithmic',
-          'scale-pct': 'percentage',
-          'scale-idx': 'indexed_to_100',
+          'scale-log':    'logarithmic',
+          'scale-pct':    'percentage',
+          'scale-idx':    'indexed_to_100',
         };
         let activeScaleMode = 'normal';
 
         function setScaleMode(mode) {
           activeScaleMode = mode;
-          forEachCore((chartCore) => chartCore.set_price_scale_mode(mode));
-          for (const [btnId, m] of Object.entries(scaleButtons)) {
-            document.getElementById(btnId).classList.toggle('active', m === mode);
+          forEachCore((c) => c.set_price_scale_mode(mode));
+          for (const [bid, m] of Object.entries(scaleButtons)) {
+            document.getElementById(bid).classList.toggle('active', m === mode);
           }
         }
 
-        // Set up scale mode button handlers
         for (const [btnId, mode] of Object.entries(scaleButtons)) {
           document.getElementById(btnId).addEventListener('click', () => setScaleMode(mode));
         }
-        // Mark Normal as active by default
         document.getElementById('scale-normal').classList.add('active');
 
-        function runGroupSync() {
-          if (!group || !workspace || paneCores.size < 2 || syncGuard) {
-            return;
-          }
-          updateCorePointer();
-          const sourceLayoutPaneId = workspace.active_pane_id();
-          const sourceCore = paneCores.get(sourceLayoutPaneId);
-          const sourceGroupPaneId = paneToGroup.get(sourceLayoutPaneId);
-          if (!sourceCore || sourceGroupPaneId === undefined) {
-            return;
-          }
-
-          syncGuard = true;
-          try {
-            if (cfg.syncSymbol.checked) {
-              const symbol = sourceCore.symbol();
-              if (symbol) {
-                const targets = group.update_symbol(sourceGroupPaneId, symbol);
-                for (const targetGroupPaneIdRaw of targets) {
-                  const targetGroupPaneId = Number(targetGroupPaneIdRaw);
-                  const targetLayoutPaneId = groupToPane.get(targetGroupPaneId);
-                  const targetCore = targetLayoutPaneId !== undefined ? paneCores.get(targetLayoutPaneId) : null;
-                  if (targetCore) {
-                    targetCore.set_symbol(symbol);
-                  }
-                }
-              }
-            }
-
-            if (cfg.syncInterval.checked) {
-              const interval = sourceCore.interval();
-              if (interval) {
-                const targets = group.update_interval(sourceGroupPaneId, interval);
-                for (const targetGroupPaneIdRaw of targets) {
-                  const targetGroupPaneId = Number(targetGroupPaneIdRaw);
-                  const targetLayoutPaneId = groupToPane.get(targetGroupPaneId);
-                  const targetCore = targetLayoutPaneId !== undefined ? paneCores.get(targetLayoutPaneId) : null;
-                  if (targetCore) {
-                    targetCore.set_interval(interval);
-                  }
-                }
-              }
-            }
-
-            if (cfg.syncTime.checked) {
-              const sourceRange = sourceCore.visible_range();
-              const targets = group.update_time_range(sourceGroupPaneId, sourceRange[0], sourceRange[1]);
-              for (const targetGroupPaneIdRaw of targets) {
-                const targetGroupPaneId = Number(targetGroupPaneIdRaw);
-                const targetLayoutPaneId = groupToPane.get(targetGroupPaneId);
-                const targetCore = targetLayoutPaneId !== undefined ? paneCores.get(targetLayoutPaneId) : null;
-                if (targetCore) {
-                  targetCore.set_visible_range(sourceRange[0], sourceRange[1]);
-                }
-              }
-            }
-
-            if (cfg.syncCrosshair.checked) {
-              const sourceCrosshair = sourceCore.crosshair_state();
-              const sourceMagnet = sourceCore.crosshair_mode() === 'magnet_ohlc' ? 1 : 0;
-              const sourceState = [
-                sourceCrosshair[0],
-                sourceCrosshair[1],
-                sourceCrosshair[2],
-                sourceCrosshair[3],
-                sourceCrosshair[4],
-                sourceMagnet,
-              ];
-              if (sourceState[0] > 0.5) {
-                const targets = group.update_crosshair(sourceGroupPaneId, sourceState);
-                for (const targetGroupPaneIdRaw of targets) {
-                  const targetGroupPaneId = Number(targetGroupPaneIdRaw);
-                  const targetLayoutPaneId = groupToPane.get(targetGroupPaneId);
-                  const targetCore = targetLayoutPaneId !== undefined ? paneCores.get(targetLayoutPaneId) : null;
-                  if (targetCore) {
-                    targetCore.set_crosshair_state(
-                      sourceState[0] > 0.5,
-                      sourceState[1],
-                      sourceState[2],
-                      sourceState[3],
-                      sourceState[4],
-                      sourceState[5] > 0.5 ? 'magnet_ohlc' : 'normal'
-                    );
-                  }
-                }
-              }
-            }
-
-            if (cfg.syncDataRange.checked) {
-              const sourceDataRange = sourceCore.data_range();
-              if (sourceDataRange.length === 2) {
-                group.update_data_range(sourceGroupPaneId, sourceDataRange[0], sourceDataRange[1]);
-              }
-            }
-          } catch (e) {
-            console.warn('Group sync error', e);
-          } finally {
-            syncGuard = false;
-          }
-        }
-
-        function frame() {
-          rafId = requestAnimationFrame(frame);
-          try {
-            updateCorePointer();
-            forEachCore((paneCore) => paneCore.render());
-            runGroupSync();
-          } catch (e) {
-            console.error('Render error:', e);
-          }
-        }
-        rafId = requestAnimationFrame(frame);
       } catch (e) {
         console.error(e);
         showError('Init failed (' + renderer + '): ' + (e.message || e));
       }
     }
 
+    // ── Renderer toggle buttons (populated dynamically) ───────────────────────
+    function updateToggleButtons(active) {
+      toggleGroup.querySelectorAll('.toggle-btn').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.renderer === active);
+      });
+    }
+
+    // ── Boot ──────────────────────────────────────────────────────────────────
     async function boot() {
       try {
         await init();
         updateSplitButtons();
 
-        // Build toggle buttons from supported renderers
         const renderers = RayCore.get_supported_renderers();
-        const labels = { canvas2d: 'Canvas 2D', webgpu: 'WebGPU' };
+        const labels    = { canvas2d: 'Canvas 2D', webgpu: 'WebGPU' };
         for (const r of renderers) {
           const btn = document.createElement('button');
-          btn.className = 'toggle-btn';
+          btn.className      = 'toggle-btn';
           btn.dataset.renderer = r;
-          btn.textContent = labels[r] || r;
+          btn.textContent    = labels[r] || r;
           btn.addEventListener('click', () => {
             if (currentRenderer === r) return;
             createChart(r);
@@ -1447,7 +1555,6 @@
           toggleGroup.appendChild(btn);
         }
 
-        // Start with the best available renderer
         const preferred = renderers.includes('webgpu') ? 'webgpu' : 'canvas2d';
         await createChart(preferred);
 

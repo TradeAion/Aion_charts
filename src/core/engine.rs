@@ -10,11 +10,11 @@
 
 use crate::core::chart_type::{MainChartOptions, MainChartType};
 use crate::core::constants::{
-    AUTO_SCROLL_THRESHOLD_RATIO, DEFAULT_BAR_SPACING_CSS, DEFAULT_INITIAL_VISIBLE_BARS,
-    MIN_VISIBLE_BARS,
+    DEFAULT_BAR_SPACING_CSS, DEFAULT_INITIAL_VISIBLE_BARS, MIN_VISIBLE_BARS,
 };
 use crate::core::data::{Bar, BarArray};
 use crate::core::drawings::DrawingManager;
+use crate::core::events::EventBus;
 use crate::core::markers::MarkerManager;
 use crate::core::price_line::PriceLineManager;
 use crate::core::renderer::traits::{
@@ -87,6 +87,8 @@ pub struct ChartEngine {
     pub main_chart_type: MainChartType,
     /// Options for the main chart rendering.
     pub main_chart_options: MainChartOptions,
+    /// Event bus — collects events for the platform layer to drain and forward.
+    pub event_bus: EventBus,
 }
 
 impl ChartEngine {
@@ -211,6 +213,7 @@ impl ChartEngine {
             v_pixel_ratio: dpr,
             main_chart_type: MainChartType::default(),
             main_chart_options: MainChartOptions::default(),
+            event_bus: EventBus::new(),
         }
     }
 
@@ -652,16 +655,31 @@ impl ChartEngine {
         // Update studies with new data
         self.studies.update_studies(&self.bars);
 
-        // Scroll viewport to keep latest bar visible (if near the right edge)
+        // LWC-style viewport advance: if the previous last bar was inside the
+        // visible range, shift the viewport right by exactly 1 bar so the new
+        // bar comes into view at the same position the old last bar occupied.
+        // When the user has panned away the new bar accumulates off-screen to
+        // the right and the viewport is left completely untouched — no hard
+        // set_range() reset, no interruption of active drag/zoom interactions.
         let len = self.bars.len() as f64;
-        let visible = self.viewport.end_bar - self.viewport.start_bar;
-        if self.viewport.end_bar >= len - visible * AUTO_SCROLL_THRESHOLD_RATIO - 1.0 {
-            // User is near the right edge — auto-scroll
-            self.viewport.set_range(len - visible, len);
+        let old_last_bar = len - 2.0; // index of bar that was last before this append
+        if self.viewport.end_bar > old_last_bar {
+            self.viewport.start_bar += 1.0;
+            self.viewport.end_bar += 1.0;
+            // price_invalidated = true tells the render loop to call auto_fit_price
+            // for the new visible range; no explicit call needed here.
+            self.viewport.price_invalidated = true;
         }
 
+        // Y-drift guard: only refit price when the new bar's high/low exits
+        // the current viewport bounds.  Same pattern as update_bar — prevents
+        // the price axis from jittering on every new-bar event.
         if !self.viewport.price_locked {
-            self.viewport.auto_fit_price(&self.bars);
+            let h = bar.high as f64;
+            let l = bar.low as f64;
+            if h > self.viewport.price_max || l < self.viewport.price_min {
+                self.viewport.auto_fit_price(&self.bars);
+            }
         }
         Ok(())
     }
@@ -683,7 +701,18 @@ impl ChartEngine {
         self.studies.update_studies(&self.bars);
 
         if !self.viewport.price_locked {
-            self.viewport.auto_fit_price(&self.bars);
+            // Only rescale when the live bar's price actually exits the current
+            // viewport bounds.  Calling auto_fit_price on every tick was causing
+            // the entire price scale to shift every 200 ms (Y-drift) because
+            // auto_fit_price scans all visible bars and adjusts price_min/price_max
+            // with scale margins.  Since price_max already includes the 20 % top
+            // margin and price_min the 10 % bottom margin, this guard fires only
+            // when the bar genuinely moves outside the displayed range.
+            let h = bar.high as f64;
+            let l = bar.low as f64;
+            if h > self.viewport.price_max || l < self.viewport.price_min {
+                self.viewport.auto_fit_price(&self.bars);
+            }
         }
         Ok(())
     }

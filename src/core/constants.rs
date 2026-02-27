@@ -31,9 +31,6 @@ pub const DEFAULT_VOLUME_HEIGHT_RATIO: f64 = 0.15;
 /// Fallback price range when data is degenerate (all same price).
 pub const DEGENERATE_PRICE_RANGE_FALLBACK: f64 = 10.0;
 
-/// Threshold ratio from edge to trigger auto-scroll (10% from right edge).
-pub const AUTO_SCROLL_THRESHOLD_RATIO: f64 = 0.1;
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // Time Constants (milliseconds)
 // ═══════════════════════════════════════════════════════════════════════════════
