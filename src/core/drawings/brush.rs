@@ -10,6 +10,7 @@ use super::hit_test;
 use super::types::*;
 use crate::core::renderer::draw_list::ColoredLine;
 use crate::core::viewport::Viewport;
+use crate::impl_drawing_accessors;
 
 #[derive(Debug)]
 pub struct BrushDrawing {
@@ -41,30 +42,7 @@ impl BrushDrawing {
 }
 
 impl Drawing for BrushDrawing {
-    fn id(&self) -> u64 {
-        self.id
-    }
-    fn tool(&self) -> DrawingTool {
-        DrawingTool::Brush
-    }
-    fn state(&self) -> DrawingState {
-        self.state
-    }
-    fn set_state(&mut self, state: DrawingState) {
-        self.state = state;
-    }
-    fn style(&self) -> &DrawingStyle {
-        &self.style
-    }
-    fn style_mut(&mut self) -> &mut DrawingStyle {
-        &mut self.style
-    }
-    fn anchors(&self) -> &[AnchorPoint] {
-        &self.anchors
-    }
-    fn anchors_mut(&mut self) -> &mut Vec<AnchorPoint> {
-        &mut self.anchors
-    }
+    impl_drawing_accessors!(DrawingTool::Brush);
     fn required_anchors(&self) -> usize {
         // Brush is finalized by pointer-up, not a fixed anchor count.
         // Return 2 so the default add_creation_point logic completes on

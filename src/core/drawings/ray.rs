@@ -1,273 +1,161 @@
-//! Ray drawing — two-anchor line extending to visible area edges.
-//!
-//! Like a trend line but extends infinitely in both directions.
+//! Ray drawing — 2-anchor line that starts at anchor[0], passes through anchor[1],
+//! and extends infinitely in that direction to the pane boundary.
 
-use crate::core::drawings::types::{
-    AnchorCircle, AnchorPoint, DrawingGeometry, DrawingState, DrawingStyle, HitPart, HitResult,
+use super::drawing::{
+    generate_anchor_circles, next_drawing_id, point_to_bitmap, point_to_css, Drawing,
 };
+use super::hit_test;
+use super::types::*;
 use crate::core::renderer::draw_list::ColoredLine;
 use crate::core::viewport::Viewport;
+use crate::impl_drawing_accessors;
 
-/// A ray (extended line) drawing with two anchor points.
-pub struct Ray {
-    /// Two anchor points defining the line.
-    pub anchors: [AnchorPoint; 2],
-    pub style: DrawingStyle,
-    pub state: DrawingState,
+#[derive(Debug)]
+pub struct RayDrawing {
+    id: u64,
+    state: DrawingState,
+    style: DrawingStyle,
+    anchors: Vec<AnchorPoint>,
 }
 
-impl Ray {
-    pub fn new(bar0: f64, price0: f64, bar1: f64, price1: f64, style: DrawingStyle) -> Self {
+impl RayDrawing {
+    pub fn new(bar_index: f64, price: f64) -> Self {
+        let id = next_drawing_id();
         Self {
-            anchors: [
-                AnchorPoint::new(bar0, price0),
-                AnchorPoint::new(bar1, price1),
+            id,
+            state: DrawingState::Creating { step: 1 },
+            style: DrawingStyle::default(),
+            anchors: vec![
+                AnchorPoint::new(bar_index, price),
+                AnchorPoint::new(bar_index, price),
             ],
-            style,
-            state: DrawingState::Creating { step: 0 },
         }
     }
 
-    /// Number of anchor points needed (2 for ray).
-    pub fn anchor_count() -> usize {
+    /// Compute the far endpoint where the ray exits the pane rectangle.
+    /// Returns the bitmap-space endpoint extending from p0 through p1.
+    fn ray_far_point(x0: f64, y0: f64, x1: f64, y1: f64, pane_pw: f64, pane_ph: f64) -> (f64, f64) {
+        let dx = x1 - x0;
+        let dy = y1 - y0;
+        if dx.abs() < 1e-12 && dy.abs() < 1e-12 {
+            return (x1, y1);
+        }
+        // Find the largest t such that (x0 + t*dx, y0 + t*dy) is still in bounds.
+        let mut t_max = f64::MAX;
+        if dx.abs() > 1e-12 {
+            let t = if dx > 0.0 {
+                (pane_pw - x0) / dx
+            } else {
+                -x0 / dx
+            };
+            if t > 0.0 {
+                t_max = t_max.min(t);
+            }
+        }
+        if dy.abs() > 1e-12 {
+            let t = if dy > 0.0 {
+                (pane_ph - y0) / dy
+            } else {
+                -y0 / dy
+            };
+            if t > 0.0 {
+                t_max = t_max.min(t);
+            }
+        }
+        // Ensure we at least reach p1
+        if t_max < 1.0 {
+            t_max = 1.0;
+        }
+        (x0 + t_max * dx, y0 + t_max * dy)
+    }
+}
+
+impl Drawing for RayDrawing {
+    impl_drawing_accessors!(DrawingTool::Ray);
+    fn required_anchors(&self) -> usize {
         2
     }
 
-    /// Set anchor at creation step.
-    pub fn set_anchor(&mut self, step: usize, bar_index: f64, price: f64) {
-        if step < 2 {
-            self.anchors[step].point.bar_index = bar_index;
-            self.anchors[step].point.price = price;
+    fn hit_test(&self, cx: f64, cy: f64, vp: &Viewport, pw: f64, ph: f64) -> HitResult {
+        if self.anchors.len() < 2 {
+            return HitResult::miss();
         }
-    }
-
-    /// Move the entire drawing by delta.
-    pub fn translate(&mut self, delta_bar: f64, delta_price: f64) {
-        for anchor in &mut self.anchors {
-            anchor.point.bar_index += delta_bar;
-            anchor.point.price += delta_price;
-        }
-    }
-
-    /// Move a specific anchor.
-    pub fn move_anchor(&mut self, idx: usize, bar: f64, price: f64) {
-        if idx < 2 {
-            self.anchors[idx].point.bar_index = bar;
-            self.anchors[idx].point.price = price;
-        }
-    }
-
-    /// Generate pixel-space geometry for rendering.
-    pub fn generate_geometry(
-        &self,
-        vp: &Viewport,
-        pane_css_w: f64,
-        pane_css_h: f64,
-        dpr: f64,
-        _h_ratio: f64,
-        _v_ratio: f64,
-    ) -> DrawingGeometry {
-        let mut geom = DrawingGeometry::new();
-
-        // Convert anchor points to pixel coordinates
-        let visible_bars = (vp.end_bar - vp.start_bar).max(1.0);
-
-        let x0_css =
-            (self.anchors[0].point.bar_index - vp.start_bar + 0.5) / visible_bars * pane_css_w;
-        let y0_css = vp.price_to_css_y(self.anchors[0].point.price, pane_css_h);
-
-        let x1_css =
-            (self.anchors[1].point.bar_index - vp.start_bar + 0.5) / visible_bars * pane_css_w;
-        let y1_css = vp.price_to_css_y(self.anchors[1].point.price, pane_css_h);
-
-        // Extend line to pane edges
-        let (ext_x0, ext_y0, ext_x1, ext_y1) = extend_line_to_rect(
-            x0_css, y0_css, x1_css, y1_css, 0.0, 0.0, pane_css_w, pane_css_h,
-        );
-
-        let ext_x0_phys = ext_x0 * dpr;
-        let ext_y0_phys = ext_y0 * dpr;
-        let ext_x1_phys = ext_x1 * dpr;
-        let ext_y1_phys = ext_y1 * dpr;
-
-        let line_w = (self.style.line_width * dpr).max(1.0);
-
-        // Draw extended line
-        let (dash, gap) = self
-            .style
-            .dash
-            .map_or((0.0, 0.0), |d| (d[0] as f32, d[1] as f32));
-        geom.lines.push(ColoredLine {
-            x0: ext_x0_phys as f32,
-            y0: ext_y0_phys as f32,
-            x1: ext_x1_phys as f32,
-            y1: ext_y1_phys as f32,
-            width: line_w as f32,
-            r: self.style.color[0],
-            g: self.style.color[1],
-            b: self.style.color[2],
-            a: self.style.color[3],
-            dash,
-            gap,
-        });
-
-        // Draw anchor circles if selected
-        if matches!(
-            self.state,
-            DrawingState::Selected | DrawingState::Dragging { .. }
-        ) {
-            let anchor_r = 5.0 * dpr;
-            let pane_pw = pane_css_w * dpr;
-            let pane_ph = pane_css_h * dpr;
-
-            for (_i, anchor) in self.anchors.iter().enumerate() {
-                let ax = (anchor.point.bar_index - vp.start_bar + 0.5) / visible_bars * pane_pw;
-                let ay = vp.price_to_css_y(anchor.point.price, pane_css_h) * dpr;
-
-                // Only draw if anchor is in visible area
-                if ax >= -anchor_r
-                    && ax <= pane_pw + anchor_r
-                    && ay >= -anchor_r
-                    && ay <= pane_ph + anchor_r
-                {
-                    geom.anchors.push(AnchorCircle {
-                        cx: ax,
-                        cy: ay,
-                        radius: anchor_r,
-                        fill: super::default_anchor_color(),
-                        border: self.style.color,
-                        border_width: 2.0 * dpr,
-                    });
-                }
+        // Anchor hit-test first
+        for (i, a) in self.anchors.iter().enumerate() {
+            let (ax, ay) = point_to_css(&a.point, vp, pw, ph);
+            let d = hit_test::point_to_circle_distance(cx, cy, ax, ay);
+            if d <= hit_test::ANCHOR_HIT_THRESHOLD_CSS {
+                return HitResult::hit(HitPart::Anchor(i), d);
             }
         }
-
-        geom
-    }
-
-    /// Hit-test the ray.
-    pub fn hit_test(
-        &self,
-        x_css: f64,
-        y_css: f64,
-        vp: &Viewport,
-        pane_css_w: f64,
-        pane_css_h: f64,
-    ) -> HitResult {
-        let visible_bars = (vp.end_bar - vp.start_bar).max(1.0);
-
-        // Check anchor hits first
-        for (i, anchor) in self.anchors.iter().enumerate() {
-            let ax = (anchor.point.bar_index - vp.start_bar + 0.5) / visible_bars * pane_css_w;
-            let ay = vp.price_to_css_y(anchor.point.price, pane_css_h);
-            let dist = ((x_css - ax).powi(2) + (y_css - ay).powi(2)).sqrt();
-            if dist <= anchor.hit_radius {
-                return HitResult::hit(HitPart::Anchor(i), dist);
-            }
+        // Ray body — from anchor[0] through anchor[1], extending infinitely
+        let (x0, y0) = point_to_css(&self.anchors[0].point, vp, pw, ph);
+        let (x1, y1) = point_to_css(&self.anchors[1].point, vp, pw, ph);
+        let d = hit_test::point_to_ray_distance(cx, cy, x0, y0, x1, y1);
+        if d <= hit_test::HIT_THRESHOLD_CSS {
+            return HitResult::hit(HitPart::Body, d);
         }
-
-        // Check line body hit
-        let x0 = (self.anchors[0].point.bar_index - vp.start_bar + 0.5) / visible_bars * pane_css_w;
-        let y0 = vp.price_to_css_y(self.anchors[0].point.price, pane_css_h);
-        let x1 = (self.anchors[1].point.bar_index - vp.start_bar + 0.5) / visible_bars * pane_css_w;
-        let y1 = vp.price_to_css_y(self.anchors[1].point.price, pane_css_h);
-
-        let dist = point_to_line_distance(x_css, y_css, x0, y0, x1, y1);
-        if dist <= 7.0 {
-            return HitResult::hit(HitPart::Body, dist);
-        }
-
         HitResult::miss()
     }
-}
 
-/// Extend a line defined by two points to the edges of a rectangle.
-/// Returns (x0, y0, x1, y1) of the extended line segment.
-fn extend_line_to_rect(
-    x0: f64,
-    y0: f64,
-    x1: f64,
-    y1: f64,
-    rect_x: f64,
-    rect_y: f64,
-    rect_w: f64,
-    rect_h: f64,
-) -> (f64, f64, f64, f64) {
-    let dx = x1 - x0;
-    let dy = y1 - y0;
-
-    // Handle degenerate cases
-    if dx.abs() < 1e-10 && dy.abs() < 1e-10 {
-        return (x0, y0, x1, y1);
-    }
-
-    // Find intersections with all four edges
-    let mut t_values: Vec<f64> = Vec::new();
-
-    // Left edge (x = rect_x)
-    if dx.abs() > 1e-10 {
-        let t = (rect_x - x0) / dx;
-        let y = y0 + t * dy;
-        if y >= rect_y && y <= rect_y + rect_h {
-            t_values.push(t);
+    fn generate_geometry(
+        &self,
+        vp: &Viewport,
+        pw: f64,
+        ph: f64,
+        _dpr: f64,
+        h_pixel_ratio: f64,
+        v_pixel_ratio: f64,
+        show_anchors: bool,
+    ) -> DrawingGeometry {
+        let mut geom = DrawingGeometry::new();
+        if self.anchors.len() < 2 {
+            return geom;
         }
-    }
 
-    // Right edge (x = rect_x + rect_w)
-    if dx.abs() > 1e-10 {
-        let t = (rect_x + rect_w - x0) / dx;
-        let y = y0 + t * dy;
-        if y >= rect_y && y <= rect_y + rect_h {
-            t_values.push(t);
+        let c = &self.style.color;
+        let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
+        let lw = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
+
+        let (bx0, by0) = point_to_bitmap(
+            &self.anchors[0].point,
+            vp,
+            pw,
+            ph,
+            h_pixel_ratio,
+            v_pixel_ratio,
+        );
+        let (bx1, by1) = point_to_bitmap(
+            &self.anchors[1].point,
+            vp,
+            pw,
+            ph,
+            h_pixel_ratio,
+            v_pixel_ratio,
+        );
+
+        let pane_pw = pw * h_pixel_ratio;
+        let pane_ph = ph * v_pixel_ratio;
+        let (far_x, far_y) = Self::ray_far_point(bx0, by0, bx1, by1, pane_pw, pane_ph);
+
+        geom.lines.push(ColoredLine {
+            x0: bx0 as f32,
+            y0: by0 as f32,
+            x1: far_x as f32,
+            y1: far_y as f32,
+            width: lw,
+            r: c[0],
+            g: c[1],
+            b: c[2],
+            a: c[3],
+            dash: 0.0,
+            gap: 0.0,
+        });
+
+        if show_anchors {
+            geom.anchors =
+                generate_anchor_circles(&self.anchors, vp, pw, ph, h_pixel_ratio, v_pixel_ratio, c);
         }
+        geom
     }
-
-    // Top edge (y = rect_y)
-    if dy.abs() > 1e-10 {
-        let t = (rect_y - y0) / dy;
-        let x = x0 + t * dx;
-        if x >= rect_x && x <= rect_x + rect_w {
-            t_values.push(t);
-        }
-    }
-
-    // Bottom edge (y = rect_y + rect_h)
-    if dy.abs() > 1e-10 {
-        let t = (rect_y + rect_h - y0) / dy;
-        let x = x0 + t * dx;
-        if x >= rect_x && x <= rect_x + rect_w {
-            t_values.push(t);
-        }
-    }
-
-    if t_values.len() < 2 {
-        return (x0, y0, x1, y1);
-    }
-
-    // Sort and take min/max
-    t_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let t_min = t_values[0];
-    let t_max = t_values[t_values.len() - 1];
-
-    let new_x0 = x0 + t_min * dx;
-    let new_y0 = y0 + t_min * dy;
-    let new_x1 = x0 + t_max * dx;
-    let new_y1 = y0 + t_max * dy;
-
-    (new_x0, new_y0, new_x1, new_y1)
-}
-
-/// Calculate distance from point (px, py) to infinite line through (x0, y0) and (x1, y1).
-fn point_to_line_distance(px: f64, py: f64, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
-    let dx = x1 - x0;
-    let dy = y1 - y0;
-    let len_sq = dx * dx + dy * dy;
-
-    if len_sq < 1e-10 {
-        // Degenerate line (two points are same)
-        return ((px - x0).powi(2) + (py - y0).powi(2)).sqrt();
-    }
-
-    // Distance to infinite line
-    ((dy * px - dx * py + x1 * y0 - y1 * x0).abs()) / len_sq.sqrt()
 }

@@ -1,153 +1,117 @@
 //! HorizontalLine drawing — single-anchor line spanning full pane width.
 //!
 //! Like price lines but as a drawing tool that can be selected, dragged, deleted.
+//! Completes on the first click (1 anchor). The line extends across the full
+//! pane width at the anchor's price level.
 
-use crate::core::drawings::types::{
-    AnchorCircle, AnchorPoint, DrawingGeometry, DrawingState, DrawingStyle, HitPart, HitResult,
-};
+use super::drawing::{generate_anchor_circles, next_drawing_id, point_to_css, Drawing};
+use super::hit_test;
+use super::types::*;
 use crate::core::renderer::draw_list::ColoredLine;
 use crate::core::viewport::Viewport;
+use crate::impl_drawing_accessors;
 
-/// A horizontal line drawing at a fixed price level.
-pub struct HorizontalLine {
-    /// Single anchor at the price level.
-    pub anchor: AnchorPoint,
-    pub style: DrawingStyle,
-    pub state: DrawingState,
+#[derive(Debug)]
+pub struct HorizontalLineDrawing {
+    id: u64,
+    state: DrawingState,
+    style: DrawingStyle,
+    anchors: Vec<AnchorPoint>,
 }
 
-impl HorizontalLine {
-    pub fn new(price: f64, style: DrawingStyle) -> Self {
+impl HorizontalLineDrawing {
+    pub fn new(bar_index: f64, price: f64) -> Self {
+        let id = next_drawing_id();
         Self {
-            anchor: AnchorPoint::new(0.0, price), // bar_index doesn't matter
-            style,
-            state: DrawingState::Creating { step: 0 },
+            id,
+            state: DrawingState::Creating { step: 1 },
+            style: DrawingStyle::default(),
+            anchors: vec![AnchorPoint::new(bar_index, price)],
         }
     }
+}
 
-    /// Number of anchor points needed (1 for horizontal line).
-    pub fn anchor_count() -> usize {
+impl Drawing for HorizontalLineDrawing {
+    impl_drawing_accessors!(DrawingTool::HorizontalLine);
+    fn required_anchors(&self) -> usize {
         1
     }
 
-    /// Set anchor at creation step.
-    pub fn set_anchor(&mut self, step: usize, bar_index: f64, price: f64) {
-        if step == 0 {
-            self.anchor.point.price = price;
-            self.anchor.point.bar_index = bar_index;
+    fn hit_test(&self, cx: f64, cy: f64, vp: &Viewport, pw: f64, ph: f64) -> HitResult {
+        if self.anchors.is_empty() {
+            return HitResult::miss();
         }
+        // Anchor hit
+        let (ax, ay) = point_to_css(&self.anchors[0].point, vp, pw, ph);
+        let ad = hit_test::point_to_circle_distance(cx, cy, ax, ay);
+        if ad <= hit_test::ANCHOR_HIT_THRESHOLD_CSS {
+            return HitResult::hit(HitPart::Anchor(0), ad);
+        }
+        // Line body — full-width horizontal at anchor price
+        let line_y = vp.price_to_css_y(self.anchors[0].point.price, ph);
+        let d = (cy - line_y).abs();
+        if d <= hit_test::HIT_THRESHOLD_CSS {
+            return HitResult::hit(HitPart::Body, d);
+        }
+        HitResult::miss()
     }
 
-    /// Move the entire drawing by delta.
-    pub fn translate(&mut self, _delta_bar: f64, delta_price: f64) {
-        // Only move vertically (price changes, bar_index doesn't matter)
-        self.anchor.point.price += delta_price;
-    }
-
-    /// Move a specific anchor.
-    pub fn move_anchor(&mut self, _idx: usize, _bar: f64, price: f64) {
-        // Only one anchor, just update price
-        self.anchor.point.price = price;
-    }
-
-    /// Generate pixel-space geometry for rendering.
-    pub fn generate_geometry(
+    fn generate_geometry(
         &self,
         vp: &Viewport,
-        pane_css_w: f64,
-        pane_css_h: f64,
-        dpr: f64,
-        _h_ratio: f64,
-        _v_ratio: f64,
+        pw: f64,
+        ph: f64,
+        _dpr: f64,
+        h_pixel_ratio: f64,
+        v_pixel_ratio: f64,
+        show_anchors: bool,
     ) -> DrawingGeometry {
         let mut geom = DrawingGeometry::new();
-
-        let price = self.anchor.point.price;
-        let y_css = vp.price_to_css_y(price, pane_css_h);
-        let y_phys = y_css * dpr;
-
-        // Check if line is visible
-        let pane_ph = pane_css_h * dpr;
-        if y_phys < 0.0 || y_phys > pane_ph {
+        if self.anchors.is_empty() {
             return geom;
         }
 
-        let pane_pw = pane_css_w * dpr;
-        let line_w = (self.style.line_width * dpr).max(1.0);
+        let c = &self.style.color;
+        let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
+        let lw = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
+        let y = (vp.price_to_css_y(self.anchors[0].point.price, ph) * v_pixel_ratio).round() as f32;
+        let pane_pw = (pw * h_pixel_ratio).round() as f32;
 
-        // Draw horizontal line spanning full width
-        let (dash, gap) = self
-            .style
-            .dash
-            .map_or((0.0, 0.0), |d| (d[0] as f32, d[1] as f32));
+        let (dash, gap) = self.style.dash.map_or((0.0, 0.0), |d| {
+            ((d[0] * avg_ratio) as f32, (d[1] * avg_ratio) as f32)
+        });
+
         geom.lines.push(ColoredLine {
             x0: 0.0,
-            y0: y_phys as f32,
-            x1: pane_pw as f32,
-            y1: y_phys as f32,
-            width: line_w as f32,
-            r: self.style.color[0],
-            g: self.style.color[1],
-            b: self.style.color[2],
-            a: self.style.color[3],
+            y0: y,
+            x1: pane_pw,
+            y1: y,
+            width: lw,
+            r: c[0],
+            g: c[1],
+            b: c[2],
+            a: c[3],
             dash,
             gap,
         });
 
-        // Draw anchor circle if selected
-        if matches!(
-            self.state,
-            DrawingState::Selected | DrawingState::Dragging { .. }
-        ) {
-            let anchor_r = 5.0 * dpr;
-            // Place anchor at center of visible area
-            let center_x = pane_pw / 2.0;
-
-            geom.anchors.push(AnchorCircle {
-                cx: center_x,
-                cy: y_phys,
-                radius: anchor_r,
-                fill: super::default_anchor_color(),
-                border: self.style.color,
-                border_width: 2.0 * dpr,
-            });
+        if show_anchors {
+            geom.anchors =
+                generate_anchor_circles(&self.anchors, vp, pw, ph, h_pixel_ratio, v_pixel_ratio, c);
         }
-
         geom
     }
 
-    /// Hit-test the line.
-    pub fn hit_test(
-        &self,
-        x_css: f64,
-        y_css: f64,
-        vp: &Viewport,
-        pane_css_w: f64,
-        pane_css_h: f64,
-    ) -> HitResult {
-        let price = self.anchor.point.price;
-        let line_y_css = vp.price_to_css_y(price, pane_css_h);
-
-        // Check if within pane bounds
-        if line_y_css < 0.0 || line_y_css > pane_css_h {
-            return HitResult::miss();
+    /// Only vertical movement matters for a horizontal line.
+    fn move_by(&mut self, _delta_bar: f64, delta_price: f64) {
+        for a in self.anchors.iter_mut() {
+            a.point.price += delta_price;
         }
+    }
 
-        // Distance from cursor to line
-        let dist = (y_css - line_y_css).abs();
-
-        // Anchor hit (center of pane)
-        let anchor_x = pane_css_w / 2.0;
-        let anchor_dist = ((x_css - anchor_x).powi(2) + (y_css - line_y_css).powi(2)).sqrt();
-        if anchor_dist <= self.anchor.hit_radius {
-            return HitResult::hit(HitPart::Anchor(0), anchor_dist);
+    fn move_anchor(&mut self, index: usize, _bar_index: f64, price: f64) {
+        if let Some(a) = self.anchors.get_mut(index) {
+            a.point.price = price;
         }
-
-        // Line body hit (7px threshold)
-        if dist <= 7.0 {
-            return HitResult::hit(HitPart::Body, dist);
-        }
-
-        HitResult::miss()
     }
 }

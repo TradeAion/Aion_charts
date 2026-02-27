@@ -10,6 +10,51 @@ pub fn next_drawing_id() -> u64 {
     NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Macro to implement the repetitive accessor methods on Drawing.
+///
+/// All drawing structs have the same `id`, `state`, `style`, `anchors` fields
+/// and the same trivial accessor impls. This macro eliminates ~40 lines of
+/// boilerplate per tool.
+///
+/// Usage:
+/// ```ignore
+/// impl Drawing for MyDrawing {
+///     impl_drawing_accessors!(DrawingTool::MyTool);
+///     fn required_anchors(&self) -> usize { 2 }
+///     fn hit_test(...) { ... }
+///     fn generate_geometry(...) { ... }
+/// }
+/// ```
+#[macro_export]
+macro_rules! impl_drawing_accessors {
+    ($tool:expr) => {
+        fn id(&self) -> u64 {
+            self.id
+        }
+        fn tool(&self) -> DrawingTool {
+            $tool
+        }
+        fn state(&self) -> DrawingState {
+            self.state
+        }
+        fn set_state(&mut self, state: DrawingState) {
+            self.state = state;
+        }
+        fn style(&self) -> &DrawingStyle {
+            &self.style
+        }
+        fn style_mut(&mut self) -> &mut DrawingStyle {
+            &mut self.style
+        }
+        fn anchors(&self) -> &[AnchorPoint] {
+            &self.anchors
+        }
+        fn anchors_mut(&mut self) -> &mut Vec<AnchorPoint> {
+            &mut self.anchors
+        }
+    };
+}
+
 /// The trait every drawing tool implements.
 pub trait Drawing: std::fmt::Debug {
     /// Unique ID for this drawing instance.

@@ -10,6 +10,7 @@ use super::hit_test;
 use super::types::*;
 use crate::core::renderer::draw_list::{ColoredLine, ColoredRect, DrawText};
 use crate::core::viewport::Viewport;
+use crate::impl_drawing_accessors;
 
 /// Standard Fibonacci retracement levels (matches TradingView defaults).
 const FIB_LEVELS: &[(f64, &str)] = &[
@@ -55,30 +56,7 @@ impl FibonacciDrawing {
 }
 
 impl Drawing for FibonacciDrawing {
-    fn id(&self) -> u64 {
-        self.id
-    }
-    fn tool(&self) -> DrawingTool {
-        DrawingTool::Fibonacci
-    }
-    fn state(&self) -> DrawingState {
-        self.state
-    }
-    fn set_state(&mut self, state: DrawingState) {
-        self.state = state;
-    }
-    fn style(&self) -> &DrawingStyle {
-        &self.style
-    }
-    fn style_mut(&mut self) -> &mut DrawingStyle {
-        &mut self.style
-    }
-    fn anchors(&self) -> &[AnchorPoint] {
-        &self.anchors
-    }
-    fn anchors_mut(&mut self) -> &mut Vec<AnchorPoint> {
-        &mut self.anchors
-    }
+    impl_drawing_accessors!(DrawingTool::Fibonacci);
     fn required_anchors(&self) -> usize {
         2
     }

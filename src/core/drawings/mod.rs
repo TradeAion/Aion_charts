@@ -181,11 +181,13 @@ impl DrawingManager {
             DrawingTool::Fibonacci => Box::new(fibonacci::FibonacciDrawing::new(bar_index, price)),
             DrawingTool::Scale => Box::new(scale::ScaleDrawing::new(bar_index, price)),
             DrawingTool::Brush => Box::new(brush::BrushDrawing::new(bar_index, price)),
-            // TODO: Implement Drawing trait for these new tools
-            DrawingTool::HorizontalLine | DrawingTool::VerticalLine | DrawingTool::Ray => {
-                // For now, fall back to trend line behavior
-                Box::new(trend_line::TrendLineDrawing::new(bar_index, price))
+            DrawingTool::HorizontalLine => Box::new(horizontal_line::HorizontalLineDrawing::new(
+                bar_index, price,
+            )),
+            DrawingTool::VerticalLine => {
+                Box::new(vertical_line::VerticalLineDrawing::new(bar_index, price))
             }
+            DrawingTool::Ray => Box::new(ray::RayDrawing::new(bar_index, price)),
             DrawingTool::None => unreachable!(),
         };
 

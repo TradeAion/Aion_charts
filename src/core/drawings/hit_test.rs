@@ -61,6 +61,23 @@ pub const HIT_THRESHOLD_CSS: f64 = 5.0;
 /// Hit-test threshold for anchor points (slightly larger than the anchor radius).
 pub const ANCHOR_HIT_THRESHOLD_CSS: f64 = 8.0;
 
+/// Distance from point (px, py) to a ray starting at (x0,y0) through (x1,y1).
+/// The ray extends infinitely past (x1,y1) but does NOT extend behind (x0,y0).
+pub fn point_to_ray_distance(px: f64, py: f64, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
+    let dx = x1 - x0;
+    let dy = y1 - y0;
+    let len_sq = dx * dx + dy * dy;
+    if len_sq < 1e-12 {
+        return ((px - x0).powi(2) + (py - y0).powi(2)).sqrt();
+    }
+    // Project onto the ray; clamp only the lower bound (t >= 0), no upper bound.
+    let t = ((px - x0) * dx + (py - y0) * dy) / len_sq;
+    let t = t.max(0.0); // ray starts at t=0, extends to +inf
+    let proj_x = x0 + t * dx;
+    let proj_y = y0 + t * dy;
+    ((px - proj_x).powi(2) + (py - proj_y).powi(2)).sqrt()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
