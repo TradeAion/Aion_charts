@@ -1,133 +1,94 @@
 # RayCore
 
-**High-performance, GPU-accelerated charting engine built in Rust + WebGPU.**
+**High-performance WebGPU/Canvas2D charting engine built in Rust + WASM.**
 
-Created by [RayCharts](https://raycharts.com/) — all rights reserved.
-
----
-
-## Overview
-
-RayCore is a from-scratch charting engine that renders financial candlestick charts entirely on the GPU via WebGPU. It is compiled to WebAssembly for browser deployment, delivering native-level rendering performance in the browser with zero JavaScript rendering overhead.
-
-This is **not** a wrapper around Canvas 2D or SVG. Every candle body, wick, volume bar, and grid line is drawn through GPU-instanced draw calls using custom WGSL shaders.
+Created by [RayCharts](https://raycharts.com/)
 
 ---
 
-## Architecture
+## Quick Start
 
+```bash
+npm install raycore-wasm
 ```
-raycharts_core/
-├── src/                        # Core Rust library (raycore)
-│   ├── lib.rs                  # Public API & re-exports
-│   └── core/
-│       ├── engine.rs           # ChartEngine — orchestrates data + rendering
-│       ├── data.rs             # OHLCV data model
-│       ├── viewport.rs         # Viewport state (pan, zoom, visible range)
-│       └── renderer/
-│           ├── traits.rs       # ChartRenderer / RendererBackend trait
-│           ├── wgpu_context.rs # GPU device, surface, adapter init
-│           ├── wgpu_backend.rs # WgpuRenderer — main GPU render loop
-│           ├── pipeline_manager.rs # Shader pipeline cache
-│           ├── candle_renderer.rs  # Instanced candlestick rendering
-│           ├── volume_renderer.rs  # Volume bar rendering
-│           ├── price_axis.rs   # Price axis (Canvas 2D)
-│           ├── time_axis.rs    # Time axis (Canvas 2D)
-│           ├── overlay.rs      # Crosshair & tooltip overlay
-│           ├── grid.rs         # Grid line generation
-│           ├── tick_marks.rs   # Axis tick calculation
-│           ├── theme.rs        # Color & style constants
-│           ├── geometry_generator.rs
-│           ├── series.rs
-│           ├── canvas2d.rs
-│           └── draw_list.rs
-├── wasm/                       # WASM entry point (raycore-wasm)
-│   └── src/
-│       ├── lib.rs              # #[wasm_bindgen] exports, event handling, render loop
-│       └── canvas_manager.rs   # Multi-canvas layout manager
-├── shaders/                    # WGSL GPU shaders
-│   ├── rect.wgsl               # Instanced rectangle shader (candles + wicks)
-│   ├── volume.wgsl             # Volume bar shader
-│   ├── candle.wgsl             # Legacy candle shader
-│   └── candles.wgsl            # Legacy candle shader
-├── demo/                       # Browser demo
-│   ├── index.html              # Demo page with live chart
-│   └── pkg/                    # Compiled WASM + JS glue
-├── Cargo.toml                  # Workspace root
-└── LICENSE                     # Proprietary license
+
+```js
+import init, { RayCore } from 'raycore-wasm';
+
+await init();
+
+const chart = await RayCore.create_chart('container', {
+  renderer: 'auto',
+  autoRender: true,
+  theme: 'dark',
+});
+
+chart.set_data_arrays(opens, highs, lows, closes, volumes, timestamps);
 ```
 
 ---
 
-## Rendering Pipeline
+## Features
 
-1. **Data ingestion** — OHLCV JSON is parsed into `CandleData` structs and loaded into `ChartEngine`.
-2. **Viewport calculation** — Visible candle range, price bounds, and pixel mapping are computed based on zoom/pan state.
-3. **GPU instance buffers** — Candle bodies, wicks, and volume bars are packed into per-instance vertex buffers (`bytemuck`).
-4. **Instanced draw calls** — A single `rect.wgsl` shader draws all visible candles in one GPU draw call. Volume bars use `volume.wgsl`.
-5. **Canvas 2D overlays** — Price axis, time axis, and crosshair are rendered on separate Canvas 2D layers stacked above the WebGPU surface.
-6. **requestAnimationFrame** — The render loop runs at display refresh rate, only re-rendering when state changes (dirty flag).
+- **GPU-accelerated rendering** via WebGPU with Canvas2D fallback
+- **6 chart types**: Candlestick, OHLC, Line, Area, Heikin-Ashi, Baseline
+- **8 drawing tools**: Trend Line, Horizontal Line, Vertical Line, Ray, Rectangle, Fibonacci, Scale, Brush
+- **8 built-in studies**: SMA, EMA, RSI, MACD, Bollinger Bands, Stochastic, ATR, VWAP
+- **Overlay series**: Line, Area, Histogram, Bar, Baseline
+- **Series markers**: Arrows, circles, squares at bar indices
+- **Price lines**: Horizontal price level annotations
+- **Multi-pane**: Indicator sub-panes, synchronized chart groups, split workspaces
+- **Typed event system**: crosshairMove, click, visibleRangeChange, drawing events
+- **Theme system**: Dark/light presets, CSS variable integration
+- **Framework-agnostic**: Works with React, Vue, Svelte, vanilla JS
 
 ---
 
-## Key Technical Decisions
+## Documentation
 
-| Decision | Rationale |
+| Doc | Description |
 |---|---|
-| **WebGPU over WebGL** | Modern API, compute shaders, better instancing, future-proof |
-| **Rust + WASM** | Zero-cost abstractions, memory safety, native perf in browser |
-| **Instanced rendering** | One draw call for thousands of candles instead of one per candle |
-| **Multi-canvas layering** | Separates GPU surface from 2D text overlays — avoids readback |
-| **No framework dependency** | Pure Rust + raw DOM — zero JS runtime overhead |
+| [Getting Started](./docs/getting-started.md) | Installation, quick start, WASM init |
+| [API Reference](./docs/api-reference.md) | Complete method documentation |
+| [Framework Guide](./docs/framework-guide.md) | React, Vue, Svelte, bundler config |
+| [Theming](./docs/theming.md) | Dark/light, custom colors, CSS variables |
+| [Drawing Tools](./docs/drawing-tools.md) | Interactive drawing tools |
 
 ---
 
-## Build
+## Build from Source
 
 ### Prerequisites
 
 - Rust 1.83+ with `wasm32-unknown-unknown` target
 - [wasm-pack](https://rustwasm.github.io/wasm-pack/)
 
-### Compile to WASM
+### Compile
 
 ```bash
-wasm-pack build wasm --target web --out-dir ../pkg --release
+wasm-pack build --target web --out-dir pkg wasm
 ```
 
-### Run demo
+### Run Demo
 
 ```bash
-# Copy built artifacts to demo/pkg/, then serve:
 python serve.py
 # Open http://localhost:8080/demo/
 ```
 
 ---
 
-## Interaction
-
-- **Scroll** — Zoom in/out (horizontal scale)
-- **Click + Drag** — Pan through time
-- **Mouse move** — Crosshair with price/time tooltip
-
----
-
 ## Performance
 
-- **10,000+ candles** rendered in a single instanced draw call
-- **Sub-millisecond frame times** on integrated GPUs
-- **Zero GC pressure** — no JavaScript objects created per frame
-- **Dirty-flag rendering** — skips frames when nothing changes
+- 10,000+ candles in a single instanced GPU draw call
+- Sub-millisecond frame times on integrated GPUs
+- Zero GC pressure (no JS objects created per frame)
+- Dirty-flag rendering (skips unchanged frames)
 
 ---
 
 ## License
 
-**Proprietary. All rights reserved.**
-
-This software is the exclusive intellectual property of [RayCharts](https://raycharts.com/). You may NOT copy, use, modify, distribute, or create derivative works from this software without prior written authorization. See [LICENSE](./LICENSE) for full terms.
-
----
+Proprietary. All rights reserved. See [LICENSE](./LICENSE).
 
 *Built by [RayCharts](https://raycharts.com/)*

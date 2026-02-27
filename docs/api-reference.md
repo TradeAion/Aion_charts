@@ -1,0 +1,290 @@
+# API Reference
+
+Complete reference for the RayCore WASM public API.
+
+---
+
+## Lifecycle
+
+### `RayCore.create_chart(container, options)`
+
+Create a new chart instance.
+
+```ts
+static create_chart(
+  container: HTMLElement | string,
+  options?: CreateChartOptions
+): Promise<RayCore>
+```
+
+**Parameters:**
+- `container` — DOM element or element ID string
+- `options.renderer` — `'auto'` (default), `'webgpu'`, or `'canvas2d'`
+- `options.autoRender` — `true` to start RAF loop automatically
+- `options.theme` — `'dark'`, `'light'`
+- `options.symbol` — symbol string (e.g. `'BTCUSD'`)
+- `options.interval` — interval string (e.g. `'1m'`, `'1h'`, `'1D'`)
+
+### `apply_options(options)`
+
+Update chart options at runtime.
+
+```ts
+apply_options(options: { theme?: 'dark' | 'light' }): void
+```
+
+### `dispose()`
+
+Detach all event listeners, stop RAF loop, and free WASM memory. Always call this when removing the chart.
+
+### `render()`
+
+Render a single frame. Only needed if `autoRender` is `false`.
+
+### `start_auto_render()` / `stop_auto_render()`
+
+Control the internal `requestAnimationFrame` loop.
+
+---
+
+## Data
+
+### `set_data_arrays(open, high, low, close, volume, timestamps)`
+
+Load OHLCV bar data from parallel typed arrays.
+
+```ts
+set_data_arrays(
+  open: Float32Array,
+  high: Float32Array,
+  low: Float32Array,
+  close: Float32Array,
+  volume: Float32Array,
+  timestamps: BigUint64Array  // millisecond unix timestamps
+): void
+```
+
+### `upsert_bar(timestamp, open, high, low, close, volume)`
+
+Insert or update a single bar. If a bar with the given timestamp exists, it is updated; otherwise a new bar is appended.
+
+### `append_bar(timestamp, open, high, low, close, volume)`
+
+Append a new bar (must have a timestamp greater than the last bar).
+
+### `update_last_bar(open, high, low, close, volume)`
+
+Update the most recent bar in-place (for live streaming).
+
+### `demo_mode()`
+
+Load 600 sample bars for testing.
+
+---
+
+## Viewport
+
+### `zoom_to_range(start, end)`
+
+Zoom to a specific timestamp range (millisecond unix timestamps).
+
+### `set_visible_range(start, end)` / `visible_range()`
+
+Get or set the currently visible timestamp range.
+
+### `data_range()`
+
+Returns the full data timestamp range `[start, end]`.
+
+### `set_auto_scroll(enabled)` / `get_auto_scroll()`
+
+Toggle auto-scroll to latest bar on new data.
+
+---
+
+## Chart Type
+
+### `set_chart_type(type)`
+
+```ts
+set_chart_type(type: 'candlestick' | 'ohlc' | 'line' | 'area' | 'heikin_ashi' | 'baseline'): void
+```
+
+Aliases: `'candles'` = `'candlestick'`, `'bars'` = `'ohlc'`, `'ha'` = `'heikin_ashi'`.
+
+---
+
+## Price Scale
+
+### `set_price_scale_mode(mode)`
+
+```ts
+set_price_scale_mode(mode: 'normal' | 'logarithmic' | 'percentage' | 'indexed_to_100'): void
+```
+
+### `set_price_scale_margins(top, bottom)`
+
+Set top/bottom margins as fractions (0.0-1.0).
+
+---
+
+## Crosshair
+
+### `set_crosshair_mode(mode)`
+
+```ts
+set_crosshair_mode(mode: 'normal' | 'magnet_ohlc'): void
+```
+
+See [Theming](./theming.md) for crosshair styling methods.
+
+---
+
+## Drawing Tools
+
+### `set_drawing_tool(tool)`
+
+```ts
+set_drawing_tool(tool:
+  | 'none'
+  | 'trend_line'
+  | 'horizontal_line'
+  | 'vertical_line'
+  | 'ray'
+  | 'rectangle'
+  | 'fibonacci'
+  | 'scale'
+  | 'brush'
+): void
+```
+
+See [Drawing Tools](./drawing-tools.md) for detailed usage.
+
+### `remove_selected_drawing()` / `cancel_drawing()` / `clear_drawings()`
+
+Drawing lifecycle management.
+
+---
+
+## Series Overlays
+
+### `add_line_series(r, g, b, a, width, style, timestamps, values)`
+
+Add a line series overlay. Returns a `series_id` (number).
+
+### `add_area_series(...)` / `add_bar_series(...)` / `add_baseline_series(...)` / `add_histogram_series(...)`
+
+Add other series types. See TypeScript definitions for full parameter lists.
+
+### `remove_series(id)` / `set_series_visible(id, visible)` / `series_count()`
+
+Manage overlay series.
+
+### `set_series_data(id, values, timestamps)` / `upsert_series_point(id, timestamp, value)`
+
+Update series data.
+
+---
+
+## Studies (Technical Indicators)
+
+### `create_study(type)`
+
+```ts
+create_study(type: 'sma' | 'ema' | 'rsi' | 'macd' | 'bollinger' | 'stochastic' | 'atr' | 'vwap'): number
+```
+
+Returns a `study_id`.
+
+### `remove_study(id)` / `set_study_parameter(id, key, value)` / `study_count()`
+
+Manage studies.
+
+### `add_indicator_pane(study_id, type, height)` / `remove_indicator_pane(pane_id)`
+
+Add sub-chart panes for indicators like RSI, MACD, etc.
+
+---
+
+## Price Lines
+
+### `create_price_line(price, r, g, b, a, width, style, label)`
+
+Create a horizontal price line. Returns a `price_line_id`.
+
+### `remove_price_line(id)` / `set_price_line_price(id, price)` / `set_price_line_visible(id, visible)`
+
+Manage price lines.
+
+---
+
+## Series Markers
+
+### `add_marker(series_id, timestamp, position, shape, r, g, b, a, text)`
+
+Add a marker (arrow, circle, square) at a specific bar.
+
+- `position`: `'above_bar'`, `'below_bar'`, `'at_price'`
+- `shape`: `'arrow_up'`, `'arrow_down'`, `'circle'`, `'square'`
+
+### `remove_marker(series_id, marker_id)` / `clear_markers(series_id)` / `clear_all_markers()`
+
+---
+
+## Events
+
+### `on(event, callback)` / `off(event, callback)` / `once(event, callback)`
+
+Subscribe to chart events:
+
+| Event | Payload |
+|---|---|
+| `crosshairMove` | `{ price, timestamp, bar_index, x, y }` |
+| `click` | `{ price, timestamp, bar_index, x, y }` |
+| `visibleRangeChange` | `{ start, end }` |
+| `symbolChange` | `{ symbol }` |
+| `intervalChange` | `{ interval }` |
+| `chartTypeChange` | `{ chart_type }` |
+| `priceScaleChange` | `{ mode }` |
+| `resize` | `{ width, height }` |
+| `drawingCreated` | `{ id, tool }` |
+| `drawingSelected` | `{ id }` |
+| `error` | `{ message }` |
+
+---
+
+## Multi-Chart
+
+### `ChartGroup`
+
+Synchronize multiple chart panes:
+
+```ts
+const group = new ChartGroup();
+group.add_pane(chart1_id, 'BTCUSD', '1h');
+group.add_pane(chart2_id, 'ETHUSD', '1h');
+group.link_panes(chart1_id, chart2_id, 'link-1');
+group.set_sync('link-1', 'time', true);
+group.set_sync('link-1', 'crosshair', true);
+```
+
+### `ChartWorkspace`
+
+Split-pane layout management:
+
+```ts
+const ws = new ChartWorkspace('container-id');
+ws.split_active('vertical');
+```
+
+---
+
+## Static Methods
+
+### `RayCore.get_supported_renderers()`
+
+Returns `['webgpu', 'canvas2d']` or `['canvas2d']` depending on browser support.
+
+### `RayCore.renderer_name()`
+
+Returns the active renderer name (`'webgpu'` or `'canvas2d'`).
