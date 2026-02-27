@@ -25,10 +25,10 @@ pub struct BarSeriesOptions {
 
 impl Default for BarSeriesOptions {
     fn default() -> Self {
-        // LWC defaults: up=#26a69a, down=#ef5350
+        let theme = crate::core::renderer::theme::ThemeConfig::default();
         Self {
-            up_color: [0.149, 0.651, 0.604, 1.0],   // #26a69a
-            down_color: [0.937, 0.325, 0.314, 1.0], // #ef5350
+            up_color: theme.series_defaults.bar_up_color,
+            down_color: theme.series_defaults.bar_down_color,
             open_visible: true,
             thin_bars: true,
             visible: true,

@@ -49,18 +49,15 @@ pub struct BaselineSeriesOptions {
 
 impl Default for BaselineSeriesOptions {
     fn default() -> Self {
+        let theme = crate::core::renderer::theme::ThemeConfig::default();
         Self {
             base_value: 0.0,
-            // Teal/green for above
-            top_line_color: [0.149, 0.651, 0.604, 1.0],
-            // Red for below
-            bottom_line_color: [0.937, 0.325, 0.314, 1.0],
-            // Above fill gradient: line → baseline
-            top_fill_color1: [0.149, 0.651, 0.604, 0.28],
-            top_fill_color2: [0.149, 0.651, 0.604, 0.05],
-            // Below fill gradient: baseline → line
-            bottom_fill_color1: [0.937, 0.325, 0.314, 0.05],
-            bottom_fill_color2: [0.937, 0.325, 0.314, 0.28],
+            top_line_color: theme.series_defaults.baseline_top_line,
+            bottom_line_color: theme.series_defaults.baseline_bottom_line,
+            top_fill_color1: theme.series_defaults.baseline_top_fill_1,
+            top_fill_color2: theme.series_defaults.baseline_top_fill_2,
+            bottom_fill_color1: theme.series_defaults.baseline_bottom_fill_1,
+            bottom_fill_color2: theme.series_defaults.baseline_bottom_fill_2,
             line_width: 2.0,
             visible: true,
             title: String::new(),

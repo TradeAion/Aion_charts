@@ -87,9 +87,9 @@ pub struct LineSeriesOptions {
 
 impl Default for LineSeriesOptions {
     fn default() -> Self {
-        // TradingView blue: #2962FF
+        let theme = crate::core::renderer::theme::ThemeConfig::default();
         Self {
-            color: [0.161, 0.384, 1.0, 1.0],
+            color: theme.series_defaults.line_color,
             line_width: 2.0,
             line_style: LineStyle::Solid,
             crosshair_marker_visible: true,

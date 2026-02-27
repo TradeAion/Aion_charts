@@ -32,13 +32,12 @@ pub struct AreaSeriesOptions {
 
 impl Default for AreaSeriesOptions {
     fn default() -> Self {
-        // LWC defaults: line #2962FF, topColor rgba(41,98,255,0.28),
-        // bottomColor rgba(41,98,255,0.0)
+        let theme = crate::core::renderer::theme::ThemeConfig::default();
         Self {
-            line_color: [0.161, 0.384, 1.0, 1.0],
+            line_color: theme.series_defaults.area_line_color,
             line_width: 2.0,
-            top_color: [0.161, 0.384, 1.0, 0.28],
-            bottom_color: [0.161, 0.384, 1.0, 0.0],
+            top_color: theme.series_defaults.area_top_fill,
+            bottom_color: theme.series_defaults.area_bottom_fill,
             invert_filled_area: false,
             crosshair_marker_visible: true,
             crosshair_marker_radius: 4.0,

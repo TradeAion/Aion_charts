@@ -20,9 +20,9 @@ pub struct HistogramSeriesOptions {
 
 impl Default for HistogramSeriesOptions {
     fn default() -> Self {
-        // LWC default histogram color: #26a69a
+        let theme = crate::core::renderer::theme::ThemeConfig::default();
         Self {
-            color: [0.149, 0.651, 0.604, 1.0],
+            color: theme.series_defaults.histogram_color,
             base: 0.0,
             visible: true,
             title: String::new(),
