@@ -220,18 +220,21 @@ impl ChartInner {
 
         // Ctrl-key OHLC magnet snapping (works during drawing creation/drag)
         if ctrl_pressed {
-            let bar_idx = bar.round() as usize;
-            if bar_idx < self.engine.bars.len() {
+            if let Some(bar_idx) =
+                self.engine
+                    .viewport
+                    .bar_index_at_pixel(x, pw, self.engine.bars.len())
+            {
                 // Snap to nearest OHLC price
                 price = snap_to_ohlc_price(
                     &self.engine.bars,
                     bar_idx,
                     y,
                     &self.engine.viewport,
-                    candle_css_h,
+                    ph,
                 );
-                // Also snap bar to integer index for cleaner anchoring
-                bar = bar_idx as f64;
+                // Anchor to the candle center (bar slot midpoint), not bar boundary.
+                bar = bar_idx as f64 + 0.5;
             }
         }
 
@@ -724,7 +727,7 @@ fn snap_to_ohlc_price(
     bar_idx: usize,
     cursor_css_y: f64,
     viewport: &raycore::Viewport,
-    candle_css_h: f64,
+    pane_css_h: f64,
 ) -> f64 {
     let open = bars.open(bar_idx) as f64;
     let high = bars.high(bar_idx) as f64;
@@ -736,7 +739,7 @@ fn snap_to_ohlc_price(
     let mut best_price = close;
     let mut best_dist = f64::MAX;
     for &price in &candidates {
-        let py = viewport.price_to_css_y(price, candle_css_h);
+        let py = viewport.price_to_css_y(price, pane_css_h);
         let dist = (py - cursor_css_y).abs();
         if dist < best_dist {
             best_dist = dist;
