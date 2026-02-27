@@ -1951,6 +1951,11 @@ impl RayCore {
         });
     }
 
+    /// Set the shared crosshair label text color (applies to both axes).
+    pub fn set_crosshair_label_text_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        self.inner.borrow_mut().engine.style.crosshair_label_text = [r, g, b, a];
+    }
+
     /// Set live last-price line style.
     /// `line_style`: "solid", "dotted", "dashed", "large_dashed", "sparse_dotted".
     pub fn set_last_price_line_style(&mut self, line_style: &str) {
