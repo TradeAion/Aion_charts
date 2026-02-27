@@ -1138,7 +1138,7 @@ export declare class RayCore {
   /**
    * Activate a drawing tool.
    * @param tool — `"none"`, `"trend_line"`, `"horizontal_line"`, `"vertical_line"`,
-   *   `"ray"`, `"rectangle"`, `"fibonacci"`, `"scale"`
+   *   `"ray"`, `"rectangle"`, `"fibonacci"`, `"scale"`, `"brush"`
    */
   set_drawing_tool(tool: string): void;
 

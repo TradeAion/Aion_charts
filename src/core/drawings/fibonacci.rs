@@ -1,20 +1,25 @@
 //! Fibonacci Retracement drawing — 2-anchor with horizontal level lines.
+//!
+//! Lines and fills are confined to the horizontal span between the two
+//! anchor points (not extended to full pane width).
 
-use super::drawing::{generate_anchor_circles, next_drawing_id, point_to_css, Drawing};
+use super::drawing::{
+    generate_anchor_circles, next_drawing_id, point_to_bitmap, point_to_css, Drawing,
+};
 use super::hit_test;
 use super::types::*;
 use crate::core::renderer::draw_list::{ColoredLine, ColoredRect, DrawText};
 use crate::core::viewport::Viewport;
 
-/// Standard Fibonacci retracement levels.
+/// Standard Fibonacci retracement levels (matches TradingView defaults).
 const FIB_LEVELS: &[(f64, &str)] = &[
-    (0.0, "0%"),
-    (0.236, "23.6%"),
-    (0.382, "38.2%"),
-    (0.5, "50%"),
-    (0.618, "61.8%"),
-    (0.786, "78.6%"),
-    (1.0, "100%"),
+    (0.0, "0"),
+    (0.236, "0.236"),
+    (0.382, "0.382"),
+    (0.5, "0.5"),
+    (0.618, "0.618"),
+    (0.786, "0.786"),
+    (1.0, "1"),
 ];
 
 #[derive(Debug)]
@@ -83,7 +88,7 @@ impl Drawing for FibonacciDrawing {
             return HitResult::miss();
         }
 
-        // Check anchors first
+        // Anchor hit-test first (highest priority)
         for (i, a) in self.anchors.iter().enumerate() {
             let (ax, ay) = point_to_css(&a.point, vp, pw, ph);
             let d = hit_test::point_to_circle_distance(cx, cy, ax, ay);
@@ -92,23 +97,31 @@ impl Drawing for FibonacciDrawing {
             }
         }
 
-        // Check each horizontal fib level line
-        for &(level, _) in FIB_LEVELS {
-            let price = self.level_price(level);
-            let y = vp.price_to_css_y(price, ph);
-            let d = (cy - y).abs();
-            if d <= hit_test::HIT_THRESHOLD_CSS {
-                return HitResult::hit(HitPart::Body, d);
-            }
-        }
+        // Horizontal span between the two anchors (CSS px)
+        let (x0, _) = point_to_css(&self.anchors[0].point, vp, pw, ph);
+        let (x1, _) = point_to_css(&self.anchors[1].point, vp, pw, ph);
+        let left = x0.min(x1);
+        let right = x0.max(x1);
 
-        // Check if cursor is within the vertical span of fib levels
-        let (_, y0) = point_to_css(&self.anchors[0].point, vp, pw, ph);
-        let (_, y1) = point_to_css(&self.anchors[1].point, vp, pw, ph);
-        let min_y = y0.min(y1);
-        let max_y = y0.max(y1);
-        if cy >= min_y && cy <= max_y {
-            return HitResult::hit(HitPart::Body, (cy - min_y).min(max_y - cy));
+        // Only test fib level lines within the anchor span
+        if cx >= left && cx <= right {
+            for &(level, _) in FIB_LEVELS {
+                let price = self.level_price(level);
+                let y = vp.price_to_css_y(price, ph);
+                let d = (cy - y).abs();
+                if d <= hit_test::HIT_THRESHOLD_CSS {
+                    return HitResult::hit(HitPart::Body, d);
+                }
+            }
+
+            // Interior: within vertical span of fib levels
+            let (_, y0) = point_to_css(&self.anchors[0].point, vp, pw, ph);
+            let (_, y1) = point_to_css(&self.anchors[1].point, vp, pw, ph);
+            let min_y = y0.min(y1);
+            let max_y = y0.max(y1);
+            if cy >= min_y && cy <= max_y {
+                return HitResult::hit(HitPart::Body, (cy - min_y).min(max_y - cy));
+            }
         }
 
         HitResult::miss()
@@ -132,19 +145,39 @@ impl Drawing for FibonacciDrawing {
         let c = &self.style.color;
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let lw = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
-        let pane_phys_w = (pw * h_pixel_ratio).round() as f32;
         let fs = (self.style.font_size * avg_ratio) as f32;
 
-        // Draw each fib level line across full pane width
+        // Compute bitmap X positions of the two anchors — lines and fills are
+        // confined to this horizontal span (NOT extended to full pane width).
+        let (bx0, _) = point_to_bitmap(
+            &self.anchors[0].point,
+            vp,
+            pw,
+            ph,
+            h_pixel_ratio,
+            v_pixel_ratio,
+        );
+        let (bx1, _) = point_to_bitmap(
+            &self.anchors[1].point,
+            vp,
+            pw,
+            ph,
+            h_pixel_ratio,
+            v_pixel_ratio,
+        );
+        let left_x = (bx0.min(bx1)) as f32;
+        let right_x = (bx0.max(bx1)) as f32;
+        let span_w = right_x - left_x;
+
         for (i, &(level, label_text)) in FIB_LEVELS.iter().enumerate() {
             let price = self.level_price(level);
             let y = (vp.price_to_css_y(price, ph) * v_pixel_ratio).round() as f32;
 
-            // Level line
+            // Level line — confined between anchor X positions
             geom.lines.push(ColoredLine {
-                x0: 0.0,
+                x0: left_x,
                 y0: y,
-                x1: pane_phys_w,
+                x1: right_x,
                 y1: y,
                 width: lw,
                 r: c[0],
@@ -163,9 +196,9 @@ impl Drawing for FibonacciDrawing {
                     let ry = y.min(next_y);
                     let rh = (y - next_y).abs();
                     geom.rects.push(ColoredRect {
-                        x: 0.0,
+                        x: left_x,
                         y: ry,
-                        w: pane_phys_w,
+                        w: span_w,
                         h: rh,
                         r: fc[0],
                         g: fc[1],
@@ -175,11 +208,11 @@ impl Drawing for FibonacciDrawing {
                 }
             }
 
-            // Label (right-aligned)
+            // Label — right-aligned within the anchor span
             let price_label = format!("{} ({:.2})", label_text, price);
             geom.texts.push(DrawText {
                 text: price_label,
-                x: pane_phys_w - (5.0 * h_pixel_ratio) as f32,
+                x: right_x - (5.0 * h_pixel_ratio) as f32,
                 y: y - fs * 0.3,
                 font_size: fs,
                 r: c[0],

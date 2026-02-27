@@ -1785,7 +1785,7 @@ impl RayCore {
 
     // ── Drawing tools ─────────────────────────────────────────────────────────
 
-    /// Set active drawing tool: "none", "trend_line", "rectangle", "fibonacci", "scale".
+    /// Set active drawing tool: "none", "trend_line", "rectangle", "fibonacci", "scale", "brush".
     pub fn set_drawing_tool(&mut self, tool: &str) {
         let mut s = self.inner.borrow_mut();
         s.engine.drawings.active_tool = match tool {
@@ -1793,6 +1793,7 @@ impl RayCore {
             "rectangle" => raycore::DrawingTool::Rectangle,
             "fibonacci" => raycore::DrawingTool::Fibonacci,
             "scale" => raycore::DrawingTool::Scale,
+            "brush" => raycore::DrawingTool::Brush,
             _ => raycore::DrawingTool::None,
         };
     }

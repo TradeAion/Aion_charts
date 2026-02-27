@@ -1,13 +1,14 @@
-//! Drawings subsystem — trend lines, fib retracements, rectangles, scale tools.
+//! Drawings subsystem — trend lines, fib retracements, rectangles, scale tools, brush.
 //!
 //! Architecture:
 //! - `types.rs`: shared types (DrawingPoint, AnchorPoint, DrawingState, etc.)
 //! - `drawing.rs`: Drawing trait all tools implement
 //! - `hit_test.rs`: geometric hit-test math
-//! - `trend_line.rs`, `rectangle.rs`, `fibonacci.rs`, `scale.rs`: concrete tools
+//! - `trend_line.rs`, `rectangle.rs`, `fibonacci.rs`, `scale.rs`, `brush.rs`: concrete tools
 //! - `horizontal_line.rs`, `vertical_line.rs`, `ray.rs`: additional line tools
 //! - `DrawingManager` (this file): owns all drawings, dispatches hit-tests, manages active tool
 
+pub mod brush;
 pub mod drawing;
 pub mod fibonacci;
 pub mod hit_test;
@@ -179,6 +180,7 @@ impl DrawingManager {
             DrawingTool::Rectangle => Box::new(rectangle::RectangleDrawing::new(bar_index, price)),
             DrawingTool::Fibonacci => Box::new(fibonacci::FibonacciDrawing::new(bar_index, price)),
             DrawingTool::Scale => Box::new(scale::ScaleDrawing::new(bar_index, price)),
+            DrawingTool::Brush => Box::new(brush::BrushDrawing::new(bar_index, price)),
             // TODO: Implement Drawing trait for these new tools
             DrawingTool::HorizontalLine | DrawingTool::VerticalLine | DrawingTool::Ray => {
                 // For now, fall back to trend line behavior

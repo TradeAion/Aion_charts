@@ -254,6 +254,8 @@ pub enum DrawingTool {
     VerticalLine,
     /// Ray / extended line (two anchors, extends to visible edges).
     Ray,
+    /// Brush / freehand (variable points, recorded from pointer drag).
+    Brush,
 }
 
 // ── Z-order ─────────────────────────────────────────────────────────────────
