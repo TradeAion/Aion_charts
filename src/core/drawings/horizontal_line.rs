@@ -24,7 +24,9 @@ impl HorizontalLineDrawing {
         let id = next_drawing_id();
         Self {
             id,
-            state: DrawingState::Creating { step: 1 },
+            // Single-anchor tool: start at step 0 so finalize_creation_step()
+            // completes without creating a phantom second anchor.
+            state: DrawingState::Creating { step: 0 },
             style: DrawingStyle::default(),
             anchors: vec![AnchorPoint::new(bar_index, price)],
         }
