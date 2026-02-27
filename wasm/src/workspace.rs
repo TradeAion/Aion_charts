@@ -128,6 +128,7 @@ struct WorkspaceInner {
     split_views: HashMap<u32, SplitView>,
     drag_split_id: Option<u32>,
     drag_pointer_id: Option<i32>,
+    fullscreen_pane_id: Option<u32>,
     style: WorkspaceStyleConfig,
 }
 
@@ -173,6 +174,7 @@ impl WorkspaceInner {
             split_views: HashMap::new(),
             drag_split_id: None,
             drag_pointer_id: None,
+            fullscreen_pane_id: None,
             style: WorkspaceStyleConfig::default(),
         };
         this.style.divider.normalize();
@@ -229,6 +231,38 @@ impl WorkspaceInner {
         let mut ids: Vec<u32> = self.panes.keys().copied().collect();
         ids.sort_unstable();
         ids
+    }
+
+    fn fullscreen_pane_id(&self) -> Option<u32> {
+        self.fullscreen_pane_id
+            .filter(|pane_id| self.panes.contains_key(pane_id))
+    }
+
+    fn is_fullscreen(&self) -> bool {
+        self.fullscreen_pane_id().is_some()
+    }
+
+    fn toggle_fullscreen_pane(&mut self, pane_id: u32) -> bool {
+        if !self.panes.contains_key(&pane_id) {
+            return false;
+        }
+
+        self.active_pane_id = pane_id;
+        self.fullscreen_pane_id = if self.fullscreen_pane_id == Some(pane_id) {
+            None
+        } else {
+            Some(pane_id)
+        };
+
+        self.rebuild_dom().is_ok()
+    }
+
+    fn clear_fullscreen(&mut self) -> bool {
+        if self.fullscreen_pane_id.is_none() {
+            return false;
+        }
+        self.fullscreen_pane_id = None;
+        self.rebuild_dom().is_ok()
     }
 
     fn split_active(&mut self, direction: SplitDirection) -> Result<u32, JsValue> {
@@ -304,6 +338,7 @@ impl WorkspaceInner {
         self.pane_to_node.insert(pane_id, first_leaf_id);
         self.pane_to_node.insert(new_pane_id, second_leaf_id);
         self.active_pane_id = new_pane_id;
+        self.fullscreen_pane_id = None;
 
         self.rebuild_dom()?;
         Ok(new_pane_id)
@@ -315,8 +350,18 @@ impl WorkspaceInner {
         }
         self.split_views.clear();
 
-        let root = self.build_node_dom(self.root_node_id)?;
-        self.container.append_child(&root)?;
+        if let Some(fullscreen_pane_id) = self.fullscreen_pane_id() {
+            if let Some(pane) = self.panes.get(&fullscreen_pane_id) {
+                self.container.append_child(&pane.host)?;
+            } else {
+                self.fullscreen_pane_id = None;
+                let root = self.build_node_dom(self.root_node_id)?;
+                self.container.append_child(&root)?;
+            }
+        } else {
+            let root = self.build_node_dom(self.root_node_id)?;
+            self.container.append_child(&root)?;
+        }
         self.apply_active_styles();
         self.apply_divider_styles();
         Ok(())
@@ -706,6 +751,22 @@ impl ChartWorkspace {
             out.set(i as u32, JsValue::from_f64(id as f64));
         }
         out
+    }
+
+    pub fn fullscreen_pane_id(&self) -> u32 {
+        self.inner.borrow().fullscreen_pane_id().unwrap_or(0)
+    }
+
+    pub fn is_pane_fullscreen(&self) -> bool {
+        self.inner.borrow().is_fullscreen()
+    }
+
+    pub fn toggle_pane_fullscreen(&mut self, pane_id: u32) -> bool {
+        self.inner.borrow_mut().toggle_fullscreen_pane(pane_id)
+    }
+
+    pub fn clear_pane_fullscreen(&mut self) -> bool {
+        self.inner.borrow_mut().clear_fullscreen()
     }
 
     pub fn split_active(&mut self, direction: &str) -> Result<u32, JsValue> {

@@ -2394,20 +2394,36 @@ impl RayCore {
 
         s.engine.crosshair.active = active;
         s.engine.crosshair.mode = parse_crosshair_mode(mode);
-        s.engine.crosshair.x = x;
-        s.engine.crosshair.y = y;
-        s.engine.crosshair.bar_index = if bar_index.is_finite() && bar_index >= 0.0 {
+        let resolved_bar_index = if bar_index.is_finite() && bar_index >= 0.0 {
             Some(bar_index as usize)
         } else if pw > 0.0 {
             s.engine.viewport.bar_index_for_crosshair(x, pw)
         } else {
             None
         };
+        s.engine.crosshair.bar_index = resolved_bar_index;
+        s.engine.crosshair.x = if let Some(idx) = resolved_bar_index {
+            if pw > 0.0 {
+                s.engine.viewport.bar_center_css(idx, pw)
+            } else {
+                x
+            }
+        } else {
+            x
+        };
         if price.is_finite() {
             s.engine.crosshair.price = price;
+            s.engine.crosshair.y = if ph > 0.0 {
+                s.engine.viewport.price_to_css_y(price, ph)
+            } else {
+                y
+            };
         } else if ph > 0.0 {
             let candle_h = ph * s.engine.viewport.candle_height_frac();
             s.engine.crosshair.price = s.engine.viewport.pixel_to_price(y, candle_h);
+            s.engine.crosshair.y = y;
+        } else {
+            s.engine.crosshair.y = y;
         }
     }
 
