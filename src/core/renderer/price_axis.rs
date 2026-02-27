@@ -355,7 +355,7 @@ impl PriceAxisRenderer {
         resolve_label_overlaps(&mut layout, label_h);
 
         let css_font = format!("{}px {}", style.font_size, style.font_family);
-        let text_color = [1.0, 1.0, 1.0, 0.9];
+        let text_color = style.crosshair_label_text;
         for (i, item) in labels.iter().enumerate() {
             let text_w = self
                 .text_cache
@@ -685,12 +685,7 @@ fn draw_right_axis_label_tick(
 ) {
     let tick_h = dpr.floor().max(1.0);
     ctx.set_fill_style_str(&rgba(tick_color));
-    ctx.fill_rect(
-        geom.x_inside,
-        geom.y_mid.round(),
-        geom.tick_size,
-        tick_h,
-    );
+    ctx.fill_rect(geom.x_inside, geom.y_mid.round(), geom.tick_size, tick_h);
 }
 
 fn draw_right_axis_label_text(
@@ -706,14 +701,14 @@ fn draw_right_axis_label_text(
     let _ = ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
     ctx.set_font(font_css);
     ctx.set_fill_style_str(&rgba(text_color));
-    ctx.set_text_align(if geom.text_align_right { "right" } else { "left" });
+    ctx.set_text_align(if geom.text_align_right {
+        "right"
+    } else {
+        "left"
+    });
     ctx.set_text_baseline("middle");
     let m = text_cache.measure_full(ctx, text, font_css);
-    let _ = ctx.fill_text(
-        text,
-        geom.text_x_css,
-        geom.text_y_css + m.y_mid_correction,
-    );
+    let _ = ctx.fill_text(text, geom.text_x_css, geom.text_y_css + m.y_mid_correction);
     ctx.restore();
 }
 

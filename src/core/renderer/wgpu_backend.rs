@@ -30,6 +30,9 @@ struct FrameState {
     encoder: wgpu::CommandEncoder,
     /// True if the first render pass has already cleared the surface.
     cleared: bool,
+    /// Theme background color used for LoadOp::Clear — read from ctx.style.bg_color
+    /// in begin_frame so all passes (and end_frame fallback) always match the theme.
+    bg_color: wgpu::Color,
 }
 
 // ── Buffer pool helpers ──────────────────────────────────────────────────────
@@ -200,12 +203,7 @@ impl WgpuRenderer {
             wgpu::LoadOp::Load
         } else {
             frame.cleared = true;
-            wgpu::LoadOp::Clear(wgpu::Color {
-                r: 0.09020,
-                g: 0.09020,
-                b: 0.09020,
-                a: 1.0,
-            })
+            wgpu::LoadOp::Clear(frame.bg_color)
         };
         {
             let mut pass = frame
@@ -291,12 +289,7 @@ impl WgpuRenderer {
             wgpu::LoadOp::Load
         } else {
             frame.cleared = true;
-            wgpu::LoadOp::Clear(wgpu::Color {
-                r: 0.09020,
-                g: 0.09020,
-                b: 0.09020,
-                a: 1.0,
-            })
+            wgpu::LoadOp::Clear(frame.bg_color)
         };
         {
             let mut pass = frame
@@ -382,12 +375,7 @@ impl WgpuRenderer {
             wgpu::LoadOp::Load
         } else {
             frame.cleared = true;
-            wgpu::LoadOp::Clear(wgpu::Color {
-                r: 0.09020,
-                g: 0.09020,
-                b: 0.09020,
-                a: 1.0,
-            })
+            wgpu::LoadOp::Clear(frame.bg_color)
         };
         {
             let mut pass = frame
@@ -497,7 +485,7 @@ impl ChartRenderer for WgpuRenderer {
         true
     }
 
-    fn begin_frame(&mut self, _ctx: &RenderContext) -> Result<(), String> {
+    fn begin_frame(&mut self, ctx: &RenderContext) -> Result<(), String> {
         let output = self.acquire_surface_texture()?;
 
         let view = output
@@ -509,11 +497,22 @@ impl ChartRenderer for WgpuRenderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("raycore_encoder"),
             });
+        // Cache the theme bg_color as a wgpu::Color for all LoadOp::Clear calls this frame.
+        // Previously this was hardcoded to 0.09020 (#171717 dark) — now it always matches
+        // the active theme so light/custom themes clear correctly.
+        let bg = &ctx.style.bg_color;
+        let bg_color = wgpu::Color {
+            r: bg[0] as f64,
+            g: bg[1] as f64,
+            b: bg[2] as f64,
+            a: bg[3] as f64,
+        };
         self.frame = Some(FrameState {
             output,
             view,
             encoder,
             cleared: false,
+            bg_color,
         });
         Ok(())
     }
@@ -756,12 +755,7 @@ impl ChartRenderer for WgpuRenderer {
                         view: &frame.view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color {
-                                r: 0.09020,
-                                g: 0.09020,
-                                b: 0.09020,
-                                a: 1.0,
-                            }),
+                            load: wgpu::LoadOp::Clear(frame.bg_color),
                             store: wgpu::StoreOp::Store,
                         },
                         depth_slice: None,

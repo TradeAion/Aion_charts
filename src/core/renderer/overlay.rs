@@ -16,9 +16,11 @@ use crate::core::renderer::canvas_dash::{clear_canvas_line_dash, set_canvas_line
 use crate::core::renderer::line_generator;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
-use crate::core::renderer::transforms::bar_to_x;
 use crate::core::renderer::traits::{ChartStyle, CrosshairState};
-use crate::core::renderer::value_projection::{price_to_pane_y_phys, timestamp_to_bar_index_in_bars};
+use crate::core::renderer::transforms::bar_to_x;
+use crate::core::renderer::value_projection::{
+    price_to_pane_y_phys, timestamp_to_bar_index_in_bars,
+};
 use crate::core::series::{LineStyle, SeriesCollection, SeriesType};
 use crate::core::viewport::Viewport;
 use wasm_bindgen::prelude::*;
@@ -176,7 +178,7 @@ impl OverlayRenderer {
             let font = format!(
                 "{}px {}",
                 t.font_size,
-                "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif"
+                crate::core::renderer::theme::FONT_FAMILY
             );
             ctx.set_font(&font);
             ctx.set_fill_style_str(&rgba(&[t.r, t.g, t.b, t.a]));
@@ -474,11 +476,12 @@ impl OverlayRenderer {
                 let y_phys = price_to_pane_y_phys(last.close as f64, viewport, pane_ph);
                 if x_anchor >= 0.0 && x_anchor < pane_pw && y_phys >= 0.0 && y_phys <= candle_h {
                     let y = y_phys.round() + correction;
-                    self.ctx.set_stroke_style_str(&rgba(&if last.close >= last.open {
-                        style.bullish_color
-                    } else {
-                        style.bearish_color
-                    }));
+                    self.ctx
+                        .set_stroke_style_str(&rgba(&if last.close >= last.open {
+                            style.bullish_color
+                        } else {
+                            style.bearish_color
+                        }));
                     self.ctx.begin_path();
                     self.ctx.move_to(x_anchor.max(0.0), y);
                     self.ctx.line_to(pane_pw + line_w + 1.0, y);
@@ -938,8 +941,8 @@ impl OverlayRenderer {
 
             // Draw text label if present
             if !m.text.is_empty() {
-                let font_size = 11.0 * dpr;
-                let font = format!("{}px sans-serif", font_size);
+                let font_size = style.font_size as f64 * dpr;
+                let font = format!("{}px {}", font_size, style.font_family);
                 self.ctx.set_font(&font);
                 self.ctx.set_text_align("center");
                 self.ctx.set_text_baseline("middle");

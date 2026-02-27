@@ -81,15 +81,16 @@ pub struct SeriesMarker {
 
 impl Default for SeriesMarker {
     fn default() -> Self {
+        let theme = crate::core::renderer::theme::ThemeConfig::default();
         Self {
             bar_index: 0,
             shape: MarkerShape::Circle,
             position: MarkerPosition::AboveBar,
             price: 0.0,
-            color: [0.161, 0.384, 1.0, 1.0], // TradingView blue #2962FF
+            color: theme.series_defaults.marker_color,
             size: 6.0,
             text: String::new(),
-            text_color: [1.0, 1.0, 1.0, 0.9],
+            text_color: theme.series_defaults.marker_text_color,
             id: 0,
         }
     }

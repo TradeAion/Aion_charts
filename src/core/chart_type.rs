@@ -148,26 +148,27 @@ pub struct MainChartOptions {
 
 impl Default for MainChartOptions {
     fn default() -> Self {
+        let theme = crate::core::renderer::theme::ThemeConfig::default();
+        let (up, down) = theme.chart_type_colors();
         Self {
             chart_type: MainChartType::Candlestick,
-            // Default colors (TradingView-style)
-            up_color: [0.18, 0.8, 0.44, 1.0],    // Green #2ECC71
-            down_color: [0.91, 0.30, 0.24, 1.0], // Red #E74C3C
+            up_color: up,
+            down_color: down,
             up_border_color: None,
             down_border_color: None,
             border_visible: true,
             wick_visible: true,
             // Line/Area defaults
-            line_color: [0.161, 0.384, 1.0, 1.0], // Blue #2962FF
+            line_color: theme.series_defaults.line_color,
             line_width: 2.0,
-            area_top_color: [0.161, 0.384, 1.0, 0.4],
-            area_bottom_color: [0.161, 0.384, 1.0, 0.0],
+            area_top_color: theme.series_defaults.area_top_fill,
+            area_bottom_color: theme.series_defaults.area_bottom_fill,
             // Baseline defaults
             baseline_value: 0.0,
-            baseline_top_fill_color: [0.18, 0.8, 0.44, 0.3],
-            baseline_bottom_fill_color: [0.91, 0.30, 0.24, 0.3],
-            baseline_top_line_color: [0.18, 0.8, 0.44, 1.0],
-            baseline_bottom_line_color: [0.91, 0.30, 0.24, 1.0],
+            baseline_top_fill_color: [up[0], up[1], up[2], 0.3],
+            baseline_bottom_fill_color: [down[0], down[1], down[2], 0.3],
+            baseline_top_line_color: up,
+            baseline_bottom_line_color: down,
         }
     }
 }

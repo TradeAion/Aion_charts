@@ -91,6 +91,13 @@ pub use crate::core::renderer::traits::{
     RendererBackend, TickMark,
 };
 
+/// Theme configuration system — presets, custom themes, CSS variable output.
+pub use crate::core::renderer::theme::{
+    ThemeConfig, ThemeColors, ThemeCrosshair, ThemeDrawingDefaults, ThemeIndicatorPalette,
+    ThemeLastPriceLine, ThemeLayout, ThemePreset, ThemeSeriesDefaults, ThemeSubpaneSeparator,
+    ThemeTypography, ThemeWorkspace,
+};
+
 /// Candle sizing strategies.
 pub use crate::core::renderer::series::CandleSizing;
 
@@ -163,6 +170,13 @@ pub use crate::core::price_line::{
 pub use crate::core::markers::{
     MarkerManager, MarkerPosition, MarkerShape, SeriesMarker, SeriesMarkers,
 };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Re-exports: Event System
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Typed chart events and core event bus.
+pub use crate::core::events::{ChartEvent, EventBus};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Re-exports: Pane & Layout

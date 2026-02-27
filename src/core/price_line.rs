@@ -39,9 +39,10 @@ pub struct PriceLineOptions {
 
 impl Default for PriceLineOptions {
     fn default() -> Self {
+        let theme = crate::core::renderer::theme::ThemeConfig::default();
         Self {
             price: 0.0,
-            color: [0.5, 0.5, 0.5, 1.0], // gray
+            color: theme.series_defaults.price_line_color,
             line_width: 1.0,
             line_style: LineStyle::Dashed,
             visible: true,
@@ -49,7 +50,7 @@ impl Default for PriceLineOptions {
             label_text: String::new(),
             show_label: true,
             label_bg_color: None,
-            label_text_color: [1.0, 1.0, 1.0, 0.9], // white
+            label_text_color: theme.series_defaults.price_line_text_color,
         }
     }
 }

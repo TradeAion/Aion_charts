@@ -330,7 +330,7 @@ impl PaneManager {
 
         // Compute new heights respecting minimums
         let new_top = (top_height + delta_y).max(top_min);
-        let new_bottom = (bottom_height - delta_y).max(bottom_min);
+        let _new_bottom = (bottom_height - delta_y).max(bottom_min);
 
         // Only apply if both are valid
         let actual_delta = new_top - top_height;
