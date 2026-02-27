@@ -1779,6 +1779,62 @@ impl RayCore {
             .and_then(|o| js_get(o, "wickDownColor").or_else(|| js_get(o, "borderDownColor")))
             .and_then(|v| parse_color_js(&v))
             .or(bearish_color);
+        let bar_width_ratio = candles_obj
+            .as_ref()
+            .and_then(|o| js_get_f64(o, "barWidth").or_else(|| js_get_f64(o, "bar_width")))
+            .filter(|v| v.is_finite())
+            .map(|v| v.clamp(0.1, 1.0) as f32);
+
+        let volume_obj = js_get(options, "volume");
+        let volume_color = volume_obj
+            .as_ref()
+            .and_then(|o| js_get(o, "color"))
+            .and_then(|v| parse_color_js(&v));
+        let bullish_volume_color = volume_obj
+            .as_ref()
+            .and_then(|o| js_get(o, "upColor"))
+            .and_then(|v| parse_color_js(&v))
+            .or(volume_color);
+        let bearish_volume_color = volume_obj
+            .as_ref()
+            .and_then(|o| js_get(o, "downColor"))
+            .and_then(|v| parse_color_js(&v))
+            .or(volume_color);
+
+        let last_price_obj =
+            js_get(options, "lastPriceLine").or_else(|| js_get(options, "last_price_line"));
+        let last_price_visible = last_price_obj
+            .as_ref()
+            .and_then(|o| js_get_bool(o, "visible"));
+        let last_price_label_visible = last_price_obj
+            .as_ref()
+            .and_then(|o| js_get_bool(o, "labelVisible").or_else(|| js_get_bool(o, "label_visible")));
+        let last_price_width = last_price_obj
+            .as_ref()
+            .and_then(|o| js_get_f64(o, "width"))
+            .filter(|v| v.is_finite() && *v > 0.0);
+        let last_price_style = last_price_obj
+            .as_ref()
+            .and_then(|o| js_get(o, "style"))
+            .and_then(|v| parse_line_style_js(&v));
+
+        let separator_obj = js_get(options, "separator");
+        let separator_color = separator_obj
+            .as_ref()
+            .and_then(|o| js_get(o, "color"))
+            .and_then(|v| parse_color_js(&v));
+        let separator_hover_color = separator_obj
+            .as_ref()
+            .and_then(|o| js_get(o, "hoverColor").or_else(|| js_get(o, "hover_color")))
+            .and_then(|v| parse_color_js(&v));
+        let separator_thickness = separator_obj
+            .as_ref()
+            .and_then(|o| js_get_f64(o, "thickness"))
+            .filter(|v| v.is_finite() && *v > 0.0);
+        let separator_hit_area = separator_obj
+            .as_ref()
+            .and_then(|o| js_get_f64(o, "hitArea").or_else(|| js_get_f64(o, "hit_area")))
+            .filter(|v| v.is_finite() && *v > 0.0);
 
         {
             let mut s = self.inner.borrow_mut();
@@ -1886,6 +1942,52 @@ impl RayCore {
                 if let Some(color) = wick_bearish_color {
                     style.wick_bearish_color = color;
                 }
+                if let Some(ratio) = bar_width_ratio {
+                    style.bar_width_ratio = ratio;
+                }
+                if let Some(color) = bullish_volume_color {
+                    style.bullish_volume_color = color;
+                }
+                if let Some(color) = bearish_volume_color {
+                    style.bearish_volume_color = color;
+                }
+                if let Some(visible) = last_price_visible {
+                    style.last_price_line.visible = visible;
+                }
+                if let Some(visible) = last_price_label_visible {
+                    style.last_price_line.label_visible = visible;
+                }
+                if let Some(width) = last_price_width {
+                    style.last_price_line.width = width;
+                }
+                if let Some(line_style) = last_price_style {
+                    style.last_price_line.style = line_style;
+                }
+            }
+
+            let mut separator_style_changed = false;
+            if let Some(color) = separator_color {
+                s.subpane_separator_style.color = color;
+                separator_style_changed = true;
+            }
+            if let Some(color) = separator_hover_color {
+                s.subpane_separator_style.hover_color = color;
+                separator_style_changed = true;
+            }
+            if let Some(thickness) = separator_thickness {
+                s.subpane_separator_style.line_thickness_css = thickness;
+                separator_style_changed = true;
+            }
+            if let Some(hit_area) = separator_hit_area {
+                s.subpane_separator_style.hit_area_css = hit_area;
+                separator_style_changed = true;
+            }
+            if separator_style_changed {
+                s.subpane_separator_style.normalize();
+                let sep_style = s.subpane_separator_style.clone();
+                for sp in &s.subpanes {
+                    sp.apply_separator_style(&sep_style);
+                }
             }
         }
 
@@ -1931,6 +2033,18 @@ impl RayCore {
             self.theme_config.colors.wick_bearish = color;
             css_changed = true;
         }
+        if let Some(ratio) = bar_width_ratio {
+            self.theme_config.layout.bar_width_ratio = ratio;
+            css_changed = true;
+        }
+        if let Some(color) = bullish_volume_color {
+            self.theme_config.colors.bullish_volume = color;
+            css_changed = true;
+        }
+        if let Some(color) = bearish_volume_color {
+            self.theme_config.colors.bearish_volume = color;
+            css_changed = true;
+        }
 
         if let Some(color) = vert_patch.color.or(horz_patch.color) {
             self.theme_config.crosshair.line_color = color;
@@ -1966,6 +2080,30 @@ impl RayCore {
         }
         if let Some(color) = crosshair_label_text {
             self.theme_config.crosshair.label_text = color;
+            css_changed = true;
+        }
+        if let Some(visible) = last_price_visible {
+            self.theme_config.last_price_line.visible = visible;
+            css_changed = true;
+        }
+        if let Some(visible) = last_price_label_visible {
+            self.theme_config.last_price_line.label_visible = visible;
+            css_changed = true;
+        }
+        if let Some(width) = last_price_width {
+            self.theme_config.last_price_line.width = width;
+            css_changed = true;
+        }
+        if let Some(line_style) = last_price_style {
+            self.theme_config.last_price_line.style = line_style;
+            css_changed = true;
+        }
+        if let Some(color) = separator_color {
+            self.theme_config.subpane_separator.color = color;
+            css_changed = true;
+        }
+        if let Some(color) = separator_hover_color {
+            self.theme_config.subpane_separator.hover_color = color;
             css_changed = true;
         }
 
