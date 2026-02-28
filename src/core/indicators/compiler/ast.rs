@@ -1,6 +1,43 @@
+#[derive(Debug, Clone, Default)]
+pub struct IndicatorDecl {
+    /// Indicator title (displayed in chart header)
+    pub title: Option<String>,
+    /// Short title (abbreviated name)
+    pub shorttitle: Option<String>,
+    /// Whether the indicator overlays on the main chart (true) or uses a separate pane (false)
+    pub overlay: Option<bool>,
+    /// Price format: "price" (default), "volume", "percent", "inherit"
+    pub format: Option<String>,
+    /// Decimal precision for display (0-16)
+    pub precision: Option<i32>,
+    /// Price scale mode: "right", "left", "none", "inherit"
+    pub scale: Option<String>,
+    /// Maximum bars to look back (affects performance)
+    pub max_bars_back: Option<i32>,
+    /// Default timeframe for the indicator
+    pub timeframe: Option<String>,
+    /// Gaps handling: "barmerge.gaps_off" (default), "barmerge.gaps_on"
+    pub timeframe_gaps: Option<String>,
+    /// Whether to enable dynamic requests
+    pub dynamic_requests: Option<bool>,
+    /// Whether to track realtime updates
+    pub calc_on_every_tick: Option<bool>,
+    /// Maximum number of labels
+    pub max_labels_count: Option<i32>,
+    /// Maximum number of lines
+    pub max_lines_count: Option<i32>,
+    /// Maximum number of boxes
+    pub max_boxes_count: Option<i32>,
+    /// Maximum number of tables
+    pub max_tables_count: Option<i32>,
+    /// Maximum number of polylines
+    pub max_polylines_count: Option<i32>,
+}
+
 #[derive(Debug, Clone)]
 pub struct AstProgram {
     pub name: Option<String>,
+    pub indicator_decl: IndicatorDecl,
     pub inputs: Vec<AstInputDecl>,
     pub statements: Vec<AstStatement>,
 }

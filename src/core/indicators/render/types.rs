@@ -142,6 +142,34 @@ pub enum DrawInstruction {
         lower_series_id: String,
         color: [f32; 4],
     },
+    DrawTable {
+        order: RenderOrderKey,
+        id: ObjectId,
+        position: String, // position.top_left, position.top_center, etc.
+        columns: u32,
+        rows: u32,
+        bgcolor: [f32; 4],
+        frame_color: [f32; 4],
+        frame_width: f32,
+        border_color: [f32; 4],
+        border_width: f32,
+        cells: Vec<TableCell>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableCell {
+    pub column: u32,
+    pub row: u32,
+    pub text: String,
+    pub text_color: [f32; 4],
+    pub text_halign: String,
+    pub text_valign: String,
+    pub text_size: f32,
+    pub bgcolor: [f32; 4],
+    pub width: Option<f32>,
+    pub height: Option<f32>,
+    pub tooltip: Option<String>,
 }
 
 impl DrawInstruction {
@@ -157,6 +185,7 @@ impl DrawInstruction {
             | DrawInstruction::DrawBox { order, .. }
             | DrawInstruction::DrawLine { order, .. }
             | DrawInstruction::DrawPolyline { order, .. }
+            | DrawInstruction::DrawTable { order, .. }
             | DrawInstruction::FillBetween { order, .. } => *order,
         }
     }

@@ -230,6 +230,20 @@ fn estimate_frame_bytes(frame: &IndicatorFrameOutput) -> usize {
                 lower_series_id,
                 ..
             } => 64 + upper_series_id.len() + lower_series_id.len(),
+            DrawInstruction::DrawTable {
+                position, cells, ..
+            } => {
+                let cell_size: usize = cells
+                    .iter()
+                    .map(|c| {
+                        64 + c.text.len()
+                            + c.text_halign.len()
+                            + c.text_valign.len()
+                            + c.tooltip.as_ref().map_or(0, |s| s.len())
+                    })
+                    .sum();
+                128 + position.len() + cell_size
+            }
         });
     }
 

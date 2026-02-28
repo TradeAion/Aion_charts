@@ -505,6 +505,142 @@ pub fn execute_bar_with_resolver(
                 }
             }
 
+            // -- Table mutations -------------------------------------------------
+            IrCallKind::ObjTableNew => {
+                let ctx = EvalContext::with_vars(
+                    instance,
+                    mtf_resolver,
+                    decl_idx as u32,
+                    &persistent_vars,
+                    &local_vars,
+                );
+                if let Some(mutation) = build_table_mutation_with_ctx(
+                    args,
+                    instance,
+                    decl_idx,
+                    bars,
+                    bar_index,
+                    mtf_resolver,
+                    &ctx,
+                    true,
+                ) {
+                    object_mutations.push(mutation);
+                }
+            }
+            IrCallKind::ObjTableSet => {
+                let ctx = EvalContext::with_vars(
+                    instance,
+                    mtf_resolver,
+                    decl_idx as u32,
+                    &persistent_vars,
+                    &local_vars,
+                );
+                if let Some(mutation) = build_table_mutation_with_ctx(
+                    args,
+                    instance,
+                    decl_idx,
+                    bars,
+                    bar_index,
+                    mtf_resolver,
+                    &ctx,
+                    false,
+                ) {
+                    object_mutations.push(mutation);
+                }
+            }
+            IrCallKind::ObjTableDelete => {
+                let ctx = EvalContext::with_vars(
+                    instance,
+                    mtf_resolver,
+                    decl_idx as u32,
+                    &persistent_vars,
+                    &local_vars,
+                );
+                if let Some(id) = parse_object_id_with_eval(args.first(), &ctx, bars, bar_index) {
+                    object_mutations.push(ObjectMutation::Delete { id });
+                }
+            }
+            IrCallKind::ObjTableCell => {
+                let ctx = EvalContext::with_vars(
+                    instance,
+                    mtf_resolver,
+                    decl_idx as u32,
+                    &persistent_vars,
+                    &local_vars,
+                );
+                if let Some(mutation) = build_table_cell_mutation_with_ctx(
+                    args,
+                    instance,
+                    decl_idx,
+                    bars,
+                    bar_index,
+                    mtf_resolver,
+                    &ctx,
+                ) {
+                    object_mutations.push(mutation);
+                }
+            }
+            IrCallKind::ObjTableCellSet => {
+                let ctx = EvalContext::with_vars(
+                    instance,
+                    mtf_resolver,
+                    decl_idx as u32,
+                    &persistent_vars,
+                    &local_vars,
+                );
+                if let Some(mutation) = build_table_cell_set_mutation_with_ctx(
+                    args,
+                    instance,
+                    decl_idx,
+                    bars,
+                    bar_index,
+                    mtf_resolver,
+                    &ctx,
+                ) {
+                    object_mutations.push(mutation);
+                }
+            }
+            IrCallKind::ObjTableMerge => {
+                let ctx = EvalContext::with_vars(
+                    instance,
+                    mtf_resolver,
+                    decl_idx as u32,
+                    &persistent_vars,
+                    &local_vars,
+                );
+                if let Some(mutation) = build_table_merge_mutation_with_ctx(
+                    args,
+                    instance,
+                    decl_idx,
+                    bars,
+                    bar_index,
+                    mtf_resolver,
+                    &ctx,
+                ) {
+                    object_mutations.push(mutation);
+                }
+            }
+            IrCallKind::ObjTableClear => {
+                let ctx = EvalContext::with_vars(
+                    instance,
+                    mtf_resolver,
+                    decl_idx as u32,
+                    &persistent_vars,
+                    &local_vars,
+                );
+                if let Some(mutation) = build_table_clear_mutation_with_ctx(
+                    args,
+                    instance,
+                    decl_idx,
+                    bars,
+                    bar_index,
+                    mtf_resolver,
+                    &ctx,
+                ) {
+                    object_mutations.push(mutation);
+                }
+            }
+
             // -- MTF samples: collect for current bar directly --------------------
             IrCallKind::RequestSeries => {
                 collect_mtf_samples_for_call(
@@ -1241,6 +1377,286 @@ fn build_polyline_mutation_with_ctx(
     }
 }
 
+fn build_table_mutation_with_ctx(
+    args: &[IrCallArg],
+    instance: &IndicatorInstance,
+    decl_idx: usize,
+    bars: &BarArray,
+    bar_index: usize,
+    mtf_resolver: &dyn MtfResolver,
+    ctx: &EvalContext<'_>,
+    create: bool,
+) -> Option<ObjectMutation> {
+    // table.new(position, columns, rows, ...) — 3 positional args
+    let (id, args_offset) =
+        parse_object_id_with_offset_ctx(args, ctx, bars, bar_index, instance, decl_idx, 3)?;
+    if positional_arg_count(args) < args_offset + 3 {
+        return None;
+    }
+
+    let position_arg = positional_arg(args, args_offset)?;
+    let columns_arg = positional_arg(args, args_offset + 1)?;
+    let rows_arg = positional_arg(args, args_offset + 2)?;
+
+    let position = resolve_string_argument_ctx(position_arg, ctx, bars, bar_index)
+        .unwrap_or_else(|| "position.top_right".to_string());
+    let columns = resolve_int_argument_ctx(columns_arg, ctx, bars, bar_index).unwrap_or(1) as u32;
+    let rows = resolve_int_argument_ctx(rows_arg, ctx, bars, bar_index).unwrap_or(1) as u32;
+
+    let bgcolor = parse_named_color(args, "bgcolor").unwrap_or([0.1, 0.1, 0.1, 0.9]);
+    let frame_color = parse_named_color(args, "frame_color").unwrap_or([0.3, 0.3, 0.3, 1.0]);
+    let frame_width = parse_named_f32(
+        args,
+        "frame_width",
+        instance,
+        decl_idx,
+        bars,
+        bar_index,
+        mtf_resolver,
+    )
+    .unwrap_or(1.0);
+    let border_color = parse_named_color(args, "border_color").unwrap_or([0.2, 0.2, 0.2, 1.0]);
+    let border_width = parse_named_f32(
+        args,
+        "border_width",
+        instance,
+        decl_idx,
+        bars,
+        bar_index,
+        mtf_resolver,
+    )
+    .unwrap_or(1.0);
+
+    let props = json!({
+        "position": position,
+        "columns": columns,
+        "rows": rows,
+        "bgcolor": bgcolor,
+        "frame_color": frame_color,
+        "frame_width": frame_width,
+        "border_color": border_color,
+        "border_width": border_width,
+        "cells": [],
+    });
+
+    if create {
+        Some(ObjectMutation::Create {
+            id,
+            object_type: "table".to_string(),
+            layer_band: LayerBand::AxisUi, // Tables render in UI layer, not chart layer
+            z: parse_named_i16(args, "z", instance, decl_idx, bars, bar_index, mtf_resolver)
+                .unwrap_or(0),
+            props,
+        })
+    } else {
+        Some(ObjectMutation::Update { id, props })
+    }
+}
+
+fn build_table_cell_mutation_with_ctx(
+    args: &[IrCallArg],
+    instance: &IndicatorInstance,
+    decl_idx: usize,
+    bars: &BarArray,
+    bar_index: usize,
+    mtf_resolver: &dyn MtfResolver,
+    ctx: &EvalContext<'_>,
+) -> Option<ObjectMutation> {
+    // table.cell(table_id, column, row, text, ...) — 4 positional args
+    let positional_count = positional_arg_count(args);
+    if positional_count < 4 {
+        return None;
+    }
+
+    let table_id_arg = positional_arg(args, 0)?;
+    let column_arg = positional_arg(args, 1)?;
+    let row_arg = positional_arg(args, 2)?;
+    let text_arg = positional_arg(args, 3)?;
+
+    let table_id =
+        resolve_object_id_argument_ctx(table_id_arg, ctx, bars, bar_index, instance, decl_idx)?;
+    let column = resolve_int_argument_ctx(column_arg, ctx, bars, bar_index).unwrap_or(0) as u32;
+    let row = resolve_int_argument_ctx(row_arg, ctx, bars, bar_index).unwrap_or(0) as u32;
+    let text = resolve_string_argument_ctx(text_arg, ctx, bars, bar_index).unwrap_or_default();
+
+    let text_color = parse_named_color(args, "text_color").unwrap_or([1.0, 1.0, 1.0, 1.0]);
+    let text_halign =
+        parse_named_string(args, "text_halign").unwrap_or_else(|| "text.align_center".to_string());
+    let text_valign =
+        parse_named_string(args, "text_valign").unwrap_or_else(|| "text.align_center".to_string());
+    let text_size =
+        parse_named_string(args, "text_size").unwrap_or_else(|| "size.normal".to_string());
+    let bgcolor = parse_named_color(args, "bgcolor").unwrap_or([0.15, 0.15, 0.15, 1.0]);
+    let width = parse_named_f32(
+        args,
+        "width",
+        instance,
+        decl_idx,
+        bars,
+        bar_index,
+        mtf_resolver,
+    );
+    let height = parse_named_f32(
+        args,
+        "height",
+        instance,
+        decl_idx,
+        bars,
+        bar_index,
+        mtf_resolver,
+    );
+    let tooltip = parse_named_string(args, "tooltip");
+
+    let props = json!({
+        "action": "cell",
+        "column": column,
+        "row": row,
+        "text": text,
+        "text_color": text_color,
+        "text_halign": text_halign,
+        "text_valign": text_valign,
+        "text_size": text_size,
+        "bgcolor": bgcolor,
+        "width": width,
+        "height": height,
+        "tooltip": tooltip,
+    });
+
+    Some(ObjectMutation::Update {
+        id: table_id,
+        props,
+    })
+}
+
+fn build_table_cell_set_mutation_with_ctx(
+    args: &[IrCallArg],
+    instance: &IndicatorInstance,
+    decl_idx: usize,
+    bars: &BarArray,
+    bar_index: usize,
+    _mtf_resolver: &dyn MtfResolver,
+    ctx: &EvalContext<'_>,
+) -> Option<ObjectMutation> {
+    // table.cell_set_text(table_id, column, row, text) — 4 positional args
+    let positional_count = positional_arg_count(args);
+    if positional_count < 4 {
+        return None;
+    }
+
+    let table_id_arg = positional_arg(args, 0)?;
+    let column_arg = positional_arg(args, 1)?;
+    let row_arg = positional_arg(args, 2)?;
+    let text_arg = positional_arg(args, 3)?;
+
+    let table_id =
+        resolve_object_id_argument_ctx(table_id_arg, ctx, bars, bar_index, instance, decl_idx)?;
+    let column = resolve_int_argument_ctx(column_arg, ctx, bars, bar_index).unwrap_or(0) as u32;
+    let row = resolve_int_argument_ctx(row_arg, ctx, bars, bar_index).unwrap_or(0) as u32;
+    let text = resolve_string_argument_ctx(text_arg, ctx, bars, bar_index).unwrap_or_default();
+
+    let props = json!({
+        "action": "cell_set_text",
+        "column": column,
+        "row": row,
+        "text": text,
+    });
+
+    Some(ObjectMutation::Update {
+        id: table_id,
+        props,
+    })
+}
+
+fn build_table_merge_mutation_with_ctx(
+    args: &[IrCallArg],
+    instance: &IndicatorInstance,
+    decl_idx: usize,
+    bars: &BarArray,
+    bar_index: usize,
+    _mtf_resolver: &dyn MtfResolver,
+    ctx: &EvalContext<'_>,
+) -> Option<ObjectMutation> {
+    // table.merge_cells(table_id, start_column, start_row, end_column, end_row) — 5 positional args
+    let positional_count = positional_arg_count(args);
+    if positional_count < 5 {
+        return None;
+    }
+
+    let table_id_arg = positional_arg(args, 0)?;
+    let start_col_arg = positional_arg(args, 1)?;
+    let start_row_arg = positional_arg(args, 2)?;
+    let end_col_arg = positional_arg(args, 3)?;
+    let end_row_arg = positional_arg(args, 4)?;
+
+    let table_id =
+        resolve_object_id_argument_ctx(table_id_arg, ctx, bars, bar_index, instance, decl_idx)?;
+    let start_column =
+        resolve_int_argument_ctx(start_col_arg, ctx, bars, bar_index).unwrap_or(0) as u32;
+    let start_row =
+        resolve_int_argument_ctx(start_row_arg, ctx, bars, bar_index).unwrap_or(0) as u32;
+    let end_column =
+        resolve_int_argument_ctx(end_col_arg, ctx, bars, bar_index).unwrap_or(0) as u32;
+    let end_row = resolve_int_argument_ctx(end_row_arg, ctx, bars, bar_index).unwrap_or(0) as u32;
+
+    let props = json!({
+        "action": "merge_cells",
+        "start_column": start_column,
+        "start_row": start_row,
+        "end_column": end_column,
+        "end_row": end_row,
+    });
+
+    Some(ObjectMutation::Update {
+        id: table_id,
+        props,
+    })
+}
+
+fn build_table_clear_mutation_with_ctx(
+    args: &[IrCallArg],
+    instance: &IndicatorInstance,
+    decl_idx: usize,
+    bars: &BarArray,
+    bar_index: usize,
+    _mtf_resolver: &dyn MtfResolver,
+    ctx: &EvalContext<'_>,
+) -> Option<ObjectMutation> {
+    // table.clear(table_id, start_column, start_row, end_column, end_row) — 5 positional args
+    let positional_count = positional_arg_count(args);
+    if positional_count < 5 {
+        return None;
+    }
+
+    let table_id_arg = positional_arg(args, 0)?;
+    let start_col_arg = positional_arg(args, 1)?;
+    let start_row_arg = positional_arg(args, 2)?;
+    let end_col_arg = positional_arg(args, 3)?;
+    let end_row_arg = positional_arg(args, 4)?;
+
+    let table_id =
+        resolve_object_id_argument_ctx(table_id_arg, ctx, bars, bar_index, instance, decl_idx)?;
+    let start_column =
+        resolve_int_argument_ctx(start_col_arg, ctx, bars, bar_index).unwrap_or(0) as u32;
+    let start_row =
+        resolve_int_argument_ctx(start_row_arg, ctx, bars, bar_index).unwrap_or(0) as u32;
+    let end_column =
+        resolve_int_argument_ctx(end_col_arg, ctx, bars, bar_index).unwrap_or(0) as u32;
+    let end_row = resolve_int_argument_ctx(end_row_arg, ctx, bars, bar_index).unwrap_or(0) as u32;
+
+    let props = json!({
+        "action": "clear",
+        "start_column": start_column,
+        "start_row": start_row,
+        "end_column": end_column,
+        "end_row": end_row,
+    });
+
+    Some(ObjectMutation::Update {
+        id: table_id,
+        props,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Helpers for object argument resolution using EvalContext
 // ---------------------------------------------------------------------------
@@ -1313,6 +1729,115 @@ fn parse_text_argument_ctx(
         IrCallArg::Text(text) => Some(text.clone()),
         IrCallArg::Expr(expr) => eval_expr(expr, bars, bar_index, ctx).map(|v| v.to_string()),
         IrCallArg::NamedExpr { .. } | IrCallArg::NamedText { .. } => None,
+    }
+}
+
+fn resolve_string_argument_ctx(
+    raw: &IrCallArg,
+    ctx: &EvalContext<'_>,
+    bars: &BarArray,
+    bar_index: usize,
+) -> Option<String> {
+    match raw {
+        IrCallArg::Text(text) => Some(text.clone()),
+        IrCallArg::Expr(expr) => {
+            let value = eval_expr(expr, bars, bar_index, ctx)?;
+            Some(value.to_string())
+        }
+        IrCallArg::NamedText { value, .. } => Some(value.clone()),
+        IrCallArg::NamedExpr { value, .. } => {
+            let result = eval_expr(value, bars, bar_index, ctx)?;
+            Some(result.to_string())
+        }
+    }
+}
+
+fn resolve_int_argument_ctx(
+    raw: &IrCallArg,
+    ctx: &EvalContext<'_>,
+    bars: &BarArray,
+    bar_index: usize,
+) -> Option<i64> {
+    let expr = arg_as_expr(raw)?;
+    let value = eval_expr(expr, bars, bar_index, ctx)?;
+    if !value.is_finite() {
+        return None;
+    }
+    Some(value.round() as i64)
+}
+
+fn resolve_object_id_argument_ctx(
+    raw: &IrCallArg,
+    ctx: &EvalContext<'_>,
+    bars: &BarArray,
+    bar_index: usize,
+    instance: &IndicatorInstance,
+    decl_idx: usize,
+) -> Option<u64> {
+    let expr = arg_as_expr(raw);
+    match expr {
+        Some(e) => eval_expr(e, bars, bar_index, ctx).and_then(to_object_id),
+        None => Some(default_object_id(instance, decl_idx)),
+    }
+}
+
+fn parse_named_color(args: &[IrCallArg], name: &str) -> Option<[f32; 4]> {
+    for arg in args {
+        match arg {
+            IrCallArg::NamedText { name: key, value } if key == name => {
+                return parse_color_string(value);
+            }
+            IrCallArg::NamedExpr { name: key, value } if key == name => {
+                if let IrExpr::Color { r, g, b, a } = value {
+                    return Some([
+                        *r as f32 / 255.0,
+                        *g as f32 / 255.0,
+                        *b as f32 / 255.0,
+                        *a as f32 / 255.0,
+                    ]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn parse_color_string(s: &str) -> Option<[f32; 4]> {
+    let s = s.trim();
+    if s.starts_with('#') {
+        let hex = &s[1..];
+        if hex.len() == 6 {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            return Some([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]);
+        } else if hex.len() == 8 {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
+            return Some([
+                r as f32 / 255.0,
+                g as f32 / 255.0,
+                b as f32 / 255.0,
+                a as f32 / 255.0,
+            ]);
+        }
+    }
+    // Named colors
+    match s.to_lowercase().as_str() {
+        "white" => Some([1.0, 1.0, 1.0, 1.0]),
+        "black" => Some([0.0, 0.0, 0.0, 1.0]),
+        "red" => Some([1.0, 0.0, 0.0, 1.0]),
+        "green" => Some([0.0, 1.0, 0.0, 1.0]),
+        "blue" => Some([0.0, 0.0, 1.0, 1.0]),
+        "yellow" => Some([1.0, 1.0, 0.0, 1.0]),
+        "cyan" => Some([0.0, 1.0, 1.0, 1.0]),
+        "magenta" => Some([1.0, 0.0, 1.0, 1.0]),
+        "gray" | "grey" => Some([0.5, 0.5, 0.5, 1.0]),
+        "transparent" => Some([0.0, 0.0, 0.0, 0.0]),
+        _ => None,
     }
 }
 
@@ -2150,6 +2675,7 @@ fn estimate_vertices(instructions: &[DrawInstruction]) -> usize {
             DrawInstruction::DrawLine { .. } => 2,
             DrawInstruction::DrawPolyline { points, .. } => points.len().saturating_mul(2),
             DrawInstruction::FillBetween { .. } => 6,
+            DrawInstruction::DrawTable { cells, .. } => cells.len().saturating_mul(6), // Each cell is a quad
         })
         .sum()
 }

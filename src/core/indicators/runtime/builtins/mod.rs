@@ -7,6 +7,7 @@ pub mod math;
 pub mod na_ops;
 pub mod str;
 pub mod ta;
+pub mod table;
 
 use crate::core::indicators::runtime::value::RayValue;
 
@@ -81,6 +82,26 @@ impl BuiltinRegistry {
         // line.* functions (computed properties; line.new/set/delete are handled by compiler)
         if let Some(line_fn) = name_lower.strip_prefix("line.") {
             return line::call(line_fn, args);
+        }
+
+        // table.* functions (constants/computed properties; table.new/cell/delete are handled by compiler)
+        if let Some(table_fn) = name_lower.strip_prefix("table.") {
+            return table::call(table_fn, args);
+        }
+
+        // position.* constants for table positioning
+        if let Some(pos) = name_lower.strip_prefix("position.") {
+            return table::call(&format!("position_{}", pos), args);
+        }
+
+        // text.align_* constants for table cell alignment
+        if name_lower.starts_with("text.align_") {
+            return table::call(&name_lower.replace("text.", ""), args);
+        }
+
+        // size.* constants for table text sizing
+        if let Some(size) = name_lower.strip_prefix("size.") {
+            return table::call(&format!("size_{}", size), args);
         }
 
         // color.* functions

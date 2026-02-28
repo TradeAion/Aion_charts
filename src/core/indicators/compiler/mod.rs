@@ -15,7 +15,8 @@ use crate::core::indicators::compiler::parser::parse_program;
 use crate::core::indicators::compiler::typecheck::typecheck_program;
 use crate::core::indicators::language::{normalize_source, parse_compile_mode};
 use crate::core::indicators::{
-    IndicatorProgram, InputSchemaField, IrCall, OpCode, OutputSchemaField, ResourceDecl,
+    IndicatorDeclMeta, IndicatorProgram, InputSchemaField, IrCall, OpCode, OutputSchemaField,
+    ResourceDecl,
 };
 use sha2::{Digest, Sha256};
 
@@ -89,14 +90,15 @@ pub fn compile_source(
         };
     }
 
-    let (opcodes, ir_calls): (Vec<OpCode>, Vec<IrCall>) = if let Some(ref ast_program) = ast {
-        let lowered = lower_to_ir(ast_program, compile_mode.mode);
-        // Collect diagnostics from the lowering pass (BUG-1, BUG-7 fixes)
-        diagnostics.extend(lowered.diagnostics);
-        (lowered.opcodes, lowered.calls)
-    } else {
-        (vec![OpCode::Nop, OpCode::Halt], Vec::new())
-    };
+    let (opcodes, ir_calls, indicator_decl): (Vec<OpCode>, Vec<IrCall>, _) =
+        if let Some(ref ast_program) = ast {
+            let lowered = lower_to_ir(ast_program, compile_mode.mode);
+            // Collect diagnostics from the lowering pass (BUG-1, BUG-7 fixes)
+            diagnostics.extend(lowered.diagnostics);
+            (lowered.opcodes, lowered.calls, Some(lowered.indicator_decl))
+        } else {
+            (vec![OpCode::Nop, OpCode::Halt], Vec::new(), None)
+        };
 
     if diagnostics
         .iter()
@@ -134,6 +136,28 @@ pub fn compile_source(
         max_vertices_per_frame: 2_000_000,
     };
 
+    // Convert AST IndicatorDecl to serializable IndicatorDeclMeta
+    let indicator_meta = indicator_decl
+        .map(|d| IndicatorDeclMeta {
+            title: d.title,
+            shorttitle: d.shorttitle,
+            overlay: d.overlay,
+            format: d.format,
+            precision: d.precision,
+            scale: d.scale,
+            max_bars_back: d.max_bars_back,
+            timeframe: d.timeframe,
+            timeframe_gaps: d.timeframe_gaps,
+            dynamic_requests: d.dynamic_requests,
+            calc_on_every_tick: d.calc_on_every_tick,
+            max_labels_count: d.max_labels_count,
+            max_lines_count: d.max_lines_count,
+            max_boxes_count: d.max_boxes_count,
+            max_tables_count: d.max_tables_count,
+            max_polylines_count: d.max_polylines_count,
+        })
+        .unwrap_or_default();
+
     let program = IndicatorProgram {
         program_id: 0,
         name: program_name,
@@ -148,6 +172,7 @@ pub fn compile_source(
         input_schema,
         output_schema,
         resource_decl,
+        indicator_meta,
     };
 
     CompileOutput {
@@ -499,5 +524,62 @@ mod tests {
             output.diagnostics.iter().any(|d| d.code == "INDL-1106"),
             "expected INDL-1106 diagnostic"
         );
+    }
+
+    #[test]
+    fn parses_indicator_declaration_parameters() {
+        let output = compile_source(
+            r#"indicator("My Indicator", shorttitle="MI", overlay=true, precision=2, max_bars_back=500)
+plot(close)"#,
+            INDICATOR_IR_VERSION,
+            INDICATOR_STDLIB_VERSION,
+            &[],
+        );
+        assert!(output.program.is_some(), "expected compile success");
+        let program = output.program.unwrap();
+        assert_eq!(program.name, "My Indicator");
+        assert_eq!(
+            program.indicator_meta.title,
+            Some("My Indicator".to_string())
+        );
+        assert_eq!(program.indicator_meta.shorttitle, Some("MI".to_string()));
+        assert_eq!(program.indicator_meta.overlay, Some(true));
+        assert_eq!(program.indicator_meta.precision, Some(2));
+        assert_eq!(program.indicator_meta.max_bars_back, Some(500));
+    }
+
+    #[test]
+    fn parses_indicator_format_and_scale() {
+        let output = compile_source(
+            r#"indicator("Volume Indicator", format=format.volume, scale=scale.none)
+plot(volume)"#,
+            INDICATOR_IR_VERSION,
+            INDICATOR_STDLIB_VERSION,
+            &[],
+        );
+        assert!(output.program.is_some(), "expected compile success");
+        let program = output.program.unwrap();
+        assert_eq!(
+            program.indicator_meta.format,
+            Some("format.volume".to_string())
+        );
+        assert_eq!(program.indicator_meta.scale, Some("scale.none".to_string()));
+    }
+
+    #[test]
+    fn parses_indicator_max_objects_counts() {
+        let output = compile_source(
+            r#"indicator("Object Test", max_labels_count=100, max_lines_count=50, max_boxes_count=25, max_tables_count=10)
+plot(close)"#,
+            INDICATOR_IR_VERSION,
+            INDICATOR_STDLIB_VERSION,
+            &[],
+        );
+        assert!(output.program.is_some(), "expected compile success");
+        let program = output.program.unwrap();
+        assert_eq!(program.indicator_meta.max_labels_count, Some(100));
+        assert_eq!(program.indicator_meta.max_lines_count, Some(50));
+        assert_eq!(program.indicator_meta.max_boxes_count, Some(25));
+        assert_eq!(program.indicator_meta.max_tables_count, Some(10));
     }
 }

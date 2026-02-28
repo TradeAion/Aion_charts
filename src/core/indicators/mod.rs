@@ -8,7 +8,7 @@ use crate::core::indicators::compiler::compile_source;
 use crate::core::indicators::compiler::diagnostics::{CompileDiagnostic, DiagnosticSeverity};
 use crate::core::indicators::language::normalize_source;
 use crate::core::indicators::render::types::{
-    DrawInstruction, LayerBand, ObjectMutation, RenderOrderKey,
+    DrawInstruction, LayerBand, ObjectMutation, RenderOrderKey, TableCell,
 };
 use crate::core::indicators::runtime::events::RuntimeEvent;
 use crate::core::indicators::runtime::instance::IndicatorInstance;
@@ -61,6 +61,7 @@ pub enum OpCode {
     EmitDrawBox,
     EmitDrawLine,
     EmitDrawPolyline,
+    EmitDrawTable,
     Halt,
 }
 
@@ -177,6 +178,13 @@ pub enum IrCallKind {
     ObjPolylineNew,
     ObjPolylineSet,
     ObjPolylineDelete,
+    ObjTableNew,
+    ObjTableSet,
+    ObjTableDelete,
+    ObjTableCell,
+    ObjTableCellSet,
+    ObjTableMerge,
+    ObjTableClear,
     ObjDelete,
     RequestSeries,
 }
@@ -208,6 +216,28 @@ pub struct ResourceDecl {
     pub max_vertices_per_frame: usize,
 }
 
+/// Indicator declaration parameters from indicator() call.
+/// Serializable version of the AST IndicatorDecl.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IndicatorDeclMeta {
+    pub title: Option<String>,
+    pub shorttitle: Option<String>,
+    pub overlay: Option<bool>,
+    pub format: Option<String>,
+    pub precision: Option<i32>,
+    pub scale: Option<String>,
+    pub max_bars_back: Option<i32>,
+    pub timeframe: Option<String>,
+    pub timeframe_gaps: Option<String>,
+    pub dynamic_requests: Option<bool>,
+    pub calc_on_every_tick: Option<bool>,
+    pub max_labels_count: Option<i32>,
+    pub max_lines_count: Option<i32>,
+    pub max_boxes_count: Option<i32>,
+    pub max_tables_count: Option<i32>,
+    pub max_polylines_count: Option<i32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndicatorProgram {
     pub program_id: IndicatorProgramId,
@@ -223,6 +253,7 @@ pub struct IndicatorProgram {
     pub input_schema: Vec<InputSchemaField>,
     pub output_schema: Vec<OutputSchemaField>,
     pub resource_decl: ResourceDecl,
+    pub indicator_meta: IndicatorDeclMeta,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -711,6 +742,55 @@ fn object_registry_draw_instructions(instance: &IndicatorInstance) -> Vec<DrawIn
                     });
                 }
             }
+            "table" => {
+                let position = state
+                    .mutable_props
+                    .get("position")
+                    .and_then(Value::as_str)
+                    .unwrap_or("position.top_right")
+                    .to_string();
+                let columns = state
+                    .mutable_props
+                    .get("columns")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1) as u32;
+                let rows = state
+                    .mutable_props
+                    .get("rows")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1) as u32;
+
+                // Parse cells from the mutable_props
+                let cells = parse_table_cells(state.mutable_props.get("cells"));
+
+                out.push(DrawInstruction::DrawTable {
+                    order,
+                    id: *object_id,
+                    position,
+                    columns,
+                    rows,
+                    bgcolor: parse_color4(state.mutable_props.get("bgcolor"), [0.1, 0.1, 0.1, 0.9]),
+                    frame_color: parse_color4(
+                        state.mutable_props.get("frame_color"),
+                        [0.3, 0.3, 0.3, 1.0],
+                    ),
+                    frame_width: state
+                        .mutable_props
+                        .get("frame_width")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(1.0) as f32,
+                    border_color: parse_color4(
+                        state.mutable_props.get("border_color"),
+                        [0.2, 0.2, 0.2, 1.0],
+                    ),
+                    border_width: state
+                        .mutable_props
+                        .get("border_width")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(1.0) as f32,
+                    cells,
+                });
+            }
             _ => {}
         }
     }
@@ -949,6 +1029,60 @@ fn parse_points(raw: Option<&Value>) -> Vec<(u64, f64)> {
     out
 }
 
+fn parse_table_cells(raw: Option<&Value>) -> Vec<TableCell> {
+    let Some(cells_value) = raw else {
+        return Vec::new();
+    };
+    let Some(items) = cells_value.as_array() else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        let Some(obj) = item.as_object() else {
+            continue;
+        };
+        let column = obj.get("column").and_then(Value::as_u64).unwrap_or(0) as u32;
+        let row = obj.get("row").and_then(Value::as_u64).unwrap_or(0) as u32;
+        let text = obj
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let text_color = parse_color4(obj.get("text_color"), [1.0, 1.0, 1.0, 1.0]);
+        let text_halign = obj
+            .get("text_halign")
+            .and_then(Value::as_str)
+            .unwrap_or("text.align_center")
+            .to_string();
+        let text_valign = obj
+            .get("text_valign")
+            .and_then(Value::as_str)
+            .unwrap_or("text.align_center")
+            .to_string();
+        let text_size = obj.get("text_size").and_then(Value::as_f64).unwrap_or(12.0) as f32;
+        let bgcolor = parse_color4(obj.get("bgcolor"), [0.15, 0.15, 0.15, 1.0]);
+        let width = obj.get("width").and_then(Value::as_f64).map(|v| v as f32);
+        let height = obj.get("height").and_then(Value::as_f64).map(|v| v as f32);
+        let tooltip = obj.get("tooltip").and_then(Value::as_str).map(String::from);
+
+        out.push(TableCell {
+            column,
+            row,
+            text,
+            text_color,
+            text_halign,
+            text_valign,
+            text_size,
+            bgcolor,
+            width,
+            height,
+            tooltip,
+        });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::{object_registry_draw_instructions, IndicatorManager};
@@ -1014,5 +1148,57 @@ plot(req.series("ETHUSD", "4h", "high", "live"))
         assert!(requests.iter().any(|r| {
             r.symbol == "ETHUSD" && r.timeframe == "4h" && r.field == "high" && r.mode == "live"
         }));
+    }
+
+    #[test]
+    fn registry_table_is_converted_to_draw_instruction() {
+        let mut instance = IndicatorInstance::new(8, 1, serde_json::Value::Null);
+        instance.object_registry.insert(
+            20,
+            ObjectState {
+                object_type: "table".to_string(),
+                layer_band: LayerBand::AxisUi,
+                z: 0,
+                anchors: serde_json::Value::Null,
+                style: serde_json::Value::Null,
+                lifetime: "persistent".to_string(),
+                mutable_props: json!({
+                    "position": "position.top_right",
+                    "columns": 2u64,
+                    "rows": 2u64,
+                    "bgcolor": [0.1, 0.1, 0.1, 0.9],
+                    "frame_color": [0.3, 0.3, 0.3, 1.0],
+                    "frame_width": 1.0,
+                    "border_color": [0.2, 0.2, 0.2, 1.0],
+                    "border_width": 1.0,
+                    "cells": [
+                        {"column": 0u64, "row": 0u64, "text": "Header", "text_color": [1.0, 1.0, 1.0, 1.0]}
+                    ]
+                }),
+            },
+        );
+
+        let instructions = object_registry_draw_instructions(&instance);
+        assert_eq!(instructions.len(), 1);
+        match &instructions[0] {
+            crate::core::indicators::render::types::DrawInstruction::DrawTable {
+                order,
+                id,
+                position,
+                columns,
+                rows,
+                cells,
+                ..
+            } => {
+                assert_eq!(*id, 20);
+                assert_eq!(order.layer_band, LayerBand::AxisUi);
+                assert_eq!(position, "position.top_right");
+                assert_eq!(*columns, 2);
+                assert_eq!(*rows, 2);
+                assert_eq!(cells.len(), 1);
+                assert_eq!(cells[0].text, "Header");
+            }
+            other => panic!("unexpected instruction {:?}", other),
+        }
     }
 }

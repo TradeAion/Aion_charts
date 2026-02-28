@@ -1,7 +1,7 @@
 use crate::core::indicators::compiler::ast::{
     AstAssign, AstBinaryOp, AstCall, AstExpr, AstFnDecl, AstForLoop, AstIf, AstInputDecl,
     AstProgram, AstReturn, AstSeriesField, AstStatement, AstSwitch, AstSwitchCase, AstTupleAssign,
-    AstUnaryOp, AstVarDecl, AstWhile,
+    AstUnaryOp, AstVarDecl, AstWhile, IndicatorDecl,
 };
 use crate::core::indicators::compiler::diagnostics::{
     CompileDiagnostic, DiagnosticSeverity, SourceSpan,
@@ -154,6 +154,7 @@ impl<'a> ProgramTokenCursor<'a> {
 
     fn parse_program(&mut self, diagnostics: &mut Vec<CompileDiagnostic>) -> Option<AstProgram> {
         let mut name = None;
+        let mut indicator_decl = IndicatorDecl::default();
         let mut inputs = Vec::new();
         let mut statements = Vec::new();
 
@@ -169,7 +170,7 @@ impl<'a> ProgramTokenCursor<'a> {
             if self.is_indicator_start() {
                 let statement_tokens = self.collect_statement_tokens();
                 let header = tokens_to_source(&statement_tokens);
-                name = extract_indicator_name(&header);
+                (name, indicator_decl) = parse_indicator_decl(&header);
                 continue;
             }
 
@@ -209,6 +210,7 @@ impl<'a> ProgramTokenCursor<'a> {
 
         Some(AstProgram {
             name,
+            indicator_decl,
             inputs,
             statements,
         })
@@ -1197,11 +1199,234 @@ fn is_assignment_target(target: &str) -> bool {
     chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
-fn extract_indicator_name(line: &str) -> Option<String> {
-    let start = line.find('"')?;
-    let rest = &line[start + 1..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
+fn parse_indicator_decl(line: &str) -> (Option<String>, IndicatorDecl) {
+    let mut decl = IndicatorDecl::default();
+
+    // Extract all arguments from indicator(...)
+    let Some(open_paren) = line.find('(') else {
+        return (None, decl);
+    };
+    let Some(close_paren) = line.rfind(')') else {
+        return (None, decl);
+    };
+
+    let args_str = &line[open_paren + 1..close_paren];
+    let args = split_indicator_args(args_str);
+
+    let mut name = None;
+
+    for (idx, arg) in args.iter().enumerate() {
+        let trimmed = arg.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Check if it's a named argument (key=value)
+        if let Some((key, value)) = parse_named_indicator_arg(trimmed) {
+            match key.to_lowercase().as_str() {
+                "title" => {
+                    if let Some(s) = extract_string_value(value) {
+                        name = Some(s.clone());
+                        decl.title = Some(s);
+                    }
+                }
+                "shorttitle" => {
+                    if let Some(s) = extract_string_value(value) {
+                        decl.shorttitle = Some(s);
+                    }
+                }
+                "overlay" => {
+                    decl.overlay = Some(parse_bool_value(value));
+                }
+                "format" => {
+                    if let Some(s) = extract_string_or_const(value) {
+                        decl.format = Some(s);
+                    }
+                }
+                "precision" => {
+                    if let Ok(v) = value.trim().parse::<i32>() {
+                        decl.precision = Some(v.clamp(0, 16));
+                    }
+                }
+                "scale" => {
+                    if let Some(s) = extract_string_or_const(value) {
+                        decl.scale = Some(s);
+                    }
+                }
+                "max_bars_back" => {
+                    if let Ok(v) = value.trim().parse::<i32>() {
+                        decl.max_bars_back = Some(v);
+                    }
+                }
+                "timeframe" => {
+                    if let Some(s) = extract_string_value(value) {
+                        decl.timeframe = Some(s);
+                    }
+                }
+                "timeframe_gaps" => {
+                    if let Some(s) = extract_string_or_const(value) {
+                        decl.timeframe_gaps = Some(s);
+                    }
+                }
+                "dynamic_requests" => {
+                    decl.dynamic_requests = Some(parse_bool_value(value));
+                }
+                "calc_on_every_tick" => {
+                    decl.calc_on_every_tick = Some(parse_bool_value(value));
+                }
+                "max_labels_count" => {
+                    if let Ok(v) = value.trim().parse::<i32>() {
+                        decl.max_labels_count = Some(v);
+                    }
+                }
+                "max_lines_count" => {
+                    if let Ok(v) = value.trim().parse::<i32>() {
+                        decl.max_lines_count = Some(v);
+                    }
+                }
+                "max_boxes_count" => {
+                    if let Ok(v) = value.trim().parse::<i32>() {
+                        decl.max_boxes_count = Some(v);
+                    }
+                }
+                "max_tables_count" => {
+                    if let Ok(v) = value.trim().parse::<i32>() {
+                        decl.max_tables_count = Some(v);
+                    }
+                }
+                "max_polylines_count" => {
+                    if let Ok(v) = value.trim().parse::<i32>() {
+                        decl.max_polylines_count = Some(v);
+                    }
+                }
+                _ => {}
+            }
+        } else if idx == 0 {
+            // First positional argument is the title
+            if let Some(s) = extract_string_value(trimmed) {
+                name = Some(s.clone());
+                decl.title = Some(s);
+            }
+        } else if idx == 1 {
+            // Second positional argument is shorttitle
+            if let Some(s) = extract_string_value(trimmed) {
+                decl.shorttitle = Some(s);
+            }
+        } else if idx == 2 {
+            // Third positional argument is overlay
+            decl.overlay = Some(parse_bool_value(trimmed));
+        }
+    }
+
+    (name, decl)
+}
+
+fn split_indicator_args(args_str: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut in_string = false;
+    let mut escape = false;
+    let mut paren_depth = 0;
+
+    for ch in args_str.chars() {
+        if escape {
+            current.push(ch);
+            escape = false;
+            continue;
+        }
+
+        if ch == '\\' && in_string {
+            current.push(ch);
+            escape = true;
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = !in_string;
+            current.push(ch);
+            continue;
+        }
+
+        if !in_string {
+            if ch == '(' {
+                paren_depth += 1;
+                current.push(ch);
+                continue;
+            }
+            if ch == ')' {
+                paren_depth -= 1;
+                current.push(ch);
+                continue;
+            }
+            if ch == ',' && paren_depth == 0 {
+                result.push(current.trim().to_string());
+                current = String::new();
+                continue;
+            }
+        }
+
+        current.push(ch);
+    }
+
+    if !current.trim().is_empty() {
+        result.push(current.trim().to_string());
+    }
+
+    result
+}
+
+fn parse_named_indicator_arg(arg: &str) -> Option<(&str, &str)> {
+    // Look for `key=value` pattern, handling quotes properly
+    let mut in_string = false;
+    let mut escape = false;
+
+    for (idx, ch) in arg.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if ch == '\\' && in_string {
+            escape = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if ch == '=' && !in_string {
+            let key = arg[..idx].trim();
+            let value = arg[idx + 1..].trim();
+            return Some((key, value));
+        }
+    }
+    None
+}
+
+fn extract_string_value(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+        Some(trimmed[1..trimmed.len() - 1].to_string())
+    } else {
+        None
+    }
+}
+
+fn extract_string_or_const(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    // If it's a quoted string, extract it
+    if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+        return Some(trimmed[1..trimmed.len() - 1].to_string());
+    }
+    // Otherwise, it's a constant like format.price, scale.right, etc.
+    if !trimmed.is_empty() {
+        return Some(trimmed.to_string());
+    }
+    None
+}
+
+fn parse_bool_value(value: &str) -> bool {
+    let trimmed = value.trim().to_lowercase();
+    matches!(trimmed.as_str(), "true" | "1" | "yes")
 }
 
 fn parse_input_decl(line: &str) -> Option<AstInputDecl> {

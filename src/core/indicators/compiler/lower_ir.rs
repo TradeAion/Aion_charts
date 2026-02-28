@@ -1,6 +1,6 @@
 use crate::core::indicators::compiler::ast::{
     AstBinaryOp, AstCall, AstExpr, AstFnDecl, AstProgram, AstSeriesField, AstStatement, AstSwitch,
-    AstUnaryOp, AstWhile,
+    AstUnaryOp, AstWhile, IndicatorDecl,
 };
 use crate::core::indicators::compiler::diagnostics::{
     CompileDiagnostic, DiagnosticSeverity, SourceSpan,
@@ -18,6 +18,7 @@ pub struct LoweredIr {
     pub opcodes: Vec<OpCode>,
     pub calls: Vec<IrCall>,
     pub diagnostics: Vec<CompileDiagnostic>,
+    pub indicator_decl: IndicatorDecl,
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +65,7 @@ pub fn lower_to_ir(program: &AstProgram, compile_mode: CompileMode) -> LoweredIr
         opcodes,
         calls,
         diagnostics,
+        indicator_decl: program.indicator_decl.clone(),
     }
 }
 
@@ -1033,6 +1035,21 @@ fn map_call_kind(function: &str) -> Option<(IrCallKind, OpCode)> {
         "polyline.delete" | "obj.delete_polyline" => {
             Some((IrCallKind::ObjPolylineDelete, OpCode::EmitDrawPolyline))
         }
+        "table.new" | "obj.new_table" => Some((IrCallKind::ObjTableNew, OpCode::EmitDrawTable)),
+        "table.set" | "obj.set_table" => Some((IrCallKind::ObjTableSet, OpCode::EmitDrawTable)),
+        "table.delete" | "obj.delete_table" => {
+            Some((IrCallKind::ObjTableDelete, OpCode::EmitDrawTable))
+        }
+        "table.cell" | "obj.table_cell" => Some((IrCallKind::ObjTableCell, OpCode::EmitDrawTable)),
+        "table.cell_set_text" | "obj.table_cell_set" => {
+            Some((IrCallKind::ObjTableCellSet, OpCode::EmitDrawTable))
+        }
+        "table.merge_cells" | "obj.table_merge" => {
+            Some((IrCallKind::ObjTableMerge, OpCode::EmitDrawTable))
+        }
+        "table.clear" | "obj.table_clear" => {
+            Some((IrCallKind::ObjTableClear, OpCode::EmitDrawTable))
+        }
         "obj.delete" | "obj.remove" => Some((IrCallKind::ObjDelete, OpCode::CallBuiltin)),
         "req.series" => Some((IrCallKind::RequestSeries, OpCode::RequestSeries)),
         _ => None,
@@ -1697,7 +1714,7 @@ mod tests {
     use super::lower_to_ir;
     use crate::core::indicators::compiler::ast::{
         AstAssign, AstBinaryOp, AstCall, AstExpr, AstFnDecl, AstProgram, AstStatement, AstSwitch,
-        AstSwitchCase, AstVarDecl, AstWhile,
+        AstSwitchCase, AstVarDecl, AstWhile, IndicatorDecl,
     };
     use crate::core::indicators::compiler::diagnostics::DiagnosticSeverity;
     use crate::core::indicators::language::CompileMode;
@@ -1707,6 +1724,7 @@ mod tests {
     fn v2_rejects_missing_structured_expr_fallback() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            indicator_decl: IndicatorDecl::default(),
             inputs: Vec::new(),
             statements: vec![AstStatement::VarDecl(AstVarDecl {
                 is_persistent: false,
@@ -1731,6 +1749,7 @@ mod tests {
     fn v1_keeps_string_fallback_when_structured_expr_missing() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            indicator_decl: IndicatorDecl::default(),
             inputs: Vec::new(),
             statements: vec![AstStatement::VarDecl(AstVarDecl {
                 is_persistent: false,
@@ -1771,6 +1790,7 @@ mod tests {
     fn v2_rejects_unstructured_function_argument_fallback() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            indicator_decl: IndicatorDecl::default(),
             inputs: Vec::new(),
             statements: vec![
                 AstStatement::FnDecl(AstFnDecl {
@@ -1811,6 +1831,7 @@ mod tests {
     fn lowers_structured_modulo_and_power_ops() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            indicator_decl: IndicatorDecl::default(),
             inputs: Vec::new(),
             statements: vec![AstStatement::VarDecl(AstVarDecl {
                 is_persistent: false,
@@ -1859,6 +1880,7 @@ mod tests {
     fn lowers_structured_ternary_expression() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            indicator_decl: IndicatorDecl::default(),
             inputs: Vec::new(),
             statements: vec![AstStatement::VarDecl(AstVarDecl {
                 is_persistent: false,
@@ -1906,6 +1928,7 @@ mod tests {
     fn lowers_structured_variable_history_index_expr() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            indicator_decl: IndicatorDecl::default(),
             inputs: Vec::new(),
             statements: vec![AstStatement::VarDecl(AstVarDecl {
                 is_persistent: false,
@@ -1945,6 +1968,7 @@ mod tests {
     fn lowers_while_loop_with_guarded_body_calls() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            indicator_decl: IndicatorDecl::default(),
             inputs: Vec::new(),
             statements: vec![AstStatement::While(AstWhile {
                 condition: "x < 2".to_string(),
@@ -1991,6 +2015,7 @@ mod tests {
     fn lowers_switch_to_guarded_case_calls() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            indicator_decl: IndicatorDecl::default(),
             inputs: Vec::new(),
             statements: vec![AstStatement::Switch(AstSwitch {
                 subject: "x".to_string(),
@@ -2036,6 +2061,7 @@ mod tests {
     fn rejects_recursive_function_call() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            indicator_decl: IndicatorDecl::default(),
             inputs: Vec::new(),
             statements: vec![
                 AstStatement::FnDecl(AstFnDecl {
