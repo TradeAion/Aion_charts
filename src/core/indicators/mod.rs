@@ -18,7 +18,7 @@ use crate::core::indicators::runtime::scheduler::Scheduler;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub type IndicatorProgramId = u32;
@@ -59,6 +59,7 @@ pub enum OpCode {
     EmitPlotShape,
     EmitDrawLabel,
     EmitDrawBox,
+    EmitDrawLine,
     EmitDrawPolyline,
     Halt,
 }
@@ -69,6 +70,8 @@ pub enum IrBinaryOp {
     Sub,
     Mul,
     Div,
+    Mod,
+    Pow,
     Gt,
     Gte,
     Lt,
@@ -96,6 +99,10 @@ pub enum IrExpr {
     Number(f64),
     Na,
     Var(String),
+    VarIndexed {
+        name: String,
+        index: Box<IrExpr>,
+    },
     UnaryNot(Box<IrExpr>),
     UnaryNeg(Box<IrExpr>),
     Binary {
@@ -103,16 +110,37 @@ pub enum IrExpr {
         op: IrBinaryOp,
         rhs: Box<IrExpr>,
     },
+    Conditional {
+        condition: Box<IrExpr>,
+        then_expr: Box<IrExpr>,
+        else_expr: Box<IrExpr>,
+    },
     ReqSeries {
         symbol: String,
         timeframe: String,
         field: String,
         mode: String,
+        /// barmerge gaps setting
+        gaps: Option<String>,
+        /// barmerge lookahead setting
+        lookahead: Option<String>,
         index: Option<Box<IrExpr>>,
     },
     Series {
         field: IrSeriesField,
         index: Option<Box<IrExpr>>,
+    },
+    /// Expression-level function call (e.g., nz(ema[1]), math.abs(x))
+    FnCall {
+        name: String,
+        args: Vec<IrExpr>,
+    },
+    /// Color literal (from #RRGGBB or #RRGGBBAA hex, or color.* functions)
+    Color {
+        r: u8,
+        g: u8,
+        b: u8,
+        a: u8,
     },
 }
 
@@ -129,6 +157,7 @@ pub enum IrCallKind {
     StateVarDecl,
     StateLetDecl,
     StateAssign,
+    StateTupleAssign, // [a, b, c] = expr - destructures tuple into multiple vars
     PlotLine,
     PlotArea,
     PlotHistogram,
@@ -142,6 +171,9 @@ pub enum IrCallKind {
     ObjLabelNew,
     ObjLabelSet,
     ObjLabelDelete,
+    ObjLineNew,
+    ObjLineSet,
+    ObjLineDelete,
     ObjPolylineNew,
     ObjPolylineSet,
     ObjPolylineDelete,
@@ -180,6 +212,7 @@ pub struct ResourceDecl {
 pub struct IndicatorProgram {
     pub program_id: IndicatorProgramId,
     pub name: String,
+    pub compile_mode: String,
     pub ir_version: u32,
     pub stdlib_version: u32,
     pub source_hash: String,
@@ -249,6 +282,14 @@ pub struct IndicatorRuntimeMessage {
     pub instance_id: IndicatorInstanceId,
     pub program_id: IndicatorProgramId,
     pub event: RuntimeEvent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndicatorMtfRequestTemplate {
+    pub symbol: String,
+    pub timeframe: String,
+    pub field: String,
+    pub mode: String,
 }
 
 pub struct IndicatorManager {
@@ -353,12 +394,12 @@ impl IndicatorManager {
         program_id: IndicatorProgramId,
         inputs: serde_json::Value,
     ) -> Option<IndicatorInstanceId> {
-        if !self.programs.contains_key(&program_id) {
-            return None;
-        }
+        let program = self.programs.get(&program_id)?;
+        // BUG-5 fix: merge declared input defaults with provided inputs
+        let merged_inputs = merge_input_defaults(&program.input_schema, &inputs);
         let instance_id = self.next_instance_id;
         self.next_instance_id = self.next_instance_id.saturating_add(1);
-        let instance = IndicatorInstance::new(instance_id, program_id, inputs);
+        let instance = IndicatorInstance::new(instance_id, program_id, merged_inputs);
         self.instances.insert(instance_id, instance);
         Some(instance_id)
     }
@@ -492,6 +533,35 @@ impl IndicatorManager {
             })
     }
 
+    pub fn get_program_compile_mode(&self, program_id: IndicatorProgramId) -> Option<String> {
+        self.programs
+            .get(&program_id)
+            .map(|program| program.compile_mode.clone())
+    }
+
+    pub fn get_program_mtf_requests(
+        &self,
+        program_id: IndicatorProgramId,
+    ) -> Vec<IndicatorMtfRequestTemplate> {
+        let Some(program) = self.programs.get(&program_id) else {
+            return Vec::new();
+        };
+
+        let mut out = Vec::<IndicatorMtfRequestTemplate>::new();
+        let mut seen = HashSet::<String>::new();
+        for call in &program.ir_calls {
+            if call.kind == IrCallKind::RequestSeries {
+                if let Some(request) = mtf_request_from_ir_call_args(&call.args) {
+                    push_mtf_request(&mut out, &mut seen, request);
+                }
+            }
+            for arg in &call.args {
+                collect_mtf_requests_from_ir_arg(arg, &mut out, &mut seen);
+            }
+        }
+        out
+    }
+
     pub fn collect_draw_instructions(
         &self,
     ) -> std::collections::BTreeMap<(LayerBand, i16), Vec<DrawInstruction>> {
@@ -604,6 +674,43 @@ fn object_registry_draw_instructions(instance: &IndicatorInstance) -> Vec<DrawIn
                     });
                 }
             }
+            "line" => {
+                let x1 = state.mutable_props.get("x1").and_then(Value::as_u64);
+                let y1 = state.mutable_props.get("y1").and_then(Value::as_f64);
+                let x2 = state.mutable_props.get("x2").and_then(Value::as_u64);
+                let y2 = state.mutable_props.get("y2").and_then(Value::as_f64);
+                if let (Some(x1), Some(y1), Some(x2), Some(y2)) = (x1, y1, x2, y2) {
+                    out.push(DrawInstruction::DrawLine {
+                        order,
+                        id: *object_id,
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        color: parse_color4(
+                            state.mutable_props.get("color"),
+                            [0.14, 0.80, 0.92, 1.0],
+                        ),
+                        width: state
+                            .mutable_props
+                            .get("width")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(1.0) as f32,
+                        style: state
+                            .mutable_props
+                            .get("style")
+                            .and_then(Value::as_str)
+                            .unwrap_or("solid")
+                            .to_string(),
+                        extend: state
+                            .mutable_props
+                            .get("extend")
+                            .and_then(Value::as_str)
+                            .unwrap_or("none")
+                            .to_string(),
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -629,6 +736,171 @@ fn build_compile_cache_key(
         hasher.update(flag.as_bytes());
     }
     format!("{:x}", hasher.finalize())
+}
+
+fn push_mtf_request(
+    out: &mut Vec<IndicatorMtfRequestTemplate>,
+    seen: &mut HashSet<String>,
+    request: IndicatorMtfRequestTemplate,
+) {
+    if request.timeframe.trim().is_empty() || request.field.trim().is_empty() {
+        return;
+    }
+    let dedupe_key = format!(
+        "{}|{}|{}|{}",
+        request.symbol.trim().to_ascii_uppercase(),
+        request.timeframe.trim().to_ascii_lowercase(),
+        request.field.trim().to_ascii_lowercase(),
+        request.mode.trim().to_ascii_lowercase(),
+    );
+    if seen.insert(dedupe_key) {
+        out.push(request);
+    }
+}
+
+fn mtf_request_from_ir_call_args(args: &[IrCallArg]) -> Option<IndicatorMtfRequestTemplate> {
+    let symbol = positional_text_arg(args, 0)
+        .or_else(|| named_text_arg(args, "symbol"))
+        .unwrap_or_default()
+        .to_string();
+    let timeframe = positional_text_arg(args, 1)
+        .or_else(|| named_text_arg(args, "timeframe"))
+        .unwrap_or_default()
+        .to_string();
+    let field = positional_text_arg(args, 2)
+        .or_else(|| named_text_arg(args, "field"))
+        .unwrap_or_default()
+        .to_string();
+    let mode = positional_text_arg(args, 3)
+        .or_else(|| named_text_arg(args, "mode"))
+        .unwrap_or("confirmed")
+        .to_ascii_lowercase();
+
+    Some(IndicatorMtfRequestTemplate {
+        symbol,
+        timeframe,
+        field,
+        mode,
+    })
+}
+
+fn positional_text_arg<'a>(args: &'a [IrCallArg], index: usize) -> Option<&'a str> {
+    let mut seen = 0usize;
+    for arg in args {
+        if let IrCallArg::Text(text) = arg {
+            if seen == index {
+                return Some(text.as_str());
+            }
+            seen = seen.saturating_add(1);
+        }
+    }
+    None
+}
+
+fn named_text_arg<'a>(args: &'a [IrCallArg], name: &str) -> Option<&'a str> {
+    for arg in args {
+        if let IrCallArg::NamedText { name: key, value } = arg {
+            if key.eq_ignore_ascii_case(name) {
+                return Some(value.as_str());
+            }
+        }
+    }
+    None
+}
+
+fn collect_mtf_requests_from_ir_arg(
+    arg: &IrCallArg,
+    out: &mut Vec<IndicatorMtfRequestTemplate>,
+    seen: &mut HashSet<String>,
+) {
+    match arg {
+        IrCallArg::Expr(expr) => collect_mtf_requests_from_ir_expr(expr, out, seen),
+        IrCallArg::NamedExpr { value, .. } => collect_mtf_requests_from_ir_expr(value, out, seen),
+        IrCallArg::Text(_) | IrCallArg::NamedText { .. } => {}
+    }
+}
+
+fn collect_mtf_requests_from_ir_expr(
+    expr: &IrExpr,
+    out: &mut Vec<IndicatorMtfRequestTemplate>,
+    seen: &mut HashSet<String>,
+) {
+    match expr {
+        IrExpr::ReqSeries {
+            symbol,
+            timeframe,
+            field,
+            mode,
+            index,
+            ..  // gaps and lookahead not needed for MTF request discovery
+        } => {
+            push_mtf_request(
+                out,
+                seen,
+                IndicatorMtfRequestTemplate {
+                    symbol: symbol.clone(),
+                    timeframe: timeframe.clone(),
+                    field: field.clone(),
+                    mode: mode.to_ascii_lowercase(),
+                },
+            );
+            if let Some(inner) = index {
+                collect_mtf_requests_from_ir_expr(inner, out, seen);
+            }
+        }
+        IrExpr::UnaryNot(inner) | IrExpr::UnaryNeg(inner) => {
+            collect_mtf_requests_from_ir_expr(inner, out, seen)
+        }
+        IrExpr::Binary { lhs, rhs, .. } => {
+            collect_mtf_requests_from_ir_expr(lhs, out, seen);
+            collect_mtf_requests_from_ir_expr(rhs, out, seen);
+        }
+        IrExpr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            collect_mtf_requests_from_ir_expr(condition, out, seen);
+            collect_mtf_requests_from_ir_expr(then_expr, out, seen);
+            collect_mtf_requests_from_ir_expr(else_expr, out, seen);
+        }
+        IrExpr::VarIndexed { index, .. } => {
+            collect_mtf_requests_from_ir_expr(index, out, seen);
+        }
+        IrExpr::Series { index, .. } => {
+            if let Some(inner) = index {
+                collect_mtf_requests_from_ir_expr(inner, out, seen);
+            }
+        }
+        IrExpr::FnCall { args, .. } => {
+            for arg in args {
+                collect_mtf_requests_from_ir_expr(arg, out, seen);
+            }
+        }
+        IrExpr::Bool(_)
+        | IrExpr::Number(_)
+        | IrExpr::Na
+        | IrExpr::Var(_)
+        | IrExpr::Color { .. } => {}
+    }
+}
+
+/// Merge declared input defaults with user-provided inputs (BUG-5 fix).
+/// For each field in `schema`, if the provided `inputs` object does not contain
+/// that field's `name`, insert the field's `default_value`.
+fn merge_input_defaults(schema: &[InputSchemaField], inputs: &Value) -> Value {
+    let mut merged = match inputs {
+        Value::Object(map) => Value::Object(map.clone()),
+        _ => Value::Object(serde_json::Map::new()),
+    };
+    if let Value::Object(ref mut map) = merged {
+        for field in schema {
+            if !map.contains_key(&field.name) && !field.default_value.is_null() {
+                map.insert(field.name.clone(), field.default_value.clone());
+            }
+        }
+    }
+    merged
 }
 
 fn parse_color4(raw: Option<&Value>, fallback: [f32; 4]) -> [f32; 4] {
@@ -679,7 +951,7 @@ fn parse_points(raw: Option<&Value>) -> Vec<(u64, f64)> {
 
 #[cfg(test)]
 mod tests {
-    use super::object_registry_draw_instructions;
+    use super::{object_registry_draw_instructions, IndicatorManager};
     use crate::core::indicators::render::types::LayerBand;
     use crate::core::indicators::runtime::instance::IndicatorInstance;
     use crate::core::indicators::ObjectState;
@@ -718,5 +990,29 @@ mod tests {
             }
             other => panic!("unexpected instruction {:?}", other),
         }
+    }
+
+    #[test]
+    fn extracts_mtf_request_templates_from_compiled_ir() {
+        let mut manager = IndicatorManager::new(true);
+        let source = r#"indicator("mtf")
+req.series("BTCUSD", "1h", "close", "confirmed")
+plot(req.series("ETHUSD", "4h", "high", "live"))
+"#;
+
+        let compile = manager.compile(source, &[]);
+        let indicator_id = compile.indicator_id.expect("indicator should compile");
+        let requests = manager.get_program_mtf_requests(indicator_id);
+
+        assert_eq!(requests.len(), 2, "expected two distinct mtf requests");
+        assert!(requests.iter().any(|r| {
+            r.symbol == "BTCUSD"
+                && r.timeframe == "1h"
+                && r.field == "close"
+                && r.mode == "confirmed"
+        }));
+        assert!(requests.iter().any(|r| {
+            r.symbol == "ETHUSD" && r.timeframe == "4h" && r.field == "high" && r.mode == "live"
+        }));
     }
 }

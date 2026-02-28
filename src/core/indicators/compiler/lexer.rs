@@ -1,7 +1,9 @@
 use crate::core::indicators::compiler::diagnostics::{
     CompileDiagnostic, DiagnosticSeverity, SourceSpan,
 };
-use crate::core::indicators::compiler::types::{Token, TokenKind};
+use crate::core::indicators::compiler::types::{
+    keyword_kind_for_ident, DelimiterKind, OperatorKind, Token, TokenKind,
+};
 
 pub fn lex(source: &str, diagnostics: &mut Vec<CompileDiagnostic>) -> Vec<Token> {
     let mut tokens = Vec::new();
@@ -17,14 +19,28 @@ pub fn lex(source: &str, diagnostics: &mut Vec<CompileDiagnostic>) -> Vec<Token>
             }
 
             let start = cursor;
+            if ch == '/' && cursor + 1 < bytes.len() && bytes[cursor + 1] as char == '/' {
+                tokens.push(Token {
+                    kind: TokenKind::Comment,
+                    lexeme: line[cursor..].to_string(),
+                    line: line_no,
+                    column: start + 1,
+                });
+                break;
+            }
+
             if is_ident_start(ch) {
                 cursor += 1;
                 while cursor < bytes.len() && is_ident_part(bytes[cursor] as char) {
                     cursor += 1;
                 }
+                let lexeme = line[start..cursor].to_string();
+                let kind = keyword_kind_for_ident(&lexeme)
+                    .map(TokenKind::Keyword)
+                    .unwrap_or(TokenKind::Identifier);
                 tokens.push(Token {
-                    kind: TokenKind::Identifier,
-                    lexeme: line[start..cursor].to_string(),
+                    kind,
+                    lexeme,
                     line: line_no,
                     column: start + 1,
                 });
@@ -103,10 +119,58 @@ pub fn lex(source: &str, diagnostics: &mut Vec<CompileDiagnostic>) -> Vec<Token>
                 continue;
             }
 
-            if is_punctuation(ch) {
+            // Hex color literal: #RRGGBB or #RRGGBBAA
+            if ch == '#' {
+                cursor += 1;
+                let hex_start = cursor;
+                while cursor < bytes.len() && (bytes[cursor] as char).is_ascii_hexdigit() {
+                    cursor += 1;
+                }
+                let hex_len = cursor - hex_start;
+                if hex_len == 6 || hex_len == 8 {
+                    tokens.push(Token {
+                        kind: TokenKind::ColorLiteral,
+                        lexeme: line[start..cursor].to_string(),
+                        line: line_no,
+                        column: start + 1,
+                    });
+                    continue;
+                } else {
+                    // Invalid hex color format - emit warning and treat as unknown
+                    diagnostics.push(CompileDiagnostic {
+                        code: "INDL-1004".to_string(),
+                        severity: DiagnosticSeverity::Warning,
+                        message: format!(
+                            "invalid hex color literal '{}' (expected 6 or 8 hex digits)",
+                            &line[start..cursor]
+                        ),
+                        hint: Some("use #RRGGBB or #RRGGBBAA format".to_string()),
+                        span: Some(SourceSpan {
+                            line: line_no,
+                            column: start + 1,
+                            len: cursor - start,
+                        }),
+                    });
+                    // Don't emit a token for invalid hex color
+                    continue;
+                }
+            }
+
+            if let Some((kind, width)) = match_operator(&line[cursor..]) {
+                cursor += width;
+                tokens.push(Token {
+                    kind: TokenKind::Operator(kind),
+                    lexeme: line[start..cursor].to_string(),
+                    line: line_no,
+                    column: start + 1,
+                });
+                continue;
+            }
+
+            if let Some(kind) = match_delimiter(ch) {
                 cursor += 1;
                 tokens.push(Token {
-                    kind: TokenKind::Punctuation,
+                    kind: TokenKind::Delimiter(kind),
                     lexeme: line[start..cursor].to_string(),
                     line: line_no,
                     column: start + 1,
@@ -136,6 +200,13 @@ pub fn lex(source: &str, diagnostics: &mut Vec<CompileDiagnostic>) -> Vec<Token>
         });
     }
 
+    tokens.push(Token {
+        kind: TokenKind::Eof,
+        lexeme: String::new(),
+        line: source.lines().count().max(1),
+        column: 1,
+    });
+
     if tokens.is_empty() {
         diagnostics.push(CompileDiagnostic {
             code: "INDL-1001".to_string(),
@@ -160,26 +231,152 @@ fn is_ident_part(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '_' || ch == '.'
 }
 
-fn is_punctuation(ch: char) -> bool {
-    matches!(
-        ch,
-        '('
-            | ')'
-            | '['
-            | ']'
-            | '{'
-            | '}'
-            | ','
-            | ':'
-            | ';'
-            | '+'
-            | '-'
-            | '*'
-            | '/'
-            | '%'
-            | '='
-            | '<'
-            | '>'
-            | '!'
-    )
+fn match_operator(raw: &str) -> Option<(OperatorKind, usize)> {
+    let candidates: [(&str, OperatorKind); 13] = [
+        ("==", OperatorKind::EqEq),
+        ("!=", OperatorKind::NotEq),
+        (">=", OperatorKind::Gte),
+        ("<=", OperatorKind::Lte),
+        ("&&", OperatorKind::AndAnd),
+        ("||", OperatorKind::OrOr),
+        ("+=", OperatorKind::PlusEq),
+        ("-=", OperatorKind::MinusEq),
+        ("**", OperatorKind::StarStar),
+        ("*=", OperatorKind::StarEq),
+        ("/=", OperatorKind::SlashEq),
+        ("=>", OperatorKind::Arrow),
+        ("=", OperatorKind::Assign),
+    ];
+    for (token, kind) in candidates {
+        if raw.starts_with(token) {
+            return Some((kind, token.len()));
+        }
+    }
+    let first = raw.chars().next()?;
+    let kind = match first {
+        '+' => OperatorKind::Plus,
+        '-' => OperatorKind::Minus,
+        '*' => OperatorKind::Star,
+        '/' => OperatorKind::Slash,
+        '%' => OperatorKind::Percent,
+        '^' => OperatorKind::Caret,
+        '!' => OperatorKind::Bang,
+        '>' => OperatorKind::Gt,
+        '<' => OperatorKind::Lt,
+        '?' => OperatorKind::Question,
+        ':' => OperatorKind::Colon,
+        _ => return None,
+    };
+    Some((kind, 1))
+}
+
+fn match_delimiter(ch: char) -> Option<DelimiterKind> {
+    match ch {
+        '(' => Some(DelimiterKind::LParen),
+        ')' => Some(DelimiterKind::RParen),
+        '[' => Some(DelimiterKind::LBracket),
+        ']' => Some(DelimiterKind::RBracket),
+        '{' => Some(DelimiterKind::LBrace),
+        '}' => Some(DelimiterKind::RBrace),
+        ',' => Some(DelimiterKind::Comma),
+        '.' => Some(DelimiterKind::Dot),
+        ';' => Some(DelimiterKind::Semicolon),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lex;
+    use crate::core::indicators::compiler::types::{
+        DelimiterKind, KeywordKind, OperatorKind, TokenKind,
+    };
+
+    #[test]
+    fn tokenizes_keywords_operators_and_delimiters() {
+        let mut diagnostics = Vec::new();
+        let tokens = lex(
+            "indicator(\"t\")\nif close >= open { x += 1 }\ny = 2 ** 3\nz = close > open ? high : low\nswitch close { case open { z = high } default { z = low } }\n//@version=2",
+            &mut diagnostics,
+        );
+        assert!(
+            diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            diagnostics
+        );
+        assert!(tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Keyword(KeywordKind::Indicator)));
+        assert!(tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Keyword(KeywordKind::If)));
+        assert!(tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Keyword(KeywordKind::Switch)));
+        assert!(tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Keyword(KeywordKind::Case)));
+        assert!(tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Keyword(KeywordKind::Default)));
+        assert!(tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Operator(OperatorKind::Gte)));
+        assert!(tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Operator(OperatorKind::PlusEq)));
+        assert!(tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Operator(OperatorKind::StarStar)));
+        assert!(tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Operator(OperatorKind::Question)));
+        assert!(tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Operator(OperatorKind::Colon)));
+        assert!(tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Delimiter(DelimiterKind::LParen)));
+        assert!(tokens.iter().any(|t| t.kind == TokenKind::Comment));
+        assert!(
+            tokens.last().map(|t| t.kind) == Some(TokenKind::Eof),
+            "expected EOF token"
+        );
+    }
+
+    #[test]
+    fn tokenizes_hex_color_literals() {
+        let mut diagnostics = Vec::new();
+        let tokens = lex("var c1 = #FF0000\nvar c2 = #00FF00FF", &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            diagnostics
+        );
+
+        // Find color literals
+        let color_tokens: Vec<_> = tokens
+            .iter()
+            .filter(|t| t.kind == TokenKind::ColorLiteral)
+            .collect();
+
+        assert_eq!(color_tokens.len(), 2, "expected 2 color literals");
+        assert_eq!(color_tokens[0].lexeme, "#FF0000");
+        assert_eq!(color_tokens[1].lexeme, "#00FF00FF");
+    }
+
+    #[test]
+    fn warns_on_invalid_hex_color() {
+        let mut diagnostics = Vec::new();
+        let tokens = lex("var c = #ABC", &mut diagnostics); // 3 hex digits - invalid
+
+        assert_eq!(diagnostics.len(), 1, "expected 1 diagnostic");
+        assert_eq!(diagnostics[0].code, "INDL-1004");
+
+        // No color token should be emitted for invalid hex
+        assert!(
+            !tokens.iter().any(|t| t.kind == TokenKind::ColorLiteral),
+            "should not emit color token for invalid hex"
+        );
+    }
 }

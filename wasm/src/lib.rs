@@ -3892,6 +3892,15 @@ impl RayCore {
             .map(|id| JsValue::from_f64(id as f64))
             .unwrap_or(JsValue::NULL);
         let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("indicatorId"), &indicator_id);
+        if let Some(id) = result.indicator_id {
+            if let Some(mode) = s.engine.indicators.get_program_compile_mode(id) {
+                let _ = js_sys::Reflect::set(
+                    &obj,
+                    &JsValue::from_str("compileMode"),
+                    &JsValue::from_str(&mode),
+                );
+            }
+        }
         let _ = js_sys::Reflect::set(
             &obj,
             &JsValue::from_str("diagnostics"),
@@ -4031,6 +4040,8 @@ impl RayCore {
                     timeframe: timeframe.clone(),
                     field: field.clone(),
                     mode,
+                    gaps: Default::default(),
+                    lookahead: Default::default(),
                 };
 
                 let mut samples = Vec::<MtfResolvedSample>::new();
@@ -4143,6 +4154,42 @@ impl RayCore {
             .indicators
             .get_program_diagnostics(indicator_id);
         diagnostics_to_js(&diags)
+    }
+
+    /// Get compile-time-discovered MTF request templates from a compiled indicator.
+    pub fn indicator_get_mtf_requests(&self, indicator_id: u32) -> JsValue {
+        let requests = self
+            .inner
+            .borrow()
+            .engine
+            .indicators
+            .get_program_mtf_requests(indicator_id);
+        let arr = js_sys::Array::new();
+        for req in requests {
+            let obj = js_sys::Object::new();
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("symbol"),
+                &JsValue::from_str(&req.symbol),
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("timeframe"),
+                &JsValue::from_str(&req.timeframe),
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("field"),
+                &JsValue::from_str(&req.field),
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("mode"),
+                &JsValue::from_str(&req.mode),
+            );
+            arr.push(&obj);
+        }
+        arr.into()
     }
 
     /// Get runtime stats for an indicator instance.

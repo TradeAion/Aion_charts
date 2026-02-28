@@ -13,7 +13,7 @@ use crate::core::indicators::compiler::diagnostics::{
 use crate::core::indicators::compiler::lower_ir::lower_to_ir;
 use crate::core::indicators::compiler::parser::parse_program;
 use crate::core::indicators::compiler::typecheck::typecheck_program;
-use crate::core::indicators::language::normalize_source;
+use crate::core::indicators::language::{normalize_source, parse_compile_mode};
 use crate::core::indicators::{
     IndicatorProgram, InputSchemaField, IrCall, OpCode, OutputSchemaField, ResourceDecl,
 };
@@ -33,9 +33,24 @@ pub fn compile_source(
     stdlib_version: u32,
     feature_flags: &[String],
 ) -> CompileOutput {
+    let compile_mode = parse_compile_mode(source);
+    let mut diagnostics = Vec::new();
+    if let Some(warning) = compile_mode.warning {
+        diagnostics.push(CompileDiagnostic {
+            code: "INDL-1010".to_string(),
+            severity: DiagnosticSeverity::Warning,
+            message: warning.message,
+            hint: Some(warning.hint),
+            span: Some(SourceSpan {
+                line: warning.line,
+                column: warning.column,
+                len: warning.len,
+            }),
+        });
+    }
     let normalized_source = normalize_source(source);
     let source_hash = source_sha256(&normalized_source);
-    let mut diagnostics = Vec::new();
+    let compile_mode_key = format!("raydsl_v{}", compile_mode.mode.as_version());
 
     if normalized_source.is_empty() {
         diagnostics.push(CompileDiagnostic {
@@ -75,11 +90,25 @@ pub fn compile_source(
     }
 
     let (opcodes, ir_calls): (Vec<OpCode>, Vec<IrCall>) = if let Some(ref ast_program) = ast {
-        let lowered = lower_to_ir(ast_program);
+        let lowered = lower_to_ir(ast_program, compile_mode.mode);
+        // Collect diagnostics from the lowering pass (BUG-1, BUG-7 fixes)
+        diagnostics.extend(lowered.diagnostics);
         (lowered.opcodes, lowered.calls)
     } else {
         (vec![OpCode::Nop, OpCode::Halt], Vec::new())
     };
+
+    if diagnostics
+        .iter()
+        .any(|d| matches!(d.severity, DiagnosticSeverity::Error))
+    {
+        return CompileOutput {
+            normalized_source,
+            source_hash,
+            program: None,
+            diagnostics,
+        };
+    }
 
     let program_name = ast
         .as_ref()
@@ -108,6 +137,7 @@ pub fn compile_source(
     let program = IndicatorProgram {
         program_id: 0,
         name: program_name,
+        compile_mode: compile_mode_key,
         ir_version,
         stdlib_version,
         source_hash: source_hash.clone(),
@@ -137,7 +167,42 @@ fn source_sha256(normalized_source: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::compile_source;
-    use crate::core::indicators::{INDICATOR_IR_VERSION, INDICATOR_STDLIB_VERSION};
+    use crate::core::indicators::{
+        IrCallArg, IrCallKind, IrExpr, INDICATOR_IR_VERSION, INDICATOR_STDLIB_VERSION,
+    };
+    use std::collections::HashSet;
+
+    fn contains_returned_flag(expr: &IrExpr) -> bool {
+        match expr {
+            IrExpr::Var(name) => name.starts_with("__fn_returned_"),
+            IrExpr::VarIndexed { name, index } => {
+                name.starts_with("__fn_returned_") || contains_returned_flag(index)
+            }
+            IrExpr::UnaryNot(inner) | IrExpr::UnaryNeg(inner) => contains_returned_flag(inner),
+            IrExpr::Binary { lhs, rhs, .. } => {
+                contains_returned_flag(lhs) || contains_returned_flag(rhs)
+            }
+            IrExpr::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                contains_returned_flag(condition)
+                    || contains_returned_flag(then_expr)
+                    || contains_returned_flag(else_expr)
+            }
+            IrExpr::Series { index, .. } => index
+                .as_ref()
+                .map(|inner| contains_returned_flag(inner))
+                .unwrap_or(false),
+            IrExpr::ReqSeries { index, .. } => index
+                .as_ref()
+                .map(|inner| contains_returned_flag(inner))
+                .unwrap_or(false),
+            IrExpr::FnCall { args, .. } => args.iter().any(contains_returned_flag),
+            IrExpr::Bool(_) | IrExpr::Number(_) | IrExpr::Na | IrExpr::Color { .. } => false,
+        }
+    }
 
     #[test]
     fn allows_comment_lines() {
@@ -160,7 +225,7 @@ mod tests {
     #[test]
     fn rejects_unsupported_raw_statement() {
         let output = compile_source(
-            "indicator(\"t\")\nwhile true",
+            "indicator(\"t\")\nrepeat close",
             INDICATOR_IR_VERSION,
             INDICATOR_STDLIB_VERSION,
             &[],
@@ -191,6 +256,42 @@ mod tests {
     }
 
     #[test]
+    fn accepts_while_loops() {
+        let output = compile_source(
+            "indicator(\"t\")\nlet x = 0\nwhile x < 2 {\n  x = x + 1\n}\nplot(x)",
+            INDICATOR_IR_VERSION,
+            INDICATOR_STDLIB_VERSION,
+            &[],
+        );
+        assert!(output.program.is_some(), "expected compile success");
+        assert!(
+            !output
+                .diagnostics
+                .iter()
+                .any(|d| matches!(d.severity, super::DiagnosticSeverity::Error)),
+            "expected no compile errors"
+        );
+    }
+
+    #[test]
+    fn accepts_switch_statements() {
+        let output = compile_source(
+            "indicator(\"t\")\nlet x = close\nswitch close {\n  case open {\n    x = high\n  }\n  case high {\n    x = low\n  }\n  default {\n    x = close\n  }\n}\nplot(x)",
+            INDICATOR_IR_VERSION,
+            INDICATOR_STDLIB_VERSION,
+            &[],
+        );
+        assert!(output.program.is_some(), "expected compile success");
+        assert!(
+            !output
+                .diagnostics
+                .iter()
+                .any(|d| matches!(d.severity, super::DiagnosticSeverity::Error)),
+            "expected no compile errors"
+        );
+    }
+
+    #[test]
     fn accepts_inline_else_block_closure_style() {
         let output = compile_source(
             "indicator(\"t\")\nvar x = na\nif close > open {\n  x = high\n} else {\n  x = low\n}\nplot(x)",
@@ -205,6 +306,198 @@ mod tests {
                 .iter()
                 .any(|d| matches!(d.severity, super::DiagnosticSeverity::Error)),
             "expected no compile errors"
+        );
+    }
+
+    #[test]
+    fn accepts_else_if_chains() {
+        let output = compile_source(
+            "indicator(\"t\")\nvar x = na\nif close > open {\n  x = high\n} else if close < open {\n  x = low\n} else {\n  x = close\n}\nplot(x)",
+            INDICATOR_IR_VERSION,
+            INDICATOR_STDLIB_VERSION,
+            &[],
+        );
+        assert!(output.program.is_some(), "expected compile success");
+        assert!(
+            !output
+                .diagnostics
+                .iter()
+                .any(|d| matches!(d.severity, super::DiagnosticSeverity::Error)),
+            "expected no compile errors"
+        );
+    }
+
+    #[test]
+    fn accepts_ternary_expressions() {
+        let output = compile_source(
+            "indicator(\"t\")\nlet x = close > open ? high : low\nplot(x)",
+            INDICATOR_IR_VERSION,
+            INDICATOR_STDLIB_VERSION,
+            &[],
+        );
+        assert!(output.program.is_some(), "expected compile success");
+        assert!(
+            !output
+                .diagnostics
+                .iter()
+                .any(|d| matches!(d.severity, super::DiagnosticSeverity::Error)),
+            "expected no compile errors"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_function_call() {
+        let output = compile_source(
+            "indicator(\"t\")\nplot(close)\nunknown_fn(close)",
+            INDICATOR_IR_VERSION,
+            INDICATOR_STDLIB_VERSION,
+            &[],
+        );
+        assert!(output.program.is_none(), "expected compile failure");
+        assert!(
+            output.diagnostics.iter().any(|d| d.code == "INDL-1300"),
+            "expected INDL-1300 diagnostic"
+        );
+    }
+
+    #[test]
+    fn rejects_function_arity_mismatch() {
+        let output = compile_source(
+            "indicator(\"t\")\nfn myFn(a, b) {\n  plot(a)\n}\nmyFn(close)",
+            INDICATOR_IR_VERSION,
+            INDICATOR_STDLIB_VERSION,
+            &[],
+        );
+        assert!(output.program.is_none(), "expected compile failure");
+        assert!(
+            output.diagnostics.iter().any(|d| d.code == "INDL-1301"),
+            "expected INDL-1301 diagnostic"
+        );
+    }
+
+    #[test]
+    fn return_guards_following_inlined_statements() {
+        let output = compile_source(
+            "indicator(\"t\")\nfn stopThenPlot() {\n  return\n  plot(close)\n}\nstopThenPlot()",
+            INDICATOR_IR_VERSION,
+            INDICATOR_STDLIB_VERSION,
+            &[],
+        );
+        let program = output.program.expect("expected compile success");
+        let plot_call = program
+            .ir_calls
+            .iter()
+            .find(|call| call.kind == IrCallKind::PlotLine)
+            .expect("expected inlined plot call");
+        let guard = plot_call
+            .guard
+            .as_ref()
+            .expect("expected guard on inlined statement");
+        assert!(
+            contains_returned_flag(guard),
+            "expected guard to reference returned flag"
+        );
+    }
+
+    #[test]
+    fn each_function_call_gets_unique_returned_flag() {
+        let output = compile_source(
+            "indicator(\"t\")\nfn f() {\n  return\n}\nf()\nf()",
+            INDICATOR_IR_VERSION,
+            INDICATOR_STDLIB_VERSION,
+            &[],
+        );
+        let program = output.program.expect("expected compile success");
+        let mut returned_vars = HashSet::<String>::new();
+        for call in &program.ir_calls {
+            if call.kind != IrCallKind::StateLetDecl {
+                continue;
+            }
+            let Some(IrCallArg::Text(name)) = call.args.first() else {
+                continue;
+            };
+            if name.starts_with("__fn_returned_") {
+                returned_vars.insert(name.clone());
+            }
+        }
+        assert_eq!(
+            returned_vars.len(),
+            2,
+            "expected unique returned flag per call frame"
+        );
+    }
+
+    #[test]
+    fn v1_keeps_expression_parse_failures_as_warnings() {
+        let output = compile_source(
+            "indicator(\"t\")\nlet x = close +\nplot(x)",
+            INDICATOR_IR_VERSION,
+            INDICATOR_STDLIB_VERSION,
+            &[],
+        );
+        assert!(
+            output.program.is_some(),
+            "expected compile success in v1 mode"
+        );
+        assert!(
+            output.diagnostics.iter().any(|d| {
+                d.code == "INDL-1400" && matches!(d.severity, super::DiagnosticSeverity::Warning)
+            }),
+            "expected INDL-1400 warning"
+        );
+    }
+
+    #[test]
+    fn v2_promotes_expression_parse_failures_to_errors() {
+        let output = compile_source(
+            "//@version=2\nindicator(\"t\")\nlet x = close +\nplot(x)",
+            INDICATOR_IR_VERSION,
+            INDICATOR_STDLIB_VERSION,
+            &[],
+        );
+        assert!(
+            output.program.is_none(),
+            "expected compile failure in v2 mode"
+        );
+        assert!(
+            output.diagnostics.iter().any(|d| {
+                d.code == "INDL-1400" && matches!(d.severity, super::DiagnosticSeverity::Error)
+            }),
+            "expected INDL-1400 error"
+        );
+    }
+
+    #[test]
+    fn invalid_version_header_emits_warning_and_falls_back_to_v1() {
+        let output = compile_source(
+            "//@version=99\nindicator(\"t\")\nplot(close)",
+            INDICATOR_IR_VERSION,
+            INDICATOR_STDLIB_VERSION,
+            &[],
+        );
+        assert!(
+            output.program.is_some(),
+            "expected fallback compile success"
+        );
+        assert!(
+            output.diagnostics.iter().any(|d| d.code == "INDL-1010"
+                && matches!(d.severity, super::DiagnosticSeverity::Warning)),
+            "expected version warning diagnostic"
+        );
+    }
+
+    #[test]
+    fn rejects_unbalanced_delimiters_from_token_validation() {
+        let output = compile_source(
+            "indicator(\"t\")\nif (close > open {\n  plot(close)\n}",
+            INDICATOR_IR_VERSION,
+            INDICATOR_STDLIB_VERSION,
+            &[],
+        );
+        assert!(output.program.is_none(), "expected compile failure");
+        assert!(
+            output.diagnostics.iter().any(|d| d.code == "INDL-1106"),
+            "expected INDL-1106 diagnostic"
         );
     }
 }

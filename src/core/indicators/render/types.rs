@@ -71,7 +71,10 @@ pub enum DrawInstruction {
         order: RenderOrderKey,
         series_id: String,
         points: Vec<(u64, f64)>,
+        /// Default color used when per_point_colors is empty.
         color: [f32; 4],
+        /// Optional per-point colors for dynamic styling (same length as points if used).
+        per_point_colors: Vec<[f32; 4]>,
         base: f64,
     },
     PlotBar {
@@ -114,6 +117,18 @@ pub enum DrawInstruction {
         line_color: [f32; 4],
         fill_color: [f32; 4],
     },
+    DrawLine {
+        order: RenderOrderKey,
+        id: ObjectId,
+        x1: u64,
+        y1: f64,
+        x2: u64,
+        y2: f64,
+        color: [f32; 4],
+        width: f32,
+        style: String,
+        extend: String,
+    },
     DrawPolyline {
         order: RenderOrderKey,
         id: ObjectId,
@@ -140,6 +155,7 @@ impl DrawInstruction {
             | DrawInstruction::PlotShape { order, .. }
             | DrawInstruction::DrawLabel { order, .. }
             | DrawInstruction::DrawBox { order, .. }
+            | DrawInstruction::DrawLine { order, .. }
             | DrawInstruction::DrawPolyline { order, .. }
             | DrawInstruction::FillBetween { order, .. } => *order,
         }

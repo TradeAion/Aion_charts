@@ -89,7 +89,9 @@ fn typecheck_statements(
                             code: "INDL-1204".to_string(),
                             severity: DiagnosticSeverity::Error,
                             message: "recursive function calls are not allowed".to_string(),
-                            hint: Some("remove direct recursion for deterministic execution".to_string()),
+                            hint: Some(
+                                "remove direct recursion for deterministic execution".to_string(),
+                            ),
                             span: Some(SourceSpan {
                                 line: call.line,
                                 column: call.column,
@@ -105,7 +107,9 @@ fn typecheck_statements(
                         code: "INDL-1208".to_string(),
                         severity: DiagnosticSeverity::Error,
                         message: "variable name cannot be empty".to_string(),
-                        hint: Some("declare variable as `var name = ...` or `let name = ...`".to_string()),
+                        hint: Some(
+                            "declare variable as `var name = ...` or `let name = ...`".to_string(),
+                        ),
                         span: Some(SourceSpan {
                             line: decl.line,
                             column: decl.column,
@@ -159,6 +163,54 @@ fn typecheck_statements(
                 typecheck_statements(&branch.then_branch, current_function, diagnostics);
                 typecheck_statements(&branch.else_branch, current_function, diagnostics);
             }
+            AstStatement::While(loop_stmt) => {
+                if loop_stmt.condition.trim().is_empty() {
+                    diagnostics.push(CompileDiagnostic {
+                        code: "INDL-1213".to_string(),
+                        severity: DiagnosticSeverity::Error,
+                        message: "while condition cannot be empty".to_string(),
+                        hint: Some("provide a boolean-compatible condition".to_string()),
+                        span: Some(SourceSpan {
+                            line: loop_stmt.line,
+                            column: loop_stmt.column,
+                            len: 5,
+                        }),
+                    });
+                }
+                typecheck_statements(&loop_stmt.body, current_function, diagnostics);
+            }
+            AstStatement::Switch(switch_stmt) => {
+                if switch_stmt.subject.trim().is_empty() {
+                    diagnostics.push(CompileDiagnostic {
+                        code: "INDL-1214".to_string(),
+                        severity: DiagnosticSeverity::Error,
+                        message: "switch subject cannot be empty".to_string(),
+                        hint: Some("provide an expression after `switch`".to_string()),
+                        span: Some(SourceSpan {
+                            line: switch_stmt.line,
+                            column: switch_stmt.column,
+                            len: 6,
+                        }),
+                    });
+                }
+                for case in &switch_stmt.cases {
+                    if case.value.trim().is_empty() {
+                        diagnostics.push(CompileDiagnostic {
+                            code: "INDL-1215".to_string(),
+                            severity: DiagnosticSeverity::Error,
+                            message: "switch case value cannot be empty".to_string(),
+                            hint: Some("provide an expression after `case`".to_string()),
+                            span: Some(SourceSpan {
+                                line: case.line,
+                                column: case.column,
+                                len: 4,
+                            }),
+                        });
+                    }
+                    typecheck_statements(&case.body, current_function, diagnostics);
+                }
+                typecheck_statements(&switch_stmt.default_branch, current_function, diagnostics);
+            }
             AstStatement::FnDecl(function) => {
                 if function.name.trim().is_empty() {
                     diagnostics.push(CompileDiagnostic {
@@ -186,6 +238,23 @@ fn typecheck_statements(
                             line: ret.line,
                             column: ret.column,
                             len: 6,
+                        }),
+                    });
+                }
+            }
+            AstStatement::TupleAssign(tuple_assign) => {
+                // Tuple assignments like [a, b, c] = expr are valid anywhere
+                // We could add checks for empty names here if needed
+                if tuple_assign.names.is_empty() {
+                    diagnostics.push(CompileDiagnostic {
+                        code: "INDL-1213".to_string(),
+                        severity: DiagnosticSeverity::Error,
+                        message: "tuple destructuring requires at least one variable".to_string(),
+                        hint: Some("use [a, b, c] = expr syntax".to_string()),
+                        span: Some(SourceSpan {
+                            line: tuple_assign.line,
+                            column: tuple_assign.column,
+                            len: 1,
                         }),
                     });
                 }

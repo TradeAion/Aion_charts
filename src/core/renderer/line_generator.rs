@@ -1941,6 +1941,46 @@ fn generate_indicator_instruction_geometry_internal(
                     );
                 }
             }
+            DrawInstruction::DrawLine {
+                x1,
+                y1,
+                x2,
+                y2,
+                color,
+                width,
+                ..
+            } => {
+                let Some(bar_idx_1) = timestamp_to_bar_index(*x1, bar_timestamps) else {
+                    continue;
+                };
+                let Some(bar_idx_2) = timestamp_to_bar_index(*x2, bar_timestamps) else {
+                    continue;
+                };
+                let px_x1 = bar_to_x(bar_idx_1 + 0.5, viewport, pane_w).round();
+                let px_y1 = price_to_y(*y1, viewport, candle_h).round();
+                let px_x2 = bar_to_x(bar_idx_2 + 0.5, viewport, pane_w).round();
+                let px_y2 = price_to_y(*y2, viewport, candle_h).round();
+                let line_w = (*width as f64 * v_ratio).round().max(1.0) as f32;
+                let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
+                push_indicator_line(
+                    &mut line_segments,
+                    &mut ordered_commands,
+                    order,
+                    &mut sequence,
+                    LineSegment {
+                        x1: (px_x1 + correction) as f32,
+                        y1: (px_y1 + correction) as f32,
+                        x2: (px_x2 + correction) as f32,
+                        y2: (px_y2 + correction) as f32,
+                        width: line_w,
+                        r: color[0],
+                        g: color[1],
+                        b: color[2],
+                        a: color[3],
+                        _pad: 0.0,
+                    },
+                );
+            }
             DrawInstruction::PlotShape {
                 timestamp,
                 value,

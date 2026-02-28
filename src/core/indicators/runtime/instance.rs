@@ -1,6 +1,8 @@
 use crate::core::indicators::render::types::{DrawInstruction, ObjectMutation};
 use crate::core::indicators::runtime::events::RuntimeEvent;
 use crate::core::indicators::runtime::limits::{ResourceCounters, ResourceLimits};
+use crate::core::indicators::runtime::value::RayValue;
+use crate::core::indicators::runtime::var_series::VarSeries;
 use crate::core::indicators::{
     IndicatorFrameOutput, IndicatorInstanceId, IndicatorProgramId, ObjectState,
 };
@@ -23,6 +25,9 @@ pub struct PlotAccumulator {
     pub histogram_points: Vec<(u64, f64)>,
     /// Per-point histogram base values (one per histogram_points entry).
     pub histogram_bases: Vec<f64>,
+    /// Per-point histogram colors for dynamic styling (one per histogram_points entry).
+    /// If empty, uses default color.
+    pub histogram_colors: Vec<[f32; 4]>,
     pub bar_points: Vec<(u64, f64, f64, f64, f64)>,
     pub candle_points: Vec<(u64, f64, f64, f64, f64)>,
     pub shape_entries: Vec<ShapeEntry>,
@@ -32,7 +37,9 @@ pub struct PlotAccumulator {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IncrementalState {
     /// Persistent variables (`var`-declared), survive across bars.
-    pub persistent_vars: HashMap<String, Option<f64>>,
+    pub persistent_vars: HashMap<String, RayValue>,
+    /// Per-variable bar-aligned history for indexed lookups (e.g. x[1]).
+    pub var_series: HashMap<String, VarSeries>,
     /// Accumulated plot data keyed by IR call position index.
     pub plot_data: HashMap<usize, PlotAccumulator>,
     /// FillBetween metadata keyed by IR call position (constant across bars).
@@ -159,6 +166,11 @@ impl IndicatorInstance {
                 .len()
                 .saturating_mul(48),
         );
+        for (name, series) in &self.incremental_state.var_series {
+            total = total
+                .saturating_add(name.len())
+                .saturating_add(series.len().saturating_mul(16));
+        }
         for acc in self.incremental_state.plot_data.values() {
             total = total.saturating_add(acc.line_points.len().saturating_mul(16));
             total = total.saturating_add(acc.area_points.len().saturating_mul(16));
@@ -211,6 +223,7 @@ fn estimate_frame_bytes(frame: &IndicatorFrameOutput) -> usize {
             DrawInstruction::PlotShape { shape, .. } => 64 + shape.len(),
             DrawInstruction::DrawLabel { text, .. } => 72 + text.len(),
             DrawInstruction::DrawBox { .. } => 96,
+            DrawInstruction::DrawLine { style, extend, .. } => 96 + style.len() + extend.len(),
             DrawInstruction::DrawPolyline { points, .. } => 72 + points.len().saturating_mul(16),
             DrawInstruction::FillBetween {
                 upper_series_id,

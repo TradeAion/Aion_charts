@@ -177,8 +177,9 @@ pub use crate::core::indicators::runtime::mtf::{
 pub use crate::core::indicators::{
     ConstantValue, IndicatorCompileResult, IndicatorFrameInput, IndicatorFrameOutput,
     IndicatorInstanceId, IndicatorInstanceStats, IndicatorInstanceSummary, IndicatorManager,
-    IndicatorProgram, IndicatorProgramId, IndicatorRuntimeMessage, InputSchemaField, OpCode,
-    OutputSchemaField, ResourceDecl, INDICATOR_IR_VERSION, INDICATOR_STDLIB_VERSION,
+    IndicatorMtfRequestTemplate, IndicatorProgram, IndicatorProgramId, IndicatorRuntimeMessage,
+    InputSchemaField, OpCode, OutputSchemaField, ResourceDecl, INDICATOR_IR_VERSION,
+    INDICATOR_STDLIB_VERSION,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════

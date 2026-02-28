@@ -1,19 +1,37 @@
-use crate::core::indicators::compiler::ast::{AstCall, AstFnDecl, AstProgram, AstStatement};
+use crate::core::indicators::compiler::ast::{
+    AstBinaryOp, AstCall, AstExpr, AstFnDecl, AstProgram, AstSeriesField, AstStatement, AstSwitch,
+    AstUnaryOp, AstWhile,
+};
+use crate::core::indicators::compiler::diagnostics::{
+    CompileDiagnostic, DiagnosticSeverity, SourceSpan,
+};
+use crate::core::indicators::language::CompileMode;
 use crate::core::indicators::{
     IrBinaryOp, IrCall, IrCallArg, IrCallKind, IrExpr, IrSeriesField, OpCode,
 };
 use std::collections::HashMap;
 
+const MAX_WHILE_UNROLL: usize = 128;
+
 #[derive(Debug, Clone)]
 pub struct LoweredIr {
     pub opcodes: Vec<OpCode>,
     pub calls: Vec<IrCall>,
+    pub diagnostics: Vec<CompileDiagnostic>,
 }
 
-pub fn lower_to_ir(program: &AstProgram) -> LoweredIr {
+#[derive(Debug, Clone)]
+struct FnInlineFrame {
+    result_var: String,
+    returned_var: String,
+}
+
+pub fn lower_to_ir(program: &AstProgram, compile_mode: CompileMode) -> LoweredIr {
     let mut opcodes = Vec::new();
     let mut calls = Vec::new();
+    let mut diagnostics = Vec::new();
     let mut functions = HashMap::<String, AstFnDecl>::new();
+    let mut inline_call_counter = 0u64;
 
     for statement in &program.statements {
         if let AstStatement::FnDecl(function) = statement {
@@ -30,6 +48,10 @@ pub fn lower_to_ir(program: &AstProgram) -> LoweredIr {
             &mut call_stack,
             &mut opcodes,
             &mut calls,
+            &mut diagnostics,
+            compile_mode,
+            None,
+            &mut inline_call_counter,
         );
     }
 
@@ -38,7 +60,11 @@ pub fn lower_to_ir(program: &AstProgram) -> LoweredIr {
     }
     opcodes.push(OpCode::Halt);
 
-    LoweredIr { opcodes, calls }
+    LoweredIr {
+        opcodes,
+        calls,
+        diagnostics,
+    }
 }
 
 fn lower_statement(
@@ -48,35 +74,75 @@ fn lower_statement(
     call_stack: &mut Vec<String>,
     opcodes: &mut Vec<OpCode>,
     calls: &mut Vec<IrCall>,
+    diagnostics: &mut Vec<CompileDiagnostic>,
+    compile_mode: CompileMode,
+    active_frame: Option<&FnInlineFrame>,
+    inline_call_counter: &mut u64,
 ) {
     match statement {
         AstStatement::Call(call) => {
-            lower_call(call, guard, functions, call_stack, opcodes, calls);
+            lower_call(
+                call,
+                guard,
+                functions,
+                call_stack,
+                opcodes,
+                calls,
+                diagnostics,
+                compile_mode,
+                inline_call_counter,
+            );
         }
+        // BUG-3 fix: assign iterator variable to correct value each iteration
         AstStatement::For(for_loop) => {
             opcodes.push(OpCode::BranchIfTrue);
-            let iterations = for_loop
-                .end
-                .saturating_sub(for_loop.start)
-                .saturating_add(1)
-                .min(1024);
-            for _ in 0..iterations {
+            let end = for_loop.end.min(for_loop.start.saturating_add(1024));
+            for iter_val in for_loop.start..=end {
+                // Emit a let-binding for the iterator variable with the current value
+                calls.push(IrCall {
+                    kind: IrCallKind::StateLetDecl,
+                    args: vec![
+                        IrCallArg::Text(for_loop.iterator.clone()),
+                        IrCallArg::Expr(IrExpr::Number(iter_val as f64)),
+                    ],
+                    guard: guard.cloned(),
+                    declaration_order: for_loop.line.saturating_sub(1) as u32,
+                });
+                opcodes.push(OpCode::StoreSeries);
                 for body_stmt in &for_loop.body {
-                    lower_statement(body_stmt, guard, functions, call_stack, opcodes, calls);
+                    lower_statement(
+                        body_stmt,
+                        guard,
+                        functions,
+                        call_stack,
+                        opcodes,
+                        calls,
+                        diagnostics,
+                        compile_mode,
+                        active_frame,
+                        inline_call_counter,
+                    );
                 }
             }
         }
+        // BUG-7 fix: emit diagnostic when if-condition fails to parse
         AstStatement::If(branch) => {
             opcodes.push(OpCode::BranchIfTrue);
-            let Some(condition) = parse_expression(&branch.condition) else {
-                return;
+            let condition = match lower_expr_with_fallback(
+                branch.condition_expr.as_ref(),
+                &branch.condition,
+                branch.line,
+                branch.column,
+                diagnostics,
+                compile_mode,
+            ) {
+                Some(expr) => expr,
+                None => return,
             };
 
             let then_guard = combine_guards(guard, Some(condition.clone()));
-            let else_guard = combine_guards(
-                guard,
-                Some(IrExpr::UnaryNot(Box::new(condition.clone()))),
-            );
+            let else_guard =
+                combine_guards(guard, Some(IrExpr::UnaryNot(Box::new(condition.clone()))));
 
             for body_stmt in &branch.then_branch {
                 lower_statement(
@@ -86,6 +152,10 @@ fn lower_statement(
                     call_stack,
                     opcodes,
                     calls,
+                    diagnostics,
+                    compile_mode,
+                    active_frame,
+                    inline_call_counter,
                 );
             }
 
@@ -99,24 +169,173 @@ fn lower_statement(
                         call_stack,
                         opcodes,
                         calls,
+                        diagnostics,
+                        compile_mode,
+                        active_frame,
+                        inline_call_counter,
                     );
                 }
             }
         }
+        AstStatement::Switch(AstSwitch {
+            subject,
+            subject_expr,
+            cases,
+            default_branch,
+            line,
+            column,
+        }) => {
+            opcodes.push(OpCode::BranchIfTrue);
+            let subject_expr = match lower_expr_with_fallback(
+                subject_expr.as_ref(),
+                subject,
+                *line,
+                *column,
+                diagnostics,
+                compile_mode,
+            ) {
+                Some(expr) => expr,
+                None => return,
+            };
+
+            let mut matched_expr = None::<IrExpr>;
+            for case in cases {
+                let case_expr = match lower_expr_with_fallback(
+                    case.value_expr.as_ref(),
+                    &case.value,
+                    case.line,
+                    case.column,
+                    diagnostics,
+                    compile_mode,
+                ) {
+                    Some(expr) => expr,
+                    None => continue,
+                };
+
+                let eq_expr = IrExpr::Binary {
+                    lhs: Box::new(subject_expr.clone()),
+                    op: IrBinaryOp::Eq,
+                    rhs: Box::new(case_expr),
+                };
+                let case_guard_expr = if let Some(prev_match) = matched_expr.as_ref() {
+                    IrExpr::Binary {
+                        lhs: Box::new(IrExpr::UnaryNot(Box::new(prev_match.clone()))),
+                        op: IrBinaryOp::And,
+                        rhs: Box::new(eq_expr.clone()),
+                    }
+                } else {
+                    eq_expr.clone()
+                };
+                let case_guard = combine_guards(guard, Some(case_guard_expr));
+                for body_stmt in &case.body {
+                    lower_statement(
+                        body_stmt,
+                        case_guard.as_ref(),
+                        functions,
+                        call_stack,
+                        opcodes,
+                        calls,
+                        diagnostics,
+                        compile_mode,
+                        active_frame,
+                        inline_call_counter,
+                    );
+                }
+
+                matched_expr = Some(match matched_expr {
+                    Some(prev) => IrExpr::Binary {
+                        lhs: Box::new(prev),
+                        op: IrBinaryOp::Or,
+                        rhs: Box::new(eq_expr),
+                    },
+                    None => eq_expr,
+                });
+            }
+
+            if !default_branch.is_empty() {
+                let default_expr = matched_expr
+                    .map(|matched| IrExpr::UnaryNot(Box::new(matched)))
+                    .unwrap_or(IrExpr::Bool(true));
+                let default_guard = combine_guards(guard, Some(default_expr));
+                for body_stmt in default_branch {
+                    lower_statement(
+                        body_stmt,
+                        default_guard.as_ref(),
+                        functions,
+                        call_stack,
+                        opcodes,
+                        calls,
+                        diagnostics,
+                        compile_mode,
+                        active_frame,
+                        inline_call_counter,
+                    );
+                }
+            }
+        }
+        AstStatement::While(AstWhile {
+            condition,
+            condition_expr,
+            body,
+            line,
+            column,
+        }) => {
+            opcodes.push(OpCode::BranchIfTrue);
+            let condition = match lower_expr_with_fallback(
+                condition_expr.as_ref(),
+                condition,
+                *line,
+                *column,
+                diagnostics,
+                compile_mode,
+            ) {
+                Some(expr) => expr,
+                None => return,
+            };
+
+            for _ in 0..MAX_WHILE_UNROLL {
+                let loop_guard = combine_guards(guard, Some(condition.clone()));
+                for body_stmt in body {
+                    lower_statement(
+                        body_stmt,
+                        loop_guard.as_ref(),
+                        functions,
+                        call_stack,
+                        opcodes,
+                        calls,
+                        diagnostics,
+                        compile_mode,
+                        active_frame,
+                        inline_call_counter,
+                    );
+                }
+            }
+        }
+        // BUG-7 fix: emit diagnostic when var/let value expression fails to parse
         AstStatement::VarDecl(decl) => {
             let kind = if decl.is_persistent {
                 IrCallKind::StateVarDecl
             } else {
                 IrCallKind::StateLetDecl
             };
-            let value_expr = decl
-                .value
-                .as_ref()
-                .and_then(|raw| parse_expression(raw))
-                .unwrap_or(IrExpr::Na);
+            let value_expr = match &decl.value {
+                Some(raw) => lower_expr_with_fallback(
+                    decl.value_expr.as_ref(),
+                    raw,
+                    decl.line,
+                    decl.column,
+                    diagnostics,
+                    compile_mode,
+                )
+                .unwrap_or(IrExpr::Na),
+                None => IrExpr::Na,
+            };
             calls.push(IrCall {
                 kind,
-                args: vec![IrCallArg::Text(decl.name.clone()), IrCallArg::Expr(value_expr)],
+                args: vec![
+                    IrCallArg::Text(decl.name.clone()),
+                    IrCallArg::Expr(value_expr),
+                ],
                 guard: guard.cloned(),
                 declaration_order: decl.line.saturating_sub(1) as u32,
             });
@@ -126,8 +345,17 @@ fn lower_statement(
                 opcodes.push(OpCode::Nop);
             }
         }
+        // BUG-7 fix: emit diagnostic when assignment value expression fails to parse
         AstStatement::Assign(assign) => {
-            let value_expr = parse_expression(&assign.value).unwrap_or(IrExpr::Na);
+            let value_expr = lower_expr_with_fallback(
+                assign.value_expr.as_ref(),
+                &assign.value,
+                assign.line,
+                assign.column,
+                diagnostics,
+                compile_mode,
+            )
+            .unwrap_or(IrExpr::Na);
             calls.push(IrCall {
                 kind: IrCallKind::StateAssign,
                 args: vec![
@@ -137,16 +365,361 @@ fn lower_statement(
                 guard: guard.cloned(),
                 declaration_order: assign.line.saturating_sub(1) as u32,
             });
-            if parse_expression(&assign.value).is_some() {
+            // Use the already-parsed result rather than parsing twice
+            if !matches!(value_expr_is_na_fallback(&assign.value), true) {
                 opcodes.push(OpCode::StoreSeries);
             } else {
                 opcodes.push(OpCode::Nop);
             }
         }
-        AstStatement::FnDecl(_) => {}
-        AstStatement::Return(_) => {
-            opcodes.push(OpCode::BranchIfFalse);
+        // Tuple destructuring: [a, b, c] = expr
+        AstStatement::TupleAssign(tuple_assign) => {
+            let value_expr = lower_expr_with_fallback(
+                tuple_assign.value_expr.as_ref(),
+                &tuple_assign.value,
+                tuple_assign.line,
+                tuple_assign.column,
+                diagnostics,
+                compile_mode,
+            )
+            .unwrap_or(IrExpr::Na);
+
+            // Create args: first the expression, then the variable names
+            let mut args = vec![IrCallArg::Expr(value_expr)];
+            for name in &tuple_assign.names {
+                args.push(IrCallArg::Text(name.clone()));
+            }
+
+            calls.push(IrCall {
+                kind: IrCallKind::StateTupleAssign,
+                args,
+                guard: guard.cloned(),
+                declaration_order: tuple_assign.line.saturating_sub(1) as u32,
+            });
+            opcodes.push(OpCode::StoreSeries);
         }
+        AstStatement::FnDecl(_) => {}
+        // BUG-4 fix: capture return value and stop subsequent inlined statements.
+        AstStatement::Return(ret) => {
+            let Some(frame) = active_frame else {
+                diagnostics.push(CompileDiagnostic {
+                    code: "INDL-1302".to_string(),
+                    severity: DiagnosticSeverity::Error,
+                    message: "return encountered outside active function frame".to_string(),
+                    hint: Some("move return into an `fn` body".to_string()),
+                    span: Some(SourceSpan {
+                        line: ret.line,
+                        column: ret.column,
+                        len: 6,
+                    }),
+                });
+                return;
+            };
+
+            let return_guard = combine_guards(
+                guard,
+                Some(IrExpr::UnaryNot(Box::new(IrExpr::Var(
+                    frame.returned_var.clone(),
+                )))),
+            );
+
+            if let Some(ref value_raw) = ret.value {
+                let value_expr = lower_expr_with_fallback(
+                    ret.value_expr.as_ref(),
+                    value_raw,
+                    ret.line,
+                    ret.column,
+                    diagnostics,
+                    compile_mode,
+                )
+                .unwrap_or(IrExpr::Na);
+                calls.push(IrCall {
+                    kind: IrCallKind::StateAssign,
+                    args: vec![
+                        IrCallArg::Text(frame.result_var.clone()),
+                        IrCallArg::Expr(value_expr),
+                    ],
+                    guard: return_guard.clone(),
+                    declaration_order: ret.line.saturating_sub(1) as u32,
+                });
+                opcodes.push(OpCode::StoreSeries);
+            }
+
+            calls.push(IrCall {
+                kind: IrCallKind::StateAssign,
+                args: vec![
+                    IrCallArg::Text(frame.returned_var.clone()),
+                    IrCallArg::Expr(IrExpr::Bool(true)),
+                ],
+                guard: return_guard,
+                declaration_order: ret.line.saturating_sub(1) as u32,
+            });
+            opcodes.push(OpCode::StoreSeries);
+        }
+    }
+}
+
+fn lower_expr_with_fallback(
+    ast_expr: Option<&AstExpr>,
+    raw: &str,
+    line: usize,
+    column: usize,
+    diagnostics: &mut Vec<CompileDiagnostic>,
+    compile_mode: CompileMode,
+) -> Option<IrExpr> {
+    if let Some(ast_expr) = ast_expr {
+        if let Some(expr) = lower_ast_expr(ast_expr) {
+            return Some(expr);
+        }
+        if matches!(compile_mode, CompileMode::RayDslV2) {
+            let diag_count_before = diagnostics.len();
+            let _ = parse_expression_with_diagnostic(raw, line, column, diagnostics, compile_mode);
+            if diagnostics.len() == diag_count_before {
+                emit_v2_structured_expr_required(
+                    raw,
+                    line,
+                    column,
+                    diagnostics,
+                    "expression cannot be lowered from AST in v2 mode",
+                );
+            }
+            return None;
+        }
+        return parse_expression_with_diagnostic(raw, line, column, diagnostics, compile_mode);
+    }
+
+    if matches!(compile_mode, CompileMode::RayDslV2) {
+        let diag_count_before = diagnostics.len();
+        let _ = parse_expression_with_diagnostic(raw, line, column, diagnostics, compile_mode);
+        if diagnostics.len() == diag_count_before {
+            emit_v2_structured_expr_required(
+                raw,
+                line,
+                column,
+                diagnostics,
+                "expression requires structured AST parsing in v2 mode",
+            );
+        }
+        return None;
+    }
+
+    parse_expression_with_diagnostic(raw, line, column, diagnostics, compile_mode)
+}
+
+fn emit_v2_structured_expr_required(
+    raw: &str,
+    line: usize,
+    column: usize,
+    diagnostics: &mut Vec<CompileDiagnostic>,
+    message: &str,
+) {
+    diagnostics.push(CompileDiagnostic {
+        code: "INDL-1401".to_string(),
+        severity: DiagnosticSeverity::Error,
+        message: format!("{}: '{}'", message, truncate_for_display(raw, 40)),
+        hint: Some(
+            "fix expression syntax or use currently supported v2 expression forms".to_string(),
+        ),
+        span: Some(SourceSpan {
+            line,
+            column,
+            len: raw.len().max(1),
+        }),
+    });
+}
+fn lower_ast_expr(expr: &AstExpr) -> Option<IrExpr> {
+    match expr {
+        AstExpr::Bool(value) => Some(IrExpr::Bool(*value)),
+        AstExpr::Number(value) => Some(IrExpr::Number(*value)),
+        AstExpr::Na => Some(IrExpr::Na),
+        AstExpr::String(_) => None,
+        AstExpr::Var(name) => Some(IrExpr::Var(name.clone())),
+        AstExpr::VarIndexed { name, index } => Some(IrExpr::VarIndexed {
+            name: name.clone(),
+            index: Box::new(lower_ast_expr(index)?),
+        }),
+        AstExpr::Unary { op, expr } => {
+            let inner = lower_ast_expr(expr)?;
+            match op {
+                AstUnaryOp::Not => Some(IrExpr::UnaryNot(Box::new(inner))),
+                AstUnaryOp::Neg => Some(IrExpr::UnaryNeg(Box::new(inner))),
+            }
+        }
+        AstExpr::Binary { lhs, op, rhs } => {
+            let lhs = lower_ast_expr(lhs)?;
+            let rhs = lower_ast_expr(rhs)?;
+            Some(IrExpr::Binary {
+                lhs: Box::new(lhs),
+                op: lower_ast_binary_op(*op),
+                rhs: Box::new(rhs),
+            })
+        }
+        AstExpr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            let condition = lower_ast_expr(condition)?;
+            let then_expr = lower_ast_expr(then_expr)?;
+            let else_expr = lower_ast_expr(else_expr)?;
+            Some(IrExpr::Conditional {
+                condition: Box::new(condition),
+                then_expr: Box::new(then_expr),
+                else_expr: Box::new(else_expr),
+            })
+        }
+        AstExpr::ReqSeries {
+            symbol,
+            timeframe,
+            field,
+            mode,
+            gaps,
+            lookahead,
+            index,
+        } => Some(IrExpr::ReqSeries {
+            symbol: symbol.clone(),
+            timeframe: timeframe.clone(),
+            field: field.clone(),
+            mode: mode.clone(),
+            gaps: gaps.clone(),
+            lookahead: lookahead.clone(),
+            index: match index {
+                Some(inner) => Some(Box::new(lower_ast_expr(inner)?)),
+                None => None,
+            },
+        }),
+        AstExpr::Series { field, index } => Some(IrExpr::Series {
+            field: lower_ast_series_field(*field),
+            index: match index {
+                Some(inner) => Some(Box::new(lower_ast_expr(inner)?)),
+                None => None,
+            },
+        }),
+        // Expression-level function calls (e.g., nz(x), math.abs(y))
+        AstExpr::FnCall { name, args } => {
+            let mut ir_args = Vec::with_capacity(args.len());
+            for arg in args {
+                ir_args.push(lower_ast_expr(arg)?);
+            }
+            Some(IrExpr::FnCall {
+                name: name.clone(),
+                args: ir_args,
+            })
+        }
+        AstExpr::Color { r, g, b, a } => Some(IrExpr::Color {
+            r: *r,
+            g: *g,
+            b: *b,
+            a: *a,
+        }),
+    }
+}
+
+fn lower_ast_binary_op(op: AstBinaryOp) -> IrBinaryOp {
+    match op {
+        AstBinaryOp::Add => IrBinaryOp::Add,
+        AstBinaryOp::Sub => IrBinaryOp::Sub,
+        AstBinaryOp::Mul => IrBinaryOp::Mul,
+        AstBinaryOp::Div => IrBinaryOp::Div,
+        AstBinaryOp::Mod => IrBinaryOp::Mod,
+        AstBinaryOp::Pow => IrBinaryOp::Pow,
+        AstBinaryOp::Gt => IrBinaryOp::Gt,
+        AstBinaryOp::Gte => IrBinaryOp::Gte,
+        AstBinaryOp::Lt => IrBinaryOp::Lt,
+        AstBinaryOp::Lte => IrBinaryOp::Lte,
+        AstBinaryOp::Eq => IrBinaryOp::Eq,
+        AstBinaryOp::Neq => IrBinaryOp::Neq,
+        AstBinaryOp::And => IrBinaryOp::And,
+        AstBinaryOp::Or => IrBinaryOp::Or,
+    }
+}
+
+fn lower_ast_series_field(field: AstSeriesField) -> IrSeriesField {
+    match field {
+        AstSeriesField::Open => IrSeriesField::Open,
+        AstSeriesField::High => IrSeriesField::High,
+        AstSeriesField::Low => IrSeriesField::Low,
+        AstSeriesField::Close => IrSeriesField::Close,
+        AstSeriesField::Volume => IrSeriesField::Volume,
+        AstSeriesField::Time => IrSeriesField::Time,
+        AstSeriesField::BarIndex => IrSeriesField::BarIndex,
+    }
+}
+
+/// Returns true if `parse_expression` would fail for this value (i.e., the
+/// value was treated as Na due to a parse error).
+fn value_expr_is_na_fallback(raw: &str) -> bool {
+    parse_expression(raw).is_none()
+}
+
+/// Parse an expression and emit a diagnostic on failure (BUG-7 fix).
+fn parse_expression_with_diagnostic(
+    raw: &str,
+    line: usize,
+    column: usize,
+    diagnostics: &mut Vec<CompileDiagnostic>,
+    compile_mode: CompileMode,
+) -> Option<IrExpr> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut parser = ExprParser::new(trimmed);
+    let strict = matches!(compile_mode, CompileMode::RayDslV2);
+    let severity = if strict {
+        DiagnosticSeverity::Error
+    } else {
+        DiagnosticSeverity::Warning
+    };
+    match parser.parse_expression() {
+        Ok(expr) => {
+            parser.skip_ws();
+            if parser.is_done() {
+                Some(expr)
+            } else {
+                diagnostics.push(CompileDiagnostic {
+                    code: "INDL-1400".to_string(),
+                    severity,
+                    message: format!(
+                        "failed to fully parse expression '{}' -- trailing content ignored",
+                        truncate_for_display(raw, 60)
+                    ),
+                    hint: Some("check expression syntax".to_string()),
+                    span: Some(SourceSpan {
+                        line,
+                        column,
+                        len: raw.len(),
+                    }),
+                });
+                Some(expr)
+            }
+        }
+        Err(err_msg) => {
+            diagnostics.push(CompileDiagnostic {
+                code: "INDL-1400".to_string(),
+                severity,
+                message: format!(
+                    "failed to parse expression '{}': {}",
+                    truncate_for_display(raw, 40),
+                    err_msg
+                ),
+                hint: Some("treating as na -- check expression syntax".to_string()),
+                span: Some(SourceSpan {
+                    line,
+                    column,
+                    len: raw.len(),
+                }),
+            });
+            None
+        }
+    }
+}
+
+fn truncate_for_display(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len])
     }
 }
 
@@ -170,6 +743,9 @@ fn lower_call(
     call_stack: &mut Vec<String>,
     opcodes: &mut Vec<OpCode>,
     calls: &mut Vec<IrCall>,
+    diagnostics: &mut Vec<CompileDiagnostic>,
+    compile_mode: CompileMode,
+    inline_call_counter: &mut u64,
 ) {
     if let Some((kind, opcode)) = map_call_kind(&call.function) {
         calls.push(IrCall {
@@ -184,17 +760,241 @@ fn lower_call(
 
     let function_name = call.function.trim().to_ascii_lowercase();
     let Some(function) = functions.get(&function_name) else {
+        // BUG-1 fix: emit diagnostic for unknown function instead of silently dropping
+        diagnostics.push(CompileDiagnostic {
+            code: "INDL-1300".to_string(),
+            severity: DiagnosticSeverity::Error,
+            message: format!("unknown function '{}'", call.function.trim()),
+            hint: suggest_function_name(call.function.trim()),
+            span: Some(SourceSpan {
+                line: call.line,
+                column: call.column,
+                len: call.function.trim().len(),
+            }),
+        });
         return;
     };
     if call_stack.contains(&function_name) {
+        diagnostics.push(CompileDiagnostic {
+            code: "INDL-1302".to_string(),
+            severity: DiagnosticSeverity::Error,
+            message: format!("recursive call to '{}' detected", call.function.trim()),
+            hint: Some("recursion is not supported; use loops instead".to_string()),
+            span: Some(SourceSpan {
+                line: call.line,
+                column: call.column,
+                len: call.function.trim().len(),
+            }),
+        });
         return;
     }
 
+    const MAX_CALL_DEPTH: usize = 64;
+    if call_stack.len() >= MAX_CALL_DEPTH {
+        diagnostics.push(CompileDiagnostic {
+            code: "INDL-1303".to_string(),
+            severity: DiagnosticSeverity::Error,
+            message: format!(
+                "call stack depth limit ({}) exceeded when calling '{}'",
+                MAX_CALL_DEPTH,
+                call.function.trim()
+            ),
+            hint: Some("reduce nesting of function calls".to_string()),
+            span: Some(SourceSpan {
+                line: call.line,
+                column: call.column,
+                len: call.function.trim().len(),
+            }),
+        });
+        return;
+    }
+
+    // BUG-2 fix: bind function parameters to caller arguments before inlining body
+    if call.args.len() != function.params.len() {
+        diagnostics.push(CompileDiagnostic {
+            code: "INDL-1301".to_string(),
+            severity: DiagnosticSeverity::Error,
+            message: format!(
+                "function '{}' expects {} argument(s) but got {}",
+                call.function.trim(),
+                function.params.len(),
+                call.args.len()
+            ),
+            hint: Some("update the call site to match the function signature".to_string()),
+            span: Some(SourceSpan {
+                line: call.line,
+                column: call.column,
+                len: call.function.trim().len(),
+            }),
+        });
+        return;
+    }
+
+    let frame_id = *inline_call_counter;
+    *inline_call_counter = inline_call_counter.saturating_add(1);
+    let frame = FnInlineFrame {
+        result_var: format!("__fn_result_{}__", frame_id),
+        returned_var: format!("__fn_returned_{}__", frame_id),
+    };
+
+    calls.push(IrCall {
+        kind: IrCallKind::StateLetDecl,
+        args: vec![
+            IrCallArg::Text(frame.returned_var.clone()),
+            IrCallArg::Expr(IrExpr::Bool(false)),
+        ],
+        guard: guard.cloned(),
+        declaration_order: call.line.saturating_sub(1) as u32,
+    });
+    opcodes.push(OpCode::StoreSeries);
+
+    calls.push(IrCall {
+        kind: IrCallKind::StateLetDecl,
+        args: vec![
+            IrCallArg::Text(frame.result_var.clone()),
+            IrCallArg::Expr(IrExpr::Na),
+        ],
+        guard: guard.cloned(),
+        declaration_order: call.line.saturating_sub(1) as u32,
+    });
+    opcodes.push(OpCode::StoreSeries);
+
     call_stack.push(function_name.clone());
+    for (param_idx, param_name) in function.params.iter().enumerate() {
+        let raw_arg = call
+            .args
+            .get(param_idx)
+            .map(|raw| raw.as_str())
+            .unwrap_or("");
+        let arg_expr = match call
+            .arg_exprs
+            .get(param_idx)
+            .and_then(|expr| expr.as_ref())
+            .and_then(lower_ast_expr)
+        {
+            Some(expr) => expr,
+            None if matches!(compile_mode, CompileMode::RayDslV2) => {
+                emit_v2_structured_expr_required(
+                    raw_arg,
+                    call.line,
+                    call.column,
+                    diagnostics,
+                    &format!(
+                        "function argument {} for '{}' requires structured AST parsing in v2 mode",
+                        param_idx.saturating_add(1),
+                        call.function.trim()
+                    ),
+                );
+                IrExpr::Na
+            }
+            None => call
+                .args
+                .get(param_idx)
+                .and_then(|raw| parse_expression(raw))
+                .unwrap_or(IrExpr::Na),
+        };
+        calls.push(IrCall {
+            kind: IrCallKind::StateLetDecl,
+            args: vec![
+                IrCallArg::Text(param_name.clone()),
+                IrCallArg::Expr(arg_expr),
+            ],
+            guard: guard.cloned(),
+            declaration_order: call.line.saturating_sub(1) as u32,
+        });
+        opcodes.push(OpCode::StoreSeries);
+    }
+
+    let body_guard = combine_guards(
+        guard,
+        Some(IrExpr::UnaryNot(Box::new(IrExpr::Var(
+            frame.returned_var.clone(),
+        )))),
+    );
     for statement in &function.body {
-        lower_statement(statement, guard, functions, call_stack, opcodes, calls);
+        lower_statement(
+            statement,
+            body_guard.as_ref(),
+            functions,
+            call_stack,
+            opcodes,
+            calls,
+            diagnostics,
+            compile_mode,
+            Some(&frame),
+            inline_call_counter,
+        );
     }
     call_stack.pop();
+}
+
+/// Suggest a similar known function name for typo correction.
+fn suggest_function_name(unknown: &str) -> Option<String> {
+    let known = [
+        "plot",
+        "plotcandle",
+        "plotbar",
+        "plothistogram",
+        "plotarea",
+        "plotshape",
+        "fillbetween",
+        "fill_between",
+        "box.new",
+        "box.set",
+        "box.delete",
+        "label.new",
+        "label.set",
+        "label.delete",
+        "polyline.new",
+        "polyline.set",
+        "polyline.delete",
+        "obj.delete",
+        "req.series",
+    ];
+    let lower = unknown.to_ascii_lowercase();
+    // Simple prefix/substring match for suggestions
+    for name in &known {
+        if name.starts_with(&lower) || lower.starts_with(name) {
+            return Some(format!("did you mean '{}'?", name));
+        }
+    }
+    // Levenshtein-like: check if only 1-2 chars differ
+    for name in &known {
+        if levenshtein_distance(&lower, name) <= 2 {
+            return Some(format!("did you mean '{}'?", name));
+        }
+    }
+    Some("check function name spelling".to_string())
+}
+
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+    let a_len = a_bytes.len();
+    let b_len = b_bytes.len();
+    if a_len == 0 {
+        return b_len;
+    }
+    if b_len == 0 {
+        return a_len;
+    }
+    let mut prev_row: Vec<usize> = (0..=b_len).collect();
+    let mut curr_row = vec![0usize; b_len + 1];
+    for i in 1..=a_len {
+        curr_row[0] = i;
+        for j in 1..=b_len {
+            let cost = if a_bytes[i - 1] == b_bytes[j - 1] {
+                0
+            } else {
+                1
+            };
+            curr_row[j] = (prev_row[j] + 1)
+                .min(curr_row[j - 1] + 1)
+                .min(prev_row[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev_row, &mut curr_row);
+    }
+    prev_row[b_len]
 }
 
 fn map_call_kind(function: &str) -> Option<(IrCallKind, OpCode)> {
@@ -218,6 +1018,11 @@ fn map_call_kind(function: &str) -> Option<(IrCallKind, OpCode)> {
         "label.set" | "obj.set_label" => Some((IrCallKind::ObjLabelSet, OpCode::EmitDrawLabel)),
         "label.delete" | "obj.delete_label" => {
             Some((IrCallKind::ObjLabelDelete, OpCode::EmitDrawLabel))
+        }
+        "line.new" | "obj.new_line" => Some((IrCallKind::ObjLineNew, OpCode::EmitDrawLine)),
+        "line.set" | "obj.set_line" => Some((IrCallKind::ObjLineSet, OpCode::EmitDrawLine)),
+        "line.delete" | "obj.delete_line" => {
+            Some((IrCallKind::ObjLineDelete, OpCode::EmitDrawLine))
         }
         "polyline.new" | "obj.new_polyline" => {
             Some((IrCallKind::ObjPolylineNew, OpCode::EmitDrawPolyline))
@@ -397,7 +1202,26 @@ impl<'a> ExprParser<'a> {
     }
 
     fn parse_expression(&mut self) -> Result<IrExpr, String> {
-        self.parse_or()
+        self.parse_ternary()
+    }
+
+    fn parse_ternary(&mut self) -> Result<IrExpr, String> {
+        let condition = self.parse_or()?;
+        self.skip_ws();
+        if !self.consume("?") {
+            return Ok(condition);
+        }
+        let then_expr = self.parse_expression()?;
+        self.skip_ws();
+        if !self.consume(":") {
+            return Err("expected ':' in ternary expression".to_string());
+        }
+        let else_expr = self.parse_ternary()?;
+        Ok(IrExpr::Conditional {
+            condition: Box::new(condition),
+            then_expr: Box::new(then_expr),
+            else_expr: Box::new(else_expr),
+        })
     }
 
     fn parse_or(&mut self) -> Result<IrExpr, String> {
@@ -513,25 +1337,41 @@ impl<'a> ExprParser<'a> {
     }
 
     fn parse_mul_div(&mut self) -> Result<IrExpr, String> {
-        let mut expr = self.parse_unary()?;
+        let mut expr = self.parse_pow()?;
         loop {
             self.skip_ws();
             let op = if self.consume("*") {
                 Some(IrBinaryOp::Mul)
             } else if self.consume("/") {
                 Some(IrBinaryOp::Div)
+            } else if self.consume("%") {
+                Some(IrBinaryOp::Mod)
             } else {
                 None
             };
             let Some(op) = op else {
                 break;
             };
-            let rhs = self.parse_unary()?;
+            let rhs = self.parse_pow()?;
             expr = IrExpr::Binary {
                 lhs: Box::new(expr),
                 op,
                 rhs: Box::new(rhs),
             };
+        }
+        Ok(expr)
+    }
+
+    fn parse_pow(&mut self) -> Result<IrExpr, String> {
+        let expr = self.parse_unary()?;
+        self.skip_ws();
+        if self.consume("**") || self.consume("^") {
+            let rhs = self.parse_pow()?;
+            return Ok(IrExpr::Binary {
+                lhs: Box::new(expr),
+                op: IrBinaryOp::Pow,
+                rhs: Box::new(rhs),
+            });
         }
         Ok(expr)
     }
@@ -631,10 +1471,6 @@ impl<'a> ExprParser<'a> {
             return self.parse_call_expr(&ident, &args);
         }
 
-        let Some(field) = map_series_field(&ident) else {
-            return Ok(IrExpr::Var(ident));
-        };
-
         self.skip_ws();
         let index = if matches!(self.peek_char(), Some('[')) {
             self.take_char();
@@ -648,7 +1484,15 @@ impl<'a> ExprParser<'a> {
             None
         };
 
-        Ok(IrExpr::Series { field, index })
+        if let Some(field) = map_series_field(&ident) {
+            return Ok(IrExpr::Series { field, index });
+        }
+
+        if let Some(index) = index {
+            return Ok(IrExpr::VarIndexed { name: ident, index });
+        }
+
+        Ok(IrExpr::Var(ident))
     }
 
     fn parse_call_args(&mut self) -> Result<Vec<String>, String> {
@@ -686,39 +1530,74 @@ impl<'a> ExprParser<'a> {
     }
 
     fn parse_call_expr(&mut self, ident: &str, args: &[String]) -> Result<IrExpr, String> {
-        if ident != "req.series" {
-            return Err(format!("unsupported function '{}'", ident));
-        }
+        // Special handling for req.series and request.security
+        if ident == "req.series" || ident == "request.security" {
+            if args.len() < 3 {
+                return Err(
+                    "req.series requires (symbol, timeframe, field[, mode[, gaps[, lookahead]]])"
+                        .to_string(),
+                );
+            }
+            let mode = args
+                .get(3)
+                .map(|it| parse_text_argument(it))
+                .unwrap_or_else(|| "confirmed".to_string());
+            let gaps = args.get(4).map(|it| parse_text_argument(it));
+            let lookahead = args.get(5).map(|it| parse_text_argument(it));
 
-        if args.len() < 3 {
-            return Err("req.series requires (symbol, timeframe, field[, mode])".to_string());
-        }
-        let mode = args
-            .get(3)
-            .map(|it| parse_text_argument(it))
-            .unwrap_or_else(|| "confirmed".to_string());
-        let mut expr = IrExpr::ReqSeries {
-            symbol: parse_text_argument(&args[0]),
-            timeframe: parse_text_argument(&args[1]),
-            field: parse_text_argument(&args[2]),
-            mode,
-            index: None,
-        };
+            let mut expr = IrExpr::ReqSeries {
+                symbol: parse_text_argument(&args[0]),
+                timeframe: parse_text_argument(&args[1]),
+                field: parse_text_argument(&args[2]),
+                mode,
+                gaps,
+                lookahead,
+                index: None,
+            };
 
-        self.skip_ws();
-        if matches!(self.peek_char(), Some('[')) {
-            self.take_char();
-            let index_expr = self.parse_expression()?;
             self.skip_ws();
-            if !matches!(self.take_char(), Some(']')) {
-                return Err("expected ']'".to_string());
+            if matches!(self.peek_char(), Some('[')) {
+                self.take_char();
+                let index_expr = self.parse_expression()?;
+                self.skip_ws();
+                if !matches!(self.take_char(), Some(']')) {
+                    return Err("expected ']'".to_string());
+                }
+                if let IrExpr::ReqSeries { index, .. } = &mut expr {
+                    *index = Some(Box::new(index_expr));
+                }
             }
-            if let IrExpr::ReqSeries { index, .. } = &mut expr {
-                *index = Some(Box::new(index_expr));
+
+            return Ok(expr);
+        }
+
+        // Generic function call - parse arguments as expressions and create FnCall
+        let mut ir_args = Vec::with_capacity(args.len());
+        for arg in args {
+            let trimmed = arg.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            // Recursively parse each argument as an expression
+            let mut arg_parser = ExprParser::new(trimmed);
+            match arg_parser.parse_expression() {
+                Ok(expr) => {
+                    arg_parser.skip_ws();
+                    if arg_parser.is_done() {
+                        ir_args.push(expr);
+                    } else {
+                        // Couldn't fully parse - this is an error
+                        return Err(format!("failed to parse argument '{}'", trimmed));
+                    }
+                }
+                Err(e) => return Err(format!("failed to parse argument '{}': {}", trimmed, e)),
             }
         }
 
-        Ok(expr)
+        Ok(IrExpr::FnCall {
+            name: ident.to_string(),
+            args: ir_args,
+        })
     }
 
     fn parse_identifier(&mut self) -> String {
@@ -810,5 +1689,387 @@ fn map_series_field(ident: &str) -> Option<IrSeriesField> {
         "time" | "ctx.time" => Some(IrSeriesField::Time),
         "bar_index" | "ctx.bar_index" => Some(IrSeriesField::BarIndex),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lower_to_ir;
+    use crate::core::indicators::compiler::ast::{
+        AstAssign, AstBinaryOp, AstCall, AstExpr, AstFnDecl, AstProgram, AstStatement, AstSwitch,
+        AstSwitchCase, AstVarDecl, AstWhile,
+    };
+    use crate::core::indicators::compiler::diagnostics::DiagnosticSeverity;
+    use crate::core::indicators::language::CompileMode;
+    use crate::core::indicators::{IrCallArg, IrCallKind, IrExpr};
+
+    #[test]
+    fn v2_rejects_missing_structured_expr_fallback() {
+        let program = AstProgram {
+            name: Some("t".to_string()),
+            inputs: Vec::new(),
+            statements: vec![AstStatement::VarDecl(AstVarDecl {
+                is_persistent: false,
+                name: "x".to_string(),
+                value: Some("1e3".to_string()),
+                value_expr: None,
+                line: 2,
+                column: 1,
+            })],
+        };
+
+        let lowered = lower_to_ir(&program, CompileMode::RayDslV2);
+        assert!(
+            lowered.diagnostics.iter().any(|diag| {
+                diag.code == "INDL-1401" && matches!(diag.severity, DiagnosticSeverity::Error)
+            }),
+            "expected INDL-1401 v2 structured-expression error"
+        );
+    }
+
+    #[test]
+    fn v1_keeps_string_fallback_when_structured_expr_missing() {
+        let program = AstProgram {
+            name: Some("t".to_string()),
+            inputs: Vec::new(),
+            statements: vec![AstStatement::VarDecl(AstVarDecl {
+                is_persistent: false,
+                name: "x".to_string(),
+                value: Some("1e3".to_string()),
+                value_expr: None,
+                line: 2,
+                column: 1,
+            })],
+        };
+
+        let lowered = lower_to_ir(&program, CompileMode::RayDslV1);
+        assert!(
+            !lowered
+                .diagnostics
+                .iter()
+                .any(|diag| matches!(diag.severity, DiagnosticSeverity::Error)),
+            "did not expect v1 lowering errors"
+        );
+        let value_expr = lowered
+            .calls
+            .iter()
+            .find(|call| call.kind == IrCallKind::StateLetDecl)
+            .and_then(|call| call.args.get(1))
+            .expect("expected let declaration value");
+        match value_expr {
+            IrCallArg::Expr(IrExpr::Number(value)) => {
+                assert!(
+                    (*value - 1000.0).abs() < f64::EPSILON,
+                    "expected 1e3 fallback parse"
+                );
+            }
+            _ => panic!("expected numeric expression for v1 fallback"),
+        }
+    }
+
+    #[test]
+    fn v2_rejects_unstructured_function_argument_fallback() {
+        let program = AstProgram {
+            name: Some("t".to_string()),
+            inputs: Vec::new(),
+            statements: vec![
+                AstStatement::FnDecl(AstFnDecl {
+                    name: "f".to_string(),
+                    params: vec!["v".to_string()],
+                    body: vec![AstStatement::Call(AstCall {
+                        function: "plot".to_string(),
+                        args: vec!["v".to_string()],
+                        arg_exprs: vec![None],
+                        line: 3,
+                        column: 3,
+                    })],
+                    line: 2,
+                    column: 1,
+                }),
+                AstStatement::Call(AstCall {
+                    function: "f".to_string(),
+                    args: vec!["1e3".to_string()],
+                    arg_exprs: vec![None],
+                    line: 5,
+                    column: 1,
+                }),
+            ],
+        };
+
+        let lowered = lower_to_ir(&program, CompileMode::RayDslV2);
+        assert!(
+            lowered.diagnostics.iter().any(|diag| {
+                diag.code == "INDL-1401"
+                    && diag.message.contains("function argument")
+                    && matches!(diag.severity, DiagnosticSeverity::Error)
+            }),
+            "expected INDL-1401 for function argument fallback in v2"
+        );
+    }
+
+    #[test]
+    fn lowers_structured_modulo_and_power_ops() {
+        let program = AstProgram {
+            name: Some("t".to_string()),
+            inputs: Vec::new(),
+            statements: vec![AstStatement::VarDecl(AstVarDecl {
+                is_persistent: false,
+                name: "x".to_string(),
+                value: Some("2 % 3 ** 2".to_string()),
+                value_expr: Some(AstExpr::Binary {
+                    lhs: Box::new(AstExpr::Number(2.0)),
+                    op: AstBinaryOp::Mod,
+                    rhs: Box::new(AstExpr::Binary {
+                        lhs: Box::new(AstExpr::Number(3.0)),
+                        op: AstBinaryOp::Pow,
+                        rhs: Box::new(AstExpr::Number(2.0)),
+                    }),
+                }),
+                line: 2,
+                column: 1,
+            })],
+        };
+
+        let lowered = lower_to_ir(&program, CompileMode::RayDslV2);
+        assert!(
+            !lowered
+                .diagnostics
+                .iter()
+                .any(|diag| matches!(diag.severity, DiagnosticSeverity::Error)),
+            "did not expect lowering errors: {:?}",
+            lowered.diagnostics
+        );
+        let value_expr = lowered
+            .calls
+            .iter()
+            .find(|call| call.kind == IrCallKind::StateLetDecl)
+            .and_then(|call| call.args.get(1))
+            .expect("expected let declaration value");
+        let IrCallArg::Expr(IrExpr::Binary { op, rhs, .. }) = value_expr else {
+            panic!("expected binary expression");
+        };
+        assert_eq!(*op, crate::core::indicators::IrBinaryOp::Mod);
+        let IrExpr::Binary { op: rhs_op, .. } = rhs.as_ref() else {
+            panic!("expected rhs power expression");
+        };
+        assert_eq!(*rhs_op, crate::core::indicators::IrBinaryOp::Pow);
+    }
+
+    #[test]
+    fn lowers_structured_ternary_expression() {
+        let program = AstProgram {
+            name: Some("t".to_string()),
+            inputs: Vec::new(),
+            statements: vec![AstStatement::VarDecl(AstVarDecl {
+                is_persistent: false,
+                name: "x".to_string(),
+                value: Some("true ? 1 : 2".to_string()),
+                value_expr: Some(AstExpr::Conditional {
+                    condition: Box::new(AstExpr::Bool(true)),
+                    then_expr: Box::new(AstExpr::Number(1.0)),
+                    else_expr: Box::new(AstExpr::Number(2.0)),
+                }),
+                line: 2,
+                column: 1,
+            })],
+        };
+
+        let lowered = lower_to_ir(&program, CompileMode::RayDslV2);
+        assert!(
+            !lowered
+                .diagnostics
+                .iter()
+                .any(|diag| matches!(diag.severity, DiagnosticSeverity::Error)),
+            "did not expect lowering errors: {:?}",
+            lowered.diagnostics
+        );
+        let value_expr = lowered
+            .calls
+            .iter()
+            .find(|call| call.kind == IrCallKind::StateLetDecl)
+            .and_then(|call| call.args.get(1))
+            .expect("expected let declaration value");
+        let IrCallArg::Expr(IrExpr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        }) = value_expr
+        else {
+            panic!("expected ternary expression");
+        };
+        assert!(matches!(condition.as_ref(), IrExpr::Bool(true)));
+        assert!(matches!(then_expr.as_ref(), IrExpr::Number(1.0)));
+        assert!(matches!(else_expr.as_ref(), IrExpr::Number(2.0)));
+    }
+
+    #[test]
+    fn lowers_structured_variable_history_index_expr() {
+        let program = AstProgram {
+            name: Some("t".to_string()),
+            inputs: Vec::new(),
+            statements: vec![AstStatement::VarDecl(AstVarDecl {
+                is_persistent: false,
+                name: "x_prev".to_string(),
+                value: Some("x[1]".to_string()),
+                value_expr: Some(AstExpr::VarIndexed {
+                    name: "x".to_string(),
+                    index: Box::new(AstExpr::Number(1.0)),
+                }),
+                line: 2,
+                column: 1,
+            })],
+        };
+
+        let lowered = lower_to_ir(&program, CompileMode::RayDslV2);
+        assert!(
+            !lowered
+                .diagnostics
+                .iter()
+                .any(|diag| matches!(diag.severity, DiagnosticSeverity::Error)),
+            "did not expect lowering errors: {:?}",
+            lowered.diagnostics
+        );
+        let value_expr = lowered
+            .calls
+            .iter()
+            .find(|call| call.kind == IrCallKind::StateLetDecl)
+            .and_then(|call| call.args.get(1))
+            .expect("expected let declaration value");
+        let IrCallArg::Expr(IrExpr::VarIndexed { name, .. }) = value_expr else {
+            panic!("expected indexed var expression");
+        };
+        assert_eq!(name, "x");
+    }
+
+    #[test]
+    fn lowers_while_loop_with_guarded_body_calls() {
+        let program = AstProgram {
+            name: Some("t".to_string()),
+            inputs: Vec::new(),
+            statements: vec![AstStatement::While(AstWhile {
+                condition: "x < 2".to_string(),
+                condition_expr: Some(AstExpr::Binary {
+                    lhs: Box::new(AstExpr::Var("x".to_string())),
+                    op: AstBinaryOp::Lt,
+                    rhs: Box::new(AstExpr::Number(2.0)),
+                }),
+                body: vec![AstStatement::Assign(AstAssign {
+                    name: "x".to_string(),
+                    value: "x + 1".to_string(),
+                    value_expr: Some(AstExpr::Binary {
+                        lhs: Box::new(AstExpr::Var("x".to_string())),
+                        op: AstBinaryOp::Add,
+                        rhs: Box::new(AstExpr::Number(1.0)),
+                    }),
+                    line: 3,
+                    column: 3,
+                })],
+                line: 2,
+                column: 1,
+            })],
+        };
+
+        let lowered = lower_to_ir(&program, CompileMode::RayDslV2);
+        assert!(
+            !lowered
+                .diagnostics
+                .iter()
+                .any(|diag| matches!(diag.severity, DiagnosticSeverity::Error)),
+            "did not expect lowering errors: {:?}",
+            lowered.diagnostics
+        );
+        assert!(
+            lowered
+                .calls
+                .iter()
+                .any(|call| call.kind == IrCallKind::StateAssign && call.guard.is_some()),
+            "expected guarded state assignment from while body"
+        );
+    }
+
+    #[test]
+    fn lowers_switch_to_guarded_case_calls() {
+        let program = AstProgram {
+            name: Some("t".to_string()),
+            inputs: Vec::new(),
+            statements: vec![AstStatement::Switch(AstSwitch {
+                subject: "x".to_string(),
+                subject_expr: Some(AstExpr::Var("x".to_string())),
+                cases: vec![AstSwitchCase {
+                    value: "1".to_string(),
+                    value_expr: Some(AstExpr::Number(1.0)),
+                    body: vec![AstStatement::Assign(AstAssign {
+                        name: "x".to_string(),
+                        value: "2".to_string(),
+                        value_expr: Some(AstExpr::Number(2.0)),
+                        line: 4,
+                        column: 3,
+                    })],
+                    line: 3,
+                    column: 3,
+                }],
+                default_branch: vec![],
+                line: 2,
+                column: 1,
+            })],
+        };
+
+        let lowered = lower_to_ir(&program, CompileMode::RayDslV2);
+        assert!(
+            !lowered
+                .diagnostics
+                .iter()
+                .any(|diag| matches!(diag.severity, DiagnosticSeverity::Error)),
+            "did not expect lowering errors: {:?}",
+            lowered.diagnostics
+        );
+        assert!(
+            lowered
+                .calls
+                .iter()
+                .any(|call| call.kind == IrCallKind::StateAssign && call.guard.is_some()),
+            "expected guarded state assignment from switch case"
+        );
+    }
+
+    #[test]
+    fn rejects_recursive_function_call() {
+        let program = AstProgram {
+            name: Some("t".to_string()),
+            inputs: Vec::new(),
+            statements: vec![
+                AstStatement::FnDecl(AstFnDecl {
+                    name: "recurse".to_string(),
+                    params: vec!["n".to_string()],
+                    body: vec![AstStatement::Call(AstCall {
+                        function: "recurse".to_string(),
+                        args: vec!["n".to_string()],
+                        arg_exprs: vec![Some(AstExpr::Var("n".to_string()))],
+                        line: 3,
+                        column: 3,
+                    })],
+                    line: 2,
+                    column: 1,
+                }),
+                AstStatement::Call(AstCall {
+                    function: "recurse".to_string(),
+                    args: vec!["5".to_string()],
+                    arg_exprs: vec![Some(AstExpr::Number(5.0))],
+                    line: 5,
+                    column: 1,
+                }),
+            ],
+        };
+
+        let lowered = lower_to_ir(&program, CompileMode::RayDslV2);
+        assert!(
+            lowered.diagnostics.iter().any(|diag| {
+                diag.code == "INDL-1302"
+                    && diag.message.contains("recursive")
+                    && matches!(diag.severity, DiagnosticSeverity::Error)
+            }),
+            "expected INDL-1302 error for recursive call: {:?}",
+            lowered.diagnostics
+        );
     }
 }
