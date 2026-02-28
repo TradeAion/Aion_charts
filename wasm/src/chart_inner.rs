@@ -224,13 +224,8 @@ impl ChartInner {
                     .bar_index_at_pixel(x, pw, self.engine.bars.len())
             {
                 // Snap to nearest OHLC price
-                price = snap_to_ohlc_price(
-                    &self.engine.bars,
-                    bar_idx,
-                    y,
-                    &self.engine.viewport,
-                    ph,
-                );
+                price =
+                    snap_to_ohlc_price(&self.engine.bars, bar_idx, y, &self.engine.viewport, ph);
                 // Anchor to the candle center (bar slot midpoint), not bar boundary.
                 bar = bar_idx as f64 + 0.5;
             }

@@ -125,7 +125,6 @@ pub struct MainChartOptions {
     pub area_top_color: [f32; 4],
     /// Fill color for Area chart type (bottom/fade).
     pub area_bottom_color: [f32; 4],
-
 }
 
 impl Default for MainChartOptions {

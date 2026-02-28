@@ -322,11 +322,46 @@ impl ChartRenderer for Canvas2DRenderer {
                 ctx.v_pixel_ratio,
             );
 
-        // Draw fill rects first (area fills behind lines)
+        // Overlay series keep legacy fill->line order.
         self.draw_rects(&fill_rects);
-
-        // Draw smooth line segments on top using native Canvas2D strokes
         self.draw_line_segments(&line_segments);
+
+        let indicator_commands =
+            crate::core::renderer::line_generator::generate_indicator_instruction_commands(
+                ctx.indicator_draw_instructions,
+                ctx.viewport,
+                &ts,
+                pane_w,
+                pane_h,
+                ctx.h_pixel_ratio,
+                ctx.v_pixel_ratio,
+            );
+        let mut pending_rects = Vec::new();
+        let mut pending_lines = Vec::new();
+        for command in indicator_commands {
+            match command.primitive {
+                crate::core::renderer::line_generator::IndicatorGeometryPrimitive::Rect(rect) => {
+                    if !pending_lines.is_empty() {
+                        self.draw_line_segments(&pending_lines);
+                        pending_lines.clear();
+                    }
+                    pending_rects.push(rect);
+                }
+                crate::core::renderer::line_generator::IndicatorGeometryPrimitive::Line(segment) => {
+                    if !pending_rects.is_empty() {
+                        self.draw_rects(&pending_rects);
+                        pending_rects.clear();
+                    }
+                    pending_lines.push(segment);
+                }
+            }
+        }
+        if !pending_rects.is_empty() {
+            self.draw_rects(&pending_rects);
+        }
+        if !pending_lines.is_empty() {
+            self.draw_line_segments(&pending_lines);
+        }
 
         Ok(())
     }

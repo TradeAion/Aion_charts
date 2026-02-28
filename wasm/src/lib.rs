@@ -18,16 +18,19 @@
 //!   - subpane: Indicator subpane management
 
 use raycore::{
-    generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions,
-    BaselineSeriesOptions, Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup,
-    ChartPaneId, ChartStyle, CrosshairMagnetMode, CrosshairSnapshot, DataRange, GpuContext,
-    HistogramPoint, HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint,
-    LineSeriesOptions, LineStyle, MainChartType, MarkerPosition, MarkerShape, OhlcPoint, OverlayRenderer,
-    PriceAxisRenderer, PriceLineOptions, RendererBackend, SeriesId, SeriesMarker, TimeAxisRenderer,
-    TimeRange, Viewport, WgpuRenderer,
+    generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions, BaselineSeriesOptions,
+    Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup, ChartPaneId, ChartStyle,
+    CrosshairMagnetMode, CrosshairSnapshot, DataRange, GpuContext, HistogramPoint,
+    HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint, LineSeriesOptions, LineStyle,
+    MainChartType, MarkerPosition, MarkerShape, MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint,
+    OverlayRenderer, PriceAxisRenderer, PriceLineOptions, RendererBackend, ResourceLimits,
+    RuntimeEvent, SeriesId, SeriesMarker, SnapshotMtfResolver, TimeAxisRenderer, TimeRange,
+    Viewport, WgpuRenderer,
 };
+use serde_json::Value as JsonValue;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -170,6 +173,81 @@ fn crosshair_mode_key(mode: raycore::CrosshairMode) -> &'static str {
 
 fn js_err(message: impl Into<String>) -> JsValue {
     JsValue::from_str(&message.into())
+}
+
+fn json_value_to_js(value: &JsonValue) -> JsValue {
+    match value {
+        JsonValue::Null => JsValue::NULL,
+        JsonValue::Bool(v) => JsValue::from_bool(*v),
+        JsonValue::Number(v) => v.as_f64().map(JsValue::from_f64).unwrap_or(JsValue::NULL),
+        JsonValue::String(v) => JsValue::from_str(v),
+        JsonValue::Array(items) => {
+            let arr = js_sys::Array::new();
+            for item in items {
+                arr.push(&json_value_to_js(item));
+            }
+            arr.into()
+        }
+        JsonValue::Object(map) => {
+            let obj = js_sys::Object::new();
+            for (k, v) in map {
+                let _ = js_sys::Reflect::set(&obj, &JsValue::from_str(k), &json_value_to_js(v));
+            }
+            obj.into()
+        }
+    }
+}
+
+fn diagnostics_to_js(diagnostics: &[raycore::CompileDiagnostic]) -> JsValue {
+    let out = js_sys::Array::new();
+    for d in diagnostics {
+        let obj = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("code"),
+            &JsValue::from_str(&d.code),
+        );
+        let severity = match d.severity {
+            raycore::DiagnosticSeverity::Error => "error",
+            raycore::DiagnosticSeverity::Warning => "warning",
+            raycore::DiagnosticSeverity::Info => "info",
+        };
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("severity"),
+            &JsValue::from_str(severity),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("message"),
+            &JsValue::from_str(&d.message),
+        );
+        if let Some(hint) = &d.hint {
+            let _ =
+                js_sys::Reflect::set(&obj, &JsValue::from_str("hint"), &JsValue::from_str(hint));
+        }
+        if let Some(span) = &d.span {
+            let span_obj = js_sys::Object::new();
+            let _ = js_sys::Reflect::set(
+                &span_obj,
+                &JsValue::from_str("line"),
+                &JsValue::from_f64(span.line as f64),
+            );
+            let _ = js_sys::Reflect::set(
+                &span_obj,
+                &JsValue::from_str("column"),
+                &JsValue::from_f64(span.column as f64),
+            );
+            let _ = js_sys::Reflect::set(
+                &span_obj,
+                &JsValue::from_str("len"),
+                &JsValue::from_f64(span.len as f64),
+            );
+            let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("span"), &span_obj);
+        }
+        out.push(&obj);
+    }
+    out.into()
 }
 
 /// Get a property from a JS object, returning None if undefined/null or if the object is not valid.
@@ -581,6 +659,7 @@ fn ensure_finite_fields(ctx: &str, fields: &[(&str, f32)]) -> Result<(), JsValue
 #[wasm_bindgen]
 pub struct RayCore {
     inner: SharedInner,
+    mtf_resolver: Arc<SnapshotMtfResolver>,
     symbol: String,
     interval: String,
     _closures: Vec<Closure<dyn FnMut(web_sys::Event)>>,
@@ -694,7 +773,9 @@ impl RayCore {
         .map_err(|e| JsValue::from_str(&e))?;
 
         // Engine only manages the pane
-        let engine = ChartEngine::new(backend, pane_pw.max(1), pane_ph.max(1), dpr);
+        let mut engine = ChartEngine::new(backend, pane_pw.max(1), pane_ph.max(1), dpr);
+        let mtf_resolver = Arc::new(SnapshotMtfResolver::default());
+        engine.indicators.set_mtf_resolver(mtf_resolver.clone());
         let interaction = InteractionHandler::new();
 
         log::info!("RayCore initialized: {}", engine.renderer_name());
@@ -744,7 +825,9 @@ impl RayCore {
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.interaction.set_touch(pe.pointer_type() == "touch");
                     s.on_pointer_enter(HitZone::Chart);
                     // Clear subpane focus — cursor is now in the main pane
@@ -763,7 +846,9 @@ impl RayCore {
             let pane_c = pane_container_el.clone();
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pointer_leave(HitZone::Chart);
                     // Clear the override to let CSS default take over (crosshair)
                     let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
@@ -784,7 +869,9 @@ impl RayCore {
                     let (x, y) = event_css_pos(&pe, &pane_c);
                     let shift_pressed = pe.shift_key();
                     let ctrl_pressed = pe.ctrl_key() || pe.meta_key(); // meta for Mac Cmd
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
 
                     // Detect touch on every move (not just pointerdown)
                     s.interaction.set_touch(pe.pointer_type() == "touch");
@@ -827,7 +914,9 @@ impl RayCore {
                     }
 
                     let (x, y) = event_css_pos(&pe, &pane_c);
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
 
                     // Detect touch input
                     let is_touch = pe.pointer_type() == "touch";
@@ -865,12 +954,13 @@ impl RayCore {
                         drop(s); // release borrow before setTimeout callback
 
                         let timeout_cb = Closure::<dyn FnMut()>::wrap(Box::new(move || {
-                            let mut s = inner_lp.borrow_mut();
-                            if s.interaction.pressed
-                                && !s.interaction.drag_active
-                                && !s.interaction.pinch_active
-                            {
-                                s.on_long_press(lp_x, lp_y);
+                            if let Ok(mut s) = inner_lp.try_borrow_mut() {
+                                if s.interaction.pressed
+                                    && !s.interaction.drag_active
+                                    && !s.interaction.pinch_active
+                                {
+                                    s.on_long_press(lp_x, lp_y);
+                                }
                             }
                             *lp_timer_inner.borrow_mut() = None;
                         }));
@@ -906,7 +996,9 @@ impl RayCore {
                     }
                     *lp_cb.borrow_mut() = None;
 
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pointer_up();
                     let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
                     let _ = html_el.release_pointer_capture(pe.pointer_id());
@@ -928,7 +1020,9 @@ impl RayCore {
                 move |e: web_sys::WheelEvent| {
                     e.prevent_default();
                     let (x, _y) = wheel_css_pos(&e, &pane_c);
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pointer_enter(HitZone::Chart);
                     s.on_pane_wheel(x, e.delta_x(), e.delta_y(), e.delta_mode());
                 },
@@ -948,7 +1042,9 @@ impl RayCore {
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     e.prevent_default();
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.engine.drawings.remove_all_scale();
                     // Also exit scale drawing mode if active
                     if s.engine.drawings.active_tool == raycore::DrawingTool::Scale {
@@ -967,7 +1063,9 @@ impl RayCore {
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pointer_up();
                     let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
                     let _ = html_el.release_pointer_capture(pe.pointer_id());
@@ -1011,7 +1109,9 @@ impl RayCore {
                         let dx = x1 - x0;
                         let dy = y1 - y0;
                         let distance = (dx * dx + dy * dy).sqrt();
-                        let mut s = inner.borrow_mut();
+                        let Ok(mut s) = inner.try_borrow_mut() else {
+                            return;
+                        };
                         s.on_pinch_start(cx, cy, distance);
                     }
                 },
@@ -1044,7 +1144,9 @@ impl RayCore {
                         let dy = (t1.client_y() - t0.client_y()) as f64;
                         let distance = (dx * dx + dy * dy).sqrt();
                         let scale = distance / pinch_start_dist.max(1.0);
-                        let mut s = inner.borrow_mut();
+                        let Ok(mut s) = inner.try_borrow_mut() else {
+                            return;
+                        };
                         s.on_pinch_update(scale);
                     }
                 },
@@ -1065,7 +1167,9 @@ impl RayCore {
                 move |e: web_sys::TouchEvent| {
                     let touches = e.touches();
                     if touches.length() < 2 {
-                        let mut s = inner.borrow_mut();
+                        let Ok(mut s) = inner.try_borrow_mut() else {
+                            return;
+                        };
                         if s.interaction.pinch_active {
                             s.on_pinch_end();
                         }
@@ -1095,7 +1199,9 @@ impl RayCore {
             let price_c = price_container_el.clone();
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pointer_enter(HitZone::PriceAxis);
                     let cursor = s.cursor_css();
                     let html_el: &web_sys::HtmlElement = price_c.unchecked_ref();
@@ -1111,7 +1217,9 @@ impl RayCore {
             let price_c = price_container_el.clone();
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pointer_leave(HitZone::PriceAxis);
                     let html_el: &web_sys::HtmlElement = price_c.unchecked_ref();
                     let _ = html_el.style().set_property("cursor", "");
@@ -1129,7 +1237,9 @@ impl RayCore {
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
                     let (_x, y) = event_css_pos(&pe, &price_c);
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pointer_enter(HitZone::PriceAxis);
                     s.on_price_axis_move(y);
                     let cursor = s.cursor_css();
@@ -1157,7 +1267,9 @@ impl RayCore {
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
                     let (_x, y) = event_css_pos(&pe, &price_c);
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.interaction.is_touch = pe.pointer_type() == "touch";
                     s.on_pointer_enter(HitZone::PriceAxis);
                     s.on_pointer_down(0.0, y, HitZone::PriceAxis);
@@ -1176,7 +1288,9 @@ impl RayCore {
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pointer_up();
                     let html_el: &web_sys::HtmlElement = price_c.unchecked_ref();
                     let _ = html_el.release_pointer_capture(pe.pointer_id());
@@ -1196,7 +1310,9 @@ impl RayCore {
             let cb = Closure::<dyn FnMut(web_sys::WheelEvent)>::wrap(Box::new(
                 move |e: web_sys::WheelEvent| {
                     e.prevent_default();
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pointer_enter(HitZone::PriceAxis);
                     s.on_price_axis_wheel(e.delta_y(), e.delta_mode());
                 },
@@ -1228,7 +1344,9 @@ impl RayCore {
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pointer_up();
                     let html_el: &web_sys::HtmlElement = price_c.unchecked_ref();
                     let _ = html_el.release_pointer_capture(pe.pointer_id());
@@ -1255,7 +1373,9 @@ impl RayCore {
             let time_c = time_container_el.clone();
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pointer_enter(HitZone::TimeAxis);
                     let cursor = s.cursor_css();
                     let html_el: &web_sys::HtmlElement = time_c.unchecked_ref();
@@ -1271,7 +1391,9 @@ impl RayCore {
             let time_c = time_container_el.clone();
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pointer_leave(HitZone::TimeAxis);
                     let html_el: &web_sys::HtmlElement = time_c.unchecked_ref();
                     let _ = html_el.style().set_property("cursor", "");
@@ -1289,7 +1411,9 @@ impl RayCore {
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
                     let (x, _y) = event_css_pos(&pe, &time_c);
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pointer_enter(HitZone::TimeAxis);
                     s.on_time_axis_move(x);
                     let cursor = s.cursor_css();
@@ -1316,7 +1440,9 @@ impl RayCore {
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
                     let (x, _y) = event_css_pos(&pe, &time_c);
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.interaction.is_touch = pe.pointer_type() == "touch";
                     s.on_pointer_enter(HitZone::TimeAxis);
                     s.on_pointer_down(x, 0.0, HitZone::TimeAxis);
@@ -1334,7 +1460,9 @@ impl RayCore {
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pointer_up();
                     let html_el: &web_sys::HtmlElement = time_c.unchecked_ref();
                     let _ = html_el.release_pointer_capture(pe.pointer_id());
@@ -1356,7 +1484,9 @@ impl RayCore {
                 move |e: web_sys::WheelEvent| {
                     e.prevent_default();
                     let (x, _y) = wheel_css_pos(&e, &time_c);
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pointer_enter(HitZone::TimeAxis);
                     s.on_time_axis_wheel(x, e.delta_y(), e.delta_mode());
                 },
@@ -1387,7 +1517,9 @@ impl RayCore {
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pointer_up();
                     let html_el: &web_sys::HtmlElement = time_c.unchecked_ref();
                     let _ = html_el.release_pointer_capture(pe.pointer_id());
@@ -1436,8 +1568,8 @@ impl RayCore {
             let price_ref = price_container_for_ro.clone();
             let time_ref = time_container_for_ro.clone();
 
-            let cb = Closure::<dyn Fn(js_sys::Array)>::wrap(Box::new(
-                move |entries: js_sys::Array| {
+            let cb =
+                Closure::<dyn Fn(js_sys::Array)>::wrap(Box::new(move |entries: js_sys::Array| {
                     // ResizeObserver can fire again while a previous callback is
                     // still processing on some browsers. Use try_borrow_mut so
                     // re-entrant notifications are dropped instead of panicking.
@@ -1513,8 +1645,7 @@ impl RayCore {
                         width: cw,
                         height: ch,
                     });
-                },
-            ));
+                }));
             let observer = web_sys::ResizeObserver::new(cb.as_ref().unchecked_ref())?;
 
             // Try to observe with device-pixel-content-box; fall back to content-box
@@ -1537,6 +1668,7 @@ impl RayCore {
 
         Ok(RayCore {
             inner,
+            mtf_resolver,
             symbol: "DEMO".to_string(),
             interval: "1m".to_string(),
             _closures: closures,
@@ -1588,10 +1720,7 @@ impl RayCore {
     ///   priceScale: { mode: "normal", margins: { top: 0.1, bottom: 0.1 } },
     /// }
     /// ```
-    pub async fn create_chart(
-        container: JsValue,
-        options: JsValue,
-    ) -> Result<RayCore, JsValue> {
+    pub async fn create_chart(container: JsValue, options: JsValue) -> Result<RayCore, JsValue> {
         let options = normalize_options(options);
 
         // Resolve container: HTMLElement or string ID
@@ -1696,22 +1825,24 @@ impl RayCore {
             }
         }
 
-
-
         // Symbol
         if let Some(symbol) = js_get_str(&options, "symbol") {
             self.symbol = symbol.clone();
-            self.inner.borrow_mut().engine.event_bus.emit(
-                raycore::ChartEvent::SymbolChange { symbol },
-            );
+            self.inner
+                .borrow_mut()
+                .engine
+                .event_bus
+                .emit(raycore::ChartEvent::SymbolChange { symbol });
         }
 
         // Interval
         if let Some(interval) = js_get_str(&options, "interval") {
             self.interval = interval.clone();
-            self.inner.borrow_mut().engine.event_bus.emit(
-                raycore::ChartEvent::IntervalChange { interval },
-            );
+            self.inner
+                .borrow_mut()
+                .engine
+                .event_bus
+                .emit(raycore::ChartEvent::IntervalChange { interval });
         }
 
         css_changed = self.apply_lwc_compat_options(&options) || css_changed;
@@ -1744,7 +1875,8 @@ impl RayCore {
         let layout_bg = js_get_path(options, &["layout", "background", "color"])
             .or_else(|| js_get_path(options, &["layout", "background"]))
             .and_then(|v| parse_color_js(&v));
-        let layout_text = js_get_path(options, &["layout", "textColor"]).and_then(|v| parse_color_js(&v));
+        let layout_text =
+            js_get_path(options, &["layout", "textColor"]).and_then(|v| parse_color_js(&v));
         let layout_font_family = js_get_path(options, &["layout", "fontFamily"])
             .and_then(|v| v.as_string())
             .map(|s| s.trim().to_string())
@@ -1787,8 +1919,10 @@ impl RayCore {
         let crosshair_mode = js_get_path(options, &["crosshair", "mode"])
             .or_else(|| js_get(options, "crosshairMode"))
             .and_then(|v| parse_crosshair_mode_js(&v));
-        let vert_patch = parse_crosshair_line_patch(js_get_path(options, &["crosshair", "vertLine"]));
-        let horz_patch = parse_crosshair_line_patch(js_get_path(options, &["crosshair", "horzLine"]));
+        let vert_patch =
+            parse_crosshair_line_patch(js_get_path(options, &["crosshair", "vertLine"]));
+        let horz_patch =
+            parse_crosshair_line_patch(js_get_path(options, &["crosshair", "horzLine"]));
         let crosshair_label_text = js_get_path(options, &["crosshair", "labelTextColor"])
             .or_else(|| js_get_path(options, &["crosshair", "label_text_color"]))
             .and_then(|v| parse_color_js(&v));
@@ -1885,9 +2019,9 @@ impl RayCore {
         let last_price_visible = last_price_obj
             .as_ref()
             .and_then(|o| js_get_bool(o, "visible"));
-        let last_price_label_visible = last_price_obj
-            .as_ref()
-            .and_then(|o| js_get_bool(o, "labelVisible").or_else(|| js_get_bool(o, "label_visible")));
+        let last_price_label_visible = last_price_obj.as_ref().and_then(|o| {
+            js_get_bool(o, "labelVisible").or_else(|| js_get_bool(o, "label_visible"))
+        });
         let last_price_width = last_price_obj
             .as_ref()
             .and_then(|o| js_get_f64(o, "width"))
@@ -1914,8 +2048,8 @@ impl RayCore {
             .as_ref()
             .and_then(|o| js_get_f64(o, "hitArea").or_else(|| js_get_f64(o, "hit_area")))
             .filter(|v| v.is_finite() && *v > 0.0);
-        let auto_scroll = js_get_bool(options, "autoScroll")
-            .or_else(|| js_get_bool(options, "auto_scroll"));
+        let auto_scroll =
+            js_get_bool(options, "autoScroll").or_else(|| js_get_bool(options, "auto_scroll"));
         let chart_type = js_get(options, "chartType")
             .or_else(|| js_get(options, "chart_type"))
             .and_then(|v| v.as_string());
@@ -1941,9 +2075,11 @@ impl RayCore {
                 let next_chart_type = MainChartType::from_str(chart_type_key);
                 if s.engine.main_chart_options.chart_type != next_chart_type {
                     s.engine.set_main_chart_type(next_chart_type);
-                    s.engine.event_bus.emit(raycore::ChartEvent::ChartTypeChange {
-                        chart_type: next_chart_type.as_str().to_string(),
-                    });
+                    s.engine
+                        .event_bus
+                        .emit(raycore::ChartEvent::ChartTypeChange {
+                            chart_type: next_chart_type.as_str().to_string(),
+                        });
                 }
             }
 
@@ -2315,11 +2451,8 @@ impl RayCore {
     pub fn get_css_variables(&self) -> JsValue {
         let obj = js_sys::Object::new();
         for (key, value) in self.theme_config.to_css_variables() {
-            let _ = js_sys::Reflect::set(
-                &obj,
-                &JsValue::from_str(&key),
-                &JsValue::from_str(&value),
-            );
+            let _ =
+                js_sys::Reflect::set(&obj, &JsValue::from_str(&key), &JsValue::from_str(&value));
         }
         obj.into()
     }
@@ -2399,10 +2532,12 @@ impl RayCore {
         }
         let sb = s.engine.viewport.start_bar;
         let eb = s.engine.viewport.end_bar;
-        s.engine.event_bus.emit(raycore::ChartEvent::VisibleRangeChange {
-            start_bar: sb,
-            end_bar: eb,
-        });
+        s.engine
+            .event_bus
+            .emit(raycore::ChartEvent::VisibleRangeChange {
+                start_bar: sb,
+                end_bar: eb,
+            });
     }
 
     pub fn visible_range(&self) -> Vec<f64> {
@@ -2528,9 +2663,13 @@ impl RayCore {
 
     pub fn set_symbol(&mut self, symbol: &str) {
         self.symbol = symbol.to_string();
-        self.inner.borrow_mut().engine.event_bus.emit(
-            raycore::ChartEvent::SymbolChange { symbol: symbol.to_string() },
-        );
+        self.inner
+            .borrow_mut()
+            .engine
+            .event_bus
+            .emit(raycore::ChartEvent::SymbolChange {
+                symbol: symbol.to_string(),
+            });
         self.dirty.set(true);
     }
 
@@ -2540,9 +2679,13 @@ impl RayCore {
 
     pub fn set_interval(&mut self, interval: &str) {
         self.interval = interval.to_string();
-        self.inner.borrow_mut().engine.event_bus.emit(
-            raycore::ChartEvent::IntervalChange { interval: interval.to_string() },
-        );
+        self.inner
+            .borrow_mut()
+            .engine
+            .event_bus
+            .emit(raycore::ChartEvent::IntervalChange {
+                interval: interval.to_string(),
+            });
         self.dirty.set(true);
     }
 
@@ -2944,7 +3087,11 @@ impl RayCore {
 
     /// Set the price scale tick mark density multiplier.
     pub fn set_price_scale_tick_density(&mut self, density: f32) {
-        self.inner.borrow_mut().engine.style.price_scale_tick_mark_density = density;
+        self.inner
+            .borrow_mut()
+            .engine
+            .style
+            .price_scale_tick_mark_density = density;
     }
 
     /// Set indicator sub-pane separator visible line thickness (CSS px).
@@ -3030,9 +3177,11 @@ impl RayCore {
         let parsed = PriceScaleMode::from_str(mode);
         let mut s = self.inner.borrow_mut();
         s.engine.viewport.set_price_scale_mode(parsed);
-        s.engine.event_bus.emit(raycore::ChartEvent::PriceScaleChange {
-            mode: mode.to_string(),
-        });
+        s.engine
+            .event_bus
+            .emit(raycore::ChartEvent::PriceScaleChange {
+                mode: mode.to_string(),
+            });
     }
 
     // ── Main Chart Type API ────────────────────────────────────────────────────
@@ -3046,9 +3195,11 @@ impl RayCore {
         let ct = MainChartType::from_str(chart_type);
         let mut s = self.inner.borrow_mut();
         s.engine.set_main_chart_type(ct);
-        s.engine.event_bus.emit(raycore::ChartEvent::ChartTypeChange {
-            chart_type: ct.as_str().to_string(),
-        });
+        s.engine
+            .event_bus
+            .emit(raycore::ChartEvent::ChartTypeChange {
+                chart_type: ct.as_str().to_string(),
+            });
         log::info!("set_chart_type: {}", ct.as_str());
     }
 
@@ -3192,7 +3343,9 @@ impl RayCore {
             color: [color_r, color_g, color_b, color_a],
             size: size as f64,
             text: text.to_string(),
-            text_color: raycore::ThemeConfig::default().series_defaults.marker_text_color,
+            text_color: raycore::ThemeConfig::default()
+                .series_defaults
+                .marker_text_color,
             id: 0, // will be assigned
         };
         let id = self
@@ -3274,7 +3427,9 @@ impl RayCore {
                 color,
                 size,
                 text: String::new(),
-                text_color: raycore::ThemeConfig::default().series_defaults.marker_text_color,
+                text_color: raycore::ThemeConfig::default()
+                    .series_defaults
+                    .marker_text_color,
                 id: 0,
             });
         }
@@ -3680,6 +3835,490 @@ impl RayCore {
         self.inner.borrow().engine.study_count()
     }
 
+    // ── Indicator Runtime API (User DSL) ───────────────────────────────────
+
+    fn with_indicator_input_defaults(&self, inputs: JsonValue) -> JsonValue {
+        let mut obj = match inputs {
+            JsonValue::Object(map) => map,
+            _ => serde_json::Map::new(),
+        };
+        if !obj.contains_key("symbol") {
+            obj.insert("symbol".to_string(), JsonValue::String(self.symbol.clone()));
+        }
+        if !obj.contains_key("chartTimeframe") && !obj.contains_key("chart_timeframe") {
+            obj.insert(
+                "chartTimeframe".to_string(),
+                JsonValue::String(self.interval.clone()),
+            );
+        }
+        JsonValue::Object(obj)
+    }
+
+    /// Compile user indicator source into the internal IR program artifact.
+    /// Returns: `{ indicatorId, diagnostics }`.
+    pub fn indicator_compile(&self, source: &str, meta_json: &str) -> JsValue {
+        let feature_flags = serde_json::from_str::<JsonValue>(meta_json)
+            .ok()
+            .and_then(|v| v.get("featureFlags").cloned())
+            .and_then(|v| v.as_array().cloned())
+            .map(|arr| {
+                arr.into_iter()
+                    .filter_map(|x| x.as_str().map(ToString::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let Ok(mut s) = self.inner.try_borrow_mut() else {
+            let diagnostics = vec![raycore::CompileDiagnostic {
+                code: "INDL-3004".to_string(),
+                severity: raycore::DiagnosticSeverity::Error,
+                message: "indicator runtime is busy; retry compile".to_string(),
+                hint: Some("wait a moment and compile again".to_string()),
+                span: None,
+            }];
+            let obj = js_sys::Object::new();
+            let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("indicatorId"), &JsValue::NULL);
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("diagnostics"),
+                &diagnostics_to_js(&diagnostics),
+            );
+            return obj.into();
+        };
+        let result = s.engine.indicators.compile(source, &feature_flags);
+        let obj = js_sys::Object::new();
+        let indicator_id = result
+            .indicator_id
+            .map(|id| JsValue::from_f64(id as f64))
+            .unwrap_or(JsValue::NULL);
+        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("indicatorId"), &indicator_id);
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("diagnostics"),
+            &diagnostics_to_js(&result.diagnostics),
+        );
+        obj.into()
+    }
+
+    /// Attach a compiled indicator program to the current chart.
+    /// Returns a runtime instance ID, or 0 on failure.
+    pub fn indicator_attach(&self, indicator_id: u32, opts_json: &str) -> u32 {
+        let inputs = serde_json::from_str::<JsonValue>(opts_json)
+            .ok()
+            .and_then(|v| v.get("inputs").cloned())
+            .unwrap_or(JsonValue::Null);
+        let inputs = self.with_indicator_input_defaults(inputs);
+        let instance_id = {
+            let Ok(mut inner) = self.inner.try_borrow_mut() else {
+                return 0;
+            };
+            let instance_id = inner
+                .engine
+                .indicators
+                .attach(indicator_id, inputs)
+                .unwrap_or(0);
+            if instance_id > 0 {
+                inner.engine.recompute_indicators();
+            }
+            instance_id
+        };
+        if instance_id > 0 {
+            self.mark_dirty();
+        }
+        instance_id
+    }
+
+    /// Detach an indicator runtime instance.
+    pub fn indicator_detach(&self, instance_id: u32) -> bool {
+        let detached = self
+            .inner
+            .try_borrow_mut()
+            .map(|mut inner| inner.engine.indicators.detach(instance_id))
+            .unwrap_or(false);
+        if detached {
+            self.mark_dirty();
+        }
+        detached
+    }
+
+    /// Set runtime inputs for an attached indicator instance.
+    pub fn indicator_set_inputs(&self, instance_id: u32, inputs_json: &str) -> bool {
+        let inputs = serde_json::from_str::<JsonValue>(inputs_json).unwrap_or(JsonValue::Null);
+        let inputs = self.with_indicator_input_defaults(inputs);
+        let updated = {
+            let Ok(mut inner) = self.inner.try_borrow_mut() else {
+                return false;
+            };
+            let updated = inner.engine.indicators.set_inputs(instance_id, inputs);
+            if updated {
+                inner.engine.recompute_indicators();
+            }
+            updated
+        };
+        if updated {
+            self.mark_dirty();
+        }
+        updated
+    }
+
+    /// Load backend-resolved MTF series snapshots into the runtime resolver cache.
+    ///
+    /// JSON payload:
+    /// `{ clear?: bool, series: [{ symbol, chartTimeframe, requestId?, timeframe, field, mode?, points: [...] }] }`
+    pub fn indicator_set_mtf_snapshot(&self, snapshot_json: &str) -> bool {
+        fn json_u64(raw: Option<&JsonValue>) -> Option<u64> {
+            match raw {
+                Some(JsonValue::Number(v)) => v
+                    .as_u64()
+                    .or_else(|| v.as_i64().and_then(|n| (n >= 0).then_some(n as u64))),
+                _ => None,
+            }
+        }
+
+        let parsed = serde_json::from_str::<JsonValue>(snapshot_json).unwrap_or(JsonValue::Null);
+        let Some(root) = parsed.as_object() else {
+            return false;
+        };
+
+        let mut changed = false;
+        if root.get("clear").and_then(|v| v.as_bool()).unwrap_or(false) {
+            self.mtf_resolver.clear();
+            changed = true;
+        }
+
+        if let Some(series_list) = root.get("series").and_then(|v| v.as_array()) {
+            for (idx, series) in series_list.iter().enumerate() {
+                let Some(item) = series.as_object() else {
+                    continue;
+                };
+                let symbol = item
+                    .get("symbol")
+                    .and_then(|v| v.as_str())
+                    .filter(|v| !v.is_empty())
+                    .unwrap_or(self.symbol.as_str())
+                    .to_string();
+                let chart_timeframe = item
+                    .get("chartTimeframe")
+                    .or_else(|| item.get("chart_timeframe"))
+                    .and_then(|v| v.as_str())
+                    .filter(|v| !v.is_empty())
+                    .unwrap_or(self.interval.as_str())
+                    .to_string();
+                let timeframe = item
+                    .get("timeframe")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let field = item
+                    .get("field")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if timeframe.is_empty() || field.is_empty() {
+                    continue;
+                }
+                let mode = MtfMode::parse(item.get("mode").and_then(|v| v.as_str()));
+                let request_id = item
+                    .get("requestId")
+                    .or_else(|| item.get("request_id"))
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| format!("mtf_{}_{}_{}", idx, timeframe, field));
+                let request = MtfRequest {
+                    request_id: request_id.clone(),
+                    symbol,
+                    chart_timeframe,
+                    timeframe: timeframe.clone(),
+                    field: field.clone(),
+                    mode,
+                };
+
+                let mut samples = Vec::<MtfResolvedSample>::new();
+                if let Some(points) = item.get("points").and_then(|v| v.as_array()) {
+                    for point in points {
+                        let Some(p) = point.as_object() else {
+                            continue;
+                        };
+                        let Some(ts) = json_u64(p.get("ts")) else {
+                            continue;
+                        };
+                        let source_timeframe = p
+                            .get("sourceTimeframe")
+                            .or_else(|| p.get("source_timeframe"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(timeframe.as_str())
+                            .to_string();
+                        samples.push(MtfResolvedSample {
+                            request_id: request_id.clone(),
+                            timestamp: ts,
+                            value: p.get("value").and_then(|v| v.as_f64()),
+                            source_timeframe,
+                            source_bar_open: json_u64(
+                                p.get("sourceBarOpen").or_else(|| p.get("source_bar_open")),
+                            ),
+                            source_bar_close: json_u64(
+                                p.get("sourceBarClose")
+                                    .or_else(|| p.get("source_bar_close")),
+                            ),
+                            is_confirmed: p
+                                .get("isConfirmed")
+                                .or_else(|| p.get("is_confirmed"))
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(matches!(mode, MtfMode::Confirmed)),
+                        });
+                    }
+                }
+
+                if !samples.is_empty() {
+                    self.mtf_resolver.set_series(&request, samples);
+                    changed = true;
+                }
+            }
+        }
+
+        if changed {
+            if let Ok(mut inner) = self.inner.try_borrow_mut() {
+                inner.engine.recompute_indicators();
+            }
+            self.mark_dirty();
+        }
+        changed
+    }
+
+    /// Enable or disable a runtime indicator instance.
+    pub fn indicator_set_enabled(&self, instance_id: u32, enabled: bool) -> bool {
+        let changed = {
+            let Ok(mut inner) = self.inner.try_borrow_mut() else {
+                return false;
+            };
+            let changed = inner.engine.indicators.set_enabled(instance_id, enabled);
+            if changed && enabled {
+                inner.engine.recompute_indicators();
+            }
+            changed
+        };
+        if changed {
+            self.mark_dirty();
+        }
+        changed
+    }
+
+    /// List attached indicator instances.
+    pub fn indicator_list(&self) -> JsValue {
+        let list = self.inner.borrow().engine.indicators.list_instances();
+        let arr = js_sys::Array::new();
+        for item in list {
+            let obj = js_sys::Object::new();
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("instanceId"),
+                &JsValue::from_f64(item.instance_id as f64),
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("indicatorId"),
+                &JsValue::from_f64(item.program_id as f64),
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("enabled"),
+                &JsValue::from_bool(item.enabled),
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("updatesApplied"),
+                &JsValue::from_f64(item.updates_applied as f64),
+            );
+            arr.push(&obj);
+        }
+        arr.into()
+    }
+
+    /// Get diagnostics for a compiled indicator.
+    pub fn indicator_get_diagnostics(&self, indicator_id: u32) -> JsValue {
+        let diags = self
+            .inner
+            .borrow()
+            .engine
+            .indicators
+            .get_program_diagnostics(indicator_id);
+        diagnostics_to_js(&diags)
+    }
+
+    /// Get runtime stats for an indicator instance.
+    pub fn indicator_get_stats(&self, instance_id: u32) -> JsValue {
+        let stats = self
+            .inner
+            .borrow()
+            .engine
+            .indicators
+            .get_instance_stats(instance_id);
+        let Some(stats) = stats else {
+            return JsValue::NULL;
+        };
+        let obj = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("instanceId"),
+            &JsValue::from_f64(stats.instance_id as f64),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("indicatorId"),
+            &JsValue::from_f64(stats.program_id as f64),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("opsUsed"),
+            &JsValue::from_f64(stats.ops_used as f64),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("lastElapsedMicros"),
+            &JsValue::from_f64(stats.last_elapsed_micros as f64),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("peakObjects"),
+            &JsValue::from_f64(stats.peak_objects as f64),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("peakVertices"),
+            &JsValue::from_f64(stats.peak_vertices as f64),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("updatesApplied"),
+            &JsValue::from_f64(stats.updates_applied as f64),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("recentEvents"),
+            &json_value_to_js(
+                &serde_json::to_value(&stats.recent_events).unwrap_or(JsonValue::Array(vec![])),
+            ),
+        );
+        obj.into()
+    }
+
+    /// Drain and return pending runtime events from indicator instances.
+    ///
+    /// Returns an array of objects:
+    /// `{ instanceId, indicatorId, type, code, message, barIndex }`
+    pub fn indicator_drain_events(&self) -> JsValue {
+        let events = self
+            .inner
+            .try_borrow_mut()
+            .map(|mut inner| inner.engine.indicators.drain_runtime_events())
+            .unwrap_or_default();
+        let out = js_sys::Array::new();
+        for item in events {
+            let obj = js_sys::Object::new();
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("instanceId"),
+                &JsValue::from_f64(item.instance_id as f64),
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("indicatorId"),
+                &JsValue::from_f64(item.program_id as f64),
+            );
+            match item.event {
+                RuntimeEvent::RuntimeError {
+                    code,
+                    message,
+                    bar_index,
+                } => {
+                    let _ = js_sys::Reflect::set(
+                        &obj,
+                        &JsValue::from_str("type"),
+                        &JsValue::from_str("runtimeError"),
+                    );
+                    let _ = js_sys::Reflect::set(
+                        &obj,
+                        &JsValue::from_str("code"),
+                        &JsValue::from_str(&code),
+                    );
+                    let _ = js_sys::Reflect::set(
+                        &obj,
+                        &JsValue::from_str("message"),
+                        &JsValue::from_str(&message),
+                    );
+                    let _ = js_sys::Reflect::set(
+                        &obj,
+                        &JsValue::from_str("barIndex"),
+                        &JsValue::from_f64(bar_index as f64),
+                    );
+                }
+                RuntimeEvent::LimitsExceeded {
+                    code,
+                    message,
+                    bar_index,
+                } => {
+                    let _ = js_sys::Reflect::set(
+                        &obj,
+                        &JsValue::from_str("type"),
+                        &JsValue::from_str("limitsExceeded"),
+                    );
+                    let _ = js_sys::Reflect::set(
+                        &obj,
+                        &JsValue::from_str("code"),
+                        &JsValue::from_str(&code),
+                    );
+                    let _ = js_sys::Reflect::set(
+                        &obj,
+                        &JsValue::from_str("message"),
+                        &JsValue::from_str(&message),
+                    );
+                    let _ = js_sys::Reflect::set(
+                        &obj,
+                        &JsValue::from_str("barIndex"),
+                        &JsValue::from_f64(bar_index as f64),
+                    );
+                }
+            }
+            out.push(&obj);
+        }
+        out.into()
+    }
+
+    /// Privileged runtime-only resource limit override for an indicator instance.
+    pub fn indicator_set_resource_limits(&mut self, instance_id: u32, limits_json: &str) -> bool {
+        let parsed = serde_json::from_str::<JsonValue>(limits_json).unwrap_or(JsonValue::Null);
+        let limits = ResourceLimits {
+            max_ops_per_bar: parsed
+                .get("max_ops_per_bar")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(ResourceLimits::default().max_ops_per_bar),
+            max_wall_time_per_bar_ms: parsed
+                .get("max_wall_time_per_bar_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(ResourceLimits::default().max_wall_time_per_bar_ms),
+            max_memory_bytes_per_instance: parsed
+                .get("max_memory_bytes_per_instance")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(ResourceLimits::default().max_memory_bytes_per_instance),
+            max_objects_per_instance: parsed
+                .get("max_objects_per_instance")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(ResourceLimits::default().max_objects_per_instance),
+            max_vertices_per_frame: parsed
+                .get("max_vertices_per_frame")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(ResourceLimits::default().max_vertices_per_frame),
+        };
+        self.inner
+            .borrow_mut()
+            .engine
+            .indicators
+            .set_resource_limits(instance_id, limits)
+    }
+
     // ── Indicator Sub-Panes ──────────────────────────────────────────────────
 
     /// Create a new indicator sub-pane below the main chart.
@@ -3700,104 +4339,101 @@ impl RayCore {
             web_sys::Element,
             Rc<Cell<f64>>,
             Rc<Cell<bool>>,
-        )> = {
-            let mut s = self.inner.borrow_mut();
+        )> =
+            {
+                let mut s = self.inner.borrow_mut();
 
-            let window = match web_sys::window() {
-                Some(w) => w,
-                None => return 0,
-            };
-            let doc = match window.document() {
-                Some(d) => d,
-                None => return 0,
-            };
+                let window = match web_sys::window() {
+                    Some(w) => w,
+                    None => return 0,
+                };
+                let doc = match window.document() {
+                    Some(d) => d,
+                    None => return 0,
+                };
 
-            let id = s.next_subpane_id;
-            s.next_subpane_id += 1;
-            let dpr = s.engine.dpr;
+                let id = s.next_subpane_id;
+                s.next_subpane_id += 1;
+                let dpr = s.engine.dpr;
 
-            let grid_row = 2 + (s.subpanes.len() as u32 * 2);
+                let grid_row = 2 + (s.subpanes.len() as u32 * 2);
 
-            // Use IndicatorConfig for colors
-            let config = IndicatorConfig::for_type(indicator_type);
+                // Use IndicatorConfig for colors
+                let config = IndicatorConfig::for_type(indicator_type);
 
-            // Register with coordinator to get coordinated height
-            s.pane_coordinator.register_subpane(id);
+                // Register with coordinator to get coordinated height
+                s.pane_coordinator.register_subpane(id);
 
-            // Get total height and update coordinator
-            let (_, total_h) = s.layout.pane_css_size();
-            let subpane_count = s.subpanes.len();
-            // Reserve space: main pane + subpane heights + time axis
-            let time_axis_h = s.engine.style.time_axis_height();
-            let available_h =
-                total_h + (subpane_count as f64 * height_css) + height_css + time_axis_h;
-            s.pane_coordinator.set_total_height(available_h);
+                // Get total height and update coordinator
+                let (_, total_h) = s.layout.pane_css_size();
+                let subpane_count = s.subpanes.len();
+                // Reserve space: main pane + subpane heights + time axis
+                let time_axis_h = s.engine.style.time_axis_height();
+                let available_h =
+                    total_h + (subpane_count as f64 * height_css) + height_css + time_axis_h;
+                s.pane_coordinator.set_total_height(available_h);
 
-            // Use coordinator's computed height, or fall back to requested height
-            let coordinated_height = s.pane_coordinator.get_height(id);
-            let initial_height = if coordinated_height > 0.0 {
-                coordinated_height
-            } else {
-                height_css
-            };
+                // Use coordinator's computed height, or fall back to requested height
+                let coordinated_height = s.pane_coordinator.get_height(id);
+                let initial_height = if coordinated_height > 0.0 {
+                    coordinated_height
+                } else {
+                    height_css
+                };
 
-            let mut subpane = match SubPane::new(
-                &doc,
-                &s.layout.grid_wrapper,
-                id,
-                study_id,
-                indicator_type,
-                grid_row,
-                initial_height,
-                dpr,
-                &s.engine.style,
-                &s.subpane_separator_style,
-            ) {
-                Ok(sp) => sp,
-                Err(e) => {
-                    log::error!("Failed to create sub-pane: {:?}", e);
-                    s.pane_coordinator.unregister_subpane(id);
-                    return 0;
-                }
-            };
-
-            // Populate with current study data using config colors
-            if let Some(study) = s.engine.studies.get_study(raycore::StudyId(study_id)) {
-                let mut data = Vec::new();
-                let mut colors = Vec::new();
-                for i in 0..study.outputs.len() {
-                    if let Some(output) = study.get_output(i) {
-                        data.push(output.data.clone());
-                        colors.push(
-                            config
-                                .colors
-                                .get(i)
-                                .copied()
-                                .unwrap_or(raycore::ThemeConfig::default().indicator_palette.fallback),
-                        );
+                let mut subpane = match SubPane::new(
+                    &doc,
+                    &s.layout.grid_wrapper,
+                    id,
+                    study_id,
+                    indicator_type,
+                    grid_row,
+                    initial_height,
+                    dpr,
+                    &s.engine.style,
+                    &s.subpane_separator_style,
+                ) {
+                    Ok(sp) => sp,
+                    Err(e) => {
+                        log::error!("Failed to create sub-pane: {:?}", e);
+                        s.pane_coordinator.unregister_subpane(id);
+                        return 0;
                     }
+                };
+
+                // Populate with current study data using config colors
+                if let Some(study) = s.engine.studies.get_study(raycore::StudyId(study_id)) {
+                    let mut data = Vec::new();
+                    let mut colors = Vec::new();
+                    for i in 0..study.outputs.len() {
+                        if let Some(output) = study.get_output(i) {
+                            data.push(output.data.clone());
+                            colors.push(config.colors.get(i).copied().unwrap_or(
+                                raycore::ThemeConfig::default().indicator_palette.fallback,
+                            ));
+                        }
+                    }
+                    subpane.set_data(data, colors);
                 }
-                subpane.set_data(data, colors);
-            }
 
-            subpane.resize(dpr);
+                subpane.resize(dpr);
 
-            // Extract refs before pushing into vec
-            let chart_el: web_sys::Element = subpane.chart_container.clone().unchecked_into();
-            let axis_el: web_sys::Element = subpane.axis_container.clone().unchecked_into();
-            let crosshair_y_rc = subpane.crosshair_y.clone();
-            let crosshair_active_rc = subpane.crosshair_active.clone();
+                // Extract refs before pushing into vec
+                let chart_el: web_sys::Element = subpane.chart_container.clone().unchecked_into();
+                let axis_el: web_sys::Element = subpane.axis_container.clone().unchecked_into();
+                let crosshair_y_rc = subpane.crosshair_y.clone();
+                let crosshair_active_rc = subpane.crosshair_active.clone();
 
-            s.subpanes.push(subpane);
+                s.subpanes.push(subpane);
 
-            log::info!(
-                "Created indicator sub-pane: id={}, type={}, height={:.1}",
-                id,
-                indicator_type,
-                initial_height
-            );
-            Some((id, chart_el, axis_el, crosshair_y_rc, crosshair_active_rc))
-        }; // borrow dropped
+                log::info!(
+                    "Created indicator sub-pane: id={}, type={}, height={:.1}",
+                    id,
+                    indicator_type,
+                    initial_height
+                );
+                Some((id, chart_el, axis_el, crosshair_y_rc, crosshair_active_rc))
+            }; // borrow dropped
 
         let (id, chart_el, axis_el, crosshair_y, crosshair_active) = match creation_result {
             Some(r) => r,
@@ -3845,7 +4481,9 @@ impl RayCore {
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_: web_sys::Event| {
                     log::info!("SubPane {} pointerenter", pid);
                     ca.set(true);
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.engine.crosshair.active = true;
                     s.active_subpane_id = Some(pid);
                 }));
@@ -3865,7 +4503,9 @@ impl RayCore {
                     log::info!("SubPane {} pointerleave", pid);
                     ca.set(false);
                     if !drag.get() {
-                        let mut s = inner.borrow_mut();
+                        let Ok(mut s) = inner.try_borrow_mut() else {
+                            return;
+                        };
                         s.engine.crosshair.active = false;
                         s.active_subpane_id = None;
                     }
@@ -3903,7 +4543,9 @@ impl RayCore {
                     cy.set(y);
                     ca.set(true);
 
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.engine.crosshair.active = true;
                     s.active_subpane_id = Some(pid);
 
@@ -4020,7 +4662,9 @@ impl RayCore {
                     // Detect touch input (same as main chart)
                     is_touch.set(pe.pointer_type() == "touch");
 
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
 
                     // Get bar coordinate from main viewport (shared time axis)
                     let bar = s.engine.viewport.pixel_to_bar(x, pw);
@@ -4145,7 +4789,9 @@ impl RayCore {
 
                     // Finalize drawing creation or drag
                     {
-                        let mut s = inner.borrow_mut();
+                        let Ok(mut s) = inner.try_borrow_mut() else {
+                            return;
+                        };
                         let bar = s.engine.viewport.pixel_to_bar(x, pw);
                         if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
                             let price = sp.viewport.pixel_to_price(y, ph);
@@ -4222,7 +4868,9 @@ impl RayCore {
                     e.prevent_default();
                     let rect = chart_c.get_bounding_client_rect();
                     let x = e.client_x() as f64 - rect.left();
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     s.on_pane_wheel(x, e.delta_x(), e.delta_y(), e.delta_mode());
                 },
             ));
@@ -4324,7 +4972,9 @@ impl RayCore {
                         let new_start = start + (visible - new_visible) * cx_frac;
                         let new_end = new_start + new_visible;
 
-                        let mut s = inner.borrow_mut();
+                        let Ok(mut s) = inner.try_borrow_mut() else {
+                            return;
+                        };
                         s.engine.viewport.start_bar = new_start;
                         s.engine.viewport.end_bar = new_end;
                         let bar_len = s.engine.bars.len();
@@ -4369,7 +5019,9 @@ impl RayCore {
             let pid = pane_id;
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
                         sp.reset_price_viewport();
                         log::info!("SubPane {} viewport reset via double-click", pid);
@@ -4386,7 +5038,9 @@ impl RayCore {
             let pid = pane_id;
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
                         sp.toggle_auto_scale();
                         log::info!("SubPane {} auto-scale toggled: {}", pid, sp.auto_scale);
@@ -4406,7 +5060,9 @@ impl RayCore {
                     e.prevent_default();
                     let dy = e.delta_y();
                     let factor = if dy > 0.0 { 1.1 } else { 0.9 };
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
                         let center = (sp.viewport.price_min + sp.viewport.price_max) / 2.0;
                         let half = (sp.viewport.price_max - sp.viewport.price_min) / 2.0 * factor;
@@ -4485,7 +5141,9 @@ impl RayCore {
                     let center = (apmin.get() + apmax.get()) / 2.0;
                     let half = (apmax.get() - apmin.get()) / 2.0 * factor;
 
-                    let mut s = inner.borrow_mut();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
                     if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
                         sp.viewport.price_min = center - half;
                         sp.viewport.price_max = center + half;
@@ -4597,17 +5255,15 @@ impl RayCore {
             if let Some(subpane) = s.subpanes.iter_mut().find(|sp| sp.id == pane_id) {
                 // Use IndicatorConfig for colors instead of hardcoded values
                 let config = IndicatorConfig::for_type(&indicator_type);
-                let colors: Vec<[f32; 4]> = data
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| {
-                        config
-                            .colors
-                            .get(i)
-                            .copied()
-                            .unwrap_or(raycore::ThemeConfig::default().indicator_palette.fallback)
-                    })
-                    .collect();
+                let colors: Vec<[f32; 4]> =
+                    data.iter()
+                        .enumerate()
+                        .map(|(i, _)| {
+                            config.colors.get(i).copied().unwrap_or(
+                                raycore::ThemeConfig::default().indicator_palette.fallback,
+                            )
+                        })
+                        .collect();
 
                 subpane.set_data(data, colors);
             }
@@ -4643,7 +5299,7 @@ impl RayCore {
 
     /// Append a single bar to the data array. Used for real-time streaming.
     pub fn append_bar(
-        &mut self,
+        &self,
         timestamp: u64,
         open: f32,
         high: f32,
@@ -4670,16 +5326,16 @@ impl RayCore {
             volume,
             _pad: 0.0,
         };
-        self.inner
-            .borrow_mut()
-            .engine
-            .append_bar(bar)
-            .map_err(js_err)
+        let mut inner = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| js_err("append_bar: runtime busy"))?;
+        inner.engine.append_bar(bar).map_err(js_err)
     }
 
     /// Update the last bar in the data array. Used for real-time tick updates.
     pub fn update_last_bar(
-        &mut self,
+        &self,
         timestamp: u64,
         open: f32,
         high: f32,
@@ -4706,17 +5362,17 @@ impl RayCore {
             volume,
             _pad: 0.0,
         };
-        self.inner
-            .borrow_mut()
-            .engine
-            .update_bar(bar)
-            .map_err(js_err)
+        let mut inner = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| js_err("update_last_bar: runtime busy"))?;
+        inner.engine.update_bar(bar).map_err(js_err)
     }
 
     /// LWC-style main series update semantics:
     /// update last bar if timestamp matches, append if timestamp is newer.
     pub fn upsert_bar(
-        &mut self,
+        &self,
         timestamp: u64,
         open: f32,
         high: f32,
@@ -4734,8 +5390,11 @@ impl RayCore {
                 ("volume", volume),
             ],
         )?;
-        self.inner
-            .borrow_mut()
+        let mut inner = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| js_err("upsert_bar: runtime busy"))?;
+        inner
             .engine
             .upsert_bar(Bar {
                 timestamp,
@@ -4750,17 +5409,15 @@ impl RayCore {
     }
 
     /// Append a single point to a line/area/baseline overlay series.
-    pub fn append_series_point(
-        &mut self,
-        id: u32,
-        timestamp: u64,
-        value: f32,
-    ) -> Result<(), JsValue> {
+    pub fn append_series_point(&self, id: u32, timestamp: u64, value: f32) -> Result<(), JsValue> {
         if !value.is_finite() {
             return Err(js_err("append_series_point: value must be finite"));
         }
-        self.inner
-            .borrow_mut()
+        let mut inner = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| js_err("append_series_point: runtime busy"))?;
+        inner
             .engine
             .append_series_point(SeriesId(id), LinePoint { timestamp, value })
             .map_err(js_err)
@@ -4768,7 +5425,7 @@ impl RayCore {
 
     /// Update the last point in a line/area/baseline overlay series.
     pub fn update_last_series_point(
-        &mut self,
+        &self,
         id: u32,
         timestamp: u64,
         value: f32,
@@ -4776,8 +5433,11 @@ impl RayCore {
         if !value.is_finite() {
             return Err(js_err("update_last_series_point: value must be finite"));
         }
-        self.inner
-            .borrow_mut()
+        let mut inner = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| js_err("update_last_series_point: runtime busy"))?;
+        inner
             .engine
             .update_last_series_point(SeriesId(id), LinePoint { timestamp, value })
             .map_err(js_err)
@@ -4785,17 +5445,15 @@ impl RayCore {
 
     /// LWC-style update semantics for line/area/baseline overlays:
     /// update last point if timestamp matches, append if timestamp is newer.
-    pub fn upsert_series_point(
-        &mut self,
-        id: u32,
-        timestamp: u64,
-        value: f32,
-    ) -> Result<(), JsValue> {
+    pub fn upsert_series_point(&self, id: u32, timestamp: u64, value: f32) -> Result<(), JsValue> {
         if !value.is_finite() {
             return Err(js_err("upsert_series_point: value must be finite"));
         }
-        self.inner
-            .borrow_mut()
+        let mut inner = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| js_err("upsert_series_point: runtime busy"))?;
+        inner
             .engine
             .upsert_series_point(SeriesId(id), LinePoint { timestamp, value })
             .map_err(js_err)
@@ -4803,7 +5461,7 @@ impl RayCore {
 
     /// Append a single point to a histogram overlay series.
     pub fn append_histogram_point(
-        &mut self,
+        &self,
         id: u32,
         timestamp: u64,
         value: f32,
@@ -4822,8 +5480,11 @@ impl RayCore {
                 ("color_a", color_a),
             ],
         )?;
-        self.inner
-            .borrow_mut()
+        let mut inner = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| js_err("append_histogram_point: runtime busy"))?;
+        inner
             .engine
             .append_histogram_point(
                 SeriesId(id),
@@ -4838,7 +5499,7 @@ impl RayCore {
 
     /// Update the last point in a histogram overlay series.
     pub fn update_last_histogram_point(
-        &mut self,
+        &self,
         id: u32,
         timestamp: u64,
         value: f32,
@@ -4857,8 +5518,11 @@ impl RayCore {
                 ("color_a", color_a),
             ],
         )?;
-        self.inner
-            .borrow_mut()
+        let mut inner = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| js_err("update_last_histogram_point: runtime busy"))?;
+        inner
             .engine
             .update_last_histogram_point(
                 SeriesId(id),
@@ -4874,7 +5538,7 @@ impl RayCore {
     /// LWC-style update semantics for histogram overlays:
     /// update last point if timestamp matches, append if timestamp is newer.
     pub fn upsert_histogram_point(
-        &mut self,
+        &self,
         id: u32,
         timestamp: u64,
         value: f32,
@@ -4893,8 +5557,11 @@ impl RayCore {
                 ("color_a", color_a),
             ],
         )?;
-        self.inner
-            .borrow_mut()
+        let mut inner = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| js_err("upsert_histogram_point: runtime busy"))?;
+        inner
             .engine
             .upsert_histogram_point(
                 SeriesId(id),
@@ -4909,7 +5576,7 @@ impl RayCore {
 
     /// Append a single point to a bar (OHLC) overlay series.
     pub fn append_bar_series_point(
-        &mut self,
+        &self,
         id: u32,
         timestamp: u64,
         open: f32,
@@ -4926,8 +5593,11 @@ impl RayCore {
                 ("close", close),
             ],
         )?;
-        self.inner
-            .borrow_mut()
+        let mut inner = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| js_err("append_bar_series_point: runtime busy"))?;
+        inner
             .engine
             .append_bar_series_point(
                 SeriesId(id),
@@ -4944,7 +5614,7 @@ impl RayCore {
 
     /// Update the last point in a bar (OHLC) overlay series.
     pub fn update_last_bar_series_point(
-        &mut self,
+        &self,
         id: u32,
         timestamp: u64,
         open: f32,
@@ -4961,8 +5631,11 @@ impl RayCore {
                 ("close", close),
             ],
         )?;
-        self.inner
-            .borrow_mut()
+        let mut inner = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| js_err("update_last_bar_series_point: runtime busy"))?;
+        inner
             .engine
             .update_last_bar_series_point(
                 SeriesId(id),
@@ -4980,7 +5653,7 @@ impl RayCore {
     /// LWC-style update semantics for OHLC bar overlays:
     /// update last point if timestamp matches, append if timestamp is newer.
     pub fn upsert_bar_series_point(
-        &mut self,
+        &self,
         id: u32,
         timestamp: u64,
         open: f32,
@@ -4997,8 +5670,11 @@ impl RayCore {
                 ("close", close),
             ],
         )?;
-        self.inner
-            .borrow_mut()
+        let mut inner = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| js_err("upsert_bar_series_point: runtime busy"))?;
+        inner
             .engine
             .upsert_bar_series_point(
                 SeriesId(id),
@@ -5042,8 +5718,8 @@ impl RayCore {
     ///
     /// Uses a self-scheduling RAF callback that checks the dirty flag
     /// and calls the render pipeline when needed. The closure captures
-     /// `SharedInner` directly to avoid borrow-checker issues with `&mut self`.
-     fn start_auto_render_internal(&mut self) {
+    /// `SharedInner` directly to avoid borrow-checker issues with `&mut self`.
+    fn start_auto_render_internal(&mut self) {
         // Already running?
         if self._raf_closure.is_some() {
             return;
@@ -5064,8 +5740,7 @@ impl RayCore {
         //
         // If we called `.take()` on the slot (old bug) the clone inside the
         // closure would see None and the loop would fire exactly once.
-        let closure_slot: Rc<RefCell<Option<Closure<dyn FnMut()>>>> =
-            Rc::new(RefCell::new(None));
+        let closure_slot: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
 
         // Clone captured by the closure for self-rescheduling
         let slot_for_reschedule = Rc::clone(&closure_slot);
@@ -5411,13 +6086,7 @@ mod tests {
         let fallback_x = 400.0;
         let fallback_y = 120.0;
         let (x, y, bar_index, price) = resolve_synced_crosshair_state(
-            &viewport,
-            800.0,
-            400.0,
-            fallback_x,
-            fallback_y,
-            None,
-            None,
+            &viewport, 800.0, 400.0, fallback_x, fallback_y, None, None,
         );
 
         assert_eq!(x, fallback_x);

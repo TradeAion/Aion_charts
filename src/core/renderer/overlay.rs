@@ -10,6 +10,7 @@
 use crate::core::data::BarArray;
 use crate::core::drawings::types::DrawingGeometry;
 use crate::core::formatters::{format_price, format_volume};
+use crate::core::indicators::render::types::DrawInstruction;
 use crate::core::markers::{MarkerManager, MarkerPosition, MarkerShape};
 use crate::core::price_line::PriceLineManager;
 use crate::core::renderer::canvas_dash::{clear_canvas_line_dash, set_canvas_line_dash};
@@ -917,6 +918,63 @@ impl OverlayRenderer {
 
                 let _ = self.ctx.fill_text(&m.text, m.x_phys, text_y);
             }
+        }
+    }
+
+    /// Render persistent indicator labels emitted as `DrawInstruction::DrawLabel`.
+    ///
+    /// Labels are drawn on the overlay canvas in physical pixels so they work
+    /// for both WebGPU and Canvas2D base renderers.
+    pub fn render_indicator_labels(
+        &mut self,
+        instructions: &[DrawInstruction],
+        bars: &BarArray,
+        viewport: &Viewport,
+        style: &ChartStyle,
+        pane_css_w: f64,
+        pane_css_h: f64,
+    ) {
+        if instructions.is_empty() || bars.is_empty() {
+            return;
+        }
+
+        let dpr = self.dpr;
+        let pane_pw = pane_css_w * dpr;
+        let pane_ph = pane_css_h * dpr;
+        let font_size = style.font_size as f64 * dpr;
+        let font = format!("{}px {}", font_size, style.font_family);
+
+        self.ctx.set_font(&font);
+        self.ctx.set_text_align("center");
+        self.ctx.set_text_baseline("middle");
+
+        for instruction in instructions {
+            let DrawInstruction::DrawLabel {
+                timestamp,
+                value,
+                text,
+                color,
+                ..
+            } = instruction
+            else {
+                continue;
+            };
+            if text.is_empty() {
+                continue;
+            }
+            let Some(bar_idx) = timestamp_to_bar_index_in_bars(*timestamp, bars) else {
+                continue;
+            };
+            let x = bar_to_x(bar_idx + 0.5, viewport, pane_pw);
+            let y = viewport.price_to_css_y(*value, pane_css_h) * dpr;
+            if !x.is_finite() || !y.is_finite() {
+                continue;
+            }
+            if x < 0.0 || x > pane_pw || y < 0.0 || y > pane_ph {
+                continue;
+            }
+            self.ctx.set_fill_style_str(&rgba(color));
+            let _ = self.ctx.fill_text(text, x, y);
         }
     }
 }

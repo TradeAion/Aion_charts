@@ -15,6 +15,7 @@ use crate::core::constants::{
 use crate::core::data::{Bar, BarArray};
 use crate::core::drawings::DrawingManager;
 use crate::core::events::EventBus;
+use crate::core::indicators::IndicatorManager;
 use crate::core::markers::MarkerManager;
 use crate::core::price_line::PriceLineManager;
 use crate::core::renderer::traits::{
@@ -77,6 +78,7 @@ pub struct ChartEngine {
     pub studies: StudyManager,
     pub price_lines: PriceLineManager,
     pub markers: MarkerManager,
+    pub indicators: IndicatorManager,
     pub dpr: f64,
     /// Horizontal pixel ratio: exact `bitmapWidth / cssWidth`.
     /// Set from `device-pixel-content-box` ResizeObserver; falls back to `dpr`.
@@ -193,6 +195,7 @@ impl ChartEngine {
         let mut studies = StudyManager::new();
         let price_lines = PriceLineManager::new();
         let markers = MarkerManager::new();
+        let indicators = IndicatorManager::default();
 
         // Register built-in study calculators
         crate::core::studies::built_in::register_built_in_studies(&mut studies);
@@ -208,6 +211,7 @@ impl ChartEngine {
             studies,
             price_lines,
             markers,
+            indicators,
             dpr,
             h_pixel_ratio: dpr,
             v_pixel_ratio: dpr,
@@ -252,6 +256,7 @@ impl ChartEngine {
 
         // Update studies with new data
         self.studies.update_studies(&self.bars);
+        self.indicators.on_set_data(&self.bars);
 
         // LWC-like initial zoom: derive visible bars from default bar spacing (6 CSS px).
         // Fallback to legacy constant if dimensions are not ready yet.
@@ -269,6 +274,11 @@ impl ChartEngine {
             self.viewport.auto_fit_price(&self.bars);
         }
         Ok(())
+    }
+
+    /// Recompute user indicator runtime instances against current in-memory bars.
+    pub fn recompute_indicators(&mut self) {
+        self.indicators.on_set_data(&self.bars);
     }
 
     /// Resize the pane canvas / surface.
@@ -654,6 +664,7 @@ impl ChartEngine {
 
         // Update studies with new data
         self.studies.update_studies(&self.bars);
+        self.indicators.on_incremental_update(&self.bars);
 
         // LWC-style viewport advance: if auto_scroll is enabled AND the previous
         // last bar was inside the visible range, shift the viewport right by
@@ -701,6 +712,7 @@ impl ChartEngine {
             }
         }
         self.studies.update_studies(&self.bars);
+        self.indicators.on_incremental_update(&self.bars);
 
         if !self.viewport.price_locked {
             // Only rescale when the live bar's price actually exits the current
@@ -743,6 +755,7 @@ impl ChartEngine {
             self.viewport.price_invalidated = false;
         }
 
+        let indicator_draw_instructions = self.indicators.collect_sorted_draw_instructions();
         let ctx = RenderContext {
             bars: &self.bars,
             viewport: &self.viewport,
@@ -754,6 +767,7 @@ impl ChartEngine {
             y_ticks,
             x_ticks,
             series: &self.series,
+            indicator_draw_instructions: &indicator_draw_instructions,
             main_chart_type: self.main_chart_type,
             main_chart_options: &self.main_chart_options,
         };

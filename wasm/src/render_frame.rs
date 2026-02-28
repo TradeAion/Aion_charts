@@ -10,11 +10,11 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use raycore::tick_marks;
 use crate::chart_inner::{ChartInner, SharedInner};
 use crate::event_emitter::{chart_event_to_js, EventEmitter};
 use crate::subpane::IndicatorConfig;
 use crate::{get_dpr, sync_widget_sizes};
+use raycore::tick_marks;
 
 /// Execute the full render pipeline.
 ///
@@ -167,6 +167,7 @@ pub(crate) fn do_render_frame(
             ref active_subpane_id,
             ..
         } = *s;
+        let indicator_draw_instructions = engine.indicators.collect_sorted_draw_instructions();
         let main_crosshair = if active_subpane_id.is_some() && engine.crosshair.active {
             let mut ch = engine.crosshair;
             ch.y = -1.0;
@@ -210,6 +211,14 @@ pub(crate) fn do_render_frame(
             );
             overlay.render_markers(
                 &engine.markers,
+                &engine.bars,
+                &engine.viewport,
+                &engine.style,
+                pane_css_w,
+                pane_css_h,
+            );
+            overlay.render_indicator_labels(
+                &indicator_draw_instructions,
                 &engine.bars,
                 &engine.viewport,
                 &engine.style,
@@ -267,6 +276,14 @@ pub(crate) fn do_render_frame(
                 pane_css_h,
             );
             overlay.render_base_drawings(&base_drawings);
+            overlay.render_indicator_labels(
+                &indicator_draw_instructions,
+                &engine.bars,
+                &engine.viewport,
+                &engine.style,
+                pane_css_w,
+                pane_css_h,
+            );
             overlay.render_crosshair_markers(
                 &main_crosshair,
                 &engine.series,

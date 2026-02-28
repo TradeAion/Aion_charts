@@ -680,16 +680,56 @@ impl ChartRenderer for WgpuRenderer {
                 ctx.h_pixel_ratio,
                 ctx.v_pixel_ratio,
             );
-
-        // Draw fill rects first (area fills behind lines)
+        // Overlay series keep legacy fill->line order.
         if !fill_rects.is_empty() {
             let count = self.upload_rects(&fill_rects, ctx.viewport.width, ctx.viewport.height);
             self.draw_rect_pass(count);
         }
-
-        // Draw smooth anti-aliased line segments on top
         if !line_segments.is_empty() {
             let count = self.upload_lines(&line_segments, ctx.viewport.width, ctx.viewport.height);
+            self.draw_line_pass(count);
+        }
+
+        let indicator_commands =
+            crate::core::renderer::line_generator::generate_indicator_instruction_commands(
+                ctx.indicator_draw_instructions,
+                ctx.viewport,
+                &ts,
+                pane_w,
+                pane_h,
+                ctx.h_pixel_ratio,
+                ctx.v_pixel_ratio,
+            );
+        let mut pending_rects = Vec::new();
+        let mut pending_lines = Vec::new();
+        for command in indicator_commands {
+            match command.primitive {
+                crate::core::renderer::line_generator::IndicatorGeometryPrimitive::Rect(rect) => {
+                    if !pending_lines.is_empty() {
+                        let count =
+                            self.upload_lines(&pending_lines, ctx.viewport.width, ctx.viewport.height);
+                        self.draw_line_pass(count);
+                        pending_lines.clear();
+                    }
+                    pending_rects.push(rect);
+                }
+                crate::core::renderer::line_generator::IndicatorGeometryPrimitive::Line(segment) => {
+                    if !pending_rects.is_empty() {
+                        let count =
+                            self.upload_rects(&pending_rects, ctx.viewport.width, ctx.viewport.height);
+                        self.draw_rect_pass(count);
+                        pending_rects.clear();
+                    }
+                    pending_lines.push(segment);
+                }
+            }
+        }
+        if !pending_rects.is_empty() {
+            let count = self.upload_rects(&pending_rects, ctx.viewport.width, ctx.viewport.height);
+            self.draw_rect_pass(count);
+        }
+        if !pending_lines.is_empty() {
+            let count = self.upload_lines(&pending_lines, ctx.viewport.width, ctx.viewport.height);
             self.draw_line_pass(count);
         }
 

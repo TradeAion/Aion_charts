@@ -9,6 +9,7 @@ pub mod drawings;
 pub mod engine;
 pub mod events;
 pub mod formatters;
+pub mod indicators;
 pub mod interaction;
 pub mod invalidate_mask;
 pub mod kinetic_animation;

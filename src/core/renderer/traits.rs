@@ -11,6 +11,7 @@
 //! immediately, avoiding self-referential borrows.
 
 use crate::core::data::BarArray;
+use crate::core::indicators::render::types::DrawInstruction;
 use crate::core::series::{LineStyle, SeriesCollection};
 use crate::core::viewport::Viewport;
 
@@ -271,6 +272,8 @@ pub struct RenderContext<'a> {
     pub x_ticks: &'a [TickMark],
     /// Overlay series (line, area, etc.) — renderers iterate these in draw_lines().
     pub series: &'a SeriesCollection,
+    /// Indicator runtime draw instruction stream for the current frame.
+    pub indicator_draw_instructions: &'a [DrawInstruction],
     /// Main chart type (candlestick, OHLC bars, line, area, etc.).
     pub main_chart_type: crate::core::chart_type::MainChartType,
     /// Main chart rendering options.

@@ -42,6 +42,7 @@
 //! - [`core::studies`] — Technical indicators (SMA, EMA, RSI, MACD)
 //! - [`core::drawings`] — User annotations (trend lines, rays, etc.)
 //! - [`core::series`] — Multiple chart series types
+//! - [`core::indicators`] — User-authored indicator DSL + runtime scaffolding
 //!
 //! ## Performance Characteristics
 //!
@@ -155,6 +156,29 @@ pub use crate::core::studies::manager::{
 /// Built-in study implementations.
 pub use crate::core::studies::built_in::{
     register_built_in_studies, EmaCalculator, MacdCalculator, RsiCalculator, SmaCalculator,
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Re-exports: User Indicator Runtime (V1 scaffolding)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+pub use crate::core::indicators::compiler::diagnostics::{
+    CompileDiagnostic, DiagnosticSeverity, SourceSpan,
+};
+pub use crate::core::indicators::render::types::{
+    DrawInstruction, LayerBand, ObjectMutation, RenderOrderKey,
+};
+pub use crate::core::indicators::runtime::events::RuntimeEvent;
+pub use crate::core::indicators::runtime::limits::{ResourceCounters, ResourceLimits};
+pub use crate::core::indicators::runtime::mtf::{
+    MtfMode, MtfRequest, MtfRequestKey, MtfResolvedSample, MtfResolver, NoopMtfResolver,
+    SnapshotMtfResolver,
+};
+pub use crate::core::indicators::{
+    ConstantValue, IndicatorCompileResult, IndicatorFrameInput, IndicatorFrameOutput,
+    IndicatorInstanceId, IndicatorInstanceStats, IndicatorInstanceSummary, IndicatorManager,
+    IndicatorProgram, IndicatorProgramId, IndicatorRuntimeMessage, InputSchemaField, OpCode,
+    OutputSchemaField, ResourceDecl, INDICATOR_IR_VERSION, INDICATOR_STDLIB_VERSION,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
