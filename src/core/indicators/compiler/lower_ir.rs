@@ -1012,6 +1012,8 @@ fn map_call_kind(function: &str) -> Option<(IrCallKind, OpCode)> {
             Some((IrCallKind::FillBetween, OpCode::EmitFillBetween))
         }
         "plotshape" | "viz.plotshape" => Some((IrCallKind::PlotShape, OpCode::EmitPlotShape)),
+        "bgcolor" | "viz.bgcolor" => Some((IrCallKind::PlotBgColor, OpCode::EmitBgColor)),
+        "barcolor" | "viz.barcolor" => Some((IrCallKind::PlotBarColor, OpCode::EmitBarColor)),
         "plot" | "viz.plot" => Some((IrCallKind::PlotLine, OpCode::EmitPlotLine)),
         "box.new" | "obj.new_box" => Some((IrCallKind::ObjBoxNew, OpCode::EmitDrawBox)),
         "box.set" | "obj.set_box" => Some((IrCallKind::ObjBoxSet, OpCode::EmitDrawBox)),

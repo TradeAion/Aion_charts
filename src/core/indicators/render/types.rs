@@ -99,6 +99,16 @@ pub enum DrawInstruction {
         color: [f32; 4],
         size: f32,
     },
+    BgColor {
+        order: RenderOrderKey,
+        timestamp: u64,
+        color: [f32; 4],
+    },
+    BarColor {
+        order: RenderOrderKey,
+        timestamp: u64,
+        color: [f32; 4],
+    },
     DrawLabel {
         order: RenderOrderKey,
         id: ObjectId,
@@ -181,6 +191,8 @@ impl DrawInstruction {
             | DrawInstruction::PlotBar { order, .. }
             | DrawInstruction::PlotCandle { order, .. }
             | DrawInstruction::PlotShape { order, .. }
+            | DrawInstruction::BgColor { order, .. }
+            | DrawInstruction::BarColor { order, .. }
             | DrawInstruction::DrawLabel { order, .. }
             | DrawInstruction::DrawBox { order, .. }
             | DrawInstruction::DrawLine { order, .. }

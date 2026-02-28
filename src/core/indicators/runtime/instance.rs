@@ -221,6 +221,8 @@ fn estimate_frame_bytes(frame: &IndicatorFrameOutput) -> usize {
                 series_id, points, ..
             } => 72 + series_id.len() + points.len().saturating_mul(40),
             DrawInstruction::PlotShape { shape, .. } => 64 + shape.len(),
+            DrawInstruction::BgColor { .. } => 32,
+            DrawInstruction::BarColor { .. } => 32,
             DrawInstruction::DrawLabel { text, .. } => 72 + text.len(),
             DrawInstruction::DrawBox { .. } => 96,
             DrawInstruction::DrawLine { style, extend, .. } => 96 + style.len() + extend.len(),

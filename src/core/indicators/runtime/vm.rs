@@ -319,6 +319,42 @@ pub fn execute_bar_with_resolver(
                 }
             }
 
+            // -- BgColor: background color for bar (conditional) ------------------
+            IrCallKind::PlotBgColor => {
+                // bgcolor(color) - color can be na to skip
+                let ctx = EvalContext::with_vars(
+                    instance,
+                    mtf_resolver,
+                    decl_idx as u32,
+                    &persistent_vars,
+                    &local_vars,
+                );
+                // For now, just record that bgcolor was called - actual rendering
+                // happens via plot_data bg_color field
+                if let Some(color_expr) = positional_expr(args, 0) {
+                    if let Some(_value) = eval_expr(color_expr, bars, bar_index, &ctx) {
+                        // TODO: Store bgcolor in plot_data for rendering
+                    }
+                }
+            }
+
+            // -- BarColor: bar color override (conditional) -----------------------
+            IrCallKind::PlotBarColor => {
+                // barcolor(color) - color can be na to skip
+                let ctx = EvalContext::with_vars(
+                    instance,
+                    mtf_resolver,
+                    decl_idx as u32,
+                    &persistent_vars,
+                    &local_vars,
+                );
+                if let Some(color_expr) = positional_expr(args, 0) {
+                    if let Some(_value) = eval_expr(color_expr, bars, bar_index, &ctx) {
+                        // TODO: Store barcolor in plot_data for rendering
+                    }
+                }
+            }
+
             // -- Object mutations: process for current bar directly ---------------
             IrCallKind::ObjBoxNew => {
                 let ctx = EvalContext::with_vars(
@@ -2670,6 +2706,8 @@ fn estimate_vertices(instructions: &[DrawInstruction]) -> usize {
             DrawInstruction::PlotBar { points, .. } => points.len().saturating_mul(6),
             DrawInstruction::PlotCandle { points, .. } => points.len().saturating_mul(10),
             DrawInstruction::PlotShape { .. } => 6,
+            DrawInstruction::BgColor { .. } => 6,
+            DrawInstruction::BarColor { .. } => 0, // Modifies existing bar, no new vertices
             DrawInstruction::DrawLabel { .. } => 6,
             DrawInstruction::DrawBox { .. } => 6,
             DrawInstruction::DrawLine { .. } => 2,
