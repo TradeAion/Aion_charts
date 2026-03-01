@@ -64,6 +64,7 @@ pub enum OpCode {
     EmitDrawLine,
     EmitDrawPolyline,
     EmitDrawTable,
+    StrategyOp, // Strategy order/position operations
     Halt,
 }
 
@@ -191,6 +192,14 @@ pub enum IrCallKind {
     ObjTableClear,
     ObjDelete,
     RequestSeries,
+    // Strategy order operations
+    StrategyEntry, // strategy.entry(id, direction, qty, limit, stop, oca_name, oca_type, comment)
+    StrategyExit,  // strategy.exit(id, from_entry, qty, qty_percent, limit, stop, comment)
+    StrategyClose, // strategy.close(id, comment, immediately)
+    StrategyCloseAll, // strategy.close_all(comment, immediately)
+    StrategyCancel, // strategy.cancel(id)
+    StrategyCancelAll, // strategy.cancel_all()
+    StrategyOrder, // strategy.order(id, direction, qty, limit, stop, oca_name, oca_type, comment)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -242,6 +251,48 @@ pub struct IndicatorDeclMeta {
     pub max_polylines_count: Option<i32>,
 }
 
+/// Strategy declaration parameters from strategy() call.
+/// Serializable version of the AST StrategyDecl.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StrategyDeclMeta {
+    pub title: Option<String>,
+    pub shorttitle: Option<String>,
+    pub overlay: Option<bool>,
+    pub format: Option<String>,
+    pub precision: Option<i32>,
+    pub scale: Option<String>,
+    pub max_bars_back: Option<i32>,
+    pub calc_on_every_tick: Option<bool>,
+    pub calc_on_order_fills: Option<bool>,
+    pub initial_capital: Option<f64>,
+    pub default_qty_value: Option<f64>,
+    pub default_qty_type: Option<String>,
+    pub currency: Option<String>,
+    pub commission_type: Option<String>,
+    pub commission_value: Option<f64>,
+    pub slippage: Option<i32>,
+    pub process_orders_on_close: Option<bool>,
+    pub close_entries_rule: Option<String>,
+    pub pyramiding: Option<i32>,
+    pub fill_orders_on_standard_ohlc: Option<bool>,
+    pub use_bar_magnifier: Option<bool>,
+    pub risk_free_rate: Option<f64>,
+    pub margin_long: Option<f64>,
+    pub margin_short: Option<f64>,
+    pub max_labels_count: Option<i32>,
+    pub max_lines_count: Option<i32>,
+    pub max_boxes_count: Option<i32>,
+    pub max_tables_count: Option<i32>,
+}
+
+/// Script type for compiled programs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ScriptTypeMeta {
+    #[default]
+    Indicator,
+    Strategy,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndicatorProgram {
     pub program_id: IndicatorProgramId,
@@ -257,7 +308,9 @@ pub struct IndicatorProgram {
     pub input_schema: Vec<InputSchemaField>,
     pub output_schema: Vec<OutputSchemaField>,
     pub resource_decl: ResourceDecl,
+    pub script_type: ScriptTypeMeta,
     pub indicator_meta: IndicatorDeclMeta,
+    pub strategy_meta: StrategyDeclMeta,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

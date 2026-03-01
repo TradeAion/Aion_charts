@@ -6,7 +6,7 @@ pub mod parser;
 pub mod typecheck;
 pub mod types;
 
-use crate::core::indicators::compiler::ast::AstProgram;
+use crate::core::indicators::compiler::ast::{AstProgram, ScriptType};
 use crate::core::indicators::compiler::diagnostics::{
     CompileDiagnostic, DiagnosticSeverity, SourceSpan,
 };
@@ -15,8 +15,8 @@ use crate::core::indicators::compiler::parser::parse_program;
 use crate::core::indicators::compiler::typecheck::typecheck_program;
 use crate::core::indicators::language::{normalize_source, parse_compile_mode};
 use crate::core::indicators::{
-    IndicatorDeclMeta, IndicatorProgram, InputSchemaField, IrCall, OpCode, OutputSchemaField,
-    ResourceDecl,
+    IndicatorDeclMeta, IndicatorProgram, InputSchemaField, OpCode, OutputSchemaField, ResourceDecl,
+    ScriptTypeMeta, StrategyDeclMeta,
 };
 use sha2::{Digest, Sha256};
 
@@ -90,14 +90,26 @@ pub fn compile_source(
         };
     }
 
-    let (opcodes, ir_calls, indicator_decl): (Vec<OpCode>, Vec<IrCall>, _) =
+    let (opcodes, ir_calls, script_type, indicator_decl, strategy_decl) =
         if let Some(ref ast_program) = ast {
             let lowered = lower_to_ir(ast_program, compile_mode.mode);
             // Collect diagnostics from the lowering pass (BUG-1, BUG-7 fixes)
             diagnostics.extend(lowered.diagnostics);
-            (lowered.opcodes, lowered.calls, Some(lowered.indicator_decl))
+            (
+                lowered.opcodes,
+                lowered.calls,
+                lowered.script_type,
+                Some(lowered.indicator_decl),
+                Some(lowered.strategy_decl),
+            )
         } else {
-            (vec![OpCode::Nop, OpCode::Halt], Vec::new(), None)
+            (
+                vec![OpCode::Nop, OpCode::Halt],
+                Vec::new(),
+                ScriptType::Indicator,
+                None,
+                None,
+            )
         };
 
     if diagnostics
@@ -158,6 +170,46 @@ pub fn compile_source(
         })
         .unwrap_or_default();
 
+    // Convert AST StrategyDecl to serializable StrategyDeclMeta
+    let strategy_meta = strategy_decl
+        .map(|d| StrategyDeclMeta {
+            title: d.title,
+            shorttitle: d.shorttitle,
+            overlay: d.overlay,
+            format: d.format,
+            precision: d.precision,
+            scale: d.scale,
+            max_bars_back: d.max_bars_back,
+            calc_on_every_tick: d.calc_on_every_tick,
+            calc_on_order_fills: d.calc_on_order_fills,
+            initial_capital: d.initial_capital,
+            default_qty_value: d.default_qty_value,
+            default_qty_type: d.default_qty_type,
+            currency: d.currency,
+            commission_type: d.commission_type,
+            commission_value: d.commission_value,
+            slippage: d.slippage,
+            process_orders_on_close: d.process_orders_on_close,
+            close_entries_rule: d.close_entries_rule,
+            pyramiding: d.pyramiding,
+            fill_orders_on_standard_ohlc: d.fill_orders_on_standard_ohlc,
+            use_bar_magnifier: d.use_bar_magnifier,
+            risk_free_rate: d.risk_free_rate,
+            margin_long: d.margin_long,
+            margin_short: d.margin_short,
+            max_labels_count: d.max_labels_count,
+            max_lines_count: d.max_lines_count,
+            max_boxes_count: d.max_boxes_count,
+            max_tables_count: d.max_tables_count,
+        })
+        .unwrap_or_default();
+
+    // Convert AST ScriptType to serializable ScriptTypeMeta
+    let script_type_meta = match script_type {
+        ScriptType::Indicator => ScriptTypeMeta::Indicator,
+        ScriptType::Strategy => ScriptTypeMeta::Strategy,
+    };
+
     let program = IndicatorProgram {
         program_id: 0,
         name: program_name,
@@ -172,7 +224,9 @@ pub fn compile_source(
         input_schema,
         output_schema,
         resource_decl,
+        script_type: script_type_meta,
         indicator_meta,
+        strategy_meta,
     };
 
     CompileOutput {

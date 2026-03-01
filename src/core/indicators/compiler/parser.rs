@@ -1,7 +1,7 @@
 use crate::core::indicators::compiler::ast::{
     AstAssign, AstBinaryOp, AstCall, AstExpr, AstFnDecl, AstForLoop, AstIf, AstInputDecl,
     AstProgram, AstReturn, AstSeriesField, AstStatement, AstSwitch, AstSwitchCase, AstTupleAssign,
-    AstUnaryOp, AstVarDecl, AstWhile, IndicatorDecl,
+    AstUnaryOp, AstVarDecl, AstWhile, IndicatorDecl, ScriptType, StrategyDecl,
 };
 use crate::core::indicators::compiler::diagnostics::{
     CompileDiagnostic, DiagnosticSeverity, SourceSpan,
@@ -154,7 +154,9 @@ impl<'a> ProgramTokenCursor<'a> {
 
     fn parse_program(&mut self, diagnostics: &mut Vec<CompileDiagnostic>) -> Option<AstProgram> {
         let mut name = None;
+        let mut script_type = ScriptType::Indicator;
         let mut indicator_decl = IndicatorDecl::default();
+        let mut strategy_decl = StrategyDecl::default();
         let mut inputs = Vec::new();
         let mut statements = Vec::new();
 
@@ -171,6 +173,15 @@ impl<'a> ProgramTokenCursor<'a> {
                 let statement_tokens = self.collect_statement_tokens();
                 let header = tokens_to_source(&statement_tokens);
                 (name, indicator_decl) = parse_indicator_decl(&header);
+                script_type = ScriptType::Indicator;
+                continue;
+            }
+
+            if self.is_strategy_start() {
+                let statement_tokens = self.collect_statement_tokens();
+                let header = tokens_to_source(&statement_tokens);
+                (name, strategy_decl) = parse_strategy_decl(&header);
+                script_type = ScriptType::Strategy;
                 continue;
             }
 
@@ -210,7 +221,9 @@ impl<'a> ProgramTokenCursor<'a> {
 
         Some(AstProgram {
             name,
+            script_type,
             indicator_decl,
+            strategy_decl,
             inputs,
             statements,
         })
@@ -888,6 +901,13 @@ impl<'a> ProgramTokenCursor<'a> {
         )
     }
 
+    fn is_strategy_start(&self) -> bool {
+        matches!(
+            self.peek().map(|token| token.kind),
+            Some(TokenKind::Keyword(KeywordKind::Strategy))
+        )
+    }
+
     fn is_input_start(&self) -> bool {
         matches!(
             self.peek().map(|token| &token.kind),
@@ -1297,6 +1317,182 @@ fn parse_indicator_decl(line: &str) -> (Option<String>, IndicatorDecl) {
                 "max_polylines_count" => {
                     if let Ok(v) = value.trim().parse::<i32>() {
                         decl.max_polylines_count = Some(v);
+                    }
+                }
+                _ => {}
+            }
+        } else if idx == 0 {
+            // First positional argument is the title
+            if let Some(s) = extract_string_value(trimmed) {
+                name = Some(s.clone());
+                decl.title = Some(s);
+            }
+        } else if idx == 1 {
+            // Second positional argument is shorttitle
+            if let Some(s) = extract_string_value(trimmed) {
+                decl.shorttitle = Some(s);
+            }
+        } else if idx == 2 {
+            // Third positional argument is overlay
+            decl.overlay = Some(parse_bool_value(trimmed));
+        }
+    }
+
+    (name, decl)
+}
+
+fn parse_strategy_decl(line: &str) -> (Option<String>, StrategyDecl) {
+    let mut decl = StrategyDecl::default();
+
+    // Extract all arguments from strategy(...)
+    let Some(open_paren) = line.find('(') else {
+        return (None, decl);
+    };
+    let Some(close_paren) = line.rfind(')') else {
+        return (None, decl);
+    };
+
+    let args_str = &line[open_paren + 1..close_paren];
+    let args = split_indicator_args(args_str);
+
+    let mut name = None;
+
+    for (idx, arg) in args.iter().enumerate() {
+        let trimmed = arg.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Check if it's a named argument (key=value)
+        if let Some((key, value)) = parse_named_indicator_arg(trimmed) {
+            match key.to_lowercase().as_str() {
+                "title" => {
+                    if let Some(s) = extract_string_value(value) {
+                        name = Some(s.clone());
+                        decl.title = Some(s);
+                    }
+                }
+                "shorttitle" => {
+                    if let Some(s) = extract_string_value(value) {
+                        decl.shorttitle = Some(s);
+                    }
+                }
+                "overlay" => {
+                    decl.overlay = Some(parse_bool_value(value));
+                }
+                "format" => {
+                    if let Some(s) = extract_string_or_const(value) {
+                        decl.format = Some(s);
+                    }
+                }
+                "precision" => {
+                    if let Ok(v) = value.trim().parse::<i32>() {
+                        decl.precision = Some(v.clamp(0, 16));
+                    }
+                }
+                "scale" => {
+                    if let Some(s) = extract_string_or_const(value) {
+                        decl.scale = Some(s);
+                    }
+                }
+                "max_bars_back" => {
+                    if let Ok(v) = value.trim().parse::<i32>() {
+                        decl.max_bars_back = Some(v);
+                    }
+                }
+                "calc_on_every_tick" => {
+                    decl.calc_on_every_tick = Some(parse_bool_value(value));
+                }
+                "calc_on_order_fills" => {
+                    decl.calc_on_order_fills = Some(parse_bool_value(value));
+                }
+                "initial_capital" => {
+                    if let Ok(v) = value.trim().parse::<f64>() {
+                        decl.initial_capital = Some(v);
+                    }
+                }
+                "default_qty_value" => {
+                    if let Ok(v) = value.trim().parse::<f64>() {
+                        decl.default_qty_value = Some(v);
+                    }
+                }
+                "default_qty_type" => {
+                    if let Some(s) = extract_string_or_const(value) {
+                        decl.default_qty_type = Some(s);
+                    }
+                }
+                "currency" => {
+                    if let Some(s) = extract_string_or_const(value) {
+                        decl.currency = Some(s);
+                    }
+                }
+                "commission_type" => {
+                    if let Some(s) = extract_string_or_const(value) {
+                        decl.commission_type = Some(s);
+                    }
+                }
+                "commission_value" => {
+                    if let Ok(v) = value.trim().parse::<f64>() {
+                        decl.commission_value = Some(v);
+                    }
+                }
+                "slippage" => {
+                    if let Ok(v) = value.trim().parse::<i32>() {
+                        decl.slippage = Some(v);
+                    }
+                }
+                "process_orders_on_close" => {
+                    decl.process_orders_on_close = Some(parse_bool_value(value));
+                }
+                "close_entries_rule" => {
+                    if let Some(s) = extract_string_or_const(value) {
+                        decl.close_entries_rule = Some(s);
+                    }
+                }
+                "pyramiding" => {
+                    if let Ok(v) = value.trim().parse::<i32>() {
+                        decl.pyramiding = Some(v);
+                    }
+                }
+                "fill_orders_on_standard_ohlc" => {
+                    decl.fill_orders_on_standard_ohlc = Some(parse_bool_value(value));
+                }
+                "use_bar_magnifier" => {
+                    decl.use_bar_magnifier = Some(parse_bool_value(value));
+                }
+                "risk_free_rate" => {
+                    if let Ok(v) = value.trim().parse::<f64>() {
+                        decl.risk_free_rate = Some(v);
+                    }
+                }
+                "margin_long" => {
+                    if let Ok(v) = value.trim().parse::<f64>() {
+                        decl.margin_long = Some(v);
+                    }
+                }
+                "margin_short" => {
+                    if let Ok(v) = value.trim().parse::<f64>() {
+                        decl.margin_short = Some(v);
+                    }
+                }
+                "max_labels_count" => {
+                    if let Ok(v) = value.trim().parse::<i32>() {
+                        decl.max_labels_count = Some(v);
+                    }
+                }
+                "max_lines_count" => {
+                    if let Ok(v) = value.trim().parse::<i32>() {
+                        decl.max_lines_count = Some(v);
+                    }
+                }
+                "max_boxes_count" => {
+                    if let Ok(v) = value.trim().parse::<i32>() {
+                        decl.max_boxes_count = Some(v);
+                    }
+                }
+                "max_tables_count" => {
+                    if let Ok(v) = value.trim().parse::<i32>() {
+                        decl.max_tables_count = Some(v);
                     }
                 }
                 _ => {}
@@ -2536,5 +2732,78 @@ plot(x)"#;
         };
         assert_eq!(gaps.as_deref(), Some("barmerge.gaps_off"));
         assert!(lookahead.is_none());
+    }
+
+    #[test]
+    fn parses_strategy_declaration_with_parameters() {
+        let source = r#"strategy("My Strategy", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.1)
+let longCondition = close > open
+if longCondition {
+    strategy.entry("Long", strategy.long)
+}
+plot(close)"#;
+        let mut diagnostics = Vec::new();
+        let tokens = lexer::lex(source, &mut diagnostics);
+        let program = parse_program(&tokens, source, &mut diagnostics).expect("expected AST");
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| matches!(d.severity, DiagnosticSeverity::Error)),
+            "unexpected parser errors: {:?}",
+            diagnostics
+        );
+
+        // Verify script type is Strategy
+        assert!(
+            matches!(
+                program.script_type,
+                crate::core::indicators::compiler::ast::ScriptType::Strategy
+            ),
+            "expected script type to be Strategy"
+        );
+
+        // Verify strategy declaration parameters
+        assert_eq!(program.strategy_decl.title, Some("My Strategy".to_string()));
+        assert_eq!(program.strategy_decl.overlay, Some(true));
+        assert_eq!(program.strategy_decl.initial_capital, Some(10000.0));
+        assert_eq!(
+            program.strategy_decl.commission_type,
+            Some("strategy.commission.percent".to_string())
+        );
+        assert_eq!(program.strategy_decl.commission_value, Some(0.1));
+    }
+
+    #[test]
+    fn parses_strategy_entry_and_exit_calls() {
+        let source = r#"strategy("Test")
+strategy.entry("Long", strategy.long, qty=10)
+strategy.exit("Exit", from_entry="Long", limit=105)
+strategy.close("Long")
+plot(close)"#;
+        let mut diagnostics = Vec::new();
+        let tokens = lexer::lex(source, &mut diagnostics);
+        let program = parse_program(&tokens, source, &mut diagnostics).expect("expected AST");
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| matches!(d.severity, DiagnosticSeverity::Error)),
+            "unexpected parser errors: {:?}",
+            diagnostics
+        );
+
+        // Verify we have the expected calls
+        let call_functions: Vec<&str> = program
+            .statements
+            .iter()
+            .filter_map(|s| match s {
+                AstStatement::Call(c) => Some(c.function.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert!(call_functions.contains(&"strategy.entry"));
+        assert!(call_functions.contains(&"strategy.exit"));
+        assert!(call_functions.contains(&"strategy.close"));
+        assert!(call_functions.contains(&"plot"));
     }
 }

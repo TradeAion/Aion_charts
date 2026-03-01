@@ -1,6 +1,6 @@
 use crate::core::indicators::compiler::ast::{
     AstBinaryOp, AstCall, AstExpr, AstFnDecl, AstProgram, AstSeriesField, AstStatement, AstSwitch,
-    AstUnaryOp, AstWhile, IndicatorDecl,
+    AstUnaryOp, AstWhile, IndicatorDecl, ScriptType, StrategyDecl,
 };
 use crate::core::indicators::compiler::diagnostics::{
     CompileDiagnostic, DiagnosticSeverity, SourceSpan,
@@ -18,7 +18,9 @@ pub struct LoweredIr {
     pub opcodes: Vec<OpCode>,
     pub calls: Vec<IrCall>,
     pub diagnostics: Vec<CompileDiagnostic>,
+    pub script_type: ScriptType,
     pub indicator_decl: IndicatorDecl,
+    pub strategy_decl: StrategyDecl,
 }
 
 #[derive(Debug, Clone)]
@@ -65,7 +67,9 @@ pub fn lower_to_ir(program: &AstProgram, compile_mode: CompileMode) -> LoweredIr
         opcodes,
         calls,
         diagnostics,
+        script_type: program.script_type,
         indicator_decl: program.indicator_decl.clone(),
+        strategy_decl: program.strategy_decl.clone(),
     }
 }
 
@@ -952,6 +956,13 @@ fn suggest_function_name(unknown: &str) -> Option<String> {
         "polyline.delete",
         "obj.delete",
         "req.series",
+        "strategy.entry",
+        "strategy.exit",
+        "strategy.close",
+        "strategy.close_all",
+        "strategy.cancel",
+        "strategy.cancel_all",
+        "strategy.order",
     ];
     let lower = unknown.to_ascii_lowercase();
     // Simple prefix/substring match for suggestions
@@ -1054,6 +1065,14 @@ fn map_call_kind(function: &str) -> Option<(IrCallKind, OpCode)> {
         }
         "obj.delete" | "obj.remove" => Some((IrCallKind::ObjDelete, OpCode::CallBuiltin)),
         "req.series" => Some((IrCallKind::RequestSeries, OpCode::RequestSeries)),
+        // Strategy order/position functions
+        "strategy.entry" => Some((IrCallKind::StrategyEntry, OpCode::StrategyOp)),
+        "strategy.exit" => Some((IrCallKind::StrategyExit, OpCode::StrategyOp)),
+        "strategy.close" => Some((IrCallKind::StrategyClose, OpCode::StrategyOp)),
+        "strategy.close_all" => Some((IrCallKind::StrategyCloseAll, OpCode::StrategyOp)),
+        "strategy.cancel" => Some((IrCallKind::StrategyCancel, OpCode::StrategyOp)),
+        "strategy.cancel_all" => Some((IrCallKind::StrategyCancelAll, OpCode::StrategyOp)),
+        "strategy.order" => Some((IrCallKind::StrategyOrder, OpCode::StrategyOp)),
         _ => None,
     }
 }
@@ -1716,7 +1735,7 @@ mod tests {
     use super::lower_to_ir;
     use crate::core::indicators::compiler::ast::{
         AstAssign, AstBinaryOp, AstCall, AstExpr, AstFnDecl, AstProgram, AstStatement, AstSwitch,
-        AstSwitchCase, AstVarDecl, AstWhile, IndicatorDecl,
+        AstSwitchCase, AstVarDecl, AstWhile, IndicatorDecl, ScriptType, StrategyDecl,
     };
     use crate::core::indicators::compiler::diagnostics::DiagnosticSeverity;
     use crate::core::indicators::language::CompileMode;
@@ -1726,7 +1745,9 @@ mod tests {
     fn v2_rejects_missing_structured_expr_fallback() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            script_type: ScriptType::Indicator,
             indicator_decl: IndicatorDecl::default(),
+            strategy_decl: StrategyDecl::default(),
             inputs: Vec::new(),
             statements: vec![AstStatement::VarDecl(AstVarDecl {
                 is_persistent: false,
@@ -1751,7 +1772,9 @@ mod tests {
     fn v1_keeps_string_fallback_when_structured_expr_missing() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            script_type: ScriptType::Indicator,
             indicator_decl: IndicatorDecl::default(),
+            strategy_decl: StrategyDecl::default(),
             inputs: Vec::new(),
             statements: vec![AstStatement::VarDecl(AstVarDecl {
                 is_persistent: false,
@@ -1792,7 +1815,9 @@ mod tests {
     fn v2_rejects_unstructured_function_argument_fallback() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            script_type: ScriptType::Indicator,
             indicator_decl: IndicatorDecl::default(),
+            strategy_decl: StrategyDecl::default(),
             inputs: Vec::new(),
             statements: vec![
                 AstStatement::FnDecl(AstFnDecl {
@@ -1833,7 +1858,9 @@ mod tests {
     fn lowers_structured_modulo_and_power_ops() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            script_type: ScriptType::Indicator,
             indicator_decl: IndicatorDecl::default(),
+            strategy_decl: StrategyDecl::default(),
             inputs: Vec::new(),
             statements: vec![AstStatement::VarDecl(AstVarDecl {
                 is_persistent: false,
@@ -1882,7 +1909,9 @@ mod tests {
     fn lowers_structured_ternary_expression() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            script_type: ScriptType::Indicator,
             indicator_decl: IndicatorDecl::default(),
+            strategy_decl: StrategyDecl::default(),
             inputs: Vec::new(),
             statements: vec![AstStatement::VarDecl(AstVarDecl {
                 is_persistent: false,
@@ -1930,7 +1959,9 @@ mod tests {
     fn lowers_structured_variable_history_index_expr() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            script_type: ScriptType::Indicator,
             indicator_decl: IndicatorDecl::default(),
+            strategy_decl: StrategyDecl::default(),
             inputs: Vec::new(),
             statements: vec![AstStatement::VarDecl(AstVarDecl {
                 is_persistent: false,
@@ -1970,7 +2001,9 @@ mod tests {
     fn lowers_while_loop_with_guarded_body_calls() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            script_type: ScriptType::Indicator,
             indicator_decl: IndicatorDecl::default(),
+            strategy_decl: StrategyDecl::default(),
             inputs: Vec::new(),
             statements: vec![AstStatement::While(AstWhile {
                 condition: "x < 2".to_string(),
@@ -2017,7 +2050,9 @@ mod tests {
     fn lowers_switch_to_guarded_case_calls() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            script_type: ScriptType::Indicator,
             indicator_decl: IndicatorDecl::default(),
+            strategy_decl: StrategyDecl::default(),
             inputs: Vec::new(),
             statements: vec![AstStatement::Switch(AstSwitch {
                 subject: "x".to_string(),
@@ -2063,7 +2098,9 @@ mod tests {
     fn rejects_recursive_function_call() {
         let program = AstProgram {
             name: Some("t".to_string()),
+            script_type: ScriptType::Indicator,
             indicator_decl: IndicatorDecl::default(),
+            strategy_decl: StrategyDecl::default(),
             inputs: Vec::new(),
             statements: vec![
                 AstStatement::FnDecl(AstFnDecl {

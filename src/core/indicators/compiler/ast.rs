@@ -34,10 +34,82 @@ pub struct IndicatorDecl {
     pub max_polylines_count: Option<i32>,
 }
 
+/// Strategy declaration parameters from strategy() call.
+#[derive(Debug, Clone, Default)]
+pub struct StrategyDecl {
+    /// Strategy title (displayed in chart header)
+    pub title: Option<String>,
+    /// Short title (abbreviated name)
+    pub shorttitle: Option<String>,
+    /// Whether the strategy overlays on the main chart
+    pub overlay: Option<bool>,
+    /// Price format
+    pub format: Option<String>,
+    /// Decimal precision for display
+    pub precision: Option<i32>,
+    /// Price scale mode
+    pub scale: Option<String>,
+    /// Maximum bars to look back
+    pub max_bars_back: Option<i32>,
+    /// Whether to track realtime updates
+    pub calc_on_every_tick: Option<bool>,
+    /// Whether to recalculate on order fill
+    pub calc_on_order_fills: Option<bool>,
+    /// Initial capital for backtesting
+    pub initial_capital: Option<f64>,
+    /// Default quantity for orders
+    pub default_qty_value: Option<f64>,
+    /// Default quantity type: "fixed", "percent_of_equity", "cash"
+    pub default_qty_type: Option<String>,
+    /// Currency for the strategy
+    pub currency: Option<String>,
+    /// Commission type: "percent", "cash_per_contract", "cash_per_order"
+    pub commission_type: Option<String>,
+    /// Commission value
+    pub commission_value: Option<f64>,
+    /// Slippage in ticks
+    pub slippage: Option<i32>,
+    /// Process orders on bar close
+    pub process_orders_on_close: Option<bool>,
+    /// Close entries rule: "FIFO", "ANY"
+    pub close_entries_rule: Option<String>,
+    /// Maximum open entries in same direction
+    pub max_bars_back_entries: Option<i32>,
+    /// Pyramiding: maximum number of entries in same direction
+    pub pyramiding: Option<i32>,
+    /// Fill orders on bar magnifier
+    pub fill_orders_on_standard_ohlc: Option<bool>,
+    /// Use bar magnifier for order fills
+    pub use_bar_magnifier: Option<bool>,
+    /// Risk free rate for Sharpe ratio calculation
+    pub risk_free_rate: Option<f64>,
+    /// Margin requirement (for futures)
+    pub margin_long: Option<f64>,
+    pub margin_short: Option<f64>,
+    /// Maximum number of labels
+    pub max_labels_count: Option<i32>,
+    /// Maximum number of lines
+    pub max_lines_count: Option<i32>,
+    /// Maximum number of boxes
+    pub max_boxes_count: Option<i32>,
+    /// Maximum number of tables
+    pub max_tables_count: Option<i32>,
+}
+
+/// Script type: indicator or strategy
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScriptType {
+    #[default]
+    Indicator,
+    Strategy,
+}
+
 #[derive(Debug, Clone)]
 pub struct AstProgram {
     pub name: Option<String>,
+    pub script_type: ScriptType,
     pub indicator_decl: IndicatorDecl,
+    pub strategy_decl: StrategyDecl,
     pub inputs: Vec<AstInputDecl>,
     pub statements: Vec<AstStatement>,
 }

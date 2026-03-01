@@ -15,6 +15,7 @@ pub enum TokenKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeywordKind {
     Indicator,
+    Strategy,
     Input,
     Var,
     Let,
@@ -88,6 +89,7 @@ pub struct Token {
 pub fn keyword_kind_for_ident(ident: &str) -> Option<KeywordKind> {
     match ident.to_ascii_lowercase().as_str() {
         "indicator" => Some(KeywordKind::Indicator),
+        "strategy" => Some(KeywordKind::Strategy),
         "input" => Some(KeywordKind::Input),
         "var" => Some(KeywordKind::Var),
         "let" => Some(KeywordKind::Let),
