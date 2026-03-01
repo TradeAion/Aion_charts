@@ -825,11 +825,17 @@ impl RayCore {
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
+                    let (x, y) = event_css_pos(&pe, &pane_c);
+                    let shift_pressed = pe.shift_key();
+                    let ctrl_pressed = pe.ctrl_key() || pe.meta_key(); // meta for Mac Cmd
                     let Ok(mut s) = inner.try_borrow_mut() else {
                         return;
                     };
                     s.interaction.set_touch(pe.pointer_type() == "touch");
                     s.on_pointer_enter(HitZone::Chart);
+                    // Initialize crosshair position on first enter so it doesn't
+                    // flash at default (0,0) before the first pointermove.
+                    s.on_pane_pointer_move(x, y, shift_pressed, ctrl_pressed);
                     // Clear subpane focus — cursor is now in the main pane
                     s.active_subpane_id = None;
                     let cursor = s.cursor_css();
