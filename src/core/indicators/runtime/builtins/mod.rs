@@ -6,6 +6,7 @@ pub mod map;
 pub mod math;
 pub mod na_ops;
 pub mod str;
+pub mod strategy;
 pub mod ta;
 pub mod table;
 
@@ -87,6 +88,11 @@ impl BuiltinRegistry {
         // table.* functions (constants/computed properties; table.new/cell/delete are handled by compiler)
         if let Some(table_fn) = name_lower.strip_prefix("table.") {
             return table::call(table_fn, args);
+        }
+
+        // strategy.* functions (constants/properties; order functions are handled by VM)
+        if let Some(strategy_fn) = name_lower.strip_prefix("strategy.") {
+            return strategy::call_readonly(strategy_fn, args, None);
         }
 
         // position.* constants for table positioning

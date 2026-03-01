@@ -703,6 +703,24 @@ pub fn execute_bar_with_resolver(
                     mtf_resolver,
                 );
             }
+
+            // -- Strategy operations (Phase 8) ------------------------------------
+            // Strategy order functions are handled by the strategy execution engine,
+            // which runs separately from the indicator VM. These are placeholders
+            // that will be connected to the StrategyContext in the execution loop.
+            IrCallKind::StrategyEntry
+            | IrCallKind::StrategyExit
+            | IrCallKind::StrategyClose
+            | IrCallKind::StrategyCloseAll
+            | IrCallKind::StrategyCancel
+            | IrCallKind::StrategyCancelAll
+            | IrCallKind::StrategyOrder => {
+                // Strategy calls are collected and processed by the strategy engine
+                // after the indicator VM completes for each bar. The actual execution
+                // happens in the strategy backtest loop which has access to bar data
+                // and the StrategyContext for position/order management.
+                // For now, these are no-ops in the indicator VM.
+            }
         }
 
         // Scan ALL calls (not just RequestSeries) for embedded req.series()
