@@ -1533,6 +1533,7 @@ dependencies = [
  "js-sys",
  "log",
  "raycore",
+ "serde",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",

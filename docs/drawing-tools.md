@@ -45,6 +45,22 @@ chart.clear_drawings();            // Remove all drawings
 chart.remove_all_scale_drawings(); // Remove only scale/measurement drawings
 ```
 
+### Persist / Restore Drawings
+
+```js
+// Save
+const snapshot = chart.export_drawings();
+localStorage.setItem('my-chart-drawings', snapshot);
+
+// Restore
+const saved = localStorage.getItem('my-chart-drawings');
+if (saved) {
+  chart.import_drawings(saved);
+}
+```
+
+For production persistence patterns (full chart state, autosave, keying, pane mapping, and server storage), see [Persistent State Guide](./persistent.md).
+
 ### Keyboard Shortcuts
 
 | Key | Action |

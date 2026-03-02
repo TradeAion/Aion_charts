@@ -258,6 +258,37 @@ pub enum DrawingTool {
     Brush,
 }
 
+impl DrawingTool {
+    pub fn as_api_key(self) -> &'static str {
+        match self {
+            DrawingTool::None => "none",
+            DrawingTool::TrendLine => "trend_line",
+            DrawingTool::Rectangle => "rectangle",
+            DrawingTool::Fibonacci => "fibonacci",
+            DrawingTool::Scale => "scale",
+            DrawingTool::HorizontalLine => "horizontal_line",
+            DrawingTool::VerticalLine => "vertical_line",
+            DrawingTool::Ray => "ray",
+            DrawingTool::Brush => "brush",
+        }
+    }
+
+    pub fn from_api_key(value: &str) -> Option<Self> {
+        match value {
+            "none" => Some(DrawingTool::None),
+            "trend_line" => Some(DrawingTool::TrendLine),
+            "rectangle" => Some(DrawingTool::Rectangle),
+            "fibonacci" => Some(DrawingTool::Fibonacci),
+            "scale" => Some(DrawingTool::Scale),
+            "horizontal_line" => Some(DrawingTool::HorizontalLine),
+            "vertical_line" => Some(DrawingTool::VerticalLine),
+            "ray" => Some(DrawingTool::Ray),
+            "brush" => Some(DrawingTool::Brush),
+            _ => None,
+        }
+    }
+}
+
 // ── Z-order ─────────────────────────────────────────────────────────────────
 
 /// Where in the visual stack a drawing renders.

@@ -2,12 +2,26 @@
 
 use super::types::*;
 use crate::core::viewport::Viewport;
+use std::any::Any;
 
 /// Unique ID counter for drawings.
 static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 pub fn next_drawing_id() -> u64 {
     NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Ensure subsequent calls to `next_drawing_id()` return at least `min_next`.
+pub fn ensure_next_drawing_id_at_least(min_next: u64) {
+    use std::sync::atomic::Ordering;
+    let mut current = NEXT_ID.load(Ordering::Relaxed);
+    while current < min_next {
+        match NEXT_ID.compare_exchange_weak(current, min_next, Ordering::Relaxed, Ordering::Relaxed)
+        {
+            Ok(_) => break,
+            Err(observed) => current = observed,
+        }
+    }
 }
 
 /// Macro to implement the repetitive accessor methods on Drawing.
@@ -31,6 +45,9 @@ macro_rules! impl_drawing_accessors {
         fn id(&self) -> u64 {
             self.id
         }
+        fn set_id(&mut self, id: u64) {
+            self.id = id;
+        }
         fn tool(&self) -> DrawingTool {
             $tool
         }
@@ -52,6 +69,12 @@ macro_rules! impl_drawing_accessors {
         fn anchors_mut(&mut self) -> &mut Vec<AnchorPoint> {
             &mut self.anchors
         }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+            self
+        }
     };
 }
 
@@ -59,6 +82,7 @@ macro_rules! impl_drawing_accessors {
 pub trait Drawing: std::fmt::Debug {
     /// Unique ID for this drawing instance.
     fn id(&self) -> u64;
+    fn set_id(&mut self, id: u64);
 
     /// The tool type.
     fn tool(&self) -> DrawingTool;
@@ -74,6 +98,10 @@ pub trait Drawing: std::fmt::Debug {
     /// Anchor points (logical coordinates).
     fn anchors(&self) -> &[AnchorPoint];
     fn anchors_mut(&mut self) -> &mut Vec<AnchorPoint>;
+
+    /// Downcast helpers for tool-specific persistence.
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 
     /// How many anchor points this tool needs to be fully created.
     fn required_anchors(&self) -> usize;

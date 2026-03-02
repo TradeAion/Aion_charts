@@ -164,6 +164,37 @@ See [Drawing Tools](./drawing-tools.md) for detailed usage.
 
 Drawing lifecycle management.
 
+### `export_persistence_state(layoutId?)` / `import_persistence_state(json)`
+
+Persist and restore full chart state (recommended):
+
+- Drawings
+- Chart styles/theme options
+- Viewport state
+- Indicator pane layout
+
+```ts
+const snapshot = chart.export_persistence_state('workspace-main');
+localStorage.setItem('raycore.chart-state', snapshot);
+
+const saved = localStorage.getItem('raycore.chart-state');
+if (saved) chart.import_persistence_state(saved);
+```
+
+### `export_drawings()` / `import_drawings(json)`
+
+Persist and restore drawings only (legacy/partial snapshot).
+
+```ts
+const snapshot = chart.export_drawings();
+localStorage.setItem('raycore.drawings', snapshot);
+
+const saved = localStorage.getItem('raycore.drawings');
+if (saved) chart.import_drawings(saved);
+```
+
+See [Persistent State Guide](./persistent.md) for full production guidance.
+
 ---
 
 ## Series Overlays

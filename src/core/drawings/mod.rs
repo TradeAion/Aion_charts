@@ -13,6 +13,7 @@ pub mod drawing;
 pub mod fibonacci;
 pub mod hit_test;
 pub mod horizontal_line;
+pub mod persistence;
 pub mod ray;
 pub mod rectangle;
 pub mod scale;
@@ -21,7 +22,11 @@ pub mod types;
 pub mod vertical_line;
 
 use crate::core::viewport::Viewport;
-use drawing::Drawing;
+use drawing::{ensure_next_drawing_id_at_least, Drawing};
+use persistence::{
+    drawing_tool_from_key, drawing_tool_to_key, DrawingSnapshot, SerializedAnchorPoint,
+    SerializedDrawing, SerializedDrawingPoint, DRAWINGS_SNAPSHOT_VERSION,
+};
 use types::*;
 
 /// Returns the default anchor circle fill color from the theme.
@@ -106,6 +111,14 @@ impl DrawingManager {
     /// Number of drawings.
     pub fn len(&self) -> usize {
         self.drawings.len()
+    }
+
+    /// Remove all drawings and reset interaction state.
+    pub fn clear(&mut self) {
+        self.drawings.clear();
+        self.active_tool = DrawingTool::None;
+        self.selected_id = None;
+        self.creating_id = None;
     }
 
     /// Is a drawing tool currently active?
@@ -385,5 +398,213 @@ impl DrawingManager {
         }
 
         (base, top)
+    }
+
+    /// Export all drawings to a versioned snapshot.
+    pub fn snapshot(&self) -> DrawingSnapshot {
+        let drawings = self
+            .drawings
+            .iter()
+            .map(|drawing| {
+                let points = if drawing.tool() == DrawingTool::Brush {
+                    drawing
+                        .as_any()
+                        .downcast_ref::<brush::BrushDrawing>()
+                        .map(|brush| {
+                            brush
+                                .points()
+                                .iter()
+                                .copied()
+                                .map(SerializedDrawingPoint::from)
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+
+                SerializedDrawing {
+                    id: drawing.id(),
+                    tool: drawing_tool_to_key(drawing.tool()).to_string(),
+                    style: drawing.style().into(),
+                    anchors: drawing
+                        .anchors()
+                        .iter()
+                        .map(SerializedAnchorPoint::from)
+                        .collect(),
+                    points,
+                }
+            })
+            .collect();
+
+        DrawingSnapshot {
+            version: DRAWINGS_SNAPSHOT_VERSION,
+            drawings,
+        }
+    }
+
+    /// Export drawings as a JSON string.
+    pub fn snapshot_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(&self.snapshot())
+    }
+
+    /// Replace current drawings from a versioned snapshot payload.
+    pub fn replace_from_snapshot(&mut self, snapshot: DrawingSnapshot) -> Result<(), String> {
+        if snapshot.version > DRAWINGS_SNAPSHOT_VERSION {
+            return Err(format!(
+                "Unsupported drawing snapshot version {} (max supported {})",
+                snapshot.version, DRAWINGS_SNAPSHOT_VERSION
+            ));
+        }
+
+        self.clear();
+
+        let mut max_id = 0_u64;
+        for item in snapshot.drawings {
+            let mut drawing = Self::deserialize_one(item)?;
+            max_id = max_id.max(drawing.id());
+            drawing.set_state(DrawingState::Idle);
+            self.drawings.push(drawing);
+        }
+
+        if max_id > 0 {
+            ensure_next_drawing_id_at_least(max_id + 1);
+        }
+
+        Ok(())
+    }
+
+    /// Replace current drawings from a JSON snapshot.
+    pub fn replace_from_json(&mut self, json: &str) -> Result<(), String> {
+        let snapshot: DrawingSnapshot =
+            serde_json::from_str(json).map_err(|e| format!("Invalid drawing JSON: {e}"))?;
+        self.replace_from_snapshot(snapshot)
+    }
+
+    fn deserialize_one(item: SerializedDrawing) -> Result<Box<dyn Drawing>, String> {
+        let tool = drawing_tool_from_key(item.tool.as_str())
+            .ok_or_else(|| format!("Unknown drawing tool '{}'", item.tool))?;
+        if tool == DrawingTool::None {
+            return Err("Cannot deserialize drawing with tool 'none'".to_string());
+        }
+
+        let first = item
+            .anchors
+            .first()
+            .ok_or_else(|| format!("Drawing '{}' has no anchors", item.tool.as_str()))?;
+        let mut drawing: Box<dyn Drawing> = match tool {
+            DrawingTool::TrendLine => Box::new(trend_line::TrendLineDrawing::new(
+                first.point.bar_index,
+                first.point.price,
+            )),
+            DrawingTool::Rectangle => Box::new(rectangle::RectangleDrawing::new(
+                first.point.bar_index,
+                first.point.price,
+            )),
+            DrawingTool::Fibonacci => Box::new(fibonacci::FibonacciDrawing::new(
+                first.point.bar_index,
+                first.point.price,
+            )),
+            DrawingTool::Scale => Box::new(scale::ScaleDrawing::new(
+                first.point.bar_index,
+                first.point.price,
+            )),
+            DrawingTool::Brush => Box::new(brush::BrushDrawing::new(
+                first.point.bar_index,
+                first.point.price,
+            )),
+            DrawingTool::HorizontalLine => Box::new(horizontal_line::HorizontalLineDrawing::new(
+                first.point.bar_index,
+                first.point.price,
+            )),
+            DrawingTool::VerticalLine => Box::new(vertical_line::VerticalLineDrawing::new(
+                first.point.bar_index,
+                first.point.price,
+            )),
+            DrawingTool::Ray => Box::new(ray::RayDrawing::new(
+                first.point.bar_index,
+                first.point.price,
+            )),
+            DrawingTool::None => unreachable!(),
+        };
+
+        let required_anchors = drawing.required_anchors();
+        if item.anchors.len() < required_anchors {
+            return Err(format!(
+                "Drawing '{}' has {} anchors, expected at least {}",
+                item.tool.as_str(),
+                item.anchors.len(),
+                required_anchors
+            ));
+        }
+
+        *drawing.style_mut() = item.style.into();
+        *drawing.anchors_mut() = item.anchors.into_iter().map(Into::into).collect();
+
+        if tool == DrawingTool::Brush {
+            let brush = drawing
+                .as_any_mut()
+                .downcast_mut::<brush::BrushDrawing>()
+                .ok_or_else(|| "Brush type mismatch during restore".to_string())?;
+            let points = item.points.into_iter().map(Into::into).collect();
+            brush.set_points(points);
+        }
+
+        if item.id > 0 {
+            drawing.set_id(item.id);
+        }
+
+        Ok(drawing)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_roundtrip_preserves_brush_points() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Brush;
+
+        let id = manager.start_creating(10.0, 100.0).expect("brush id");
+        manager.update_creation_preview(10.5, 100.5);
+        manager.update_creation_preview(11.0, 101.0);
+        manager.finalize_creation_step(11.5, 101.5);
+
+        let json = manager.snapshot_json().expect("snapshot json");
+        let mut restored = DrawingManager::new();
+        restored
+            .replace_from_json(&json)
+            .expect("restore brush snapshot");
+
+        assert_eq!(restored.len(), 1);
+        let drawing = restored.get(id).expect("drawing by id");
+        let brush = drawing
+            .as_any()
+            .downcast_ref::<brush::BrushDrawing>()
+            .expect("restored brush");
+        assert_eq!(brush.points().len(), 2);
+    }
+
+    #[test]
+    fn snapshot_restore_bumps_next_id() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::TrendLine;
+
+        let first_id = manager.start_creating(1.0, 10.0).expect("first id");
+        manager.finalize_creation_step(2.0, 11.0);
+
+        let snapshot = manager.snapshot();
+
+        let mut restored = DrawingManager::new();
+        restored
+            .replace_from_snapshot(snapshot)
+            .expect("restore snapshot");
+
+        restored.active_tool = DrawingTool::TrendLine;
+        let next_id = restored.start_creating(3.0, 12.0).expect("next id");
+
+        assert!(next_id > first_id);
     }
 }

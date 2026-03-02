@@ -1149,6 +1149,35 @@ export declare class RayCore {
   /** Number of drawings. */
   drawing_count(): number;
 
+  // ── Chart persistence (state + drawings) ──────────────────────────────────
+
+  /**
+   * Export a full chart snapshot for persistence.
+   *
+   * Includes chart options/styles, viewport, indicator pane layout, and drawings.
+   * Use `layout_id` to tag snapshots per workspace/layout in your storage.
+   */
+  export_persistence_state(layout_id?: string | null): string;
+
+  /**
+   * Restore a full chart snapshot produced by `export_persistence_state()`.
+   *
+   * Reapplies options/styles, viewport, pane layout, then drawings.
+   */
+  import_persistence_state(json: string): void;
+
+  /**
+   * Export all drawings (main pane + indicator sub-panes) as a JSON snapshot.
+   * Use this string to persist drawings externally.
+   */
+  export_drawings(): string;
+
+  /**
+   * Restore drawings from a JSON snapshot created by `export_drawings()`.
+   * Existing drawings are replaced.
+   */
+  import_drawings(json: string): void;
+
   // ── Font / axis styling ────────────────────────────────────────────────────
 
   /** Set the font family for axis labels (CSS font-family string). */

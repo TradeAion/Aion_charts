@@ -130,6 +130,10 @@ pub use crate::core::interaction::{HitZone, InteractionHandler, TouchCrosshairMo
 /// Drawing tool management.
 pub use crate::core::drawings::DrawingManager;
 
+pub use crate::core::drawings::persistence::{
+    DrawingSnapshot, SerializedAnchorPoint, SerializedDrawing, SerializedDrawingPoint,
+    SerializedDrawingStyle, DRAWINGS_SNAPSHOT_VERSION,
+};
 /// Available drawing tools.
 pub use crate::core::drawings::types::DrawingTool;
 

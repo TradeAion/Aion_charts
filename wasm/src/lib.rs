@@ -27,7 +27,9 @@ use raycore::{
     RuntimeEvent, SeriesId, SeriesMarker, SnapshotMtfResolver, TimeAxisRenderer, TimeRange,
     Viewport, WgpuRenderer,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use std::collections::{HashMap, HashSet};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -563,6 +565,16 @@ fn parse_line_style_js(value: &JsValue) -> Option<LineStyle> {
     None
 }
 
+fn line_style_key(style: LineStyle) -> &'static str {
+    match style {
+        LineStyle::Solid => "solid",
+        LineStyle::Dotted => "dotted",
+        LineStyle::Dashed => "dashed",
+        LineStyle::LargeDashed => "large_dashed",
+        LineStyle::SparseDotted => "sparse_dotted",
+    }
+}
+
 fn parse_crosshair_mode_js(value: &JsValue) -> Option<raycore::CrosshairMode> {
     if let Some(mode) = value.as_string() {
         return Some(parse_crosshair_mode(mode.trim()));
@@ -592,6 +604,15 @@ fn parse_price_scale_mode_js(value: &JsValue) -> Option<raycore::PriceScaleMode>
         });
     }
     None
+}
+
+fn price_scale_mode_key(mode: raycore::PriceScaleMode) -> &'static str {
+    match mode {
+        raycore::PriceScaleMode::Normal => "normal",
+        raycore::PriceScaleMode::Logarithmic => "logarithmic",
+        raycore::PriceScaleMode::Percentage => "percentage",
+        raycore::PriceScaleMode::IndexedTo100 => "indexed_to_100",
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -654,6 +675,75 @@ fn ensure_finite_fields(ctx: &str, fields: &[(&str, f32)]) -> Result<(), JsValue
         return Err(js_err(format!("{}: {} must be finite", ctx, name)));
     }
     Ok(())
+}
+
+const DRAWING_STORE_VERSION: u32 = 1;
+const CHART_PERSISTENCE_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PaneDrawingStore {
+    #[serde(rename = "paneId")]
+    pane_id: u32,
+    drawings: raycore::DrawingSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DrawingStore {
+    version: u32,
+    main: raycore::DrawingSnapshot,
+    #[serde(default)]
+    subpanes: Vec<PaneDrawingStore>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedSubPane {
+    pub id: u32,
+    #[serde(rename = "studyId")]
+    pub study_id: u32,
+    #[serde(rename = "indicatorType")]
+    pub indicator_type: String,
+    #[serde(rename = "heightCss")]
+    pub height_css: f64,
+    #[serde(rename = "autoScale")]
+    pub auto_scale: bool,
+    #[serde(rename = "priceMin")]
+    pub price_min: f64,
+    #[serde(rename = "priceMax")]
+    pub price_max: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedViewport {
+    #[serde(rename = "startBar")]
+    pub start_bar: f64,
+    #[serde(rename = "endBar")]
+    pub end_bar: f64,
+    #[serde(rename = "priceMin")]
+    pub price_min: f64,
+    #[serde(rename = "priceMax")]
+    pub price_max: f64,
+    #[serde(rename = "priceLocked")]
+    pub price_locked: bool,
+    #[serde(rename = "priceScaleMode")]
+    pub price_scale_mode: String,
+    #[serde(rename = "scaleMarginTop")]
+    pub scale_margin_top: f64,
+    #[serde(rename = "scaleMarginBottom")]
+    pub scale_margin_bottom: f64,
+    #[serde(rename = "autoScroll")]
+    pub auto_scroll: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChartPersistenceState {
+    pub version: u32,
+    #[serde(rename = "layoutId", default)]
+    pub layout_id: String,
+    pub options: JsonValue,
+    pub viewport: PersistedViewport,
+    #[serde(default)]
+    pub panes: Vec<PersistedSubPane>,
+    pub drawings: DrawingStore,
 }
 
 #[wasm_bindgen]
@@ -2717,17 +2807,8 @@ impl RayCore {
     /// "scale", "brush", "horizontal_line", "vertical_line", "ray".
     pub fn set_drawing_tool(&mut self, tool: &str) {
         let mut s = self.inner.borrow_mut();
-        s.engine.drawings.active_tool = match tool {
-            "trend_line" => raycore::DrawingTool::TrendLine,
-            "rectangle" => raycore::DrawingTool::Rectangle,
-            "fibonacci" => raycore::DrawingTool::Fibonacci,
-            "scale" => raycore::DrawingTool::Scale,
-            "brush" => raycore::DrawingTool::Brush,
-            "horizontal_line" => raycore::DrawingTool::HorizontalLine,
-            "vertical_line" => raycore::DrawingTool::VerticalLine,
-            "ray" => raycore::DrawingTool::Ray,
-            _ => raycore::DrawingTool::None,
-        };
+        s.engine.drawings.active_tool =
+            raycore::DrawingTool::from_api_key(tool).unwrap_or(raycore::DrawingTool::None);
     }
 
     /// Remove the currently selected drawing (e.g. on Delete key).
@@ -2882,15 +2963,350 @@ impl RayCore {
     /// Remove all drawings.
     pub fn clear_drawings(&mut self) {
         let mut s = self.inner.borrow_mut();
-        while s.engine.drawings.len() > 0 {
-            let id = s.engine.drawings.all()[0].id();
-            s.engine.drawings.remove(id);
-        }
+        let active_tool = s.engine.drawings.active_tool;
+        s.engine.drawings.clear();
+        s.engine.drawings.active_tool = active_tool;
     }
 
     /// Remove all scale (measurement) drawings.
     pub fn remove_all_scale_drawings(&mut self) {
         self.inner.borrow_mut().engine.drawings.remove_all_scale();
+    }
+
+    /// Export a full chart persistence snapshot (styles + viewport + pane layout + drawings).
+    ///
+    /// `layout_id` is an optional caller-defined identifier to help external storage routing.
+    pub fn export_persistence_state(&self, layout_id: Option<String>) -> String {
+        let s = self.inner.borrow();
+        let style = &s.engine.style;
+        let viewport = &s.engine.viewport;
+
+        let options = serde_json::json!({
+            "symbol": self.symbol,
+            "interval": self.interval,
+            "autoScroll": viewport.auto_scroll,
+            "chartType": s.engine.main_chart_options.chart_type.as_str(),
+            "layout": {
+                "background": { "color": style.bg_color },
+                "textColor": style.axis_text_color,
+                "fontFamily": style.font_family,
+                "fontSize": style.font_size,
+            },
+            "grid": {
+                "color": style.grid_color,
+            },
+            "rightPriceScale": {
+                "borderColor": style.axis_border_color,
+                "borderVisible": style.axis_border_visible,
+            },
+            "timeScale": {
+                "borderColor": style.axis_border_color,
+                "borderVisible": style.axis_border_visible,
+            },
+            "crosshair": {
+                "mode": crosshair_mode_key(s.engine.crosshair.mode),
+                "vertLine": {
+                    "color": style.crosshair_vert_line.color,
+                    "width": style.crosshair_vert_line.width,
+                    "style": line_style_key(style.crosshair_vert_line.style),
+                    "visible": style.crosshair_vert_line.visible,
+                    "labelVisible": style.crosshair_vert_line.label_visible,
+                    "labelBackgroundColor": style.crosshair_vert_line.label_bg_color,
+                },
+                "horzLine": {
+                    "color": style.crosshair_horz_line.color,
+                    "width": style.crosshair_horz_line.width,
+                    "style": line_style_key(style.crosshair_horz_line.style),
+                    "visible": style.crosshair_horz_line.visible,
+                    "labelVisible": style.crosshair_horz_line.label_visible,
+                    "labelBackgroundColor": style.crosshair_horz_line.label_bg_color,
+                },
+                "labelTextColor": style.crosshair_label_text,
+            },
+            "priceScale": {
+                "mode": price_scale_mode_key(viewport.price_scale_mode),
+                "margins": {
+                    "top": viewport.scale_margin_top,
+                    "bottom": viewport.scale_margin_bottom,
+                },
+            },
+            "candles": {
+                "upColor": style.bullish_color,
+                "downColor": style.bearish_color,
+                "wickUpColor": style.wick_bullish_color,
+                "wickDownColor": style.wick_bearish_color,
+                "barWidth": style.bar_width_ratio,
+            },
+            "lineSeries": {
+                "color": s.engine.main_chart_options.line_color,
+                "lineWidth": s.engine.main_chart_options.line_width,
+            },
+            "areaSeries": {
+                "lineColor": s.engine.main_chart_options.line_color,
+                "topColor": s.engine.main_chart_options.area_top_color,
+                "bottomColor": s.engine.main_chart_options.area_bottom_color,
+                "lineWidth": s.engine.main_chart_options.line_width,
+            },
+            "volume": {
+                "upColor": style.bullish_volume_color,
+                "downColor": style.bearish_volume_color,
+            },
+            "lastPriceLine": {
+                "visible": style.last_price_line.visible,
+                "labelVisible": style.last_price_line.label_visible,
+                "width": style.last_price_line.width,
+                "style": line_style_key(style.last_price_line.style),
+            },
+            "separator": {
+                "color": s.subpane_separator_style.color,
+                "hoverColor": s.subpane_separator_style.hover_color,
+                "thickness": s.subpane_separator_style.line_thickness_css,
+                "hitArea": s.subpane_separator_style.hit_area_css,
+            },
+        });
+
+        let pane_entries: Vec<PersistedSubPane> = s
+            .subpanes
+            .iter()
+            .map(|sp| PersistedSubPane {
+                id: sp.id,
+                study_id: sp.study_id,
+                indicator_type: sp.indicator_type.clone(),
+                height_css: sp.get_height(),
+                auto_scale: sp.auto_scale,
+                price_min: sp.viewport.price_min,
+                price_max: sp.viewport.price_max,
+            })
+            .collect();
+
+        let drawings = DrawingStore {
+            version: DRAWING_STORE_VERSION,
+            main: s.engine.drawings.snapshot(),
+            subpanes: s
+                .subpanes
+                .iter()
+                .map(|sp| PaneDrawingStore {
+                    pane_id: sp.id,
+                    drawings: sp.drawings.snapshot(),
+                })
+                .collect(),
+        };
+
+        let snapshot = ChartPersistenceState {
+            version: CHART_PERSISTENCE_VERSION,
+            layout_id: layout_id.unwrap_or_default(),
+            options,
+            viewport: PersistedViewport {
+                start_bar: viewport.start_bar,
+                end_bar: viewport.end_bar,
+                price_min: viewport.price_min,
+                price_max: viewport.price_max,
+                price_locked: viewport.price_locked,
+                price_scale_mode: price_scale_mode_key(viewport.price_scale_mode).to_string(),
+                scale_margin_top: viewport.scale_margin_top,
+                scale_margin_bottom: viewport.scale_margin_bottom,
+                auto_scroll: viewport.auto_scroll,
+            },
+            panes: pane_entries,
+            drawings,
+        };
+
+        serde_json::to_string(&snapshot).unwrap_or_else(|_| {
+            r#"{"version":1,"layoutId":"","options":{},"viewport":{"startBar":0,"endBar":100,"priceMin":0,"priceMax":100,"priceLocked":false,"priceScaleMode":"normal","scaleMarginTop":0.2,"scaleMarginBottom":0.1,"autoScroll":true},"panes":[],"drawings":{"version":1,"main":{"version":1,"drawings":[]},"subpanes":[]}}"#.to_string()
+        })
+    }
+
+    /// Restore a full chart persistence snapshot (styles + viewport + pane layout + drawings).
+    pub fn import_persistence_state(&mut self, json: &str) -> Result<(), JsValue> {
+        let snapshot: ChartPersistenceState = serde_json::from_str(json)
+            .map_err(|e| js_err(format!("Invalid persistence JSON: {e}")))?;
+
+        if snapshot.version > CHART_PERSISTENCE_VERSION {
+            return Err(js_err(format!(
+                "Unsupported persistence version {} (max supported {})",
+                snapshot.version, CHART_PERSISTENCE_VERSION
+            )));
+        }
+
+        self.apply_options(json_value_to_js(&snapshot.options));
+
+        {
+            let mut s = self.inner.borrow_mut();
+            let vp = &mut s.engine.viewport;
+            vp.set_price_scale_mode(raycore::PriceScaleMode::from_str(
+                snapshot.viewport.price_scale_mode.as_str(),
+            ));
+            vp.set_range(snapshot.viewport.start_bar, snapshot.viewport.end_bar);
+            vp.price_min = snapshot.viewport.price_min;
+            vp.price_max = snapshot.viewport.price_max;
+            vp.price_locked = snapshot.viewport.price_locked;
+            vp.scale_margin_top = snapshot.viewport.scale_margin_top.clamp(0.0, 0.5);
+            vp.scale_margin_bottom = snapshot.viewport.scale_margin_bottom.clamp(0.0, 0.5);
+            vp.auto_scroll = snapshot.viewport.auto_scroll;
+        }
+
+        let existing_descriptors: Vec<(u32, u32, String)> = {
+            let s = self.inner.borrow();
+            s.subpanes
+                .iter()
+                .map(|sp| (sp.id, sp.study_id, sp.indicator_type.clone()))
+                .collect()
+        };
+
+        let mut pane_id_map: HashMap<u32, u32> = HashMap::new();
+        let mut used_existing: HashSet<u32> = HashSet::new();
+
+        for pane in &snapshot.panes {
+            if existing_descriptors.iter().any(|(id, _, _)| *id == pane.id) {
+                pane_id_map.insert(pane.id, pane.id);
+                used_existing.insert(pane.id);
+            }
+        }
+
+        for pane in &snapshot.panes {
+            if pane_id_map.contains_key(&pane.id) {
+                continue;
+            }
+            if let Some((matched_id, _, _)) = existing_descriptors.iter().find(|(id, study, kind)| {
+                !used_existing.contains(id)
+                    && *study == pane.study_id
+                    && kind.as_str() == pane.indicator_type.as_str()
+            }) {
+                pane_id_map.insert(pane.id, *matched_id);
+                used_existing.insert(*matched_id);
+            }
+        }
+
+        for pane in &snapshot.panes {
+            if pane_id_map.contains_key(&pane.id) {
+                continue;
+            }
+            let study_exists = {
+                let s = self.inner.borrow();
+                s.engine
+                    .studies
+                    .get_study(raycore::StudyId(pane.study_id))
+                    .is_some()
+            };
+            if !study_exists {
+                continue;
+            }
+            let created_id =
+                self.add_indicator_pane(pane.study_id, &pane.indicator_type, pane.height_css);
+            if created_id > 0 {
+                pane_id_map.insert(pane.id, created_id);
+            }
+        }
+
+        let keep_ids: HashSet<u32> = pane_id_map.values().copied().collect();
+        let current_ids: Vec<u32> = {
+            let s = self.inner.borrow();
+            s.subpanes.iter().map(|sp| sp.id).collect()
+        };
+        for pane_id in current_ids {
+            if !keep_ids.contains(&pane_id) {
+                let _ = self.remove_indicator_pane(pane_id);
+            }
+        }
+
+        {
+            let mut s = self.inner.borrow_mut();
+            for pane in &snapshot.panes {
+                let Some(actual_id) = pane_id_map.get(&pane.id).copied() else {
+                    continue;
+                };
+                if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == actual_id) {
+                    sp.set_height(pane.height_css);
+                    sp.auto_scale = pane.auto_scale;
+                    sp.viewport.price_min = pane.price_min;
+                    sp.viewport.price_max = pane.price_max;
+                    sp.viewport.price_locked = !pane.auto_scale;
+                }
+            }
+        }
+
+        let mut remapped_drawings = snapshot.drawings.clone();
+        remapped_drawings.subpanes = remapped_drawings
+            .subpanes
+            .into_iter()
+            .filter_map(|mut pane| {
+                let mapped = pane_id_map.get(&pane.pane_id).copied()?;
+                pane.pane_id = mapped;
+                Some(pane)
+            })
+            .collect();
+
+        let drawings_json = serde_json::to_string(&remapped_drawings)
+            .map_err(|e| js_err(format!("Failed to serialize remapped drawings: {e}")))?;
+        self.import_drawings(&drawings_json)?;
+
+        self.mark_dirty();
+        Ok(())
+    }
+
+    /// Export all drawings (main pane + indicator subpanes) as JSON.
+    ///
+    /// The returned string is versioned and can be stored externally.
+    pub fn export_drawings(&self) -> String {
+        let s = self.inner.borrow();
+        let payload = DrawingStore {
+            version: DRAWING_STORE_VERSION,
+            main: s.engine.drawings.snapshot(),
+            subpanes: s
+                .subpanes
+                .iter()
+                .map(|sp| PaneDrawingStore {
+                    pane_id: sp.id,
+                    drawings: sp.drawings.snapshot(),
+                })
+                .collect(),
+        };
+
+        serde_json::to_string(&payload).unwrap_or_else(|_| {
+            r#"{"version":1,"main":{"version":1,"drawings":[]},"subpanes":[]}"#.to_string()
+        })
+    }
+
+    /// Restore all drawings (main pane + indicator subpanes) from JSON.
+    ///
+    /// Existing drawings are replaced. Unknown subpane IDs in the payload are ignored.
+    pub fn import_drawings(&mut self, json: &str) -> Result<(), JsValue> {
+        let payload: DrawingStore = serde_json::from_str(json)
+            .map_err(|e| js_err(format!("Invalid drawing snapshot JSON: {e}")))?;
+
+        if payload.version > DRAWING_STORE_VERSION {
+            return Err(js_err(format!(
+                "Unsupported drawing store version {} (max supported {})",
+                payload.version, DRAWING_STORE_VERSION
+            )));
+        }
+
+        let mut s = self.inner.borrow_mut();
+        s.engine
+            .drawings
+            .replace_from_snapshot(payload.main)
+            .map_err(js_err)?;
+
+        // Clear all subpane drawings first so restore is deterministic.
+        for sp in s.subpanes.iter_mut() {
+            sp.drawings.clear();
+        }
+
+        for pane_store in payload.subpanes {
+            if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pane_store.pane_id) {
+                sp.drawings
+                    .replace_from_snapshot(pane_store.drawings)
+                    .map_err(|e| {
+                        js_err(format!(
+                            "Failed to restore drawings for subpane {}: {}",
+                            pane_store.pane_id, e
+                        ))
+                    })?;
+            }
+        }
+
+        self.dirty.set(true);
+        Ok(())
     }
 
     // ── Runtime Style Configuration API ────────────────────────────────────────
