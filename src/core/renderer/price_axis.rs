@@ -194,8 +194,11 @@ impl PriceAxisRenderer {
     }
 
     /// Render the base layer: background, border, tick marks, tick labels.
-    /// `pane_h` is the pane height in physical pixels (used to know data area height).
-    pub fn render_base(&mut self, style: &ChartStyle, ticks: &[TickMark], pane_h: f64) {
+    ///
+    /// LWC behaviour: tick marks are clipped against the full canvas bounds,
+    /// NOT the data/candle area. This allows ticks to render into the margin
+    /// areas (e.g. below the candle area where volume is shown).
+    pub fn render_base(&mut self, style: &ChartStyle, ticks: &[TickMark]) {
         let w = self.pw as f64;
         let h = self.ph as f64;
         let dpr = self.dpr;
@@ -214,6 +217,7 @@ impl PriceAxisRenderer {
         }
 
         // Tick marks (small horizontal bars at the border edge)
+        // Clipped against full canvas height (h), not candle area
         let tick_length = (style.axis_tick_length as f64 * dpr).round();
         let tick_height = (1.0 * dpr).floor().max(1.0);
         let tick_offset = (dpr * 0.5).floor();
@@ -222,7 +226,7 @@ impl PriceAxisRenderer {
             self.base_ctx
                 .set_fill_style_str(&rgba(&style.axis_border_color));
             for t in ticks {
-                if t.pixel < 0.0 || t.pixel > pane_h {
+                if t.pixel < 0.0 || t.pixel > h {
                     continue;
                 }
                 let y = t.pixel.round();
@@ -247,11 +251,13 @@ impl PriceAxisRenderer {
         let padding_inner_css = style.price_axis_padding_inner();
         let text_x_css = tick_length / dpr + padding_inner_css;
 
+        // Clip labels against full canvas height
+        let h_css = h / dpr;
         for t in ticks {
-            if t.pixel < 0.0 || t.pixel > pane_h {
+            let y_css = t.pixel / dpr;
+            if y_css < 0.0 || y_css > h_css {
                 continue;
             }
-            let y_css = t.pixel / dpr;
             // yMidCorrection: precise centering using actualBoundingBoxAscent/Descent
             let m = self
                 .text_cache

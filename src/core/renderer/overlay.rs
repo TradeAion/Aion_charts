@@ -403,6 +403,11 @@ impl OverlayRenderer {
     /// Each line starts at the currently printing point and extends to the
     /// price axis edge, so it stays visually connected to the live print.
     /// Style is controlled by `style.last_price_line` (LWC-like options).
+    ///
+    /// LWC behaviour: the price line is clipped against the FULL pane height,
+    /// not just the candle area.  This allows the line to remain visible even
+    /// when the price is near the bottom of the candle area (approaching the
+    /// volume region).
     pub fn render_last_price_lines(
         &self,
         series: &SeriesCollection,
@@ -420,7 +425,6 @@ impl OverlayRenderer {
         let dpr = self.dpr;
         let pane_pw = pane_css_w * dpr;
         let pane_ph = pane_css_h * dpr;
-        let candle_h = pane_ph * viewport.candle_height_frac();
 
         let line_w = (style.last_price_line.width * dpr).floor().max(1.0);
         let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
@@ -430,11 +434,15 @@ impl OverlayRenderer {
         set_canvas_line_dash(&self.ctx, style.last_price_line.style, line_w);
 
         // Main series (candles / line / area / bars / baseline)
+        // LWC clips against pane bounds, not candle area — the line stays
+        // visible as long as it's within the pane, even if the price scale
+        // has scrolled the last value near or into the volume region.
         if bars.len() > 0 {
             if let Some(last) = bars.get(bars.len() - 1) {
                 let x_anchor = bar_to_x((bars.len() - 1) as f64 + 0.5, viewport, pane_pw);
                 let y_phys = price_to_pane_y_phys(last.close as f64, viewport, pane_ph);
-                if x_anchor >= 0.0 && x_anchor < pane_pw && y_phys >= 0.0 && y_phys <= candle_h {
+                // Clip to full pane height (LWC: y < 0 || y > bitmapSize.height)
+                if x_anchor >= 0.0 && x_anchor < pane_pw && y_phys >= 0.0 && y_phys <= pane_ph {
                     let y = y_phys.round() + correction;
                     self.ctx
                         .set_stroke_style_str(&rgba(&if last.close >= last.open {
@@ -500,7 +508,8 @@ impl OverlayRenderer {
             };
             let x_anchor = bar_to_x(bar_idx + 0.5, viewport, pane_pw);
             let y_phys = price_to_pane_y_phys(last_price, viewport, pane_ph);
-            if x_anchor < 0.0 || x_anchor >= pane_pw || y_phys < 0.0 || y_phys > candle_h {
+            // Clip to full pane height (LWC behaviour)
+            if x_anchor < 0.0 || x_anchor >= pane_pw || y_phys < 0.0 || y_phys > pane_ph {
                 continue;
             }
 

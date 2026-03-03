@@ -148,11 +148,11 @@ impl WidgetLayout {
         pane_container.append_child(&pane.chart)?;
         pane_container.append_child(&pane.top)?;
 
-        // ── Price axis container — right side, spans full chart height ──
+        // ── Price axis container — right side, spans main pane only ──
         let price_axis_container = create_widget_container(&doc, "raycore-price-axis")?;
         price_axis_container.style().set_css_text(
             "position:relative;overflow:hidden;\
-             grid-column:2;grid-row:1/3;\
+             grid-column:2;grid-row:1;\
              min-width:0;min-height:0;\
              z-index:2;\
              cursor:ns-resize;\
@@ -216,13 +216,16 @@ impl WidgetLayout {
         set_style_property_if_needed(&style, "grid-template-columns", &cols);
         set_style_property_if_needed(&style, "grid-template-rows", &rows);
 
-        // Default (no subpanes): time axis is row 2 and spans full width; price axis spans full height.
+        // Time axis is row 2 and spans full width (under both pane and price axis).
         let time_axis_style = self.time_axis_container.style();
         set_style_property_if_needed(&time_axis_style, "grid-row", "2");
         set_style_property_if_needed(&time_axis_style, "grid-column", "1/3");
 
+        // Price axis spans only row 1 (main pane) — matches the pane height,
+        // not extending into the time axis row. This matches LWC behaviour
+        // where the right price scale covers only the chart area.
         let price_axis_style = self.price_axis_container.style();
-        set_style_property_if_needed(&price_axis_style, "grid-row", "1/3");
+        set_style_property_if_needed(&price_axis_style, "grid-row", "1");
     }
 
     /// Update grid sizing with subpane support.

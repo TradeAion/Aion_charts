@@ -756,7 +756,8 @@ impl SubPane {
         if ph <= 0.0 {
             return 0.0;
         }
-        let y_ticks = compute_y_ticks(&self.viewport, ph, self.dpr, style);
+        // Subpanes have no volume area, so pane_h == candle_h
+        let y_ticks = compute_y_ticks(&self.viewport, ph, ph, self.dpr, style);
         self.price_axis.measure_tick_label_width(style, &y_ticks)
     }
 
@@ -779,13 +780,14 @@ impl SubPane {
         }
 
         // Compute Y tick marks for this sub-pane's viewport
-        let y_ticks = compute_y_ticks(&self.viewport, ph, dpr, style);
+        // Subpanes have no volume area, so pane_h == candle_h
+        let y_ticks = compute_y_ticks(&self.viewport, ph, ph, dpr, style);
 
         // Render chart area (grid, reference lines, data lines)
         self.render_chart(main_viewport, style, &y_ticks, x_ticks);
 
         // Render price axis base layer (ticks + labels)
-        self.price_axis.render_base(style, &y_ticks, ph);
+        self.price_axis.render_base(style, &y_ticks);
 
         // Render last-value indicator labels on the price axis (colored pills)
         let last_values: Vec<(f64, [f32; 4])> = self

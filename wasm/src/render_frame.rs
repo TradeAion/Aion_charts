@@ -91,7 +91,7 @@ pub(crate) fn do_render_frame(
     }
     let candle_ph = pane_ph * s.engine.viewport.candle_height_frac();
     let provisional_y_ticks =
-        tick_marks::compute_y_ticks(&s.engine.viewport, candle_ph, dpr, &s.engine.style);
+        tick_marks::compute_y_ticks(&s.engine.viewport, pane_ph, candle_ph, dpr, &s.engine.style);
 
     // 2. Measure price axis width using full label set, then update grid layout.
     {
@@ -151,7 +151,7 @@ pub(crate) fn do_render_frame(
 
     let y_ticks = {
         let candle_ph = pane_ph * s.engine.viewport.candle_height_frac();
-        tick_marks::compute_y_ticks(&s.engine.viewport, candle_ph, dpr, &s.engine.style)
+        tick_marks::compute_y_ticks(&s.engine.viewport, pane_ph, candle_ph, dpr, &s.engine.style)
     };
     let x_ticks = tick_marks::compute_x_ticks(&s.engine.viewport, &s.engine.bars, pane_pw, dpr);
 
@@ -260,8 +260,7 @@ pub(crate) fn do_render_frame(
             ref active_subpane_id,
             ..
         } = *s;
-        let candle_ph = pane_ph * engine.viewport.candle_height_frac();
-        price_axis_renderer.render_base(&engine.style, &y_ticks, candle_ph);
+        price_axis_renderer.render_base(&engine.style, &y_ticks);
         price_axis_renderer.render_last_price_labels(
             &engine.series,
             &engine.bars,
