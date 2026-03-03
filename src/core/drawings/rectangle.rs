@@ -1,8 +1,6 @@
 //! Rectangle drawing — 2-anchor filled rectangle with border.
 
-use super::drawing::{
-    next_drawing_id, point_to_bitmap, point_to_css, Drawing,
-};
+use super::drawing::{next_drawing_id, point_to_bitmap, point_to_css, Drawing};
 use super::hit_test;
 use super::types::*;
 use crate::core::renderer::draw_list::{ColoredLine, ColoredRect};
@@ -70,12 +68,7 @@ impl Drawing for RectangleDrawing {
         let bottom = y0.max(y1);
 
         // Check 4-corner anchors first: TL, TR, BR, BL.
-        let corners = [
-            (left, top),
-            (right, top),
-            (right, bottom),
-            (left, bottom),
-        ];
+        let corners = [(left, top), (right, top), (right, bottom), (left, bottom)];
         for (i, (ax, ay)) in corners.into_iter().enumerate() {
             let d = hit_test::point_to_circle_distance(cx, cy, ax, ay);
             if d <= hit_test::ANCHOR_HIT_THRESHOLD_CSS {

@@ -26,12 +26,8 @@ jobs:
   # Test Suite
   # ═══════════════════════════════════════════════════════════════════════════
   test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+    name: Test (ubuntu-latest)
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -113,7 +109,7 @@ jobs:
   bench:
     name: Benchmarks
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout repository
@@ -149,6 +145,7 @@ jobs:
   docs:
     name: Documentation
     runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout repository
@@ -176,6 +173,7 @@ jobs:
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout repository

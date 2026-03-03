@@ -20,12 +20,12 @@
 use raycore::{
     generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions, BaselineSeriesOptions,
     Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup, ChartPaneId, ChartStyle,
-    CrosshairMagnetMode, CrosshairSnapshot, DataRange, HistogramPoint, HistogramSeriesOptions,
-    HitZone, InteractionHandler, LinePoint, LineSeriesOptions, LineStyle, MainChartType,
-    MarkerPosition, MarkerShape, MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint,
+    CrosshairMagnetMode, CrosshairSnapshot, DataRange, GpuContext, HistogramPoint,
+    HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint, LineSeriesOptions, LineStyle,
+    MainChartType, MarkerPosition, MarkerShape, MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint,
     OverlayRenderer, PriceAxisRenderer, PriceLineOptions, RendererBackend, ResourceLimits,
     RuntimeEvent, SeriesId, SeriesMarker, SnapshotMtfResolver, TimeAxisRenderer, TimeRange,
-    Viewport, GpuContext, WgpuRenderer,
+    Viewport, WgpuRenderer,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -216,7 +216,10 @@ async fn resolve_renderer_backend(
     pane_ph: u32,
     dpr: f64,
 ) -> Result<RendererResolution, JsValue> {
-    let try_webgpu = matches!(requested, RendererModeRequest::Auto | RendererModeRequest::WebGpu);
+    let try_webgpu = matches!(
+        requested,
+        RendererModeRequest::Auto | RendererModeRequest::WebGpu
+    );
     let mut fallback_reason = None;
 
     if try_webgpu {
@@ -972,11 +975,13 @@ impl RayCore {
         // Engine only manages the pane
         let mut engine = ChartEngine::new(backend, pane_pw.max(1), pane_ph.max(1), dpr);
         if let Some(reason) = resolution.fallback_reason.clone() {
-            engine.event_bus.emit(raycore::ChartEvent::RendererFallback {
-                requested: requested_renderer.as_str().to_string(),
-                active: active_renderer_name.clone(),
-                reason,
-            });
+            engine
+                .event_bus
+                .emit(raycore::ChartEvent::RendererFallback {
+                    requested: requested_renderer.as_str().to_string(),
+                    active: active_renderer_name.clone(),
+                    reason,
+                });
         }
         let mtf_resolver = Arc::new(SnapshotMtfResolver::default());
         engine.indicators.set_mtf_resolver(mtf_resolver.clone());

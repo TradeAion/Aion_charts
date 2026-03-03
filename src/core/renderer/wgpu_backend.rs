@@ -742,17 +742,25 @@ impl ChartRenderer for WgpuRenderer {
             match command.primitive {
                 crate::core::renderer::line_generator::IndicatorGeometryPrimitive::Rect(rect) => {
                     if !pending_lines.is_empty() {
-                        let count =
-                            self.upload_lines(&pending_lines, ctx.viewport.width, ctx.viewport.height);
+                        let count = self.upload_lines(
+                            &pending_lines,
+                            ctx.viewport.width,
+                            ctx.viewport.height,
+                        );
                         self.draw_line_pass(count);
                         pending_lines.clear();
                     }
                     pending_rects.push(rect);
                 }
-                crate::core::renderer::line_generator::IndicatorGeometryPrimitive::Line(segment) => {
+                crate::core::renderer::line_generator::IndicatorGeometryPrimitive::Line(
+                    segment,
+                ) => {
                     if !pending_rects.is_empty() {
-                        let count =
-                            self.upload_rects(&pending_rects, ctx.viewport.width, ctx.viewport.height);
+                        let count = self.upload_rects(
+                            &pending_rects,
+                            ctx.viewport.width,
+                            ctx.viewport.height,
+                        );
                         self.draw_rect_pass(count);
                         pending_rects.clear();
                     }
@@ -820,58 +828,58 @@ impl ChartRenderer for WgpuRenderer {
         Ok(())
     }
 }
-    #[inline]
-    fn push_line_segment(
-        out: &mut Vec<LineSegment>,
-        x1: f32,
-        y1: f32,
-        x2: f32,
-        y2: f32,
-        width: f32,
-        color: [f32; 4],
-    ) {
-        let correction = if (width as i32) % 2 == 1 { 0.5 } else { 0.0 };
-        out.push(LineSegment {
-            x1: x1 + correction,
-            y1: y1 + correction,
-            x2: x2 + correction,
-            y2: y2 + correction,
-            width,
-            r: color[0],
-            g: color[1],
-            b: color[2],
-            a: color[3],
-            _pad: 0.0,
-        });
+#[inline]
+fn push_line_segment(
+    out: &mut Vec<LineSegment>,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    width: f32,
+    color: [f32; 4],
+) {
+    let correction = if (width as i32) % 2 == 1 { 0.5 } else { 0.0 };
+    out.push(LineSegment {
+        x1: x1 + correction,
+        y1: y1 + correction,
+        x2: x2 + correction,
+        y2: y2 + correction,
+        width,
+        r: color[0],
+        g: color[1],
+        b: color[2],
+        a: color[3],
+        _pad: 0.0,
+    });
+}
+
+fn append_styled_line_segments(out: &mut Vec<LineSegment>, line: &ColoredLine) {
+    let width = line.width.max(1.0);
+    let color = [line.r, line.g, line.b, line.a];
+    let dx = line.x1 - line.x0;
+    let dy = line.y1 - line.y0;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len <= 0.0001 {
+        return;
     }
 
-    fn append_styled_line_segments(out: &mut Vec<LineSegment>, line: &ColoredLine) {
-        let width = line.width.max(1.0);
-        let color = [line.r, line.g, line.b, line.a];
-        let dx = line.x1 - line.x0;
-        let dy = line.y1 - line.y0;
-        let len = (dx * dx + dy * dy).sqrt();
-        if len <= 0.0001 {
-            return;
-        }
-
-        let dash = line.dash.max(0.0);
-        let gap = line.gap.max(0.0);
-        if dash <= 0.0 || gap <= 0.0 {
-            push_line_segment(out, line.x0, line.y0, line.x1, line.y1, width, color);
-            return;
-        }
-
-        let ux = dx / len;
-        let uy = dy / len;
-        let mut pos = 0.0f32;
-        while pos < len {
-            let end = (pos + dash).min(len);
-            let sx = line.x0 + ux * pos;
-            let sy = line.y0 + uy * pos;
-            let ex = line.x0 + ux * end;
-            let ey = line.y0 + uy * end;
-            push_line_segment(out, sx, sy, ex, ey, width, color);
-            pos += dash + gap;
-        }
+    let dash = line.dash.max(0.0);
+    let gap = line.gap.max(0.0);
+    if dash <= 0.0 || gap <= 0.0 {
+        push_line_segment(out, line.x0, line.y0, line.x1, line.y1, width, color);
+        return;
     }
+
+    let ux = dx / len;
+    let uy = dy / len;
+    let mut pos = 0.0f32;
+    while pos < len {
+        let end = (pos + dash).min(len);
+        let sx = line.x0 + ux * pos;
+        let sy = line.y0 + uy * pos;
+        let ex = line.x0 + ux * end;
+        let ey = line.y0 + uy * end;
+        push_line_segment(out, sx, sy, ex, ey, width, color);
+        pos += dash + gap;
+    }
+}
