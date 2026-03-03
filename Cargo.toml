@@ -7,7 +7,7 @@ name = "raycore"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.83"
-description = "RayCore — high-performance GPU-accelerated charting engine"
+description = "RayCore — high-performance Canvas2D charting engine"
 
 [features]
 default = []
@@ -18,8 +18,6 @@ name = "raycore"
 path = "src/lib.rs"
 
 [dependencies]
-wgpu = "28.0"
-bytemuck = { version = "1.21", features = ["derive"] }
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -27,7 +25,6 @@ sha2 = "0.10"
 arrow = "55.2.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-pollster = "0.4"
 env_logger = "0.11"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

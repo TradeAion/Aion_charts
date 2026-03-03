@@ -1,12 +1,11 @@
 //! Line geometry generator — produces geometry for line series.
 //!
 //! Supports two rendering modes:
-//! - **LineSegment**: Smooth anti-aliased diagonal lines via GPU line pipeline.
-//!   Used by WebGPU backend for high-quality rendering.
-//! - **ColoredRect**: Staircase/walk-line approach as fallback for Canvas2D.
+//! - **LineSegment**: Smooth anti-aliased diagonal lines for Canvas2D stroke rendering.
+//! - **ColoredRect**: Staircase/walk-line approach as an alternative.
 //!
 //! The LineSegment approach produces proper diagonal lines that connect data
-//! points directly, rendered with anti-aliasing by the line.wgsl shader.
+//! points directly, rendered with anti-aliasing by Canvas2D.
 
 use crate::core::indicators::render::types::{DrawInstruction, RenderOrderKey};
 use crate::core::renderer::baseline_utils::emit_split_segment_by_baseline;
@@ -141,12 +140,12 @@ pub fn generate_line_series_points(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// LineSegment Generators (GPU anti-aliased lines)
+// LineSegment Generators (anti-aliased lines)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Generate LineSegment elements for a line series (Solid style only).
 ///
-/// Produces smooth anti-aliased diagonal line segments for GPU rendering.
+/// Produces smooth anti-aliased diagonal line segments for rendering.
 /// Each segment connects two consecutive data points directly.
 ///
 /// Dashed line series (Dotted, Dashed, LargeDashed, SparseDotted) are skipped
@@ -1244,7 +1243,7 @@ pub fn generate_all_line_rects(
 
 /// Generate LineSegments for ALL visible overlay line series (line, area, baseline).
 ///
-/// This is used by the WebGPU backend to render smooth anti-aliased indicator lines.
+/// This is used by the Canvas2D backend to render smooth anti-aliased indicator lines.
 /// Histogram and Bar series don't use line segments — they continue to use rects.
 ///
 /// Returns (line_segments, fill_rects) where:

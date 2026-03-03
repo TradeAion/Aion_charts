@@ -1,8 +1,8 @@
-//! # RayCore — High-Performance GPU-Accelerated Charting Engine
+//! # RayCore — High-Performance Canvas2D Charting Engine
 //!
 //! RayCore is a Rust/WebAssembly financial charting library designed for
-//! professional-grade performance and visual quality. It uses WebGPU for
-//! hardware-accelerated rendering on both native and web platforms.
+//! professional-grade performance and visual quality. It uses Canvas2D for
+//! reliable, high-quality rendering on web platforms.
 //!
 //! ## Architecture Overview
 //!
@@ -10,7 +10,7 @@
 //! Lightweight Charts (LWC):
 //!
 //! - **Pane System**: Multiple panes with independent price scales
-//! - **Layered Rendering**: Separate base (GPU) and overlay (Canvas2D) layers
+//! - **Layered Rendering**: Separate base and overlay (Canvas2D) layers
 //! - **Widget Components**: Price axis, time axis, and chart pane as separate DOM elements
 //! - **Shared State**: Unified viewport and data management across all widgets
 //!
@@ -37,7 +37,7 @@
 //! - [`core::data`] — OHLCV bar storage with O(1) append operations
 //! - [`core::viewport`] — Coordinate transformations and price scaling
 //! - [`core::engine`] — Central chart engine coordinating all components
-//! - [`core::renderer`] — GPU and Canvas2D rendering backends
+//! - [`core::renderer`] — Canvas2D rendering backend
 //! - [`core::interaction`] — Mouse/touch event handling
 //! - [`core::studies`] — Technical indicators (SMA, EMA, RSI, MACD)
 //! - [`core::drawings`] — User annotations (trend lines, rays, etc.)
@@ -52,7 +52,7 @@
 //! | `BarArray::set` | O(n) | Bulk data load |
 //! | `Viewport::zoom` | O(1) | Sub-microsecond |
 //! | `Viewport::auto_fit_price` | O(k) | k = visible bars |
-//! | GPU render pass | O(n) | n = visible candles |
+//! | Canvas2D render pass | O(n) | n = visible candles |
 //!
 //! ## Feature Flags
 //!
@@ -60,8 +60,7 @@
 //!
 //! ## Platform Support
 //!
-//! - **Native**: Windows, macOS, Linux via wgpu's native backends
-//! - **Web**: Chrome, Firefox, Safari via WebGPU (with Canvas2D fallback)
+//! - **Web**: Chrome, Firefox, Safari via Canvas2D
 
 pub mod core;
 pub mod group;
@@ -110,15 +109,6 @@ pub use crate::core::renderer::geometry_generator;
 
 /// Price/time axis tick mark computation.
 pub use crate::core::renderer::tick_marks;
-
-/// GPU context management.
-pub use crate::core::renderer::wgpu_context::GpuContext;
-
-/// WebGPU renderer implementation.
-pub use crate::core::renderer::wgpu_backend::WgpuRenderer;
-
-/// GPU pipeline management.
-pub use crate::core::renderer::pipeline_manager::PipelineManager;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Re-exports: Interaction

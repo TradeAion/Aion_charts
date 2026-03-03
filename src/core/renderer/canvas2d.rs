@@ -347,7 +347,9 @@ impl ChartRenderer for Canvas2DRenderer {
                     }
                     pending_rects.push(rect);
                 }
-                crate::core::renderer::line_generator::IndicatorGeometryPrimitive::Line(segment) => {
+                crate::core::renderer::line_generator::IndicatorGeometryPrimitive::Line(
+                    segment,
+                ) => {
                     if !pending_rects.is_empty() {
                         self.draw_rects(&pending_rects);
                         pending_rects.clear();

@@ -1,13 +1,11 @@
-//! Compact, GPU-friendly data structures for OHLCV bars.
+//! Compact data structures for OHLCV bars.
 //!
 //! This module provides the core data types for storing financial bar data
-//! (Open, High, Low, Close, Volume) in a format optimized for both GPU
-//! rendering and efficient real-time updates.
+//! (Open, High, Low, Close, Volume) in a format optimized for efficient
+//! real-time updates.
 //!
 //! # Design Principles
 //!
-//! - **GPU-Ready**: All structs are `#[repr(C)]` + bytemuck Pod/Zeroable for
-//!   zero-copy upload to GPU buffers
 //! - **Cache-Friendly**: 32-byte aligned structures fit cache lines
 //! - **Precision**: Timestamps are u64 (epoch millis), prices are f32 (7 significant digits)
 //! - **Streaming-Optimized**: O(1) append operations via pending buffer pattern
@@ -46,16 +44,14 @@
 //! ```
 
 use arrow::array::{Float32Array, Float32Builder, UInt64Array, UInt64Builder};
-use bytemuck::{Pod, Zeroable};
 
 /// Default chunk size for pending buffer before auto-flush (64 bars = 2KB)
 const DEFAULT_CHUNK_SIZE: usize = 64;
 
 /// A single OHLCV bar, 32 bytes, cache-line aligned.
 ///
-/// This struct is designed for efficient GPU upload and cache-friendly access:
+/// This struct is designed for cache-friendly access:
 /// - Uses `#[repr(C)]` for predictable memory layout
-/// - Implements bytemuck traits for zero-copy GPU transfer
 /// - 32-byte size aligns with common CPU cache lines
 ///
 /// # Fields
@@ -83,7 +79,7 @@ const DEFAULT_CHUNK_SIZE: usize = 64;
 /// assert!(bar.is_bullish()); // close > open
 /// ```
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[derive(Debug, Clone, Copy)]
 pub struct Bar {
     /// Unix timestamp in milliseconds.
     pub timestamp: u64,
@@ -135,7 +131,7 @@ impl Bar {
 /// The pending buffer auto-flushes when it reaches `chunk_size` bars,
 /// or can be manually flushed with `flush()`.
 pub struct BarArray {
-    // Immutable Arrow arrays (for reads and GPU upload)
+    // Immutable Arrow arrays (for reads)
     pub timestamps: UInt64Array,
     pub opens: Float32Array,
     pub highs: Float32Array,
@@ -152,7 +148,7 @@ pub struct BarArray {
     // Chunk size for auto-flush
     chunk_size: usize,
 
-    // Flag indicating pending changes need flush before GPU upload
+    // Flag indicating pending changes need flush before reads
     dirty: bool,
 }
 
@@ -390,7 +386,7 @@ impl BarArray {
     }
 
     /// Flush pending bars into the Arrow arrays.
-    /// Call this before GPU upload or when you need contiguous Arrow data.
+    /// Call this when you need contiguous Arrow data.
     pub fn flush(&mut self) {
         if self.pending.is_empty() {
             self.dirty = false;
@@ -436,14 +432,14 @@ impl BarArray {
     }
 
     /// Returns true if there are pending changes that haven't been flushed.
-    /// Check this before GPU upload to ensure data is coherent.
+    /// Check this to ensure data is coherent before reads.
     #[inline]
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }
 
     /// Ensure all data is in Arrow arrays (flush if needed).
-    /// Call this before accessing the raw Arrow arrays for GPU upload.
+    /// Call this before accessing the raw Arrow arrays.
     #[inline]
     pub fn ensure_flushed(&mut self) {
         if self.dirty {

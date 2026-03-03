@@ -2,10 +2,16 @@
   "name": "raycore-wasm",
   "version": "0.1.0",
   "type": "module",
-  "description": "High-performance WebGPU/Canvas2D charting engine — WASM build",
+  "description": "High-performance Canvas2D charting engine — WASM build",
   "main": "./wasm/pkg/raycore_wasm.js",
   "module": "./wasm/pkg/raycore_wasm.js",
   "types": "./wasm/pkg/raycore_wasm.d.ts",
+  "scripts": {
+    "build": "wasm-pack build --target web wasm",
+    "build:release": "wasm-pack build --target web --release wasm",
+    "serve": "python serve.py",
+    "dev": "python dev.py"
+  },
   "exports": {
     ".": {
       "types": "./wasm/pkg/raycore_wasm.d.ts",
@@ -22,7 +28,6 @@
   "keywords": [
     "chart",
     "charting",
-    "webgpu",
     "canvas",
     "trading",
     "wasm",

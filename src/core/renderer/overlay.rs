@@ -304,8 +304,7 @@ impl OverlayRenderer {
 
     /// Render dashed (non-Solid) line series via Canvas2D strokePath.
     ///
-    /// For Canvas2D backend: draws on the base chart canvas (same z-level as solid lines).
-    /// For WebGPU backend: draws on the overlay canvas (above the GPU surface).
+    /// Draws on the base chart canvas (same z-level as solid lines).
     ///
     /// Uses `setLineDash()` with the LWC dash table, then `beginPath/moveTo/lineTo/stroke`.
     pub fn render_dashed_series(
@@ -923,8 +922,7 @@ impl OverlayRenderer {
 
     /// Render persistent indicator labels emitted as `DrawInstruction::DrawLabel`.
     ///
-    /// Labels are drawn on the overlay canvas in physical pixels so they work
-    /// for both WebGPU and Canvas2D base renderers.
+    /// Labels are drawn on the overlay canvas in physical pixels.
     pub fn render_indicator_labels(
         &mut self,
         instructions: &[DrawInstruction],

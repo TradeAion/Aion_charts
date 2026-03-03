@@ -1,4 +1,4 @@
-//! Renderer subsystem — unified geometry + dumb renderers.
+//! Renderer subsystem — unified geometry + Canvas2D renderer.
 //!
 //! Architecture:
 //! - transforms.rs: coordinate conversion utilities (bar↔x, price↔y)
@@ -6,9 +6,6 @@
 //! - tick_marks.rs: shared tick computation (single source of truth)
 //! - geometry_generator.rs: single source of truth for candle/volume visual math
 //! - canvas2d.rs: dumb DrawList consumer (Canvas2D)
-//! - wgpu_backend.rs: dumb DrawList consumer (WebGPU instanced quads)
-//! - pipeline_manager.rs: single rect pipeline
-//! - wgpu_context.rs: GPU device/surface management
 //! - price_axis.rs: dedicated PriceAxisRenderer
 //! - time_axis.rs: dedicated TimeAxisRenderer
 //! - overlay.rs: crosshair lines, legend, and drawings on pane top canvas
@@ -33,11 +30,8 @@ pub mod baseline_utils;
 pub mod draw_list;
 pub mod geometry_generator;
 pub mod line_generator;
-pub mod pipeline_manager;
 pub mod series;
 pub mod tick_marks;
-pub mod wgpu_backend;
-pub mod wgpu_context;
 
 #[cfg(target_arch = "wasm32")]
 pub mod canvas2d;

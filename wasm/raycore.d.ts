@@ -123,14 +123,6 @@ export interface CreateChartOptions {
    */
   theme?: Theme;
   /**
-   * Renderer backend.
-   * - `'auto'`     — WebGPU when available, else Canvas2D
-   * - `'webgpu'`   — Force WebGPU (fails if unavailable)
-   * - `'canvas2d'` — Force Canvas2D
-   * @default 'auto'
-   */
-  renderer?: 'auto' | 'webgpu' | 'canvas2d';
-  /**
    * Enable automatic requestAnimationFrame loop.
    * Set `false` to render manually via `chart.render()`.
    * @default true
@@ -1207,12 +1199,12 @@ export declare class RayCore {
 
   // ── Misc ───────────────────────────────────────────────────────────────────
 
-  /** Name of the active renderer backend: `"webgpu"` or `"canvas2d"`. */
+  /** Name of the active renderer backend: `"canvas2d"`. */
   renderer_name(): string;
 
   /**
-   * Returns the list of available renderer backends in priority order.
-   * @example `["webgpu", "canvas2d"]`
+   * Returns the list of available renderer backends.
+   * @example `["canvas2d"]`
    */
   static get_supported_renderers(): string[];
 

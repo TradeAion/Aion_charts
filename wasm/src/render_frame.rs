@@ -157,8 +157,6 @@ pub(crate) fn do_render_frame(
         s.engine.v_pixel_ratio,
     );
 
-    let is_webgpu = s.engine.renderer_name() == "webgpu";
-
     // 6. Render overlay, dashed series, price lines, last price lines, drawings, crosshair, markers
     {
         let ChartInner {
@@ -175,126 +173,65 @@ pub(crate) fn do_render_frame(
         } else {
             engine.crosshair
         };
-        if is_webgpu {
-            let mut all_drawings = base_drawings;
-            all_drawings.extend(top_drawings);
-            overlay.render_with_drawings(
-                &main_crosshair,
-                &engine.style,
-                &all_drawings,
-                Some(&engine.bars),
-            );
-            overlay.render_dashed_series(
-                &engine.series,
-                &engine.viewport,
-                &bar_ts,
-                pane_pw,
-                pane_ph,
-                engine.v_pixel_ratio,
-                true,
-            );
-            overlay.render_price_lines(
-                &engine.price_lines,
-                &engine.viewport,
-                &engine.style,
-                pane_css_w,
-                pane_css_h,
-            );
-            overlay.render_last_price_lines(
-                &engine.series,
-                &engine.bars,
-                &engine.viewport,
-                &engine.style,
-                pane_css_w,
-                pane_css_h,
-                anim_time,
-            );
-            overlay.render_markers(
-                &engine.markers,
-                &engine.bars,
-                &engine.viewport,
-                &engine.style,
-                pane_css_w,
-                pane_css_h,
-            );
-            overlay.render_indicator_labels(
-                &indicator_draw_instructions,
-                &engine.bars,
-                &engine.viewport,
-                &engine.style,
-                pane_css_w,
-                pane_css_h,
-            );
-            overlay.render_crosshair_markers(
-                &main_crosshair,
-                &engine.series,
-                &engine.bars,
-                &bar_ts,
-                &engine.viewport,
-                &engine.style,
-                pane_css_w,
-                pane_css_h,
-            );
-        } else {
-            overlay.render_with_drawings(
-                &main_crosshair,
-                &engine.style,
-                &top_drawings,
-                Some(&engine.bars),
-            );
-            overlay.render_dashed_series(
-                &engine.series,
-                &engine.viewport,
-                &bar_ts,
-                pane_pw,
-                pane_ph,
-                engine.v_pixel_ratio,
-                false,
-            );
-            overlay.render_price_lines(
-                &engine.price_lines,
-                &engine.viewport,
-                &engine.style,
-                pane_css_w,
-                pane_css_h,
-            );
-            overlay.render_last_price_lines(
-                &engine.series,
-                &engine.bars,
-                &engine.viewport,
-                &engine.style,
-                pane_css_w,
-                pane_css_h,
-                anim_time,
-            );
-            overlay.render_markers(
-                &engine.markers,
-                &engine.bars,
-                &engine.viewport,
-                &engine.style,
-                pane_css_w,
-                pane_css_h,
-            );
-            overlay.render_base_drawings(&base_drawings);
-            overlay.render_indicator_labels(
-                &indicator_draw_instructions,
-                &engine.bars,
-                &engine.viewport,
-                &engine.style,
-                pane_css_w,
-                pane_css_h,
-            );
-            overlay.render_crosshair_markers(
-                &main_crosshair,
-                &engine.series,
-                &engine.bars,
-                &bar_ts,
-                &engine.viewport,
-                &engine.style,
-                pane_css_w,
-                pane_css_h,
-            );
-        }
+        // Canvas2D path: base-layer drawings on base canvas, top-layer on overlay
+        overlay.render_with_drawings(
+            &main_crosshair,
+            &engine.style,
+            &top_drawings,
+            Some(&engine.bars),
+        );
+        overlay.render_dashed_series(
+            &engine.series,
+            &engine.viewport,
+            &bar_ts,
+            pane_pw,
+            pane_ph,
+            engine.v_pixel_ratio,
+            false,
+        );
+        overlay.render_price_lines(
+            &engine.price_lines,
+            &engine.viewport,
+            &engine.style,
+            pane_css_w,
+            pane_css_h,
+        );
+        overlay.render_last_price_lines(
+            &engine.series,
+            &engine.bars,
+            &engine.viewport,
+            &engine.style,
+            pane_css_w,
+            pane_css_h,
+            anim_time,
+        );
+        overlay.render_markers(
+            &engine.markers,
+            &engine.bars,
+            &engine.viewport,
+            &engine.style,
+            pane_css_w,
+            pane_css_h,
+        );
+        overlay.render_base_drawings(&base_drawings);
+        overlay.render_indicator_labels(
+            &indicator_draw_instructions,
+            &engine.bars,
+            &engine.viewport,
+            &engine.style,
+            pane_css_w,
+            pane_css_h,
+        );
+        overlay.render_crosshair_markers(
+            &main_crosshair,
+            &engine.series,
+            &engine.bars,
+            &bar_ts,
+            &engine.viewport,
+            &engine.style,
+            pane_css_w,
+            pane_css_h,
+        );
     }
 
     // 7. Price axis — base (ticks + labels) + last price labels + price line labels + top (crosshair label)

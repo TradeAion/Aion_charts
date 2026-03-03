@@ -632,8 +632,8 @@
     }
 
     function updateBadge(name) {
-      badge.textContent = name === 'webgpu' ? 'WebGPU' : 'Canvas2D';
-      badge.className = 'badge' + (name === 'canvas2d' ? ' canvas2d' : '');
+      badge.textContent = 'Canvas2D';
+      badge.className = 'badge canvas2d';
     }
 
     function hexToRgba(hex) {
@@ -699,7 +699,6 @@
         const hostId = workspace.pane_host_id(paneId);
 
         core = await RayCore.create_chart(hostId, {
-          renderer,
           autoRender: true,
           theme: isDark ? 'dark' : 'light',
         });
@@ -1079,15 +1078,8 @@
     async function boot() {
       try {
         await init();
-        const renderers = RayCore.get_supported_renderers();
-        renderers.forEach(r => {
-          const btn = document.createElement('button');
-          btn.className = 'btn';
-          btn.textContent = r === 'webgpu' ? 'WebGPU' : 'Canvas2D';
-          btn.onclick = () => { if (currentRenderer !== r) createChart(r); };
-          rendererGroup.appendChild(btn);
-        });
-        await createChart(renderers.includes('webgpu') ? 'webgpu' : 'canvas2d');
+        updateBadge('canvas2d');
+        await createChart('canvas2d');
       } catch (e) {
         console.error(e);
         showError(`Init failed: ${e.message || e}`);

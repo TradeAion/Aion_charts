@@ -1,14 +1,10 @@
 //! Renderer trait — the abstraction layer between core logic and rendering backends.
 //!
-//! The `ChartRenderer` trait splits rendering into discrete phases so the
-//! WebGPU backend can use dedicated shader pipelines per element type
-//! (candles, volume, grid, lines, text, crosshair), while Canvas2D can
-//! use its existing DrawList approach as a fallback.
+//! The `ChartRenderer` trait splits rendering into discrete phases:
+//! candles, volume, grid, lines, text, crosshair — each as a separate pass.
 //!
-//! Borrow-checker constraint (wgpu): `begin_frame` acquires the
-//! SurfaceTexture + TextureView + CommandEncoder and stores them in `self`.
-//! Each `draw_*` method creates a short-lived RenderPass that drops
-//! immediately, avoiding self-referential borrows.
+//! The sole production backend is Canvas2D (WASM). A no-op backend exists
+//! for native compilation (benchmarks, tests).
 
 use crate::core::data::BarArray;
 use crate::core::indicators::render::types::DrawInstruction;
@@ -293,17 +289,10 @@ pub struct TickMark {
 
 /// The phased rendering trait. Every rendering backend implements this.
 ///
-/// The rendering pipeline is split into discrete phases so that:
-/// - The WebGPU backend can use dedicated shader pipelines per element type.
-/// - The Canvas2D fallback can use its existing DrawList approach.
-/// - The engine can call individual phases for custom z-ordering.
+/// The rendering pipeline is split into discrete phases so that the
+/// engine can call individual phases for custom z-ordering.
 ///
-/// **Borrow-checker contract (wgpu):**
-/// - `begin_frame` acquires the SurfaceTexture, creates a TextureView and
-///   CommandEncoder, storing them in `self`.
-/// - Each `draw_*` method creates a **short-lived** `RenderPass` that borrows
-///   the encoder, draws, and drops before the method returns.
-/// - `end_frame` submits the CommandEncoder and presents the surface.
+/// Canvas2D is the sole production backend.
 pub trait ChartRenderer {
     fn name(&self) -> &str;
     fn resize(&mut self, physical_width: u32, physical_height: u32, dpr: f64);
@@ -319,20 +308,18 @@ pub trait ChartRenderer {
     fn draw_grid(&mut self, ctx: &RenderContext) -> Result<(), String>;
 
     /// Draw candlesticks.
-    /// - WebGPU: OHLCV data -> instance buffer -> candle shader.
-    /// - Canvas2D: geometry_generator -> DrawList -> fill_rect loop.
+    /// Canvas2D: geometry_generator -> DrawList -> fill_rect loop.
     fn draw_candles(&mut self, ctx: &RenderContext) -> Result<(), String>;
 
     /// Draw volume bars.
-    /// - WebGPU: separate instance buffer + volume shader (or reuse rect pipeline).
-    /// - Canvas2D: geometry_generator -> DrawList.
+    /// Canvas2D: geometry_generator -> DrawList.
     fn draw_volume(&mut self, ctx: &RenderContext) -> Result<(), String>;
 
     /// Draw indicator/study lines (SMA, EMA, etc).
     fn draw_lines(&mut self, ctx: &RenderContext) -> Result<(), String>;
 
     /// Draw text labels (axis prices, timestamps).
-    /// WebGPU will use a texture atlas; Canvas2D uses fillText.
+    /// Canvas2D uses fillText.
     fn draw_text(&mut self, ctx: &RenderContext) -> Result<(), String>;
 
     /// Draw crosshair overlay. Kept as a separate pass so that in the future
@@ -357,99 +344,136 @@ pub trait ChartRenderer {
     }
 }
 
-/// Enum wrapper so ChartEngine can hold either renderer without dyn dispatch overhead.
+/// Enum wrapper so ChartEngine can hold the renderer without dyn dispatch overhead.
+/// Canvas2D is the sole production backend; Noop exists for native compilation.
 pub enum RendererBackend {
-    Wgpu(super::wgpu_backend::WgpuRenderer),
     #[cfg(target_arch = "wasm32")]
     Canvas2D(super::canvas2d::Canvas2DRenderer),
+    /// No-op backend for native builds (benchmarks, tests). Never renders anything.
+    #[cfg(not(target_arch = "wasm32"))]
+    Noop,
 }
 
 impl ChartRenderer for RendererBackend {
     fn name(&self) -> &str {
         match self {
-            Self::Wgpu(r) => r.name(),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.name(),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Noop => "noop",
         }
     }
 
     fn resize(&mut self, pw: u32, ph: u32, dpr: f64) {
         match self {
-            Self::Wgpu(r) => r.resize(pw, ph, dpr),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.resize(pw, ph, dpr),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Noop => {
+                let _ = (pw, ph, dpr);
+            }
         }
     }
 
     fn is_valid(&self) -> bool {
         match self {
-            Self::Wgpu(r) => r.is_valid(),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.is_valid(),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Noop => true,
         }
     }
 
     fn begin_frame(&mut self, ctx: &RenderContext) -> Result<(), String> {
         match self {
-            Self::Wgpu(r) => r.begin_frame(ctx),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.begin_frame(ctx),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Noop => {
+                let _ = ctx;
+                Ok(())
+            }
         }
     }
 
     fn draw_grid(&mut self, ctx: &RenderContext) -> Result<(), String> {
         match self {
-            Self::Wgpu(r) => r.draw_grid(ctx),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.draw_grid(ctx),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Noop => {
+                let _ = ctx;
+                Ok(())
+            }
         }
     }
 
     fn draw_candles(&mut self, ctx: &RenderContext) -> Result<(), String> {
         match self {
-            Self::Wgpu(r) => r.draw_candles(ctx),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.draw_candles(ctx),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Noop => {
+                let _ = ctx;
+                Ok(())
+            }
         }
     }
 
     fn draw_volume(&mut self, ctx: &RenderContext) -> Result<(), String> {
         match self {
-            Self::Wgpu(r) => r.draw_volume(ctx),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.draw_volume(ctx),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Noop => {
+                let _ = ctx;
+                Ok(())
+            }
         }
     }
 
     fn draw_lines(&mut self, ctx: &RenderContext) -> Result<(), String> {
         match self {
-            Self::Wgpu(r) => r.draw_lines(ctx),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.draw_lines(ctx),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Noop => {
+                let _ = ctx;
+                Ok(())
+            }
         }
     }
 
     fn draw_text(&mut self, ctx: &RenderContext) -> Result<(), String> {
         match self {
-            Self::Wgpu(r) => r.draw_text(ctx),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.draw_text(ctx),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Noop => {
+                let _ = ctx;
+                Ok(())
+            }
         }
     }
 
     fn draw_crosshair(&mut self, ctx: &RenderContext) -> Result<(), String> {
         match self {
-            Self::Wgpu(r) => r.draw_crosshair(ctx),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.draw_crosshair(ctx),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Noop => {
+                let _ = ctx;
+                Ok(())
+            }
         }
     }
 
     fn end_frame(&mut self) -> Result<(), String> {
         match self {
-            Self::Wgpu(r) => r.end_frame(),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.end_frame(),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Noop => Ok(()),
         }
     }
 }

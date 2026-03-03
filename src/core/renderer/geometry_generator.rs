@@ -1,7 +1,7 @@
 //! GeometryGenerator — single source of truth for ALL visual math.
 //!
 //! Takes Viewport, data, style → produces pixel-perfect ColoredRects.
-//! Both Canvas2D and WebGPU (fallback rect path) consume these identically.
+//! The Canvas2D renderer consumes these directly.
 //!
 //! Public API is split per element type so each ChartRenderer phase can
 //! request only the geometry it needs:
@@ -85,7 +85,7 @@ pub fn generate(
 
 /// Generate grid line rects (horizontal at price ticks, vertical at time ticks).
 /// This is the SINGLE SOURCE OF TRUTH for grid line generation.
-/// All renderers (Canvas2D, WebGPU, subpanes) should use this function.
+/// All renderers (Canvas2D, subpanes) should use this function.
 ///
 /// CURRENTLY DISABLED - returns empty vector.
 pub fn generate_grid_rects(
@@ -739,7 +739,7 @@ fn generate_area_fill_into(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Line Segment Generation (for GPU line pipeline)
+// Line Segment Generation (for Canvas2D line rendering)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 use crate::core::renderer::draw_list::{AreaSegment, LineSegment};
@@ -796,7 +796,7 @@ fn generate_main_area_points(
     points
 }
 
-/// Generate line segments for the GPU line pipeline (smooth anti-aliased lines).
+/// Generate line segments for the Canvas2D line rendering (smooth anti-aliased lines).
 pub fn generate_line_segments(
     bars: &crate::core::data::BarArray,
     viewport: &Viewport,

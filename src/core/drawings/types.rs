@@ -306,7 +306,7 @@ pub enum ZOrder {
 // ── Rendered geometry output ────────────────────────────────────────────────
 
 /// Pixel-space geometry produced by a drawing for one frame.
-/// Consumed by the renderer (Canvas2D or WebGPU rect pipeline).
+/// Consumed by the Canvas2D renderer.
 #[derive(Debug, Clone)]
 pub struct DrawingGeometry {
     pub lines: Vec<ColoredLine>,

@@ -1,9 +1,8 @@
 //! Viewport — manages the visible range of bars, zoom level, and
 //! coordinate conversions between bar-index/price space and pixel space.
 //!
-//! With the unified geometry architecture, the Viewport no longer produces
-//! GPU uniform blocks. Instead, GeometryGenerator uses Viewport's coordinate
-//! helpers to compute pixel-space rectangles.
+//! GeometryGenerator uses Viewport's coordinate helpers to compute
+//! pixel-space rectangles for the Canvas2D renderer.
 //!
 //! Supports multiple price scale modes: Normal, Logarithmic, Percentage, IndexedTo100.
 

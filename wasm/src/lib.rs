@@ -20,12 +20,12 @@
 use raycore::{
     generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions, BaselineSeriesOptions,
     Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup, ChartPaneId, ChartStyle,
-    CrosshairMagnetMode, CrosshairSnapshot, DataRange, GpuContext, HistogramPoint,
+    CrosshairMagnetMode, CrosshairSnapshot, DataRange, HistogramPoint,
     HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint, LineSeriesOptions, LineStyle,
     MainChartType, MarkerPosition, MarkerShape, MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint,
     OverlayRenderer, PriceAxisRenderer, PriceLineOptions, RendererBackend, ResourceLimits,
     RuntimeEvent, SeriesId, SeriesMarker, SnapshotMtfResolver, TimeAxisRenderer, TimeRange,
-    Viewport, WgpuRenderer,
+    Viewport,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -54,16 +54,6 @@ use subpane::{IndicatorConfig, PaneHeightCoordinator, SubPane, SubPaneSeparatorS
 fn init_logging() {
     console_error_panic_hook::set_once();
     let _ = console_log::init_with_level(log::Level::Info);
-}
-
-fn webgpu_available() -> bool {
-    let window = match web_sys::window() {
-        Some(w) => w,
-        None => return false,
-    };
-    js_sys::Reflect::get(&window.navigator(), &JsValue::from_str("gpu"))
-        .map(|v| !v.is_undefined() && !v.is_null())
-        .unwrap_or(false)
 }
 
 fn get_dpr() -> f64 {
@@ -780,8 +770,8 @@ pub struct RayCore {
 
 #[wasm_bindgen]
 impl RayCore {
-    /// Create with a specific renderer backend ("webgpu" or "canvas2d").
-    pub async fn create_with(container_id: &str, renderer: &str) -> Result<RayCore, JsValue> {
+    /// Create with a specific renderer backend (Canvas2D only).
+    pub async fn create_with(container_id: &str, _renderer: &str) -> Result<RayCore, JsValue> {
         init_logging();
 
         let layout = WidgetLayout::new(container_id)?;
@@ -804,8 +794,7 @@ impl RayCore {
         let pane_ph = (pane_css_h * dpr).round() as u32;
 
         log::info!(
-            "RayCore: creating '{}' — pane CSS {}x{}, physical {}x{}, dpr={}",
-            renderer,
+            "RayCore: creating Canvas2D — pane CSS {}x{}, physical {}x{}, dpr={}",
             pane_css_w,
             pane_css_h,
             pane_pw,
@@ -813,33 +802,11 @@ impl RayCore {
             dpr
         );
 
-        // Create pane renderer backend (only for the pane/chart canvas)
-        let backend = match renderer {
-            "webgpu" => {
-                match GpuContext::new(
-                    wgpu::SurfaceTarget::Canvas(layout.pane.chart.clone()),
-                    pane_pw.max(1),
-                    pane_ph.max(1),
-                )
-                .await
-                {
-                    Ok(gpu) => {
-                        log::info!("WebGPU adapter: {:?}", gpu.format);
-                        RendererBackend::Wgpu(WgpuRenderer::new(gpu))
-                    }
-                    Err(e) => {
-                        log::warn!("WebGPU unavailable: {}. Falling back to Canvas2D.", e);
-                        let r = Canvas2DRenderer::new(layout.pane.chart.clone(), dpr)
-                            .map_err(|e| JsValue::from_str(&e))?;
-                        RendererBackend::Canvas2D(r)
-                    }
-                }
-            }
-            _ => {
-                let r = Canvas2DRenderer::new(layout.pane.chart.clone(), dpr)
-                    .map_err(|e| JsValue::from_str(&e))?;
-                RendererBackend::Canvas2D(r)
-            }
+        // Create Canvas2D renderer backend (only for the pane/chart canvas)
+        let backend = {
+            let r = Canvas2DRenderer::new(layout.pane.chart.clone(), dpr)
+                .map_err(|e| JsValue::from_str(&e))?;
+            RendererBackend::Canvas2D(r)
         };
 
         // Pane overlay renderer (also gets reference to base chart canvas for base-layer drawings)
@@ -1793,9 +1760,6 @@ impl RayCore {
     pub fn get_supported_renderers() -> js_sys::Array {
         let arr = js_sys::Array::new();
         arr.push(&JsValue::from_str("canvas2d"));
-        if webgpu_available() {
-            arr.push(&JsValue::from_str("webgpu"));
-        }
         arr
     }
 
@@ -1808,7 +1772,6 @@ impl RayCore {
     /// ```js
     /// {
     ///   theme: "dark" | "light" | { colors: {...}, crosshair: {...}, ... },
-    ///   renderer: "auto" | "webgpu" | "canvas2d",
     ///   autoRender: true,
     ///   symbol: "BTCUSD",
     ///   interval: "1D",
@@ -1836,22 +1799,8 @@ impl RayCore {
             return Err(js_err("container must be an HTMLElement or a string ID"));
         };
 
-        // Parse renderer option
-        let renderer = js_get_str(&options, "renderer").unwrap_or_else(|| "auto".to_string());
-        let preferred = match renderer.as_str() {
-            "webgpu" => "webgpu",
-            "canvas2d" => "canvas2d",
-            _ => {
-                if webgpu_available() {
-                    "webgpu"
-                } else {
-                    "canvas2d"
-                }
-            }
-        };
-
-        // Create via existing path
-        let mut chart = Self::create_with(&container_id, preferred).await?;
+        // Always use Canvas2D
+        let mut chart = Self::create_with(&container_id, "canvas2d").await?;
 
         // Apply theme
         if let Some(theme_val) = js_get(&options, "theme") {
