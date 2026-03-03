@@ -82,6 +82,52 @@ Load 600 sample bars for testing.
 
 ---
 
+## Replay
+
+### `set_replay_mode(enabled)` / `replay_mode()`
+
+Enter or exit market replay mode.
+
+- Entering replay snapshots current bars into an internal archive.
+- Exiting replay restores the full archived timeline and jumps back to latest/live bars.
+- Replay state is runtime-only (not exported in persistence snapshots).
+
+### `set_replay_playing(playing)` / `replay_playing()`
+
+Start/pause frame-driven replay playback.
+
+- Playback speed is configured by `ReplayOptions.speedBarsPerSecond`.
+- In charts created with `autoRender: false`, starting replay playback temporarily enables RAF rendering; pausing/exiting replay restores manual mode.
+
+### `replay_step_back()` / `replay_step_forward()`
+
+Move replay cutoff by exactly 1 bar backward/forward.
+
+### `set_replay_cutoff_bar(index)` / `replay_cutoff_bar()`
+
+Set/get replay right-edge cutoff (inclusive index in the archived timeline).
+
+- `replay_cutoff_bar()` returns `-1` when unavailable (for example, empty data).
+- Clicking the main chart pane in replay mode also sets this cutoff.
+
+### `set_replay_options(options)` / `replay_options()`
+
+```ts
+type ReplayEdgeBehavior = 'auto_pause' | 'live_continue' | 'auto_exit';
+
+interface ReplayOptions {
+  speedBarsPerSecond?: number; // default: 1.0
+  edgeBehavior?: ReplayEdgeBehavior; // default: 'auto_pause'
+}
+```
+
+Edge behavior:
+- `auto_pause`: pause at the replay edge
+- `live_continue`: stay playing at edge and continue when buffered live bars arrive
+- `auto_exit`: exit replay mode and jump to live when edge is reached
+
+---
+
 ## Viewport
 
 ### `zoom_to_range(start, end)`

@@ -74,6 +74,62 @@
     body.light .btn:hover { background: #ddd; color: #222; }
     body.light .btn.active { background: #dcfce7; color: #16a34a; border-color: #22C55E44; }
 
+    .toolbar-select {
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      background: #252530;
+      color: #ddd;
+      border: 1px solid #3a3a44;
+      min-width: 110px;
+    }
+    body.light .toolbar-select { background: #fff; border-color: #ccc; color: #333; }
+
+    .replay-menu {
+      position: relative;
+      display: inline-block;
+    }
+    .replay-menu > summary {
+      list-style: none;
+      user-select: none;
+    }
+    .replay-menu > summary::-webkit-details-marker { display: none; }
+    .replay-menu[open] > summary { border-color: #22C55E44; color: #22C55E; }
+    .replay-panel {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      min-width: 260px;
+      padding: 10px;
+      border-radius: 8px;
+      background: #1c1c22;
+      border: 1px solid #343442;
+      box-shadow: 0 8px 24px #00000055;
+      display: grid;
+      gap: 8px;
+      z-index: 50;
+    }
+    body.light .replay-panel {
+      background: #fff;
+      border-color: #ddd;
+      box-shadow: 0 8px 24px #00000020;
+    }
+    .replay-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .replay-row label {
+      font-size: 10px;
+      color: #888;
+      min-width: 84px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    body.light .replay-row label { color: #555; }
+    .replay-row .btn { flex: 1; }
+    .replay-row .toolbar-select { flex: 1; min-width: 0; }
+
     /* ═══════════════════════════════════════════════════════════════════════
        Chart Container
        ═══════════════════════════════════════════════════════════════════════ */
@@ -301,6 +357,40 @@
     <div class="toolbar-section hide-mobile">
       <button class="btn" id="rsi-pane-btn">RSI</button>
       <button class="btn" id="macd-pane-btn">MACD</button>
+    </div>
+    <div class="toolbar-divider"></div>
+
+    <div class="toolbar-section">
+      <details class="replay-menu" id="replay-menu">
+        <summary class="btn" id="replay-menu-trigger">⏯ Replay</summary>
+        <div class="replay-panel">
+          <div class="replay-row">
+            <button class="btn" id="replay-mode-btn">Enter Replay</button>
+          </div>
+          <div class="replay-row">
+            <button class="btn" id="replay-play-btn" disabled>Play</button>
+            <button class="btn" id="replay-step-back-btn" disabled>◀ Step</button>
+            <button class="btn" id="replay-step-forward-btn" disabled>Step ▶</button>
+          </div>
+          <div class="replay-row">
+            <label for="replay-speed-select">Speed</label>
+            <select class="toolbar-select" id="replay-speed-select">
+              <option value="1">1x</option>
+              <option value="2">2x</option>
+              <option value="5">5x</option>
+              <option value="10">10x</option>
+            </select>
+          </div>
+          <div class="replay-row">
+            <label for="replay-edge-select">Edge</label>
+            <select class="toolbar-select" id="replay-edge-select">
+              <option value="auto_pause">auto_pause</option>
+              <option value="live_continue">live_continue</option>
+              <option value="auto_exit">auto_exit</option>
+            </select>
+          </div>
+        </div>
+      </details>
     </div>
     <div class="toolbar-divider"></div>
 
@@ -599,7 +689,7 @@
   </div>
 
   <script type="module">
-    import init, { RayCore, ChartGroup, ChartWorkspace } from '../wasm/pkg/raycore_wasm.js?v=20260227-settings';
+    import init, { RayCore, ChartGroup, ChartWorkspace } from '../wasm/pkg/raycore_wasm.js';
 
     // ═══════════════════════════════════════════════════════════════════════
     // DOM & State
@@ -621,6 +711,11 @@
     let activeChartType = 'candlestick';
     let activeDrawTool = 'none';
     let streamInterval = null;
+    let hudBaseStatus = '';
+    const replaySession = {
+      speedBarsPerSecond: 1,
+      edgeBehavior: 'auto_pause',
+    };
 
     // ═══════════════════════════════════════════════════════════════════════
     // Utilities
@@ -641,6 +736,19 @@
       const g = parseInt(hex.slice(3, 5), 16) / 255;
       const b = parseInt(hex.slice(5, 7), 16) / 255;
       return [r, g, b, 1.0];
+    }
+
+    function replayStatusSuffix() {
+      if (!core || !core.replay_mode()) return '';
+      const playing = core.replay_playing();
+      const cutoff = core.replay_cutoff_bar();
+      const cutoffText = cutoff >= 0 ? ` · cut ${cutoff}` : '';
+      return ` · Replay ${playing ? 'playing' : 'paused'}${cutoffText}`;
+    }
+
+    function updateHudStatus(text) {
+      if (typeof text === 'string') hudBaseStatus = text;
+      hudStatus.textContent = `${hudBaseStatus}${replayStatusSuffix()}`;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -710,19 +818,48 @@
         core.set_chart_type(activeChartType);
 
         core.on('crosshairMove', e => { hudPrice.textContent = e.price > 0 ? e.price.toFixed(2) : ''; });
-        core.on('visibleRangeChange', e => { hudStatus.textContent = `${currentRenderer} · ${Math.round(e.endBar - e.startBar)} bars`; });
+        core.on('visibleRangeChange', e => {
+          updateHudStatus(`${currentRenderer} · ${Math.round(e.endBar - e.startBar)} bars`);
+        });
         core.on('error', e => showError(e.message));
 
         loading.style.display = 'none';
-        hudStatus.textContent = `${currentRenderer} · ${demoData.open.length} bars`;
+        updateHudStatus(`${currentRenderer} · ${demoData.open.length} bars`);
 
         // Apply initial settings
         applyAllSettings();
+        applyReplaySessionOptions();
+        syncReplayControls();
 
       } catch (e) {
         console.error(e);
         showError(`Init failed: ${e.message || e}`);
       }
+    }
+
+    function applyReplaySessionOptions() {
+      if (!core) return;
+      core.set_replay_options({
+        speedBarsPerSecond: replaySession.speedBarsPerSecond,
+        edgeBehavior: replaySession.edgeBehavior,
+      });
+    }
+
+    function syncReplayControls() {
+      const mode = !!core && core.replay_mode();
+      const playing = mode && core.replay_playing();
+      $('replay-mode-btn').textContent = mode ? 'Exit Replay' : 'Enter Replay';
+      $('replay-mode-btn').classList.toggle('active', mode);
+
+      $('replay-play-btn').textContent = playing ? 'Pause' : 'Play';
+      $('replay-play-btn').classList.toggle('active', playing);
+      $('replay-play-btn').disabled = !mode;
+      $('replay-step-back-btn').disabled = !mode;
+      $('replay-step-forward-btn').disabled = !mode;
+
+      $('replay-speed-select').value = String(replaySession.speedBarsPerSecond);
+      $('replay-edge-select').value = replaySession.edgeBehavior;
+      updateHudStatus();
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -939,6 +1076,56 @@
     }
     $('rsi-pane-btn').onclick = () => togglePane('rsi');
     $('macd-pane-btn').onclick = () => togglePane('macd');
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Replay Controls (Header Menu)
+    // ═══════════════════════════════════════════════════════════════════════
+    $('replay-mode-btn').onclick = () => {
+      if (!core) return;
+      const next = !core.replay_mode();
+      core.set_replay_mode(next);
+      if (next) {
+        applyReplaySessionOptions();
+        core.set_replay_playing(false);
+      }
+      syncReplayControls();
+    };
+
+    $('replay-play-btn').onclick = () => {
+      if (!core || !core.replay_mode()) return;
+      core.set_replay_playing(!core.replay_playing());
+      syncReplayControls();
+    };
+
+    $('replay-step-back-btn').onclick = () => {
+      if (!core || !core.replay_mode()) return;
+      core.replay_step_back();
+      syncReplayControls();
+    };
+
+    $('replay-step-forward-btn').onclick = () => {
+      if (!core || !core.replay_mode()) return;
+      core.replay_step_forward();
+      syncReplayControls();
+    };
+
+    $('replay-speed-select').addEventListener('change', e => {
+      replaySession.speedBarsPerSecond = parseFloat(e.target.value) || 1;
+      applyReplaySessionOptions();
+      syncReplayControls();
+    });
+
+    $('replay-edge-select').addEventListener('change', e => {
+      replaySession.edgeBehavior = e.target.value;
+      applyReplaySessionOptions();
+      syncReplayControls();
+    });
+
+    // Keep replay header controls in sync with library-driven transitions
+    // (for example auto-exit at replay edge).
+    setInterval(() => {
+      if (core) syncReplayControls();
+    }, 300);
 
     // ═══════════════════════════════════════════════════════════════════════
     // Live Streaming — realistic tick-by-tick candle builder

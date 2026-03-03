@@ -12,7 +12,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use raycore::{
-    ChartEngine, HitZone, InteractionHandler, OverlayRenderer, PriceAxisRenderer, TimeAxisRenderer,
+    Bar, ChartEngine, HitZone, InteractionHandler, OverlayRenderer, PriceAxisRenderer,
+    TimeAxisRenderer,
 };
 
 use crate::canvas_manager::WidgetLayout;
@@ -176,11 +177,408 @@ pub struct ChartInner {
     pub pane_coordinator: PaneHeightCoordinator,
     /// Visual/interaction style for indicator sub-pane separators.
     pub subpane_separator_style: SubPaneSeparatorStyle,
+    /// Replay mode active flag.
+    pub replay_active: bool,
+    /// Replay trim editing mode (click-to-set cutoff).
+    pub replay_trim_edit_mode: bool,
+    /// Replay playback running flag.
+    pub replay_playing: bool,
+    /// Right-edge trim cutoff index (inclusive) in `replay_archive`.
+    pub replay_cutoff_index: Option<usize>,
+    /// Full timeline snapshot/buffer while replay mode is active.
+    pub replay_archive: Vec<Bar>,
+    /// Playback speed in bars/second.
+    pub replay_speed_bps: f64,
+    /// Replay edge handling policy.
+    pub replay_edge_behavior: ReplayEdgeBehavior,
+    /// Last playback tick timestamp in milliseconds.
+    pub replay_last_tick_ms: f64,
+    /// Fractional bar accumulator for frame-based playback.
+    pub replay_tick_accum_bars: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplayEdgeBehavior {
+    AutoPause,
+    LiveContinue,
+    AutoExit,
+}
+
+impl Default for ReplayEdgeBehavior {
+    fn default() -> Self {
+        Self::AutoPause
+    }
+}
+
+impl ReplayEdgeBehavior {
+    pub fn from_key(value: &str) -> Option<Self> {
+        match value {
+            "auto_pause" => Some(Self::AutoPause),
+            "live_continue" => Some(Self::LiveContinue),
+            "auto_exit" => Some(Self::AutoExit),
+            _ => None,
+        }
+    }
+
+    pub fn as_key(self) -> &'static str {
+        match self {
+            Self::AutoPause => "auto_pause",
+            Self::LiveContinue => "live_continue",
+            Self::AutoExit => "auto_exit",
+        }
+    }
 }
 
 /// Helper methods that destructure `self` to satisfy the borrow checker.
 /// Each method borrows `interaction` and `engine` fields separately.
 impl ChartInner {
+    fn replay_last_timestamp(&self) -> Option<u64> {
+        self.replay_archive.last().map(|bar| bar.timestamp)
+    }
+
+    fn replay_reset_tick_clock(&mut self) {
+        self.replay_last_tick_ms = 0.0;
+        self.replay_tick_accum_bars = 0.0;
+    }
+
+    fn replay_pause_playback(&mut self) {
+        self.replay_playing = false;
+        self.replay_reset_tick_clock();
+    }
+
+    pub fn replay_set_trim_edit_mode(&mut self, enabled: bool) {
+        self.replay_trim_edit_mode = enabled;
+        self.interaction
+            .set_replay_chart_trim_mode(self.replay_active && enabled);
+    }
+
+    fn replay_latest_cutoff(&self) -> Option<usize> {
+        self.replay_archive.len().checked_sub(1)
+    }
+
+    fn replay_snapshot_engine_bars(&self) -> Vec<Bar> {
+        (0..self.engine.bars.len())
+            .filter_map(|idx| self.engine.bars.get(idx))
+            .collect()
+    }
+
+    fn replay_apply_bars_preserve_viewport(&mut self, bars: Vec<Bar>) {
+        let vp_start = self.engine.viewport.start_bar;
+        let vp_end = self.engine.viewport.end_bar;
+        let vp_price_min = self.engine.viewport.price_min;
+        let vp_price_max = self.engine.viewport.price_max;
+        let vp_price_locked = self.engine.viewport.price_locked;
+        let vp_auto_scroll = self.engine.viewport.auto_scroll;
+        let crosshair_bar_index = self.engine.crosshair.bar_index;
+
+        self.engine.bars.set(bars);
+        self.engine.studies.update_studies(&self.engine.bars);
+        self.engine.indicators.on_set_data(&self.engine.bars);
+
+        self.engine.viewport.start_bar = vp_start;
+        self.engine.viewport.end_bar = vp_end;
+        self.engine.viewport.price_locked = vp_price_locked;
+        self.engine.viewport.auto_scroll = vp_auto_scroll;
+        self.engine.viewport.clamp_to_data(self.engine.bars.len());
+
+        if self.engine.viewport.price_locked {
+            self.engine.viewport.price_min = vp_price_min;
+            self.engine.viewport.price_max = vp_price_max;
+        } else {
+            self.engine.viewport.auto_fit_price(&self.engine.bars);
+        }
+
+        self.engine.crosshair.bar_index =
+            crosshair_bar_index.filter(|&idx| idx < self.engine.bars.len());
+    }
+
+    fn replay_apply_cutoff_to_engine(&mut self) -> Result<(), String> {
+        if self.replay_archive.is_empty() || self.replay_cutoff_index.is_none() {
+            self.replay_apply_bars_preserve_viewport(Vec::new());
+            return Ok(());
+        }
+
+        let max_idx = self.replay_archive.len() - 1;
+        let cutoff = self.replay_cutoff_index.unwrap_or(max_idx).min(max_idx);
+        self.replay_cutoff_index = Some(cutoff);
+        self.replay_apply_bars_preserve_viewport(self.replay_archive[..=cutoff].to_vec());
+        Ok(())
+    }
+
+    fn replay_validate_append_timestamp(
+        op: &str,
+        last: Option<u64>,
+        ts: u64,
+    ) -> Result<(), String> {
+        if let Some(last_ts) = last {
+            if ts <= last_ts {
+                return Err(format!(
+                    "{op} requires timestamp > last timestamp ({ts} <= {last_ts})"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn replay_validate_update_timestamp(
+        op: &str,
+        last: Option<u64>,
+        ts: u64,
+    ) -> Result<(), String> {
+        let last_ts = last.ok_or_else(|| format!("{op} cannot update an empty series"))?;
+        if ts != last_ts {
+            return Err(format!(
+                "{op} requires timestamp == last timestamp ({ts} != {last_ts})"
+            ));
+        }
+        Ok(())
+    }
+
+    fn replay_apply_edge_behavior(&mut self) -> Result<(), String> {
+        match self.replay_edge_behavior {
+            ReplayEdgeBehavior::AutoPause => {
+                self.replay_pause_playback();
+                Ok(())
+            }
+            ReplayEdgeBehavior::LiveContinue => {
+                self.replay_tick_accum_bars = 0.0;
+                Ok(())
+            }
+            ReplayEdgeBehavior::AutoExit => self.replay_exit(),
+        }
+    }
+
+    pub fn replay_enter(&mut self) -> Result<(), String> {
+        if self.replay_active {
+            return Ok(());
+        }
+
+        self.replay_archive = self.replay_snapshot_engine_bars();
+        self.replay_cutoff_index = self.replay_latest_cutoff();
+        self.replay_active = true;
+        self.replay_trim_edit_mode = true;
+        self.replay_pause_playback();
+        self.replay_set_trim_edit_mode(true);
+        self.interaction.pressed = false;
+        self.interaction.drag_active = false;
+        self.interaction.drawing_drag_active = false;
+        self.interaction.set_drawing_cursor(None);
+
+        if self.engine.drawings.is_creating() {
+            self.engine.drawings.cancel_creation();
+        }
+        if let Some(id) = self.engine.drawings.selected_id {
+            if matches!(
+                self.engine.drawings.get(id).map(|d| d.state()),
+                Some(raycore::core::drawings::types::DrawingState::Dragging { .. })
+            ) {
+                self.engine.drawings.end_drag(id);
+            }
+        }
+        self.engine.drawings.active_tool = raycore::DrawingTool::None;
+        Ok(())
+    }
+
+    pub fn replay_exit(&mut self) -> Result<(), String> {
+        if !self.replay_active {
+            return Ok(());
+        }
+
+        self.engine.set_data(self.replay_archive.clone())?;
+        self.replay_active = false;
+        self.replay_trim_edit_mode = false;
+        self.replay_playing = false;
+        self.replay_cutoff_index = None;
+        self.replay_archive.clear();
+        self.replay_reset_tick_clock();
+        self.replay_set_trim_edit_mode(false);
+        Ok(())
+    }
+
+    pub fn replay_replace_archive_from_data(&mut self, bars: Vec<Bar>) -> Result<(), String> {
+        self.engine.set_data(bars.clone())?;
+        self.replay_archive = bars;
+        self.replay_cutoff_index = self.replay_latest_cutoff();
+        self.replay_pause_playback();
+        Ok(())
+    }
+
+    pub fn replay_set_playing(&mut self, playing: bool) {
+        if !self.replay_active {
+            self.replay_pause_playback();
+            return;
+        }
+        if playing {
+            if self.replay_archive.is_empty() || self.replay_cutoff_index.is_none() {
+                self.replay_pause_playback();
+                return;
+            }
+            if self.replay_apply_cutoff_to_engine().is_err() {
+                self.replay_pause_playback();
+                return;
+            }
+            // Leaving trim-edit mode while playback runs.
+            self.replay_set_trim_edit_mode(false);
+            self.replay_playing = true;
+            self.replay_last_tick_ms = 0.0;
+        } else {
+            self.replay_pause_playback();
+        }
+    }
+
+    pub fn replay_cutoff_from_pane_x(&self, x_css: f64) -> Option<usize> {
+        if !self.replay_active || self.replay_archive.is_empty() {
+            return None;
+        }
+        let (pane_w, _) = self.layout.pane_css_size();
+        if pane_w <= 0.0 {
+            return None;
+        }
+        self.engine
+            .viewport
+            .bar_index_at_pixel(x_css, pane_w, self.replay_archive.len())
+    }
+
+    pub fn replay_set_cutoff_bar(&mut self, index: usize) -> Result<(), String> {
+        if !self.replay_active {
+            return Ok(());
+        }
+        let Some(max_idx) = self.replay_latest_cutoff() else {
+            self.replay_cutoff_index = None;
+            self.replay_pause_playback();
+            return self.engine.set_data(Vec::new());
+        };
+
+        self.replay_cutoff_index = Some(index.min(max_idx));
+        let result = self.replay_apply_cutoff_to_engine();
+        if result.is_ok() {
+            // Any explicit trim action exits trim-edit mode.
+            self.replay_set_trim_edit_mode(false);
+        }
+        result
+    }
+
+    pub fn replay_step_back(&mut self) -> Result<(), String> {
+        if !self.replay_active || self.replay_archive.is_empty() {
+            return Ok(());
+        }
+        let max_idx = self.replay_archive.len() - 1;
+        let current = self.replay_cutoff_index.unwrap_or(max_idx).min(max_idx);
+        self.replay_pause_playback();
+        self.replay_set_cutoff_bar(current.saturating_sub(1))
+    }
+
+    pub fn replay_step_forward(&mut self) -> Result<(), String> {
+        if !self.replay_active || self.replay_archive.is_empty() {
+            return Ok(());
+        }
+        self.replay_pause_playback();
+
+        let max_idx = self.replay_archive.len() - 1;
+        let current = self.replay_cutoff_index.unwrap_or(0).min(max_idx);
+        if current < max_idx {
+            self.replay_set_cutoff_bar(current + 1)
+        } else {
+            self.replay_apply_edge_behavior()
+        }
+    }
+
+    pub fn replay_tick(&mut self, now_ms: f64) -> Result<(), String> {
+        if !self.replay_active || !self.replay_playing {
+            return Ok(());
+        }
+        if self.replay_archive.is_empty() {
+            self.replay_pause_playback();
+            return Ok(());
+        }
+
+        let max_idx = self.replay_archive.len() - 1;
+        if self.replay_cutoff_index.is_none() {
+            self.replay_cutoff_index = Some(0);
+            self.replay_apply_cutoff_to_engine()?;
+        }
+        let current = self.replay_cutoff_index.unwrap_or(0).min(max_idx);
+        if current >= max_idx {
+            return self.replay_apply_edge_behavior();
+        }
+
+        if self.replay_last_tick_ms <= 0.0 {
+            self.replay_last_tick_ms = now_ms;
+            return Ok(());
+        }
+        let dt_sec = ((now_ms - self.replay_last_tick_ms) / 1000.0).max(0.0);
+        self.replay_last_tick_ms = now_ms;
+        if dt_sec <= 0.0 {
+            return Ok(());
+        }
+
+        let speed = if self.replay_speed_bps.is_finite() && self.replay_speed_bps > 0.0 {
+            self.replay_speed_bps
+        } else {
+            1.0
+        };
+        self.replay_tick_accum_bars += dt_sec * speed;
+        let advance = self.replay_tick_accum_bars.floor() as usize;
+        if advance == 0 {
+            return Ok(());
+        }
+        self.replay_tick_accum_bars -= advance as f64;
+
+        let target = current.saturating_add(advance).min(max_idx);
+        self.replay_set_cutoff_bar(target)?;
+        if target >= max_idx {
+            return self.replay_apply_edge_behavior();
+        }
+        Ok(())
+    }
+
+    pub fn replay_buffer_append_bar(&mut self, bar: Bar) -> Result<(), String> {
+        Self::replay_validate_append_timestamp(
+            "append_bar",
+            self.replay_last_timestamp(),
+            bar.timestamp,
+        )?;
+        self.replay_archive.push(bar);
+        if self.replay_cutoff_index.is_none() {
+            self.replay_cutoff_index = Some(0);
+        }
+        Ok(())
+    }
+
+    pub fn replay_buffer_update_last_bar(&mut self, bar: Bar) -> Result<(), String> {
+        Self::replay_validate_update_timestamp(
+            "update_last_bar",
+            self.replay_last_timestamp(),
+            bar.timestamp,
+        )?;
+        if let Some(last) = self.replay_archive.last_mut() {
+            *last = bar;
+        }
+        Ok(())
+    }
+
+    pub fn replay_buffer_upsert_bar(&mut self, bar: Bar) -> Result<(), String> {
+        match self.replay_last_timestamp() {
+            None => {
+                self.replay_archive.push(bar);
+                self.replay_cutoff_index = Some(0);
+                Ok(())
+            }
+            Some(last_ts) if bar.timestamp == last_ts => self.replay_buffer_update_last_bar(bar),
+            Some(last_ts) if bar.timestamp > last_ts => self.replay_buffer_append_bar(bar),
+            Some(last_ts) => Err(format!(
+                "upsert_bar requires timestamp >= last timestamp ({} < {})",
+                bar.timestamp, last_ts
+            )),
+        }
+    }
+
+    pub fn replay_crosshair_over_empty_area(&self) -> bool {
+        self.replay_active
+            && self.engine.crosshair.active
+            && self.engine.crosshair.bar_index.is_none()
+    }
+
     pub fn on_pointer_enter(&mut self, zone: HitZone) {
         let Self {
             interaction,

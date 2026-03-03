@@ -20,17 +20,17 @@
 use raycore::{
     generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions, BaselineSeriesOptions,
     Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup, ChartPaneId, ChartStyle,
-    CrosshairMagnetMode, CrosshairSnapshot, DataRange, HistogramPoint,
-    HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint, LineSeriesOptions, LineStyle,
-    MainChartType, MarkerPosition, MarkerShape, MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint,
+    CrosshairMagnetMode, CrosshairSnapshot, DataRange, HistogramPoint, HistogramSeriesOptions,
+    HitZone, InteractionHandler, LinePoint, LineSeriesOptions, LineStyle, MainChartType,
+    MarkerPosition, MarkerShape, MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint,
     OverlayRenderer, PriceAxisRenderer, PriceLineOptions, RendererBackend, ResourceLimits,
     RuntimeEvent, SeriesId, SeriesMarker, SnapshotMtfResolver, TimeAxisRenderer, TimeRange,
     Viewport,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use std::collections::{HashMap, HashSet};
 use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
@@ -46,7 +46,8 @@ mod workspace;
 
 use canvas_manager::WidgetLayout;
 use chart_inner::{
-    event_css_pos, wheel_css_pos, ChartInner, EventListenerRegistry, ExactPixelSizes, SharedInner,
+    event_css_pos, wheel_css_pos, ChartInner, EventListenerRegistry, ExactPixelSizes,
+    ReplayEdgeBehavior, SharedInner,
 };
 use event_emitter::EventEmitter;
 use subpane::{IndicatorConfig, PaneHeightCoordinator, SubPane, SubPaneSeparatorStyle};
@@ -161,6 +162,10 @@ fn crosshair_mode_key(mode: raycore::CrosshairMode) -> &'static str {
         raycore::CrosshairMode::Magnet => "magnet",
         raycore::CrosshairMode::MagnetOHLC => "magnet_ohlc",
     }
+}
+
+fn replay_edge_behavior_key(behavior: ReplayEdgeBehavior) -> &'static str {
+    behavior.as_key()
 }
 
 fn js_err(message: impl Into<String>) -> JsValue {
@@ -764,6 +769,8 @@ pub struct RayCore {
     _raf_closure: Option<Rc<RefCell<Option<Closure<dyn FnMut()>>>>>,
     /// Current RAF ID for cancellation.
     _raf_id: Rc<Cell<i32>>,
+    /// True when replay playback temporarily forced auto-render in manual mode.
+    replay_forced_auto_render: Rc<Cell<bool>>,
     /// Dirty flag — set on any mutation, cleared after render.
     dirty: Rc<Cell<bool>>,
 }
@@ -853,6 +860,15 @@ impl RayCore {
             active_subpane_id: None,
             pane_coordinator,
             subpane_separator_style: SubPaneSeparatorStyle::from_chart_style(&style),
+            replay_active: false,
+            replay_trim_edit_mode: false,
+            replay_playing: false,
+            replay_cutoff_index: None,
+            replay_archive: Vec::new(),
+            replay_speed_bps: 1.0,
+            replay_edge_behavior: ReplayEdgeBehavior::AutoPause,
+            replay_last_tick_ms: 0.0,
+            replay_tick_accum_bars: 0.0,
         }));
 
         let mut closures: Vec<Closure<dyn FnMut(web_sys::Event)>> = Vec::new();
@@ -985,16 +1001,38 @@ impl RayCore {
                     let is_touch = pe.pointer_type() == "touch";
                     s.interaction.is_touch = is_touch;
 
-                    s.on_pointer_enter(HitZone::Chart);
-                    s.on_pointer_down(x, y, HitZone::Chart);
-                    let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
-                    let _ = html_el.set_pointer_capture(pe.pointer_id());
-
-                    // Touch-specific: cancel any existing long-press timer
+                    // Cancel any existing long-press timer from a previous gesture.
                     if let Some(tid) = lp_timer.borrow_mut().take() {
                         let _ = web_sys::window().unwrap().clear_timeout_with_handle(tid);
                     }
                     *lp_cb.borrow_mut() = None;
+
+                    s.on_pointer_enter(HitZone::Chart);
+
+                    // Replay trim-edit mode: chart-pane click sets replay cutoff only.
+                    if s.replay_active && s.replay_trim_edit_mode {
+                        if let Some(cutoff_idx) = s.replay_cutoff_from_pane_x(x) {
+                            if let Err(err) = s.replay_set_cutoff_bar(cutoff_idx) {
+                                log::warn!("replay trim click failed: {}", err);
+                            } else {
+                                // Trim action exits replay edit mode and pauses playback.
+                                if s.replay_playing {
+                                    s.replay_set_playing(false);
+                                }
+                                s.interaction.pressed = false;
+                                s.interaction.drag_active = false;
+                                s.replay_set_trim_edit_mode(false);
+                            }
+                        }
+                        let cursor = s.cursor_css();
+                        let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
+                        let _ = html_el.style().set_property("cursor", cursor);
+                        return;
+                    }
+
+                    s.on_pointer_down(x, y, HitZone::Chart);
+                    let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
+                    let _ = html_el.set_pointer_capture(pe.pointer_id());
 
                     if is_touch {
                         // Double-tap detection (500ms)
@@ -1747,6 +1785,7 @@ impl RayCore {
             auto_render: false,
             _raf_closure: None,
             _raf_id: Rc::new(Cell::new(0)),
+            replay_forced_auto_render: Rc::new(Cell::new(false)),
             dirty: Rc::new(Cell::new(false)),
         })
     }
@@ -1896,10 +1935,12 @@ impl RayCore {
         if let Some(auto) = js_get_bool(&options, "autoRender") {
             if auto && !self.auto_render {
                 self.auto_render = true;
+                self.replay_forced_auto_render.set(false);
                 self.start_auto_render_internal();
             } else if !auto && self.auto_render {
                 self.auto_render = false;
                 self.stop_auto_render_internal();
+                self.ensure_forced_auto_render_for_replay();
             }
         }
 
@@ -2457,6 +2498,7 @@ impl RayCore {
     pub fn start_auto_render(&mut self) {
         if !self.auto_render {
             self.auto_render = true;
+            self.replay_forced_auto_render.set(false);
             self.start_auto_render_internal();
         }
     }
@@ -2472,6 +2514,138 @@ impl RayCore {
     /// Returns whether auto-render is currently active.
     pub fn is_auto_render(&self) -> bool {
         self.auto_render
+    }
+
+    // ── Replay ───────────────────────────────────────────────────────────────
+
+    /// Enter/exit market replay mode.
+    pub fn set_replay_mode(&mut self, enabled: bool) -> Result<(), JsValue> {
+        {
+            let mut s = self.inner.borrow_mut();
+            if enabled {
+                s.replay_enter().map_err(js_err)?;
+            } else {
+                s.replay_exit().map_err(js_err)?;
+            }
+        }
+        self.restore_manual_render_if_forced_replay_stopped();
+        self.refresh_pane_cursor_hint();
+        self.mark_dirty();
+        Ok(())
+    }
+
+    /// Whether replay mode is currently active.
+    pub fn replay_mode(&self) -> bool {
+        self.inner.borrow().replay_active
+    }
+
+    /// Start/pause replay playback.
+    pub fn set_replay_playing(&mut self, playing: bool) {
+        let now_playing = {
+            let mut s = self.inner.borrow_mut();
+            s.replay_set_playing(playing);
+            s.replay_playing
+        };
+
+        if now_playing {
+            self.ensure_forced_auto_render_for_replay();
+        } else {
+            self.restore_manual_render_if_forced_replay_stopped();
+        }
+        self.mark_dirty();
+    }
+
+    /// Whether replay playback is currently running.
+    pub fn replay_playing(&self) -> bool {
+        self.inner.borrow().replay_playing
+    }
+
+    /// Step replay backward by 1 bar.
+    pub fn replay_step_back(&mut self) -> Result<(), JsValue> {
+        self.inner.borrow_mut().replay_step_back().map_err(js_err)?;
+        self.restore_manual_render_if_forced_replay_stopped();
+        self.mark_dirty();
+        Ok(())
+    }
+
+    /// Step replay forward by 1 bar.
+    pub fn replay_step_forward(&mut self) -> Result<(), JsValue> {
+        self.inner
+            .borrow_mut()
+            .replay_step_forward()
+            .map_err(js_err)?;
+        self.restore_manual_render_if_forced_replay_stopped();
+        self.refresh_pane_cursor_hint();
+        self.mark_dirty();
+        Ok(())
+    }
+
+    /// Set replay cutoff bar (inclusive right-edge trim).
+    pub fn set_replay_cutoff_bar(&mut self, index: usize) -> Result<(), JsValue> {
+        let mut s = self.inner.borrow_mut();
+        if s.replay_active && s.replay_playing {
+            s.replay_set_playing(false);
+        }
+        s.replay_set_cutoff_bar(index).map_err(js_err)?;
+        drop(s);
+        self.restore_manual_render_if_forced_replay_stopped();
+        self.mark_dirty();
+        Ok(())
+    }
+
+    /// Get replay cutoff bar index, or -1 when unavailable.
+    pub fn replay_cutoff_bar(&self) -> i64 {
+        self.inner
+            .borrow()
+            .replay_cutoff_index
+            .map(|idx| idx as i64)
+            .unwrap_or(-1)
+    }
+
+    /// Update replay runtime options.
+    pub fn set_replay_options(&mut self, options: JsValue) -> Result<(), JsValue> {
+        let options = normalize_options(options);
+        if options.is_undefined() || options.is_null() {
+            return Ok(());
+        }
+
+        let mut s = self.inner.borrow_mut();
+        if let Some(speed) = js_get_f64(&options, "speedBarsPerSecond") {
+            if !speed.is_finite() || speed <= 0.0 {
+                return Err(js_err(
+                    "set_replay_options: speedBarsPerSecond must be a finite number > 0",
+                ));
+            }
+            s.replay_speed_bps = speed;
+        }
+        if let Some(edge) = js_get_str(&options, "edgeBehavior") {
+            let behavior = ReplayEdgeBehavior::from_key(edge.as_str()).ok_or_else(|| {
+                js_err(
+                    "set_replay_options: edgeBehavior must be one of auto_pause, live_continue, auto_exit",
+                )
+            })?;
+            s.replay_edge_behavior = behavior;
+        }
+        drop(s);
+        self.mark_dirty();
+        Ok(())
+    }
+
+    /// Get current replay runtime options.
+    pub fn replay_options(&self) -> JsValue {
+        let s = self.inner.borrow();
+        let obj = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("speedBarsPerSecond"),
+            &JsValue::from_f64(s.replay_speed_bps),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("edgeBehavior"),
+            &JsValue::from_str(replay_edge_behavior_key(s.replay_edge_behavior)),
+        );
+        obj.into()
     }
 
     /// Get the current theme preset name ("dark", "light", or "custom").
@@ -2536,11 +2710,16 @@ impl RayCore {
                 _pad: 0.0,
             })
             .collect();
-        self.inner
-            .borrow_mut()
-            .engine
-            .set_data(bars)
-            .map_err(js_err)?;
+        {
+            let mut inner = self.inner.borrow_mut();
+            if inner.replay_active {
+                inner
+                    .replay_replace_archive_from_data(bars)
+                    .map_err(js_err)?;
+            } else {
+                inner.engine.set_data(bars).map_err(js_err)?;
+            }
+        }
         self.dirty.set(true);
         log::info!("set_data_arrays: {} bars", count);
         Ok(())
@@ -3116,11 +3295,13 @@ impl RayCore {
             if pane_id_map.contains_key(&pane.id) {
                 continue;
             }
-            if let Some((matched_id, _, _)) = existing_descriptors.iter().find(|(id, study, kind)| {
-                !used_existing.contains(id)
-                    && *study == pane.study_id
-                    && kind.as_str() == pane.indicator_type.as_str()
-            }) {
+            if let Some((matched_id, _, _)) =
+                existing_descriptors.iter().find(|(id, study, kind)| {
+                    !used_existing.contains(id)
+                        && *study == pane.study_id
+                        && kind.as_str() == pane.indicator_type.as_str()
+                })
+            {
                 pane_id_map.insert(pane.id, *matched_id);
                 used_existing.insert(*matched_id);
             }
@@ -5748,7 +5929,11 @@ impl RayCore {
             .inner
             .try_borrow_mut()
             .map_err(|_| js_err("append_bar: runtime busy"))?;
-        inner.engine.append_bar(bar).map_err(js_err)
+        if inner.replay_active {
+            inner.replay_buffer_append_bar(bar).map_err(js_err)
+        } else {
+            inner.engine.append_bar(bar).map_err(js_err)
+        }
     }
 
     /// Update the last bar in the data array. Used for real-time tick updates.
@@ -5784,7 +5969,11 @@ impl RayCore {
             .inner
             .try_borrow_mut()
             .map_err(|_| js_err("update_last_bar: runtime busy"))?;
-        inner.engine.update_bar(bar).map_err(js_err)
+        if inner.replay_active {
+            inner.replay_buffer_update_last_bar(bar).map_err(js_err)
+        } else {
+            inner.engine.update_bar(bar).map_err(js_err)
+        }
     }
 
     /// LWC-style main series update semantics:
@@ -5812,18 +6001,20 @@ impl RayCore {
             .inner
             .try_borrow_mut()
             .map_err(|_| js_err("upsert_bar: runtime busy"))?;
-        inner
-            .engine
-            .upsert_bar(Bar {
-                timestamp,
-                open,
-                high,
-                low,
-                close,
-                volume,
-                _pad: 0.0,
-            })
-            .map_err(js_err)
+        let bar = Bar {
+            timestamp,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            _pad: 0.0,
+        };
+        if inner.replay_active {
+            inner.replay_buffer_upsert_bar(bar).map_err(js_err)
+        } else {
+            inner.engine.upsert_bar(bar).map_err(js_err)
+        }
     }
 
     /// Append a single point to a line/area/baseline overlay series.
@@ -6121,6 +6312,37 @@ impl RayCore {
         self.dirty.set(true);
     }
 
+    fn refresh_pane_cursor_hint(&self) {
+        let Ok(s) = self.inner.try_borrow() else {
+            return;
+        };
+        let cursor = s.cursor_css();
+        let pane: &web_sys::HtmlElement = s.layout.pane_container.unchecked_ref();
+        let _ = pane.style().set_property("cursor", cursor);
+    }
+
+    fn ensure_forced_auto_render_for_replay(&mut self) {
+        if self.auto_render || self.replay_forced_auto_render.get() {
+            return;
+        }
+        self.replay_forced_auto_render.set(true);
+        self.start_auto_render_internal();
+    }
+
+    fn restore_manual_render_if_forced_replay_stopped(&mut self) {
+        if !self.replay_forced_auto_render.get() {
+            return;
+        }
+        let should_restore = {
+            let s = self.inner.borrow();
+            !s.replay_active || !s.replay_playing
+        };
+        if should_restore {
+            self.replay_forced_auto_render.set(false);
+            self.stop_auto_render_internal();
+        }
+    }
+
     /// Apply CSS custom properties from the current theme to the container element.
     fn apply_css_variables(&self) {
         let vars = self.theme_config.to_css_variables();
@@ -6139,14 +6361,28 @@ impl RayCore {
     /// `SharedInner` directly to avoid borrow-checker issues with `&mut self`.
     fn start_auto_render_internal(&mut self) {
         // Already running?
-        if self._raf_closure.is_some() {
+        if self
+            ._raf_closure
+            .as_ref()
+            .map(|slot| slot.borrow().is_some())
+            .unwrap_or(false)
+        {
             return;
+        }
+        if self
+            ._raf_closure
+            .as_ref()
+            .map(|slot| slot.borrow().is_none())
+            .unwrap_or(false)
+        {
+            self._raf_closure = None;
         }
 
         let inner = Rc::clone(&self.inner);
         let dirty = Rc::clone(&self.dirty);
         let raf_id = Rc::clone(&self._raf_id);
         let event_emitter = Rc::clone(&self.event_emitter);
+        let replay_forced = Rc::clone(&self.replay_forced_auto_render);
 
         // Self-referencing closure pattern for RAF:
         //
@@ -6170,6 +6406,21 @@ impl RayCore {
             // and therefore can never mark it — any dirty-guard would prevent
             // interactions from ever producing a new frame.
             render_frame::do_render_frame(&inner, &dirty, &event_emitter);
+
+            // Manual-render charts can temporarily force auto-render for replay playback.
+            // When replay playback stops/exits, drop out of RAF and restore manual mode.
+            if replay_forced.get() {
+                let should_restore = inner
+                    .try_borrow()
+                    .map(|s| !s.replay_active || !s.replay_playing)
+                    .unwrap_or(false);
+                if should_restore {
+                    replay_forced.set(false);
+                    slot_for_reschedule.borrow_mut().take();
+                    raf_id.set(0);
+                    return;
+                }
+            }
 
             // Reschedule: read the closure from the shared slot and pass it to RAF.
             if let Some(window) = web_sys::window() {
@@ -6201,6 +6452,8 @@ impl RayCore {
 
     /// Stop the internal requestAnimationFrame loop.
     fn stop_auto_render_internal(&mut self) {
+        self.replay_forced_auto_render.set(false);
+
         // Cancel the pending RAF callback (prevents one extra frame after stop)
         let raf_id = self._raf_id.get();
         if raf_id != 0 {

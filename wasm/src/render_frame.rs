@@ -46,6 +46,27 @@ pub(crate) fn do_render_frame(
     let dpr = s.engine.dpr;
     let anim_time = js_sys::Date::now(); // For pulsing animations
 
+    if let Err(err) = s.replay_tick(anim_time) {
+        log::warn!("replay tick failed: {}", err);
+    }
+
+    let mut replay_crosshair_style_override: Option<raycore::ChartStyle> = None;
+    if s.replay_active && s.replay_trim_edit_mode {
+        let mut replay_style = s.engine.style.clone();
+
+        // Trim-edit mode only: vertical trim guide, hide horizontal guide.
+        replay_style.crosshair_horz_line.visible = false;
+        replay_style.crosshair_horz_line.label_visible = false;
+
+        replay_style.crosshair_vert_line.style = raycore::LineStyle::Solid;
+        replay_style.crosshair_vert_line.color = [0.18, 0.72, 0.30, 0.95];
+
+        if s.replay_crosshair_over_empty_area() {
+            replay_style.crosshair_vert_line.color[3] *= 0.35;
+        }
+        replay_crosshair_style_override = Some(replay_style);
+    }
+
     let (pane_css_w_pre, pane_css_h_pre) = s.layout.pane_css_size();
 
     // Update main chart kinetic scrolling
@@ -191,10 +212,13 @@ pub(crate) fn do_render_frame(
         } else {
             engine.crosshair
         };
+        let crosshair_style = replay_crosshair_style_override
+            .as_ref()
+            .unwrap_or(&engine.style);
         // Canvas2D path: base-layer drawings on base canvas, top-layer on overlay
         overlay.render_with_drawings(
             &main_crosshair,
-            &engine.style,
+            crosshair_style,
             &top_drawings,
             Some(&engine.bars),
         );
@@ -246,7 +270,7 @@ pub(crate) fn do_render_frame(
             &engine.bars,
             &bar_ts,
             &engine.viewport,
-            &engine.style,
+            crosshair_style,
             pane_css_w,
             pane_css_h,
         );
@@ -281,7 +305,10 @@ pub(crate) fn do_render_frame(
         } else {
             engine.crosshair
         };
-        price_axis_renderer.render_top(&main_ch, &engine.viewport, &engine.style, pane_ph);
+        let crosshair_style = replay_crosshair_style_override
+            .as_ref()
+            .unwrap_or(&engine.style);
+        price_axis_renderer.render_top(&main_ch, &engine.viewport, crosshair_style, pane_ph);
     }
 
     // 8. Time axis — base (ticks + labels) + top (crosshair label)
@@ -291,12 +318,15 @@ pub(crate) fn do_render_frame(
             ref engine,
             ..
         } = *s;
+        let crosshair_style = replay_crosshair_style_override
+            .as_ref()
+            .unwrap_or(&engine.style);
         time_axis_renderer.render_base(&engine.style, &x_ticks, pane_pw);
         time_axis_renderer.render_top(
             &engine.crosshair,
             &engine.bars,
             &engine.viewport,
-            &engine.style,
+            crosshair_style,
             pane_css_w,
         );
     }
@@ -358,6 +388,9 @@ pub(crate) fn do_render_frame(
         } else {
             None
         };
+        let crosshair_style = replay_crosshair_style_override
+            .as_ref()
+            .unwrap_or(&engine.style);
         for subpane in subpanes.iter_mut() {
             subpane.resize(dpr);
             subpane.render(&engine.viewport, &engine.style, &x_ticks);
@@ -370,9 +403,9 @@ pub(crate) fn do_render_frame(
             subpane.clear_crosshair_overlay();
 
             if let Some(x) = crosshair_x {
-                subpane.render_crosshair_vert(x, &engine.style);
+                subpane.render_crosshair_vert(x, crosshair_style);
             }
-            subpane.render_crosshair_horiz(&engine.style);
+            subpane.render_crosshair_horiz(crosshair_style);
         }
     }
 

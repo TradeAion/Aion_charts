@@ -111,6 +111,13 @@ export interface PriceScaleOptions {
   margins?: { top?: number; bottom?: number };
 }
 
+export type ReplayEdgeBehavior = 'auto_pause' | 'live_continue' | 'auto_exit';
+
+export interface ReplayOptions {
+  speedBarsPerSecond?: number;
+  edgeBehavior?: ReplayEdgeBehavior;
+}
+
 /**
  * Options for `RayCore.create_chart()` and `chart.apply_options()`.
  * All fields are optional. Omitted fields use defaults on creation
@@ -541,6 +548,38 @@ export declare class RayCore {
 
   /** Whether the automatic render loop is currently active. */
   is_auto_render(): boolean;
+
+  // ── Replay ────────────────────────────────────────────────────────────────
+
+  /** Enter or exit replay mode. */
+  set_replay_mode(enabled: boolean): void;
+
+  /** Whether replay mode is currently active. */
+  replay_mode(): boolean;
+
+  /** Start or pause replay playback. */
+  set_replay_playing(playing: boolean): void;
+
+  /** Whether replay playback is currently running. */
+  replay_playing(): boolean;
+
+  /** Step replay backward by exactly one bar. */
+  replay_step_back(): void;
+
+  /** Step replay forward by exactly one bar. */
+  replay_step_forward(): void;
+
+  /** Set replay right-edge cutoff (inclusive). */
+  set_replay_cutoff_bar(index: number): void;
+
+  /** Current replay cutoff index, or -1 when unavailable. */
+  replay_cutoff_bar(): number;
+
+  /** Set replay runtime options. */
+  set_replay_options(options: ReplayOptions): void;
+
+  /** Get replay runtime options. */
+  replay_options(): ReplayOptions;
 
   // ── Theme ──────────────────────────────────────────────────────────────────
 

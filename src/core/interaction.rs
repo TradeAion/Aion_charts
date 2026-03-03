@@ -55,6 +55,8 @@ fn now_ms() -> f64 {
 
 /// Manhattan distance threshold before drag starts (LWC: CancelClickManhattanDistance = 5).
 const CANCEL_CLICK_DISTANCE: f64 = 5.0;
+/// Replay trim cursor: inline SVG scissors icon with crosshair fallback.
+const REPLAY_SCISSORS_CURSOR: &str = "url(\"data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20width%3D%2724%27%20height%3D%2724%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23d7d9dd%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%276%27%20cy%3D%276%27%20r%3D%272%27/%3E%3Ccircle%20cx%3D%276%27%20cy%3D%2718%27%20r%3D%272%27/%3E%3Cpath%20d%3D%27M20%204%20L8.12%2015.88%27/%3E%3Cpath%20d%3D%27M14.47%2014.48%20L20%2020%27/%3E%3Cpath%20d%3D%27M8.12%208.12%20L12%2012%27/%3E%3C/svg%3E\") 6 6, crosshair";
 
 /// Which zone the pointer is in — determined by the WASM layer based on DOM element.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -119,6 +121,8 @@ pub struct InteractionHandler {
 
     // ── Current hover zone (for cursor hints) ──
     current_zone: HitZone,
+    /// Replay trim mode: force scissors cursor on chart pane.
+    replay_chart_trim_mode: bool,
 
     // ── Drawing-aware cursor override ──
     /// When set, overrides the normal zone-based cursor (e.g. resize on anchor hover).
@@ -182,6 +186,7 @@ impl InteractionHandler {
             last_move_y: 0.0,
             is_gliding: false,
             current_zone: HitZone::None,
+            replay_chart_trim_mode: false,
             drawing_cursor: None,
             drawing_drag_active: false,
             is_touch: false,
@@ -778,9 +783,31 @@ impl InteractionHandler {
         self.drawing_cursor = cursor;
     }
 
+    /// Enable/disable replay trim mode cursor policy.
+    pub fn set_replay_chart_trim_mode(&mut self, enabled: bool) {
+        self.replay_chart_trim_mode = enabled;
+    }
+
     /// Get the current cursor style hint.
     /// Priority: drawing drag → drawing hover cursor → zone-based default.
     pub fn cursor_hint(&self) -> &'static str {
+        if self.replay_chart_trim_mode {
+            if self.drag_active {
+                return match self.press_zone {
+                    HitZone::Chart => REPLAY_SCISSORS_CURSOR,
+                    HitZone::TimeAxis => "ew-resize",
+                    HitZone::PriceAxis => "ns-resize",
+                    HitZone::None => "default",
+                };
+            }
+            return match self.current_zone {
+                HitZone::Chart => REPLAY_SCISSORS_CURSOR,
+                HitZone::TimeAxis => "ew-resize",
+                HitZone::PriceAxis => "ns-resize",
+                HitZone::None => "default",
+            };
+        }
+
         // Drawing drag in progress — use the drag cursor
         if self.drawing_drag_active {
             return self.drawing_cursor.unwrap_or("grabbing");

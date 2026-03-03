@@ -25,3 +25,5 @@ Thumbs.db
 # Local paths
 raycore/target/
 reference/
+
+/lightweight-charts
