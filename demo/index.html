@@ -732,9 +732,13 @@
 
     function updateBadge(name) {
       const key = String(name || '').toLowerCase();
-      const normalized = key === 'webgpu' ? 'webgpu' : 'canvas2d';
-      badge.textContent = normalized === 'webgpu' ? 'WebGPU' : 'Canvas2D';
-      badge.className = `badge ${normalized}`;
+      if (key !== 'webgpu' && key !== 'canvas2d') {
+        badge.textContent = '…';
+        badge.className = 'badge';
+        return;
+      }
+      badge.textContent = key === 'webgpu' ? 'WebGPU' : 'Canvas2D';
+      badge.className = `badge ${key}`;
     }
 
     function hexToRgba(hex) {
@@ -757,6 +761,98 @@
       const fallback = rendererFallbackText ? ` · ${rendererFallbackText}` : '';
       hudStatus.textContent = `${hudBaseStatus}${fallback}${replayStatusSuffix()}`;
     }
+
+    function toJsArray(value) {
+      try {
+        return Array.from(value || []);
+      } catch (_) {
+        return [];
+      }
+    }
+
+    // Deterministic renderer verification helper.
+    // Run in DevTools:
+    //   await window.raycoreVerifyRendererBackend()
+    async function probeRenderer(requested) {
+      const host = document.createElement('div');
+      host.style.cssText = 'position:fixed;left:-100000px;top:-100000px;width:640px;height:320px;overflow:hidden;';
+      document.body.appendChild(host);
+      let chart = null;
+      try {
+        chart = await RayCore.create_chart(host, {
+          renderer: requested,
+          autoRender: false,
+          theme: isDark ? 'dark' : 'light',
+        });
+        chart.set_data_arrays(
+          demoData.open,
+          demoData.high,
+          demoData.low,
+          demoData.close,
+          demoData.volume,
+          demoData.timestamps
+        );
+        chart.render();
+        const active = String(chart.renderer_name() || '').toLowerCase();
+        return {
+          requested,
+          active,
+          fallback: requested !== 'auto' && active !== requested,
+        };
+      } finally {
+        if (chart) {
+          chart.dispose();
+          chart.free();
+        }
+        host.remove();
+      }
+    }
+
+    window.raycoreVerifyRendererBackend = async function raycoreVerifyRendererBackend() {
+      const supported = toJsArray(RayCore.get_supported_renderers()).map(v => String(v).toLowerCase());
+      const webgpuSupported = supported.includes('webgpu');
+
+      const forcedWebgpu = await probeRenderer('webgpu');
+      const forcedCanvas2d = await probeRenderer('canvas2d');
+      const auto = await probeRenderer('auto');
+      const live = core
+        ? {
+            requested: requestedRenderer,
+            active: String(core.renderer_name() || '').toLowerCase(),
+            fallback: requestedRenderer !== 'auto' && String(core.renderer_name() || '').toLowerCase() !== requestedRenderer,
+          }
+        : null;
+
+      const passForcedCanvas2d = forcedCanvas2d.active === 'canvas2d';
+      const passWebgpuExpectation = webgpuSupported
+        ? forcedWebgpu.active === 'webgpu'
+        : forcedWebgpu.active === 'canvas2d';
+      const expectedAuto = forcedWebgpu.active === 'webgpu' ? 'webgpu' : 'canvas2d';
+      const passAuto = auto.active === expectedAuto;
+
+      const report = {
+        supported,
+        webgpuSupported,
+        forcedWebgpu,
+        forcedCanvas2d,
+        auto,
+        live,
+        checks: {
+          passForcedCanvas2d,
+          passWebgpuExpectation,
+          passAuto,
+          allPass: passForcedCanvas2d && passWebgpuExpectation && passAuto,
+        },
+      };
+      console.table([
+        { mode: 'forced webgpu', active: forcedWebgpu.active, fallback: forcedWebgpu.fallback },
+        { mode: 'forced canvas2d', active: forcedCanvas2d.active, fallback: forcedCanvas2d.fallback },
+        { mode: 'auto', active: auto.active, fallback: auto.fallback },
+        ...(live ? [{ mode: 'live chart', active: live.active, fallback: live.fallback }] : []),
+      ]);
+      console.log('raycore renderer verification report:', report);
+      return report;
+    };
 
     // ═══════════════════════════════════════════════════════════════════════
     // Demo Data
@@ -823,6 +919,9 @@
 
         currentRenderer = core.renderer_name();
         updateBadge(currentRenderer);
+        rendererFallbackText = currentRenderer !== requestedRenderer
+          ? `fallback ${requestedRenderer}→${currentRenderer}`
+          : '';
         const rendererSelect = $('renderer-select');
         if (rendererSelect) rendererSelect.value = requestedRenderer;
 
@@ -1374,7 +1473,7 @@
         await init(wasmBinaryUrl);
         renderRendererControls();
         renderChartTypeButtons();
-        updateBadge('webgpu');
+        updateBadge(null);
         await createChart(requestedRenderer);
       } catch (e) {
         console.error(e);

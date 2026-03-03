@@ -1,10 +1,14 @@
-// Line segment shader — draws crisp line segments as rotated quads.
+// Line segment shader — capsule-based anti-aliased strokes.
 //
-// Each instance is a LineSegment: { x1, y1, x2, y2, width, r, g, b, a }
-// The shader computes perpendicular offsets to create a properly rotated quad.
-// 6 vertices per instance (TriangleList: 2 triangles = 1 quad).
+// Each instance is a LineSegment:
+//   { x1, y1, x2, y2, width, r, g, b, a, _pad }
 //
-// Always apply edge smoothing for a visually smooth line at all widths.
+// Compared to a plain rotated-quad stroke, this shader computes alpha from
+// signed distance to a line capsule (segment + round end caps), which avoids:
+// - "broken"/stippled appearance on slight tilt
+// - visible segment joints in brush/freehand strokes
+//
+// The quad geometry is expanded just enough to contain the capsule + AA band.
 
 struct Viewport {
     width: f32,
@@ -32,8 +36,14 @@ struct LineSegment {
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec4<f32>,
-    @location(1) local_y: f32,      // Position within line width (-0.5 to 0.5)
-    @location(2) half_width: f32,   // Half line width for AA calculation
+    // Local coordinates in line space:
+    // x: distance along centerline (0 at start, len at end)
+    // y: signed perpendicular distance from centerline
+    @location(1) local_x: f32,
+    @location(2) local_y: f32,
+    @location(3) seg_len: f32,
+    @location(4) half_width: f32,
+    @location(5) aa_band: f32,
 };
 
 @vertex
@@ -43,76 +53,93 @@ fn vs_main(
 ) -> VertexOutput {
     var out: VertexOutput;
 
-    // Direction vector
     let dx = seg.x2 - seg.x1;
     let dy = seg.y2 - seg.y1;
     let len = sqrt(dx * dx + dy * dy);
-    
-    // Avoid division by zero for degenerate segments
+
     if len < 0.001 {
         out.position = vec4<f32>(0.0, 0.0, 0.0, 1.0);
         out.color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+        out.local_x = 0.0;
         out.local_y = 0.0;
+        out.seg_len = 0.0;
         out.half_width = 0.0;
+        out.aa_band = 0.0;
         return out;
     }
 
-    // Normalized direction
     let nx = dx / len;
     let ny = dy / len;
-
-    // Perpendicular (rotated 90 degrees)
     let px = -ny;
     let py = nx;
 
-    // Half-width for the quad (add 0.5px for AA feathering).
-    let hw = seg.line_width * 0.5;
-    let aa_extend = 0.5;
-    let total_hw = hw + aa_extend;
-    
+    let hw = max(seg.line_width * 0.5, 0.5);
+    let aa = 0.5;
+    let extend = hw + aa;
+    let total_hw = hw + aa;
+
+    // Expand ends for round caps + AA.
+    let sx = seg.x1 - nx * extend;
+    let sy = seg.y1 - ny * extend;
+    let ex = seg.x2 + nx * extend;
+    let ey = seg.y2 + ny * extend;
+
+    // Perpendicular offsets.
     let ox = px * total_hw;
     let oy = py * total_hw;
 
-    // Four corner positions:
-    // v0: start - perpendicular offset (bottom-left of line)
-    // v1: start + perpendicular offset (top-left of line)
-    // v2: end - perpendicular offset (bottom-right of line)
-    // v3: end + perpendicular offset (top-right of line)
+    // Local coordinates for capsule distance evaluation.
+    // Start vertices use x = -extend, end vertices use x = len + extend.
     var corner_x: f32;
     var corner_y: f32;
-    var local: f32;  // -0.5 at one edge, +0.5 at other edge
+    var lx: f32;
+    var ly: f32;
 
     // TriangleList: v0, v2, v1, v1, v2, v3
+    // v0 = start - perp, v1 = start + perp, v2 = end - perp, v3 = end + perp
     switch (vi) {
-        case 0u: { corner_x = seg.x1 - ox; corner_y = seg.y1 - oy; local = -total_hw; } // v0
-        case 1u: { corner_x = seg.x2 - ox; corner_y = seg.y2 - oy; local = -total_hw; } // v2
-        case 2u: { corner_x = seg.x1 + ox; corner_y = seg.y1 + oy; local = total_hw; }  // v1
-        case 3u: { corner_x = seg.x1 + ox; corner_y = seg.y1 + oy; local = total_hw; }  // v1
-        case 4u: { corner_x = seg.x2 - ox; corner_y = seg.y2 - oy; local = -total_hw; } // v2
-        case 5u: { corner_x = seg.x2 + ox; corner_y = seg.y2 + oy; local = total_hw; }  // v3
-        default: { corner_x = 0.0; corner_y = 0.0; local = 0.0; }
+        case 0u: { corner_x = sx - ox; corner_y = sy - oy; lx = -extend;        ly = -total_hw; } // v0
+        case 1u: { corner_x = ex - ox; corner_y = ey - oy; lx = len + extend;   ly = -total_hw; } // v2
+        case 2u: { corner_x = sx + ox; corner_y = sy + oy; lx = -extend;        ly = total_hw;  } // v1
+        case 3u: { corner_x = sx + ox; corner_y = sy + oy; lx = -extend;        ly = total_hw;  } // v1
+        case 4u: { corner_x = ex - ox; corner_y = ey - oy; lx = len + extend;   ly = -total_hw; } // v2
+        case 5u: { corner_x = ex + ox; corner_y = ey + oy; lx = len + extend;   ly = total_hw;  } // v3
+        default: { corner_x = 0.0; corner_y = 0.0; lx = 0.0; ly = 0.0; }
     }
 
-    // Pixel → NDC
     let ndc_x = (corner_x / vp.width) * 2.0 - 1.0;
     let ndc_y = 1.0 - (corner_y / vp.height) * 2.0;
 
     out.position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
     out.color = vec4<f32>(seg.r, seg.g, seg.b, seg.a);
-    out.local_y = local;
+    out.local_x = lx;
+    out.local_y = ly;
+    out.seg_len = len;
     out.half_width = hw;
+    out.aa_band = aa;
     return out;
+}
+
+fn capsule_signed_distance(local_x: f32, local_y: f32, len: f32, hw: f32) -> f32 {
+    let y = abs(local_y);
+    if (local_x < 0.0) {
+        // Distance to start cap circle.
+        return length(vec2<f32>(local_x, y)) - hw;
+    }
+    if (local_x > len) {
+        // Distance to end cap circle.
+        return length(vec2<f32>(local_x - len, y)) - hw;
+    }
+    // Distance to segment body.
+    return y - hw;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Distance from line center (in pixels)
-    let dist = abs(in.local_y);
-    let hw = in.half_width;
-    
-    // Smooth edge over 1px total feather (0.5px each side).
-    let alpha = in.color.a * (1.0 - smoothstep(hw - 0.5, hw + 0.5, dist));
-    
-    // Premultiplied alpha output
+    let sd = capsule_signed_distance(in.local_x, in.local_y, in.seg_len, in.half_width);
+    let aaf = max(in.aa_band, 0.001);
+    let edge_alpha = 1.0 - smoothstep(-aaf, aaf, sd);
+    let alpha = in.color.a * edge_alpha;
+    // Premultiplied-alpha output.
     return vec4<f32>(in.color.rgb * alpha, alpha);
 }

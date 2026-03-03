@@ -178,7 +178,7 @@ pub(crate) fn do_render_frame(
     let x_ticks = tick_marks::compute_x_ticks(&s.engine.viewport, &s.engine.bars, pane_pw, dpr);
 
     // 5. Generate drawing geometry (bottom = idle/non-hovered, top = hovered/active).
-    let (base_drawings, top_drawings) = s.engine.drawings.generate_all_geometry(
+    let (mut base_drawings, mut top_drawings) = s.engine.drawings.generate_all_geometry(
         &s.engine.viewport,
         pane_css_w,
         pane_css_h,
@@ -186,6 +186,36 @@ pub(crate) fn do_render_frame(
         s.engine.h_pixel_ratio,
         s.engine.v_pixel_ratio,
     );
+
+    let webgpu_backend = s.engine.renderer_name() == "webgpu";
+    if webgpu_backend {
+        // WebGPU idle drawings: preserve label/fill identity via overlay path.
+        // Keep line geometry in bottom layer for z-order behavior.
+        // Clamp fill alpha to avoid visually "covering" candles.
+        for geom in &mut base_drawings {
+            if !geom.rects.is_empty() {
+                let mut fill_only = geom.clone();
+                fill_only.lines.clear();
+                fill_only.texts.clear();
+                fill_only.anchors.clear();
+                for r in &mut fill_only.rects {
+                    r.a = r.a.min(0.12);
+                }
+                top_drawings.push(fill_only);
+                geom.rects.clear();
+            }
+
+            if geom.texts.is_empty() {
+                continue;
+            }
+            let mut text_only = geom.clone();
+            text_only.lines.clear();
+            text_only.rects.clear();
+            text_only.anchors.clear();
+            top_drawings.push(text_only);
+            geom.texts.clear();
+        }
+    }
 
     // 5b. Engine render — grid + bottom drawings + data series on pane base canvas.
     if let Err(e) = s.engine.render(&y_ticks, &x_ticks, &base_drawings) {
@@ -217,6 +247,7 @@ pub(crate) fn do_render_frame(
         let crosshair_style = replay_crosshair_style_override
             .as_ref()
             .unwrap_or(&engine.style);
+
         // Canvas2D path: base-layer drawings on base canvas, top-layer on overlay
         overlay.render_with_drawings(
             &main_crosshair,
