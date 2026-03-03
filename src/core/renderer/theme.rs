@@ -50,18 +50,22 @@ pub const fn ch(v: u8) -> f32 {
 
 /// Main chart & axis background.
 pub const BG: [f32; 4] = [ch(0x17), ch(0x17), ch(0x17), 1.0];
-/// Bullish candle body — vibrant emerald green (#22C55E).
-pub const BULLISH: [f32; 4] = [ch(0x22), ch(0xC5), ch(0x5E), 1.0];
-/// Bearish candle body — vibrant rose red (#F43F5E).
-pub const BEARISH: [f32; 4] = [ch(0xF4), ch(0x3F), ch(0x5E), 1.0];
+/// Bullish candle body (#3559E9).
+pub const BULLISH: [f32; 4] = [ch(0x35), ch(0x59), ch(0xE9), 1.0];
+/// Bearish candle body (#FB3748).
+pub const BEARISH: [f32; 4] = [ch(0xFB), ch(0x37), ch(0x48), 1.0];
 /// Bullish volume (same hue, lower alpha).
-pub const BULLISH_VOLUME: [f32; 4] = [ch(0x22), ch(0xC5), ch(0x5E), 0.35];
+pub const BULLISH_VOLUME: [f32; 4] = [ch(0x35), ch(0x59), ch(0xE9), 0.35];
 /// Bearish volume.
-pub const BEARISH_VOLUME: [f32; 4] = [ch(0xF4), ch(0x3F), ch(0x5E), 0.35];
-/// Bullish wick.
-pub const WICK_BULLISH: [f32; 4] = [ch(0x22), ch(0xC5), ch(0x5E), 0.9];
-/// Bearish wick.
-pub const WICK_BEARISH: [f32; 4] = [ch(0xF4), ch(0x3F), ch(0x5E), 0.9];
+pub const BEARISH_VOLUME: [f32; 4] = [ch(0xFB), ch(0x37), ch(0x48), 0.35];
+/// Bullish wick (#3559E9).
+pub const WICK_BULLISH: [f32; 4] = [ch(0x35), ch(0x59), ch(0xE9), 1.0];
+/// Bearish wick (#FB3748).
+pub const WICK_BEARISH: [f32; 4] = [ch(0xFB), ch(0x37), ch(0x48), 1.0];
+/// Bullish candle border (#2547D0).
+pub const BORDER_BULLISH: [f32; 4] = [ch(0x25), ch(0x47), ch(0xD0), 1.0];
+/// Bearish candle border (#D02533).
+pub const BORDER_BEARISH: [f32; 4] = [ch(0xD0), ch(0x25), ch(0x33), 1.0];
 /// Grid line color.
 pub const GRID: [f32; 4] = [0.2, 0.2, 0.24, 0.4];
 /// Axis border / tick color.
@@ -413,17 +417,16 @@ impl ThemeConfig {
                 area_line_color: [0.231, 0.510, 0.965, 1.0],
                 area_top_fill: [0.231, 0.510, 0.965, 0.28],
                 area_bottom_fill: [0.231, 0.510, 0.965, 0.0],
-                // Vibrant emerald/rose pair to match candles
-                histogram_color: [0.133, 0.773, 0.369, 1.0], // #22C55E
-                bar_up_color: [0.133, 0.773, 0.369, 1.0],    // #22C55E
-                bar_down_color: [0.957, 0.247, 0.369, 1.0],  // #F43F5E
+                histogram_color: BULLISH,
+                bar_up_color: BULLISH,
+                bar_down_color: BEARISH,
                 // Baseline
-                baseline_top_line: [0.133, 0.773, 0.369, 1.0],
-                baseline_bottom_line: [0.957, 0.247, 0.369, 1.0],
-                baseline_top_fill_1: [0.133, 0.773, 0.369, 0.28],
-                baseline_top_fill_2: [0.133, 0.773, 0.369, 0.05],
-                baseline_bottom_fill_1: [0.957, 0.247, 0.369, 0.05],
-                baseline_bottom_fill_2: [0.957, 0.247, 0.369, 0.28],
+                baseline_top_line: BULLISH,
+                baseline_bottom_line: BEARISH,
+                baseline_top_fill_1: [ch(0x35), ch(0x59), ch(0xE9), 0.28],
+                baseline_top_fill_2: [ch(0x35), ch(0x59), ch(0xE9), 0.05],
+                baseline_bottom_fill_1: [ch(0xFB), ch(0x37), ch(0x48), 0.05],
+                baseline_bottom_fill_2: [ch(0xFB), ch(0x37), ch(0x48), 0.28],
                 // Markers & price lines
                 marker_color: [0.231, 0.510, 0.965, 1.0],
                 marker_text_color: [1.0, 1.0, 1.0, 0.9],
@@ -469,13 +472,13 @@ impl ThemeConfig {
     pub fn light() -> Self {
         Self {
             colors: ThemeColors {
-                background: [1.0, 1.0, 1.0, 1.0],             // #FFFFFF
-                bullish: [ch(0x26), ch(0xA6), ch(0x9A), 1.0], // #26A69A
-                bearish: [ch(0xEF), ch(0x53), ch(0x50), 1.0], // #EF5350
-                bullish_volume: [ch(0x26), ch(0xA6), ch(0x9A), 0.35],
-                bearish_volume: [ch(0xEF), ch(0x53), ch(0x50), 0.35],
-                wick_bullish: [ch(0x26), ch(0xA6), ch(0x9A), 0.9],
-                wick_bearish: [ch(0xEF), ch(0x53), ch(0x50), 0.9],
+                background: [1.0, 1.0, 1.0, 1.0], // #FFFFFF
+                bullish: BULLISH,
+                bearish: BEARISH,
+                bullish_volume: BULLISH_VOLUME,
+                bearish_volume: BEARISH_VOLUME,
+                wick_bullish: WICK_BULLISH,
+                wick_bearish: WICK_BEARISH,
                 grid: [ch(0xE0), ch(0xE3), ch(0xEB), 0.4], // #E0E3EB @ 40%
                 axis_border: [ch(0xE0), ch(0xE3), ch(0xEB), 1.0], // #E0E3EB
                 axis_text: [ch(0x78), ch(0x7B), ch(0x86), 1.0], // #787B86
@@ -512,15 +515,15 @@ impl ThemeConfig {
                 area_line_color: [0.161, 0.384, 1.0, 1.0],
                 area_top_fill: [0.161, 0.384, 1.0, 0.28],
                 area_bottom_fill: [0.161, 0.384, 1.0, 0.0],
-                histogram_color: [ch(0x26), ch(0xA6), ch(0x9A), 1.0],
-                bar_up_color: [ch(0x26), ch(0xA6), ch(0x9A), 1.0],
-                bar_down_color: [ch(0xEF), ch(0x53), ch(0x50), 1.0],
-                baseline_top_line: [ch(0x26), ch(0xA6), ch(0x9A), 1.0],
-                baseline_bottom_line: [ch(0xEF), ch(0x53), ch(0x50), 1.0],
-                baseline_top_fill_1: [ch(0x26), ch(0xA6), ch(0x9A), 0.28],
-                baseline_top_fill_2: [ch(0x26), ch(0xA6), ch(0x9A), 0.05],
-                baseline_bottom_fill_1: [ch(0xEF), ch(0x53), ch(0x50), 0.05],
-                baseline_bottom_fill_2: [ch(0xEF), ch(0x53), ch(0x50), 0.28],
+                histogram_color: BULLISH,
+                bar_up_color: BULLISH,
+                bar_down_color: BEARISH,
+                baseline_top_line: BULLISH,
+                baseline_bottom_line: BEARISH,
+                baseline_top_fill_1: [ch(0x35), ch(0x59), ch(0xE9), 0.28],
+                baseline_top_fill_2: [ch(0x35), ch(0x59), ch(0xE9), 0.05],
+                baseline_bottom_fill_1: [ch(0xFB), ch(0x37), ch(0x48), 0.05],
+                baseline_bottom_fill_2: [ch(0xFB), ch(0x37), ch(0x48), 0.28],
                 marker_color: [0.161, 0.384, 1.0, 1.0],
                 marker_text_color: [ch(0x13), ch(0x17), ch(0x22), 0.9], // Dark text on light
                 price_line_color: [0.5, 0.5, 0.5, 1.0],

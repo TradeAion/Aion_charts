@@ -135,8 +135,8 @@ impl Default for MainChartOptions {
             chart_type: MainChartType::Candlestick,
             up_color: up,
             down_color: down,
-            up_border_color: None,
-            down_border_color: None,
+            up_border_color: Some(crate::core::renderer::theme::BORDER_BULLISH),
+            down_border_color: Some(crate::core::renderer::theme::BORDER_BEARISH),
             border_visible: true,
             wick_visible: true,
             // Line/Area defaults

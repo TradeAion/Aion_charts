@@ -431,15 +431,15 @@
         <div class="setting-row">
           <span class="setting-label">Bullish</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-bullish-fill" value="#22C55E" title="Fill">
-            <input type="color" class="setting-input" id="cfg-bullish-wick" value="#22C55E" title="Wick">
+            <input type="color" class="setting-input" id="cfg-bullish-fill" value="#3559E9" title="Fill">
+            <input type="color" class="setting-input" id="cfg-bullish-wick" value="#3559E9" title="Wick">
           </div>
         </div>
         <div class="setting-row">
           <span class="setting-label">Bearish</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-bearish-fill" value="#F43F5E" title="Fill">
-            <input type="color" class="setting-input" id="cfg-bearish-wick" value="#F43F5E" title="Wick">
+            <input type="color" class="setting-input" id="cfg-bearish-fill" value="#FB3748" title="Fill">
+            <input type="color" class="setting-input" id="cfg-bearish-wick" value="#FB3748" title="Wick">
           </div>
         </div>
         <div class="setting-row">
@@ -963,7 +963,11 @@
       isDark = !isDark;
       document.body.classList.toggle('light', !isDark);
       $('theme-toggle').textContent = isDark ? '☀ Light' : '🌙 Dark';
-      if (core) core.apply_options({ theme: isDark ? 'dark' : 'light' });
+      if (core) {
+        core.apply_options({ theme: isDark ? 'dark' : 'light' });
+        // Preserve user-selected styling values across theme switches.
+        applyAllSettings();
+      }
     };
 
     // ═══════════════════════════════════════════════════════════════════════

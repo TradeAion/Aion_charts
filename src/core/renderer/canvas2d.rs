@@ -247,10 +247,20 @@ impl ChartRenderer for Canvas2DRenderer {
                 self.draw_line_segments(&line_segments);
             }
             MainChartType::Candlestick => {
+                let bullish_border = ctx
+                    .main_chart_options
+                    .up_border_color
+                    .unwrap_or(ctx.style.wick_bullish_color);
+                let bearish_border = ctx
+                    .main_chart_options
+                    .down_border_color
+                    .unwrap_or(ctx.style.wick_bearish_color);
                 let rects = geometry_generator::generate_candle_rects(
                     ctx.bars,
                     ctx.viewport,
                     ctx.style,
+                    bullish_border,
+                    bearish_border,
                     pane_w,
                     pane_h,
                     ctx.h_pixel_ratio,

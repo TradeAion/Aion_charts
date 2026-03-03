@@ -72,6 +72,8 @@ pub fn generate(
         bars,
         viewport,
         style,
+        style.wick_bullish_color,
+        style.wick_bearish_color,
         pane_w,
         candle_h,
         &sizing,
@@ -104,6 +106,8 @@ pub fn generate_candle_rects(
     bars: &crate::core::data::BarArray,
     viewport: &Viewport,
     style: &ChartStyle,
+    bullish_border_color: [f32; 4],
+    bearish_border_color: [f32; 4],
     pane_w: f64,
     pane_h: f64,
     h_ratio: f64,
@@ -113,7 +117,17 @@ pub fn generate_candle_rects(
     let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
     let mut rects = Vec::with_capacity(bars.len() * 6);
-    generate_candles_into(bars, viewport, style, pane_w, candle_h, &sizing, &mut rects);
+    generate_candles_into(
+        bars,
+        viewport,
+        style,
+        bullish_border_color,
+        bearish_border_color,
+        pane_w,
+        candle_h,
+        &sizing,
+        &mut rects,
+    );
     rects
 }
 
@@ -289,6 +303,8 @@ fn generate_candles_into(
     bars: &crate::core::data::BarArray,
     vp: &Viewport,
     style: &ChartStyle,
+    bullish_border_color: [f32; 4],
+    bearish_border_color: [f32; 4],
     chart_w: f64,
     candle_h: f64,
     sizing: &CandleSizing,
@@ -337,9 +353,9 @@ fn generate_candles_into(
     // ── Pass 2: Borders ──────────────────────────────────────────────────
     for c in &projected {
         let (br, bg, bb, ba) = if c.bull {
-            color4(&style.wick_bullish_color)
+            color4(&bullish_border_color)
         } else {
-            color4(&style.wick_bearish_color)
+            color4(&bearish_border_color)
         };
 
         let h = (c.body_bottom - c.body_top + 1.0).max(1.0);
