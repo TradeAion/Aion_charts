@@ -1,7 +1,7 @@
 //! Rectangle drawing — 2-anchor filled rectangle with border.
 
 use super::drawing::{
-    generate_anchor_circles, next_drawing_id, point_to_bitmap, point_to_css, Drawing,
+    next_drawing_id, point_to_bitmap, point_to_css, Drawing,
 };
 use super::hit_test;
 use super::types::*;
@@ -32,6 +32,23 @@ impl RectangleDrawing {
             ],
         }
     }
+
+    #[inline]
+    fn normalized_bounds(&self) -> (f64, f64, f64, f64) {
+        let a = &self.anchors[0].point;
+        let b = &self.anchors[1].point;
+        let left = a.bar_index.min(b.bar_index);
+        let right = a.bar_index.max(b.bar_index);
+        let top = a.price.max(b.price);
+        let bottom = a.price.min(b.price);
+        (left, right, top, bottom)
+    }
+
+    #[inline]
+    fn set_from_bounds(&mut self, left: f64, right: f64, top: f64, bottom: f64) {
+        self.anchors[0].point = DrawingPoint::new(left, top);
+        self.anchors[1].point = DrawingPoint::new(right, bottom);
+    }
 }
 
 impl Drawing for RectangleDrawing {
@@ -47,10 +64,19 @@ impl Drawing for RectangleDrawing {
 
         let (x0, y0) = point_to_css(&self.anchors[0].point, vp, pw, ph);
         let (x1, y1) = point_to_css(&self.anchors[1].point, vp, pw, ph);
+        let left = x0.min(x1);
+        let right = x0.max(x1);
+        let top = y0.min(y1);
+        let bottom = y0.max(y1);
 
-        // Check anchors first
-        for (i, a) in self.anchors.iter().enumerate() {
-            let (ax, ay) = point_to_css(&a.point, vp, pw, ph);
+        // Check 4-corner anchors first: TL, TR, BR, BL.
+        let corners = [
+            (left, top),
+            (right, top),
+            (right, bottom),
+            (left, bottom),
+        ];
+        for (i, (ax, ay)) in corners.into_iter().enumerate() {
             let d = hit_test::point_to_circle_distance(cx, cy, ax, ay);
             if d <= hit_test::ANCHOR_HIT_THRESHOLD_CSS {
                 return HitResult::hit(HitPart::Anchor(i), d);
@@ -194,10 +220,82 @@ impl Drawing for RectangleDrawing {
         });
 
         if show_anchors {
-            geom.anchors =
-                generate_anchor_circles(&self.anchors, vp, pw, ph, h_pixel_ratio, v_pixel_ratio, c);
+            let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
+            let radius = (self.anchors[0].hit_radius * avg_ratio).round();
+            let border_width = (1.0 * avg_ratio).floor().max(1.0);
+            geom.anchors = vec![
+                AnchorCircle {
+                    cx: px0 as f64,
+                    cy: py0 as f64,
+                    radius,
+                    fill: super::default_anchor_color(),
+                    border: *c,
+                    border_width,
+                }, // TL
+                AnchorCircle {
+                    cx: px1 as f64,
+                    cy: py0 as f64,
+                    radius,
+                    fill: super::default_anchor_color(),
+                    border: *c,
+                    border_width,
+                }, // TR
+                AnchorCircle {
+                    cx: px1 as f64,
+                    cy: py1 as f64,
+                    radius,
+                    fill: super::default_anchor_color(),
+                    border: *c,
+                    border_width,
+                }, // BR
+                AnchorCircle {
+                    cx: px0 as f64,
+                    cy: py1 as f64,
+                    radius,
+                    fill: super::default_anchor_color(),
+                    border: *c,
+                    border_width,
+                }, // BL
+            ];
         }
 
         geom
+    }
+
+    fn move_anchor(&mut self, index: usize, bar_index: f64, price: f64) {
+        if self.anchors.len() < 2 {
+            return;
+        }
+        let (mut left, mut right, mut top, mut bottom) = self.normalized_bounds();
+
+        match index {
+            0 => {
+                // TL
+                left = bar_index;
+                top = price;
+            }
+            1 => {
+                // TR
+                right = bar_index;
+                top = price;
+            }
+            2 => {
+                // BR
+                right = bar_index;
+                bottom = price;
+            }
+            3 => {
+                // BL
+                left = bar_index;
+                bottom = price;
+            }
+            _ => return,
+        }
+
+        let norm_left = left.min(right);
+        let norm_right = left.max(right);
+        let norm_top = top.max(bottom);
+        let norm_bottom = top.min(bottom);
+        self.set_from_bounds(norm_left, norm_right, norm_top, norm_bottom);
     }
 }
