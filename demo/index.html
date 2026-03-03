@@ -396,6 +396,7 @@
 
     <div class="toolbar-section">
       <button class="btn" id="stream-toggle">▶ Live</button>
+      <button class="btn active" id="volume-toggle">Volume</button>
       <button class="btn active" id="autoscroll-toggle">Auto</button>
     </div>
 
@@ -457,13 +458,13 @@
         <div class="setting-row">
           <span class="setting-label">Up Volume</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-volume-up" value="#22C55E">
+            <input type="color" class="setting-input" id="cfg-volume-up" value="#3559E9">
           </div>
         </div>
         <div class="setting-row">
           <span class="setting-label">Down Volume</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-volume-down" value="#F43F5E">
+            <input type="color" class="setting-input" id="cfg-volume-down" value="#FB3748">
           </div>
         </div>
       </div>
@@ -716,6 +717,7 @@
     let activeChartType = 'candlestick';
     let activeDrawTool = 'none';
     let streamInterval = null;
+    let volumeVisible = true;
     let hudBaseStatus = '';
     const replaySession = {
       speedBarsPerSecond: 1,
@@ -821,6 +823,7 @@
 
         core.set_data_arrays(demoData.open, demoData.high, demoData.low, demoData.close, demoData.volume, demoData.timestamps);
         core.set_chart_type(activeChartType);
+        core.set_volume_visible(volumeVisible);
 
         core.on('crosshairMove', e => { hudPrice.textContent = e.price > 0 ? e.price.toFixed(2) : ''; });
         core.on('visibleRangeChange', e => {
@@ -1260,6 +1263,19 @@
         $('stream-toggle').classList.add('active');
       }
     };
+
+    function syncVolumeToggle() {
+      const btn = $('volume-toggle');
+      btn.classList.toggle('active', volumeVisible);
+      btn.textContent = volumeVisible ? 'Volume' : 'Volume Off';
+    }
+
+    $('volume-toggle').onclick = () => {
+      volumeVisible = !volumeVisible;
+      syncVolumeToggle();
+      if (core) core.set_volume_visible(volumeVisible);
+    };
+    syncVolumeToggle();
 
     $('autoscroll-toggle').onclick = () => {
       const btn = $('autoscroll-toggle');

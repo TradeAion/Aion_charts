@@ -868,6 +868,12 @@ export declare class RayCore {
     down_r: number, down_g: number, down_b: number, down_a: number,
   ): void;
 
+  /** Show or hide volume bars in the main pane. */
+  set_volume_visible(visible: boolean): void;
+
+  /** Return whether volume bars are currently visible in the main pane. */
+  get_volume_visible(): boolean;
+
   /** Set bar width ratio (0.0–1.0, default 0.8). */
   set_bar_width_ratio(ratio: number): void;
 

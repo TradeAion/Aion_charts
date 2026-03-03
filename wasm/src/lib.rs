@@ -2099,6 +2099,7 @@ impl RayCore {
             .and_then(|o| js_get(o, "downColor"))
             .and_then(|v| parse_color_js(&v))
             .or(volume_color);
+        let volume_visible = volume_obj.as_ref().and_then(|o| js_get_bool(o, "visible"));
 
         let last_price_obj =
             js_get(options, "lastPriceLine").or_else(|| js_get(options, "last_price_line"));
@@ -2156,6 +2157,13 @@ impl RayCore {
             }
             if let Some(bottom) = margin_bottom {
                 s.engine.viewport.scale_margin_bottom = bottom;
+            }
+            if let Some(visible) = volume_visible {
+                s.engine.viewport.volume_height_ratio = if visible {
+                    raycore::core::constants::DEFAULT_VOLUME_HEIGHT_RATIO as f32
+                } else {
+                    0.0
+                };
             }
             if let Some(chart_type_key) = chart_type.as_deref() {
                 let next_chart_type = MainChartType::from_str(chart_type_key);
@@ -3586,6 +3594,20 @@ impl RayCore {
         let mut s = self.inner.borrow_mut();
         s.engine.style.bullish_volume_color = [up_r, up_g, up_b, up_a];
         s.engine.style.bearish_volume_color = [down_r, down_g, down_b, down_a];
+    }
+
+    /// Show/hide volume bars in the main pane.
+    pub fn set_volume_visible(&mut self, visible: bool) {
+        self.inner.borrow_mut().engine.viewport.volume_height_ratio = if visible {
+            raycore::core::constants::DEFAULT_VOLUME_HEIGHT_RATIO as f32
+        } else {
+            0.0
+        };
+    }
+
+    /// Whether volume bars are currently visible in the main pane.
+    pub fn get_volume_visible(&self) -> bool {
+        self.inner.borrow().engine.viewport.volume_height_ratio > 0.0
     }
 
     /// Set the font size for axis labels (in CSS pixels).
