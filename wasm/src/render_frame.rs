@@ -176,17 +176,7 @@ pub(crate) fn do_render_frame(
     };
     let x_ticks = tick_marks::compute_x_ticks(&s.engine.viewport, &s.engine.bars, pane_pw, dpr);
 
-    // 5. Engine render — candles + volume on pane chart canvas
-    if let Err(e) = s.engine.render(&y_ticks, &x_ticks) {
-        log::warn!("render error: {}", e);
-    }
-
-    // 5b. Dashed line series — rendered via Canvas2D strokePath (not rects).
-    let bar_ts: Vec<u64> = (0..s.engine.bars.len())
-        .map(|i| s.engine.bars.timestamp(i))
-        .collect();
-
-    // 5c. Generate drawing geometry (base = Idle/Selected, top = Creating/Dragging)
+    // 5. Generate drawing geometry (bottom = idle/non-hovered, top = hovered/active).
     let (base_drawings, top_drawings) = s.engine.drawings.generate_all_geometry(
         &s.engine.viewport,
         pane_css_w,
@@ -195,6 +185,16 @@ pub(crate) fn do_render_frame(
         s.engine.h_pixel_ratio,
         s.engine.v_pixel_ratio,
     );
+
+    // 5b. Engine render — grid + bottom drawings + data series on pane base canvas.
+    if let Err(e) = s.engine.render(&y_ticks, &x_ticks, &base_drawings) {
+        log::warn!("render error: {}", e);
+    }
+
+    // 5c. Dashed line series — rendered via Canvas2D strokePath (not rects).
+    let bar_ts: Vec<u64> = (0..s.engine.bars.len())
+        .map(|i| s.engine.bars.timestamp(i))
+        .collect();
 
     // 6. Render overlay, dashed series, price lines, last price lines, drawings, crosshair, markers
     {
@@ -255,7 +255,6 @@ pub(crate) fn do_render_frame(
             pane_css_w,
             pane_css_h,
         );
-        overlay.render_base_drawings(&base_drawings);
         overlay.render_indicator_labels(
             &indicator_draw_instructions,
             &engine.bars,
@@ -393,14 +392,10 @@ pub(crate) fn do_render_frame(
             .unwrap_or(&engine.style);
         for subpane in subpanes.iter_mut() {
             subpane.resize(dpr);
-            subpane.render(&engine.viewport, &engine.style, &x_ticks);
-
-            let (base_drawings, top_drawings) = subpane.generate_drawing_geometry(&engine.viewport);
-            let mut all_drawings = base_drawings;
-            all_drawings.extend(top_drawings);
-            subpane.render_drawings(&all_drawings);
+            let top_drawings = subpane.render(&engine.viewport, &engine.style, &x_ticks);
 
             subpane.clear_crosshair_overlay();
+            subpane.render_top_drawings(&top_drawings);
 
             if let Some(x) = crosshair_x {
                 subpane.render_crosshair_vert(x, crosshair_style);

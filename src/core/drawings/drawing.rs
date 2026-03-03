@@ -135,9 +135,10 @@ pub trait Drawing: std::fmt::Debug {
     /// Z-order for this drawing's current state.
     fn z_order(&self) -> ZOrder {
         match self.state() {
-            DrawingState::Creating { .. } | DrawingState::Dragging { .. } => ZOrder::Top,
-            DrawingState::Selected => ZOrder::Normal,
-            DrawingState::Idle => ZOrder::Normal,
+            DrawingState::Creating { .. }
+            | DrawingState::Dragging { .. }
+            | DrawingState::Selected => ZOrder::Top,
+            DrawingState::Idle => ZOrder::Bottom,
         }
     }
 

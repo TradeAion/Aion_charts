@@ -248,6 +248,9 @@ impl ChartInner {
 
     pub fn replay_set_trim_edit_mode(&mut self, enabled: bool) {
         self.replay_trim_edit_mode = enabled;
+        if enabled {
+            self.engine.drawings.clear_hovered();
+        }
         self.interaction
             .set_replay_chart_trim_mode(self.replay_active && enabled);
     }
@@ -363,6 +366,7 @@ impl ChartInner {
         self.interaction.drag_active = false;
         self.interaction.drawing_drag_active = false;
         self.interaction.set_drawing_cursor(None);
+        self.engine.drawings.clear_hovered();
 
         if self.engine.drawings.is_creating() {
             self.engine.drawings.cancel_creation();
@@ -392,6 +396,8 @@ impl ChartInner {
         self.replay_archive.clear();
         self.replay_reset_tick_clock();
         self.replay_set_trim_edit_mode(false);
+        self.engine.drawings.clear_hovered();
+        self.interaction.set_drawing_cursor(None);
         Ok(())
     }
 
@@ -595,6 +601,10 @@ impl ChartInner {
             ..
         } = self;
         interaction.pointer_leave(zone, &mut engine.crosshair);
+        if zone == HitZone::Chart {
+            engine.drawings.clear_hovered();
+            interaction.set_drawing_cursor(None);
+        }
     }
 
     pub fn on_pane_pointer_move(
@@ -708,6 +718,7 @@ impl ChartInner {
             if !is_drawing_drag
                 && !drawings.is_creating()
                 && drawings.active_tool == raycore::DrawingTool::None
+                && !(self.replay_active && self.replay_trim_edit_mode)
             {
                 if let Some((hit_id, result)) =
                     drawings.hit_test(x, y, &self.engine.viewport, pw, ph)
@@ -718,7 +729,12 @@ impl ChartInner {
                         .map(|d| d.tool())
                         .unwrap_or(raycore::DrawingTool::None);
                     hover_cursor = Some(cursor_for_drawing_hit(tool, result.part, None));
+                    drawings.set_hovered(Some(hit_id));
+                } else {
+                    drawings.clear_hovered();
                 }
+            } else {
+                drawings.clear_hovered();
             }
         }
 

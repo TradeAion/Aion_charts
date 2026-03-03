@@ -47,6 +47,8 @@ pub struct DrawingManager {
     pub selected_id: Option<u64>,
     /// ID of the drawing currently being created (if any).
     creating_id: Option<u64>,
+    /// ID of the drawing currently hovered by pointer hit-test (transient).
+    hovered_id: Option<u64>,
 }
 
 impl DrawingManager {
@@ -56,6 +58,7 @@ impl DrawingManager {
             active_tool: DrawingTool::None,
             selected_id: None,
             creating_id: None,
+            hovered_id: None,
         }
     }
 
@@ -73,6 +76,9 @@ impl DrawingManager {
         if self.creating_id == Some(id) {
             self.creating_id = None;
         }
+        if self.hovered_id == Some(id) {
+            self.hovered_id = None;
+        }
     }
 
     /// Remove the currently selected drawing.
@@ -89,6 +95,11 @@ impl DrawingManager {
         if let Some(id) = self.selected_id {
             if self.get(id).is_none() {
                 self.selected_id = None;
+            }
+        }
+        if let Some(id) = self.hovered_id {
+            if self.get(id).is_none() {
+                self.hovered_id = None;
             }
         }
     }
@@ -119,6 +130,22 @@ impl DrawingManager {
         self.active_tool = DrawingTool::None;
         self.selected_id = None;
         self.creating_id = None;
+        self.hovered_id = None;
+    }
+
+    /// Set the currently hovered drawing id. `None` clears hover.
+    pub fn set_hovered(&mut self, id: Option<u64>) {
+        self.hovered_id = id.filter(|hovered| self.get(*hovered).is_some());
+    }
+
+    /// Clear transient hover state.
+    pub fn clear_hovered(&mut self) {
+        self.hovered_id = None;
+    }
+
+    /// Current hovered drawing id.
+    pub fn hovered_id(&self) -> Option<u64> {
+        self.hovered_id
     }
 
     /// Is a drawing tool currently active?
@@ -360,7 +387,7 @@ impl DrawingManager {
     }
 
     /// Generate all drawing geometry for rendering.
-    /// Splits into base-layer (Idle/Selected) and top-layer (Creating/Dragging).
+    /// Splits into base-layer (idle, non-hovered) and top-layer (hovered/active).
     pub fn generate_all_geometry(
         &self,
         vp: &Viewport,
@@ -391,9 +418,18 @@ impl DrawingManager {
                 continue;
             }
 
-            match d.z_order() {
-                ZOrder::Top => top.push(geom),
-                _ => base.push(geom),
+            let is_hovered = self.hovered_id == Some(d.id());
+            let is_active = matches!(
+                d.state(),
+                DrawingState::Selected
+                    | DrawingState::Creating { .. }
+                    | DrawingState::Dragging { .. }
+            );
+
+            if is_hovered || is_active || d.z_order() == ZOrder::Top {
+                top.push(geom);
+            } else {
+                base.push(geom);
             }
         }
 
@@ -561,6 +597,24 @@ impl DrawingManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::viewport::Viewport;
+
+    fn test_viewport() -> Viewport {
+        let mut vp = Viewport::new(800, 600);
+        vp.start_bar = 0.0;
+        vp.end_bar = 100.0;
+        vp.price_min = 0.0;
+        vp.price_max = 200.0;
+        vp.volume_height_ratio = 0.0;
+        vp
+    }
+
+    fn complete_trend_line(manager: &mut DrawingManager) -> u64 {
+        manager.active_tool = DrawingTool::TrendLine;
+        let id = manager.start_creating(10.0, 100.0).expect("trend line id");
+        manager.finalize_creation_step(20.0, 110.0);
+        id
+    }
 
     #[test]
     fn snapshot_roundtrip_preserves_brush_points() {
@@ -606,5 +660,81 @@ mod tests {
         let next_id = restored.start_creating(3.0, 12.0).expect("next id");
 
         assert!(next_id > first_id);
+    }
+
+    #[test]
+    fn idle_non_hovered_drawing_goes_to_bottom_bucket() {
+        let mut manager = DrawingManager::new();
+        let id = complete_trend_line(&mut manager);
+        manager.deselect_all();
+        assert_eq!(manager.selected_id, None);
+        assert_eq!(manager.hovered_id(), None);
+        assert!(manager.get(id).is_some());
+
+        let vp = test_viewport();
+        let (bottom, top) = manager.generate_all_geometry(&vp, 800.0, 600.0, 1.0, 1.0, 1.0);
+        assert_eq!(bottom.len(), 1);
+        assert_eq!(top.len(), 0);
+    }
+
+    #[test]
+    fn hovered_idle_drawing_is_promoted_to_top_bucket() {
+        let mut manager = DrawingManager::new();
+        let id = complete_trend_line(&mut manager);
+        manager.deselect_all();
+        manager.set_hovered(Some(id));
+
+        let vp = test_viewport();
+        let (bottom, top) = manager.generate_all_geometry(&vp, 800.0, 600.0, 1.0, 1.0, 1.0);
+        assert_eq!(bottom.len(), 0);
+        assert_eq!(top.len(), 1);
+    }
+
+    #[test]
+    fn selected_creating_and_dragging_drawings_stay_in_top_bucket() {
+        let vp = test_viewport();
+
+        // Selected
+        let mut selected_mgr = DrawingManager::new();
+        complete_trend_line(&mut selected_mgr);
+        let (bottom, top) = selected_mgr.generate_all_geometry(&vp, 800.0, 600.0, 1.0, 1.0, 1.0);
+        assert_eq!(bottom.len(), 0);
+        assert_eq!(top.len(), 1);
+
+        // Creating
+        let mut creating_mgr = DrawingManager::new();
+        creating_mgr.active_tool = DrawingTool::TrendLine;
+        creating_mgr
+            .start_creating(10.0, 100.0)
+            .expect("creating trend line");
+        creating_mgr.update_creation_preview(20.0, 110.0);
+        let (bottom, top) = creating_mgr.generate_all_geometry(&vp, 800.0, 600.0, 1.0, 1.0, 1.0);
+        assert_eq!(bottom.len(), 0);
+        assert_eq!(top.len(), 1);
+
+        // Dragging
+        let mut dragging_mgr = DrawingManager::new();
+        let id = complete_trend_line(&mut dragging_mgr);
+        dragging_mgr.start_drag(id, None, 20.0, 110.0);
+        let (bottom, top) = dragging_mgr.generate_all_geometry(&vp, 800.0, 600.0, 1.0, 1.0, 1.0);
+        assert_eq!(bottom.len(), 0);
+        assert_eq!(top.len(), 1);
+    }
+
+    #[test]
+    fn hover_state_is_transient_and_not_serialized() {
+        let mut manager = DrawingManager::new();
+        let id = complete_trend_line(&mut manager);
+        manager.deselect_all();
+        manager.set_hovered(Some(id));
+        assert_eq!(manager.hovered_id(), Some(id));
+
+        let snapshot = manager.snapshot();
+        let mut restored = DrawingManager::new();
+        restored
+            .replace_from_snapshot(snapshot)
+            .expect("restore snapshot");
+
+        assert_eq!(restored.hovered_id(), None);
     }
 }

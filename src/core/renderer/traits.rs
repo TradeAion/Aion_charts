@@ -8,6 +8,7 @@
 
 use crate::core::constants::{DEFAULT_PRICE_AXIS_OPTIMAL_WIDTH, PRICE_AXIS_LABEL_OFFSET};
 use crate::core::data::BarArray;
+use crate::core::drawings::types::DrawingGeometry;
 use crate::core::indicators::render::types::DrawInstruction;
 use crate::core::series::{LineStyle, SeriesCollection};
 use crate::core::viewport::Viewport;
@@ -277,6 +278,8 @@ pub struct RenderContext<'a> {
     pub main_chart_type: crate::core::chart_type::MainChartType,
     /// Main chart rendering options.
     pub main_chart_options: &'a crate::core::chart_type::MainChartOptions,
+    /// Drawings that should render below chart data (idle, non-hovered).
+    pub bottom_drawings: &'a [DrawingGeometry],
 }
 
 /// Tick mark for axis rendering.
@@ -310,6 +313,9 @@ pub trait ChartRenderer {
     /// Draw background fill + grid lines.
     fn draw_grid(&mut self, ctx: &RenderContext) -> Result<(), String>;
 
+    /// Draw drawings that should live below series data.
+    fn draw_bottom_drawings(&mut self, ctx: &RenderContext) -> Result<(), String>;
+
     /// Draw candlesticks.
     /// Canvas2D: geometry_generator -> DrawList -> fill_rect loop.
     fn draw_candles(&mut self, ctx: &RenderContext) -> Result<(), String>;
@@ -338,6 +344,7 @@ pub trait ChartRenderer {
     fn render_frame(&mut self, ctx: &RenderContext) -> Result<(), String> {
         self.begin_frame(ctx)?;
         self.draw_grid(ctx)?;
+        self.draw_bottom_drawings(ctx)?;
         self.draw_volume(ctx)?;
         self.draw_candles(ctx)?;
         self.draw_lines(ctx)?;
@@ -403,6 +410,18 @@ impl ChartRenderer for RendererBackend {
         match self {
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.draw_grid(ctx),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Noop => {
+                let _ = ctx;
+                Ok(())
+            }
+        }
+    }
+
+    fn draw_bottom_drawings(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        match self {
+            #[cfg(target_arch = "wasm32")]
+            Self::Canvas2D(r) => r.draw_bottom_drawings(ctx),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Noop => {
                 let _ = ctx;

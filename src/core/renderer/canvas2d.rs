@@ -6,6 +6,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
+use crate::core::drawings::types::DrawingGeometry;
 use crate::core::renderer::draw_list::{AreaSegment, ColoredRect, LineSegment};
 use crate::core::renderer::geometry_generator;
 use crate::core::renderer::traits::{ChartRenderer, RenderContext};
@@ -152,6 +153,72 @@ impl Canvas2DRenderer {
         self.ctx.set_fill_style_canvas_gradient(&gradient);
         self.ctx.fill();
     }
+
+    fn draw_drawing_geometry(&self, geom: &DrawingGeometry) {
+        for r in &geom.rects {
+            if r.w <= 0.0 || r.h <= 0.0 {
+                continue;
+            }
+            self.ctx.set_fill_style_str(&rgba(&[r.r, r.g, r.b, r.a]));
+            self.ctx
+                .fill_rect(r.x as f64, r.y as f64, r.w as f64, r.h as f64);
+        }
+
+        for l in &geom.lines {
+            self.ctx.set_stroke_style_str(&rgba(&[l.r, l.g, l.b, l.a]));
+            self.ctx.set_line_width(l.width as f64);
+            self.ctx.set_line_cap("round");
+            self.ctx.set_line_join("round");
+
+            if l.dash > 0.0 && l.gap > 0.0 {
+                let _ = self.ctx.set_line_dash(&js_sys::Array::of2(
+                    &JsValue::from(l.dash as f64),
+                    &JsValue::from(l.gap as f64),
+                ));
+            } else {
+                let _ = self.ctx.set_line_dash(&js_sys::Array::new());
+            }
+
+            let correction = if (l.width as i32) % 2 == 1 { 0.5 } else { 0.0 };
+            self.ctx.begin_path();
+            self.ctx
+                .move_to(l.x0 as f64 + correction, l.y0 as f64 + correction);
+            self.ctx
+                .line_to(l.x1 as f64 + correction, l.y1 as f64 + correction);
+            self.ctx.stroke();
+        }
+        let _ = self.ctx.set_line_dash(&js_sys::Array::new());
+
+        for t in &geom.texts {
+            let font = format!(
+                "{}px {}",
+                t.font_size,
+                crate::core::renderer::theme::FONT_FAMILY
+            );
+            self.ctx.set_font(&font);
+            self.ctx.set_fill_style_str(&rgba(&[t.r, t.g, t.b, t.a]));
+            self.ctx.set_text_align("center");
+            self.ctx.set_text_baseline("middle");
+            let _ = self.ctx.fill_text(&t.text, t.x as f64, t.y as f64);
+        }
+
+        for a in &geom.anchors {
+            self.ctx.set_fill_style_str(&rgba(&a.fill));
+            self.ctx.begin_path();
+            let _ = self
+                .ctx
+                .arc(a.cx, a.cy, a.radius, 0.0, std::f64::consts::TAU);
+            self.ctx.fill();
+
+            self.ctx.set_stroke_style_str(&rgba(&a.border));
+            self.ctx.set_line_width(a.border_width);
+            self.ctx.begin_path();
+            let _ = self
+                .ctx
+                .arc(a.cx, a.cy, a.radius, 0.0, std::f64::consts::TAU);
+            self.ctx.stroke();
+        }
+    }
 }
 
 impl ChartRenderer for Canvas2DRenderer {
@@ -202,6 +269,13 @@ impl ChartRenderer for Canvas2DRenderer {
             pane_h,
         );
         self.draw_rects(&grid_rects);
+        Ok(())
+    }
+
+    fn draw_bottom_drawings(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        for geom in ctx.bottom_drawings {
+            self.draw_drawing_geometry(geom);
+        }
         Ok(())
     }
 

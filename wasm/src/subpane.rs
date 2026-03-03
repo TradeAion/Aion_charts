@@ -766,12 +766,17 @@ impl SubPane {
     /// This is the main render entry point called each frame.
     ///
     /// `x_ticks` are passed from the main chart for consistent vertical grid lines.
-    pub fn render(&mut self, main_viewport: &Viewport, style: &ChartStyle, x_ticks: &[TickMark]) {
+    pub fn render(
+        &mut self,
+        main_viewport: &Viewport,
+        style: &ChartStyle,
+        x_ticks: &[TickMark],
+    ) -> Vec<DrawingGeometry> {
         let dpr = self.dpr;
         let pw = self.chart_base.width() as f64;
         let ph = self.chart_base.height() as f64;
         if pw <= 0.0 || ph <= 0.0 {
-            return;
+            return Vec::new();
         }
 
         // Auto-scale to visible bar range (same behavior as main chart)
@@ -782,9 +787,10 @@ impl SubPane {
         // Compute Y tick marks for this sub-pane's viewport
         // Subpanes have no volume area, so pane_h == candle_h
         let y_ticks = compute_y_ticks(&self.viewport, ph, ph, dpr, style);
+        let (bottom_drawings, top_drawings) = self.generate_drawing_geometry(main_viewport);
 
-        // Render chart area (grid, reference lines, data lines)
-        self.render_chart(main_viewport, style, &y_ticks, x_ticks);
+        // Render chart area (grid, bottom drawings, reference lines, data lines)
+        self.render_chart(main_viewport, style, &y_ticks, x_ticks, &bottom_drawings);
 
         // Render price axis base layer (ticks + labels)
         self.price_axis.render_base(style, &y_ticks);
@@ -817,6 +823,8 @@ impl SubPane {
             self.price_axis
                 .render_indicator_last_values(&last_values, &self.viewport, style, ph);
         }
+
+        top_drawings
     }
 
     /// Clear the crosshair overlay canvas. Call before drawing crosshair lines.
@@ -933,6 +941,7 @@ impl SubPane {
         style: &ChartStyle,
         y_ticks: &[TickMark],
         x_ticks: &[TickMark],
+        bottom_drawings: &[DrawingGeometry],
     ) {
         let dpr = self.dpr;
         let pw = self.chart_base.width() as f64;
@@ -966,6 +975,9 @@ impl SubPane {
                 rect.h as f64,
             );
         }
+
+        // Idle/non-hovered drawings are rendered below indicator series.
+        self.render_drawings_on_ctx(&self.chart_base_ctx, bottom_drawings);
 
         // Reference lines from config (e.g. RSI 30/70, Stochastic 20/80, MACD 0)
         if !self.config.reference_levels.is_empty() {
@@ -1064,18 +1076,20 @@ impl SubPane {
             .generate_all_geometry(&hybrid_viewport, css_w, css_h, dpr, 1.0, 1.0)
     }
 
-    /// Render drawings on the chart base canvas.
-    /// Call after render_chart() so drawings appear above the data lines.
-    pub fn render_drawings(&self, drawings: &[DrawingGeometry]) {
+    /// Render top-layer drawings on the chart top canvas.
+    /// Call before crosshair rendering so crosshair remains visible above drawings.
+    pub fn render_top_drawings(&self, drawings: &[DrawingGeometry]) {
+        self.render_drawings_on_ctx(&self.chart_top_ctx, drawings);
+    }
+
+    fn render_drawings_on_ctx(&self, ctx: &CanvasRenderingContext2d, drawings: &[DrawingGeometry]) {
         for geom in drawings {
-            self.draw_geometry(geom);
+            self.draw_geometry_on_ctx(ctx, geom);
         }
     }
 
-    /// Draw a single DrawingGeometry to the chart base canvas.
-    fn draw_geometry(&self, geom: &DrawingGeometry) {
-        let ctx = &self.chart_base_ctx;
-
+    /// Draw a single DrawingGeometry to a target canvas.
+    fn draw_geometry_on_ctx(&self, ctx: &CanvasRenderingContext2d, geom: &DrawingGeometry) {
         // Filled rects
         for r in &geom.rects {
             if r.w <= 0.0 || r.h <= 0.0 {

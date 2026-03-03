@@ -299,7 +299,7 @@ pub enum ZOrder {
     Bottom,
     /// Same level as series.
     Normal,
-    /// Above everything (active/hovered drawings, above crosshair).
+    /// Above series on the overlay layer (active/hovered drawings).
     Top,
 }
 

@@ -5101,10 +5101,13 @@ impl RayCore {
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_: web_sys::Event| {
                     log::info!("SubPane {} pointerleave", pid);
                     ca.set(false);
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
+                    if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
+                        sp.drawings.clear_hovered();
+                    }
                     if !drag.get() {
-                        let Ok(mut s) = inner.try_borrow_mut() else {
-                            return;
-                        };
                         s.engine.crosshair.active = false;
                         s.active_subpane_id = None;
                     }
@@ -5164,10 +5167,13 @@ impl RayCore {
 
                     // Get bar coordinate from main viewport (shared time axis)
                     let bar = s.engine.viewport.pixel_to_bar(x, pw);
+                    let main_start_bar = s.engine.viewport.start_bar;
+                    let main_end_bar = s.engine.viewport.end_bar;
 
                     // Update drawing preview or drag if active
                     if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
                         let price = sp.viewport.pixel_to_price(y, ph);
+                        let mut is_drawing_drag = false;
 
                         // Update drawing creation preview
                         if sp.drawings.is_creating() {
@@ -5181,7 +5187,29 @@ impl RayCore {
                                 Some(raycore::core::drawings::types::DrawingState::Dragging { .. })
                             ) {
                                 sp.drawings.update_drag(id, bar, price);
+                                is_drawing_drag = true;
                             }
+                        }
+
+                        if !is_drawing_drag
+                            && !sp.drawings.is_creating()
+                            && sp.drawings.active_tool == raycore::DrawingTool::None
+                        {
+                            // Build a hybrid viewport (shared time + subpane price) for hover hit-test.
+                            let mut hybrid_vp = Viewport::new(pw as u32, ph as u32);
+                            hybrid_vp.start_bar = main_start_bar;
+                            hybrid_vp.end_bar = main_end_bar;
+                            hybrid_vp.price_min = sp.viewport.price_min;
+                            hybrid_vp.price_max = sp.viewport.price_max;
+                            hybrid_vp.volume_height_ratio = 0.0;
+
+                            let hovered_id = sp
+                                .drawings
+                                .hit_test(x, y, &hybrid_vp, pw, ph)
+                                .map(|(id, _)| id);
+                            sp.drawings.set_hovered(hovered_id);
+                        } else {
+                            sp.drawings.clear_hovered();
                         }
                     }
 
@@ -5264,6 +5292,10 @@ impl RayCore {
                     let Ok(mut s) = inner.try_borrow_mut() else {
                         return;
                     };
+
+                    if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
+                        sp.drawings.clear_hovered();
+                    }
 
                     // Get bar coordinate from main viewport (shared time axis)
                     let bar = s.engine.viewport.pixel_to_bar(x, pw);

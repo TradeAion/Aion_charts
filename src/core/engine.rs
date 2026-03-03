@@ -13,6 +13,7 @@ use crate::core::constants::{
     DEFAULT_BAR_SPACING_CSS, DEFAULT_INITIAL_VISIBLE_BARS, MIN_VISIBLE_BARS,
 };
 use crate::core::data::{Bar, BarArray};
+use crate::core::drawings::types::DrawingGeometry;
 use crate::core::drawings::DrawingManager;
 use crate::core::events::EventBus;
 use crate::core::indicators::IndicatorManager;
@@ -749,6 +750,7 @@ impl ChartEngine {
         &mut self,
         y_ticks: &[crate::core::renderer::traits::TickMark],
         x_ticks: &[crate::core::renderer::traits::TickMark],
+        bottom_drawings: &[DrawingGeometry],
     ) -> Result<(), String> {
         if self.viewport.price_invalidated && !self.viewport.price_locked {
             self.viewport.auto_fit_price(&self.bars);
@@ -770,6 +772,7 @@ impl ChartEngine {
             indicator_draw_instructions: &indicator_draw_instructions,
             main_chart_type: self.main_chart_type,
             main_chart_options: &self.main_chart_options,
+            bottom_drawings,
         };
 
         self.renderer.render_frame(&ctx)

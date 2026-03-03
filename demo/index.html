@@ -689,7 +689,12 @@
   </div>
 
   <script type="module">
-    import init, { RayCore, ChartGroup, ChartWorkspace } from '../wasm/pkg/raycore_wasm.js';
+    // Always load the newest local WASM artifact in the demo.
+    const wasmBuildToken = String(Date.now());
+    const wasmModule = await import(`../wasm/pkg/raycore_wasm.js?v=${wasmBuildToken}`);
+    const init = wasmModule.default;
+    const { RayCore, ChartGroup, ChartWorkspace } = wasmModule;
+    const wasmBinaryUrl = `../wasm/pkg/raycore_wasm_bg.wasm?v=${wasmBuildToken}`;
 
     // ═══════════════════════════════════════════════════════════════════════
     // DOM & State
@@ -1268,7 +1273,7 @@
     // ═══════════════════════════════════════════════════════════════════════
     async function boot() {
       try {
-        await init();
+        await init(wasmBinaryUrl);
         updateBadge('canvas2d');
         await createChart('canvas2d');
       } catch (e) {
