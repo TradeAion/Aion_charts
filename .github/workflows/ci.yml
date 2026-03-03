@@ -1,5 +1,5 @@
 # RayCharts CI/CD Pipeline
-# Runs on all PRs and pushes to main
+# Runs on pushes to main and selected PR lifecycle events.
 #
 # Jobs:
 # 1. test     - Run cargo test on Linux/Windows/macOS
@@ -11,9 +11,11 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
-    branches: [main, develop]
+    branches: [main]
+    types: [opened, reopened, ready_for_review]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -36,7 +38,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
 
@@ -76,7 +78,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
 
@@ -118,7 +120,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -153,7 +155,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Build documentation
         run: cargo doc --no-deps --all-features
