@@ -12,7 +12,13 @@ use crate::core::renderer::value_projection::{format_scale_value, y_tick_step_in
 use crate::core::viewport::Viewport;
 
 /// Compute price (Y-axis) tick marks.
-/// `chart_h` is the pane height in physical pixels.
+/// `chart_h` is the **candle area** height in physical pixels — i.e. the
+/// same coordinate space used by `price_to_y()`.  All renderers (candles,
+/// overlays, price-axis labels, crosshair) map prices into the candle area,
+/// so tick marks must too.  Callers should pass
+/// `candle_area_height_ph(vp, pane_ph)` (or `pane_ph` when
+/// `volume_height_ratio == 0`).
+///
 /// Handles all price scale modes (Normal, Log, Percentage, IndexedTo100).
 pub fn compute_y_ticks(vp: &Viewport, chart_h: f64, dpr: f64, style: &ChartStyle) -> Vec<TickMark> {
     let range = vp.price_max - vp.price_min;
@@ -20,8 +26,7 @@ pub fn compute_y_ticks(vp: &Viewport, chart_h: f64, dpr: f64, style: &ChartStyle
         return vec![];
     }
 
-    // Price axis ticks should span the full axis height, not only candle area.
-    // Spacing follows LWC's typography-driven density model.
+    // Tick spacing follows LWC's typography-driven density model.
     let step = y_tick_step_internal(vp, chart_h, dpr, style).max(0.0001);
     let min_gap_px = (style.price_scale_tick_mark_spacing_css() * dpr).max(1.0);
     let first = (vp.price_min / step).ceil() * step;
