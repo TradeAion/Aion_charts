@@ -98,10 +98,10 @@ pub(crate) fn do_render_frame(
             ref mut price_axis_renderer,
             ref engine,
             ref mut layout,
-            ref subpanes,
+            ref mut subpanes,
             ..
         } = *s;
-        let max_text_w_phys = price_axis_renderer.measure_optimal_width(
+        let mut max_text_w_phys = price_axis_renderer.measure_optimal_width(
             &engine.style,
             &provisional_y_ticks,
             &engine.series,
@@ -110,6 +110,20 @@ pub(crate) fn do_render_frame(
             &engine.viewport,
             pane_ph,
         );
+
+        // Include subpane tick labels in width measurement so they don't clip
+        for subpane in subpanes.iter_mut() {
+            // Auto-scale subpane to visible range before measuring
+            if subpane.config.auto_scale {
+                subpane
+                    .auto_scale_price_visible(engine.viewport.start_bar, engine.viewport.end_bar);
+            }
+            let sp_w = subpane.measure_axis_label_width(&engine.style);
+            if sp_w > max_text_w_phys {
+                max_text_w_phys = sp_w;
+            }
+        }
+
         let max_text_w_css = max_text_w_phys / dpr;
         let price_axis_css_w = engine.style.price_axis_width(max_text_w_css);
         let time_axis_css_h = engine.style.time_axis_height();

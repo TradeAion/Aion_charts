@@ -81,6 +81,39 @@ impl PriceAxisRenderer {
         self.top_ctx.set_image_smoothing_enabled(false);
     }
 
+    /// Resize with explicit CSS display dimensions.
+    ///
+    /// Unlike `resize()`, this also sets the CSS `width` and `height` on both
+    /// canvases so the browser displays them at the correct size. Required for
+    /// subpane price axes where the layout system doesn't manage canvas CSS.
+    pub fn resize_with_css(&mut self, pw: u32, ph: u32, dpr: f64, css_w: f64, css_h: f64) {
+        self.resize(pw, ph, dpr);
+        let w_str = format!("{}px", css_w);
+        let h_str = format!("{}px", css_h);
+        let _ = self.base_canvas.style().set_property("width", &w_str);
+        let _ = self.base_canvas.style().set_property("height", &h_str);
+        let _ = self.top_canvas.style().set_property("width", &w_str);
+        let _ = self.top_canvas.style().set_property("height", &h_str);
+    }
+
+    /// Measure the maximum width of tick labels only (used by subpanes
+    /// to contribute to the shared price axis column width).
+    pub fn measure_tick_label_width(&mut self, style: &ChartStyle, ticks: &[TickMark]) -> f64 {
+        if ticks.is_empty() {
+            return 0.0;
+        }
+        let font = style.axis_font(self.dpr);
+        self.base_ctx.set_font(&font);
+        let mut max_w: f64 = 0.0;
+        for t in ticks {
+            let w = self.text_cache.measure(&self.base_ctx, &t.label, &font);
+            if w > max_w {
+                max_w = w;
+            }
+        }
+        max_w
+    }
+
     /// Measure the optimal axis text width (physical px).
     ///
     /// Includes:
@@ -387,6 +420,114 @@ impl PriceAxisRenderer {
                 &self.base_ctx,
                 &mut self.text_cache,
                 &item.label,
+                &css_font,
+                &text_color,
+                &geom,
+                dpr,
+            );
+        }
+    }
+
+    /// Render last-value indicator labels on the price axis (for subpanes).
+    ///
+    /// Shows the current value of each indicator line (e.g. RSI = 65.2) as a
+    /// colored pill label, matching the main chart's last-price label style.
+    ///
+    /// `pane_ph` is the pane height in physical pixels.
+    pub fn render_indicator_last_values(
+        &mut self,
+        values: &[(f64, [f32; 4])], // (last_value, line_color) pairs
+        vp: &Viewport,
+        style: &ChartStyle,
+        pane_ph: f64,
+    ) {
+        if values.is_empty() {
+            return;
+        }
+
+        let w = self.pw as f64;
+        let dpr = self.dpr;
+        let candle_h = candle_area_height_ph(vp, pane_ph);
+        let label_h = candle_h.min(self.ph as f64);
+        if candle_h <= 0.0 || label_h <= 0.0 {
+            return;
+        }
+
+        let step = y_tick_step_internal(vp, pane_ph, dpr, style);
+        let font = style.axis_font(dpr);
+        self.base_ctx.set_font(&font);
+        let metrics = RightAxisLabelMetrics::from_style(style, dpr);
+        let half_h = right_axis_label_height_bmp(&metrics, dpr, 0.0) / 2.0;
+
+        struct IndicatorLabel {
+            label: String,
+            y_phys: f64,
+            color: [f32; 4],
+        }
+
+        let mut entries: Vec<IndicatorLabel> = Vec::new();
+        for &(value, color) in values {
+            if !value.is_finite() {
+                continue;
+            }
+            let y_phys = price_to_pane_y_phys(value, vp, pane_ph);
+            if y_phys < 0.0 || y_phys > candle_h {
+                continue;
+            }
+            let label = format_scale_value(vp, value, step);
+            entries.push(IndicatorLabel {
+                label,
+                y_phys,
+                color,
+            });
+        }
+
+        if entries.is_empty() {
+            return;
+        }
+
+        let mut layout: Vec<LabelRect> = entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| LabelRect {
+                y_center: e.y_phys.round(),
+                half_height: half_h,
+                priority: 50,
+                index: i,
+            })
+            .collect();
+        resolve_label_overlaps(&mut layout, label_h);
+
+        let css_font = format!("{}px {}", style.font_size, style.font_family);
+        let text_color = style.crosshair_label_text;
+        for (i, entry) in entries.iter().enumerate() {
+            let text_w = self
+                .text_cache
+                .measure(&self.base_ctx, &entry.label, &font)
+                .ceil();
+            let y_mid = layout
+                .get(i)
+                .map(|l| l.y_center)
+                .unwrap_or_else(|| entry.y_phys.round());
+            let geom = match compute_right_axis_label_geometry(
+                w,
+                label_h,
+                y_mid,
+                text_w,
+                dpr,
+                &metrics,
+                0.0,
+                RightAxisLabelWidthMode::AxisFull,
+            ) {
+                Some(v) => v,
+                None => continue,
+            };
+
+            draw_right_axis_label_background(&self.base_ctx, &geom, &entry.color);
+            draw_right_axis_label_text(
+                &self.base_ctx,
+                &mut self.text_cache,
+                &entry.label,
                 &css_font,
                 &text_color,
                 &geom,

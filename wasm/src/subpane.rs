@@ -667,9 +667,7 @@ impl SubPane {
     pub fn reset_price_viewport(&mut self) {
         self.viewport.price_min = self.config.price_min;
         self.viewport.price_max = self.config.price_max;
-        if self.auto_scale {
-            self.auto_scale_price();
-        }
+        // auto_scale will be applied on next render() with visible range
     }
 
     /// Toggle auto-scale mode and unlock price axis.
@@ -678,7 +676,7 @@ impl SubPane {
         // Also unlock price axis when enabling auto-scale (same as main chart)
         if self.auto_scale {
             self.viewport.price_locked = false;
-            self.auto_scale_price();
+            // auto_scale will be applied on next render() with visible range
         }
     }
 
@@ -695,13 +693,14 @@ impl SubPane {
             resize_canvas_with_size(&self.chart_base, pw, ph, cw, ch);
             resize_canvas_with_size(&self.chart_top, pw, ph, cw, ch);
         }
-        // Price axis canvases are resized via PriceAxisRenderer
+        // Price axis canvases — must set CSS size for correct display
         let aw = self.axis_container.client_width() as f64;
         let ah = self.axis_container.client_height() as f64;
         if aw > 0.0 && ah > 0.0 {
             let apw = (aw * dpr).round() as u32;
             let aph = (ah * dpr).round() as u32;
-            self.price_axis.resize(apw.max(1), aph.max(1), dpr);
+            self.price_axis
+                .resize_with_css(apw.max(1), aph.max(1), dpr, aw, ah);
         }
     }
 
@@ -712,16 +711,24 @@ impl SubPane {
         if !colors.is_empty() {
             self.colors = colors;
         }
-        if self.config.auto_scale {
-            self.auto_scale_price();
-        }
+        // Note: auto_scale is done in render() with the visible range from main_viewport,
+        // not here, so the y-axis tightens to the visible bars like the main chart does.
     }
 
-    fn auto_scale_price(&mut self) {
+    /// Auto-scale the price axis to fit visible data only.
+    /// `start_bar` and `end_bar` define the visible range from the main viewport.
+    pub fn auto_scale_price_visible(&mut self, start_bar: f64, end_bar: f64) {
+        let lo_idx = (start_bar.floor() as isize).max(0) as usize;
+        let hi_idx = (end_bar.ceil() as isize).max(0) as usize;
+
         let mut lo = f64::MAX;
         let mut hi = f64::MIN;
         for line in &self.data {
-            for &v in &line.values {
+            let end = hi_idx.min(line.values.len());
+            if lo_idx >= end {
+                continue;
+            }
+            for &v in &line.values[lo_idx..end] {
                 if v.is_finite() {
                     lo = lo.min(v as f64);
                     hi = hi.max(v as f64);
@@ -732,10 +739,26 @@ impl SubPane {
             let m = (hi - lo) * 0.1;
             self.viewport.price_min = lo - m;
             self.viewport.price_max = hi + m;
+        } else if lo == hi && lo.is_finite() {
+            // Single value — give some visual padding
+            self.viewport.price_min = lo - 1.0;
+            self.viewport.price_max = hi + 1.0;
         }
     }
 
     // ── High-level Rendering (called from lib.rs render loop) ──────────
+
+    /// Measure the maximum tick label width for this subpane's price axis.
+    /// Used by the main render loop to ensure the shared price axis column
+    /// is wide enough for all panes.
+    pub fn measure_axis_label_width(&mut self, style: &ChartStyle) -> f64 {
+        let ph = self.chart_base.height() as f64;
+        if ph <= 0.0 {
+            return 0.0;
+        }
+        let y_ticks = compute_y_ticks(&self.viewport, ph, self.dpr, style);
+        self.price_axis.measure_tick_label_width(style, &y_ticks)
+    }
 
     /// Render chart data + grid + reference lines on the BASE canvas,
     /// then render the price axis base layer.
@@ -750,6 +773,11 @@ impl SubPane {
             return;
         }
 
+        // Auto-scale to visible bar range (same behavior as main chart)
+        if self.config.auto_scale {
+            self.auto_scale_price_visible(main_viewport.start_bar, main_viewport.end_bar);
+        }
+
         // Compute Y tick marks for this sub-pane's viewport
         let y_ticks = compute_y_ticks(&self.viewport, ph, dpr, style);
 
@@ -758,6 +786,35 @@ impl SubPane {
 
         // Render price axis base layer (ticks + labels)
         self.price_axis.render_base(style, &y_ticks, ph);
+
+        // Render last-value indicator labels on the price axis (colored pills)
+        let last_values: Vec<(f64, [f32; 4])> = self
+            .data
+            .iter()
+            .enumerate()
+            .filter_map(|(i, line)| {
+                // Find the last finite value in the visible range
+                let end_idx = (main_viewport.end_bar.ceil() as usize).min(line.values.len());
+                let start_idx = (main_viewport.start_bar.floor() as usize)
+                    .max(0)
+                    .min(end_idx);
+                let last_val = line.values[start_idx..end_idx]
+                    .iter()
+                    .rev()
+                    .find(|v| v.is_finite())
+                    .copied()?;
+                let color = self
+                    .colors
+                    .get(i)
+                    .copied()
+                    .unwrap_or(raycore::ThemeConfig::default().indicator_palette.fallback);
+                Some((last_val as f64, color))
+            })
+            .collect();
+        if !last_values.is_empty() {
+            self.price_axis
+                .render_indicator_last_values(&last_values, &self.viewport, style, ph);
+        }
     }
 
     /// Clear the crosshair overlay canvas. Call before drawing crosshair lines.
