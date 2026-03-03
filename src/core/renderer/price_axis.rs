@@ -8,6 +8,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
+use crate::core::chart_type::MainChartType;
 use crate::core::price_line::PriceLineManager;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
@@ -127,6 +128,7 @@ impl PriceAxisRenderer {
         ticks: &[TickMark],
         series: &SeriesCollection,
         bars: &crate::core::data::BarArray,
+        main_chart_type: MainChartType,
         price_lines: &PriceLineManager,
         vp: &Viewport,
         pane_ph: f64,
@@ -150,7 +152,9 @@ impl PriceAxisRenderer {
 
         // Last-value labels (same source as pane last-price lines).
         if style.last_price_line.label_visible {
-            for item in collect_last_values(series, bars, vp, style, pane_ph, self.dpr) {
+            for item in
+                collect_last_values(series, bars, main_chart_type, vp, style, pane_ph, self.dpr)
+            {
                 let w = self.text_cache.measure(&self.base_ctx, &item.label, &font);
                 if w > max_w {
                     max_w = w;
@@ -361,6 +365,7 @@ impl PriceAxisRenderer {
         &mut self,
         series: &SeriesCollection,
         bars: &crate::core::data::BarArray,
+        main_chart_type: MainChartType,
         vp: &Viewport,
         style: &ChartStyle,
         pane_ph: f64,
@@ -371,7 +376,8 @@ impl PriceAxisRenderer {
 
         let w = self.pw as f64;
 
-        let labels = collect_last_values(series, bars, vp, style, pane_ph, self.dpr);
+        let labels =
+            collect_last_values(series, bars, main_chart_type, vp, style, pane_ph, self.dpr);
         if labels.is_empty() {
             return;
         }

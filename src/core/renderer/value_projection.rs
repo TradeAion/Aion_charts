@@ -8,6 +8,7 @@
 //! This module ensures pane overlays and price-axis labels are derived from
 //! the exact same data and coordinate math.
 
+use crate::core::chart_type::MainChartType;
 use crate::core::data::BarArray;
 use crate::core::formatters::{format_indexed, format_percent, format_price, nice_step_ceiling};
 use crate::core::renderer::traits::ChartStyle;
@@ -80,6 +81,7 @@ pub fn format_scale_value(vp: &Viewport, raw_price: f64, step_internal: f64) -> 
 pub fn collect_last_values(
     series: &SeriesCollection,
     bars: &BarArray,
+    main_chart_type: MainChartType,
     vp: &Viewport,
     style: &ChartStyle,
     pane_ph: f64,
@@ -100,21 +102,16 @@ pub fn collect_last_values(
     // rendering side clamps the label to the top/bottom edge of the axis
     // (via `compute_right_axis_label_geometry`), keeping it visible even
     // when the user has scaled the price axis so the last price is off-screen.
-    if bars.len() > 0 {
-        if let Some(last) = bars.get(bars.len() - 1) {
-            let y_phys = price_to_y(last.close as f64, vp, candle_h);
-            let color = if last.close >= last.open {
-                style.bullish_color
-            } else {
-                style.bearish_color
-            };
-            out.push(ProjectedLastValue {
-                price: last.close as f64,
-                y_phys,
-                color,
-                label: format_scale_value(vp, last.close as f64, step),
-            });
-        }
+    if let Some((last_price, color)) =
+        main_series_last_price_and_color(bars, main_chart_type, style)
+    {
+        let y_phys = price_to_y(last_price, vp, candle_h);
+        out.push(ProjectedLastValue {
+            price: last_price,
+            y_phys,
+            color,
+            label: format_scale_value(vp, last_price, step),
+        });
     }
 
     // Overlay series last values.
@@ -136,6 +133,68 @@ pub fn collect_last_values(
     }
 
     out
+}
+
+/// Resolve the main-series last price + color for the active chart type.
+///
+/// For Heikin-Ashi, this returns the transformed `ha_close` and candle direction
+/// color computed from `(ha_open, ha_close)` so the last-price line/label
+/// stays attached to the rendered HA body edge.
+pub fn main_series_last_price_and_color(
+    bars: &BarArray,
+    main_chart_type: MainChartType,
+    style: &ChartStyle,
+) -> Option<(f64, [f32; 4])> {
+    if bars.len() == 0 {
+        return None;
+    }
+
+    match main_chart_type {
+        MainChartType::HeikinAshi => {
+            let (ha_open, ha_close) = heikin_ashi_last_open_close(bars)?;
+            let color = if ha_close >= ha_open {
+                style.bullish_color
+            } else {
+                style.bearish_color
+            };
+            Some((ha_close, color))
+        }
+        _ => {
+            let last = bars.get(bars.len() - 1)?;
+            let color = if last.close >= last.open {
+                style.bullish_color
+            } else {
+                style.bearish_color
+            };
+            Some((last.close as f64, color))
+        }
+    }
+}
+
+fn heikin_ashi_last_open_close(bars: &BarArray) -> Option<(f64, f64)> {
+    let len = bars.len();
+    if len == 0 {
+        return None;
+    }
+
+    let first = bars.get(0)?;
+    let mut prev_ha_open = (first.open as f64 + first.close as f64) * 0.5;
+    let mut prev_ha_close =
+        (first.open as f64 + first.high as f64 + first.low as f64 + first.close as f64) * 0.25;
+
+    if len == 1 {
+        return Some((prev_ha_open, prev_ha_close));
+    }
+
+    for i in 1..len {
+        let b = bars.get(i)?;
+        let ha_close = (b.open as f64 + b.high as f64 + b.low as f64 + b.close as f64) * 0.25;
+        let ha_open = (prev_ha_open + prev_ha_close) * 0.5;
+        prev_ha_open = ha_open;
+        prev_ha_close = ha_close;
+    }
+
+    Some((prev_ha_open, prev_ha_close))
 }
 
 /// Map a timestamp to a fractional bar index using `BarArray` timestamps.
@@ -200,4 +259,63 @@ pub fn timestamp_to_bar_index_in_bars(ts: u64, bars: &BarArray) -> Option<f64> {
 
     let frac = (ts as f64 - t0) / dt;
     Some((lo - 1) as f64 + frac)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::main_series_last_price_and_color;
+    use crate::core::chart_type::MainChartType;
+    use crate::core::data::{Bar, BarArray};
+    use crate::core::renderer::traits::ChartStyle;
+
+    fn sample_bars() -> BarArray {
+        let mut bars = BarArray::new();
+        bars.set(vec![
+            Bar {
+                timestamp: 1,
+                open: 10.0,
+                high: 12.0,
+                low: 9.0,
+                close: 11.0,
+                volume: 100.0,
+                _pad: 0.0,
+            },
+            Bar {
+                timestamp: 2,
+                open: 11.0,
+                high: 13.0,
+                low: 10.0,
+                close: 12.0,
+                volume: 120.0,
+                _pad: 0.0,
+            },
+        ]);
+        bars
+    }
+
+    #[test]
+    fn main_last_price_uses_raw_close_for_candlestick() {
+        let bars = sample_bars();
+        let style = ChartStyle::default();
+        let (price, color) =
+            main_series_last_price_and_color(&bars, MainChartType::Candlestick, &style)
+                .expect("main last value");
+        assert!((price - 12.0).abs() < 1e-9);
+        assert_eq!(color, style.bullish_color);
+    }
+
+    #[test]
+    fn main_last_price_uses_heikin_ashi_close_for_heikin_ashi() {
+        let bars = sample_bars();
+        let style = ChartStyle::default();
+        let (price, color) =
+            main_series_last_price_and_color(&bars, MainChartType::HeikinAshi, &style)
+                .expect("main last value");
+
+        // For the sample bars:
+        // bar0: ha_open=10.5, ha_close=10.5
+        // bar1: ha_open=(10.5+10.5)/2=10.5, ha_close=(11+13+10+12)/4=11.5
+        assert!((price - 11.5).abs() < 1e-9);
+        assert_eq!(color, style.bullish_color);
+    }
 }

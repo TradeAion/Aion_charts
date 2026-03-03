@@ -128,6 +128,7 @@ pub(crate) fn do_render_frame(
             &provisional_y_ticks,
             &engine.series,
             &engine.bars,
+            engine.main_chart_options.chart_type,
             &engine.price_lines,
             &engine.viewport,
             pane_ph,
@@ -241,6 +242,7 @@ pub(crate) fn do_render_frame(
         overlay.render_last_price_lines(
             &engine.series,
             &engine.bars,
+            engine.main_chart_options.chart_type,
             &engine.viewport,
             &engine.style,
             pane_css_w,
@@ -287,6 +289,7 @@ pub(crate) fn do_render_frame(
         price_axis_renderer.render_last_price_labels(
             &engine.series,
             &engine.bars,
+            engine.main_chart_options.chart_type,
             &engine.viewport,
             &engine.style,
             pane_ph,

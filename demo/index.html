@@ -326,12 +326,7 @@
     </div>
     <div class="toolbar-divider"></div>
 
-    <div class="toolbar-section">
-      <button class="btn active" id="chart-candlestick">Candle</button>
-      <button class="btn" id="chart-ohlc">OHLC</button>
-      <button class="btn" id="chart-line">Line</button>
-      <button class="btn" id="chart-area">Area</button>
-    </div>
+    <div class="toolbar-section" id="chart-type-buttons"></div>
     <div class="toolbar-divider"></div>
 
     <div class="toolbar-section">
@@ -981,14 +976,71 @@
     // ═══════════════════════════════════════════════════════════════════════
     // Chart Type
     // ═══════════════════════════════════════════════════════════════════════
-    const chartTypes = { 'chart-candlestick': 'candlestick', 'chart-ohlc': 'ohlc', 'chart-line': 'line', 'chart-area': 'area' };
-    Object.entries(chartTypes).forEach(([id, type]) => {
-      $(id).onclick = () => {
-        activeChartType = type;
-        Object.keys(chartTypes).forEach(k => $(k).classList.toggle('active', k === id));
-        if (core) core.set_chart_type(type);
-      };
-    });
+    const chartTypeButtonsHost = $('chart-type-buttons');
+    const chartTypeLabel = {
+      candlestick: 'Candle',
+      ohlc: 'OHLC',
+      line: 'Line',
+      area: 'Area',
+      heikin_ashi: 'Heikin Ashi',
+      baseline: 'Baseline',
+    };
+    const preferredChartTypeOrder = ['candlestick', 'ohlc', 'line', 'area', 'heikin_ashi', 'baseline'];
+
+    function availableChartTypes() {
+      const fallback = ['candlestick', 'ohlc', 'line', 'area', 'heikin_ashi'];
+      let raw = '';
+      try {
+        if (typeof RayCore.get_available_chart_types === 'function') {
+          raw = String(RayCore.get_available_chart_types() || '');
+        }
+      } catch (_) {
+        raw = '';
+      }
+      if (!raw.trim()) return fallback;
+
+      const unique = new Set(
+        raw
+          .split(',')
+          .map(s => s.trim().toLowerCase())
+          .filter(Boolean)
+      );
+
+      const ordered = preferredChartTypeOrder.filter(type => unique.has(type));
+      unique.forEach(type => {
+        if (!ordered.includes(type)) ordered.push(type);
+      });
+      return ordered.length ? ordered : fallback;
+    }
+
+    function syncChartTypeButtons() {
+      if (!chartTypeButtonsHost) return;
+      chartTypeButtonsHost.querySelectorAll('button[data-chart-type]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.chartType === activeChartType);
+      });
+    }
+
+    function renderChartTypeButtons() {
+      if (!chartTypeButtonsHost) return;
+      const types = availableChartTypes();
+      if (!types.includes(activeChartType)) activeChartType = types[0];
+
+      chartTypeButtonsHost.innerHTML = '';
+      types.forEach(type => {
+        const btn = document.createElement('button');
+        btn.className = 'btn';
+        btn.dataset.chartType = type;
+        btn.textContent = chartTypeLabel[type] || type.replace(/_/g, ' ');
+        btn.onclick = () => {
+          activeChartType = type;
+          syncChartTypeButtons();
+          if (core) core.set_chart_type(type);
+        };
+        chartTypeButtonsHost.appendChild(btn);
+      });
+
+      syncChartTypeButtons();
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     // Drawing Tools
@@ -1290,6 +1342,7 @@
     async function boot() {
       try {
         await init(wasmBinaryUrl);
+        renderChartTypeButtons();
         updateBadge('canvas2d');
         await createChart('canvas2d');
       } catch (e) {
@@ -1297,6 +1350,7 @@
         showError(`Init failed: ${e.message || e}`);
       }
     }
+    renderChartTypeButtons();
     boot();
   </script>
 </body>

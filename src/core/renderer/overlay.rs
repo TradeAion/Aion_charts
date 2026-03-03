@@ -7,6 +7,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
+use crate::core::chart_type::MainChartType;
 use crate::core::data::BarArray;
 use crate::core::drawings::types::DrawingGeometry;
 use crate::core::formatters::{format_price, format_volume};
@@ -20,7 +21,7 @@ use crate::core::renderer::text_cache::TextWidthCache;
 use crate::core::renderer::traits::{ChartStyle, CrosshairState};
 use crate::core::renderer::transforms::bar_to_x;
 use crate::core::renderer::value_projection::{
-    price_to_pane_y_phys, timestamp_to_bar_index_in_bars,
+    main_series_last_price_and_color, price_to_pane_y_phys, timestamp_to_bar_index_in_bars,
 };
 use crate::core::series::{LineStyle, SeriesCollection, SeriesType};
 use crate::core::viewport::Viewport;
@@ -412,6 +413,7 @@ impl OverlayRenderer {
         &self,
         series: &SeriesCollection,
         bars: &crate::core::data::BarArray,
+        main_chart_type: MainChartType,
         viewport: &Viewport,
         style: &ChartStyle,
         pane_css_w: f64,
@@ -438,18 +440,15 @@ impl OverlayRenderer {
         // visible as long as it's within the pane, even if the price scale
         // has scrolled the last value near or into the volume region.
         if bars.len() > 0 {
-            if let Some(last) = bars.get(bars.len() - 1) {
+            if let Some((last_price, color)) =
+                main_series_last_price_and_color(bars, main_chart_type, style)
+            {
                 let x_anchor = bar_to_x((bars.len() - 1) as f64 + 0.5, viewport, pane_pw);
-                let y_phys = price_to_pane_y_phys(last.close as f64, viewport, pane_ph);
+                let y_phys = price_to_pane_y_phys(last_price, viewport, pane_ph);
                 // Clip to full pane height (LWC: y < 0 || y > bitmapSize.height)
                 if x_anchor >= 0.0 && x_anchor < pane_pw && y_phys >= 0.0 && y_phys <= pane_ph {
                     let y = y_phys.round() + correction;
-                    self.ctx
-                        .set_stroke_style_str(&rgba(&if last.close >= last.open {
-                            style.bullish_color
-                        } else {
-                            style.bearish_color
-                        }));
+                    self.ctx.set_stroke_style_str(&rgba(&color));
                     self.ctx.begin_path();
                     self.ctx.move_to(x_anchor.max(0.0), y);
                     self.ctx.line_to(pane_pw + line_w + 1.0, y);
