@@ -15,6 +15,8 @@ This snapshot already includes:
 
 - Drawing geometry and per-drawing style
 - Chart style/theme options (layout, grid, crosshair, last price line, separators, fonts, colors, chart type)
+- Price-scale visual settings (`ticksVisible`, `tickDensity`)
+- Volume colors and volume visibility
 - Symbol and interval
 - Viewport (visible range, price range/lock, scale mode/margins, auto-scroll)
 - Indicator sub-pane layout and pane viewport state
@@ -34,6 +36,14 @@ Use drawings-only persistence only when intentionally needed:
 4. Call `import_persistence_state(snapshot)`.
 
 If a study from the saved snapshot does not exist at restore time, its pane is skipped.
+
+---
+
+## Import Safety
+
+- `import_drawings(...)` is atomic for existing panes: payload is validated first, then applied. Invalid payloads do not wipe current drawings.
+- `import_persistence_state(...)` validates embedded drawing snapshots before applying restore mutations.
+- Unknown subpane IDs in drawings-only payloads are still ignored.
 
 ---
 
@@ -60,6 +70,7 @@ Why this works:
 
 - Pane IDs are remapped internally during import, so runtime IDs do not need to be stable.
 - Styles are included in the snapshot, so theme/layout/font changes restore as saved.
+- Non-finite viewport/pane numbers are normalized during export/import for stable snapshots.
 
 ---
 

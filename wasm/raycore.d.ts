@@ -1211,7 +1211,7 @@ export declare class RayCore {
 
   /**
    * Restore drawings from a JSON snapshot created by `export_drawings()`.
-   * Existing drawings are replaced.
+   * Existing drawings are replaced atomically (on validation failure, current drawings stay intact).
    */
   import_drawings(json: string): void;
 

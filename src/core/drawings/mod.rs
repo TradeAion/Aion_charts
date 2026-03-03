@@ -493,15 +493,17 @@ impl DrawingManager {
             ));
         }
 
-        self.clear();
-
+        let mut restored: Vec<Box<dyn Drawing>> = Vec::with_capacity(snapshot.drawings.len());
         let mut max_id = 0_u64;
         for item in snapshot.drawings {
             let mut drawing = Self::deserialize_one(item)?;
             max_id = max_id.max(drawing.id());
             drawing.set_state(DrawingState::Idle);
-            self.drawings.push(drawing);
+            restored.push(drawing);
         }
+
+        self.clear();
+        self.drawings = restored;
 
         if max_id > 0 {
             ensure_next_drawing_id_at_least(max_id + 1);
@@ -660,6 +662,24 @@ mod tests {
         let next_id = restored.start_creating(3.0, 12.0).expect("next id");
 
         assert!(next_id > first_id);
+    }
+
+    #[test]
+    fn snapshot_restore_is_atomic_on_error() {
+        let mut manager = DrawingManager::new();
+        let existing_id = complete_trend_line(&mut manager);
+        manager.deselect_all();
+        assert_eq!(manager.len(), 1);
+
+        let mut invalid = manager.snapshot();
+        invalid.drawings[0].tool = "not_a_real_tool".to_string();
+
+        let err = manager
+            .replace_from_snapshot(invalid)
+            .expect_err("invalid snapshot should fail");
+        assert!(err.contains("Unknown drawing tool"));
+        assert_eq!(manager.len(), 1);
+        assert!(manager.get(existing_id).is_some());
     }
 
     #[test]

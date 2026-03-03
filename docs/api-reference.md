@@ -218,6 +218,7 @@ Persist and restore full chart state (recommended):
 - Chart styles/theme options
 - Viewport state
 - Indicator pane layout
+- Volume visibility/colors and price-scale tick visuals (`ticksVisible`, `tickDensity`)
 
 ```ts
 const snapshot = chart.export_persistence_state('workspace-main');
@@ -230,6 +231,8 @@ if (saved) chart.import_persistence_state(saved);
 ### `export_drawings()` / `import_drawings(json)`
 
 Persist and restore drawings only (legacy/partial snapshot).
+
+- Restore is atomic for existing panes: invalid payloads fail without clearing current drawings.
 
 ```ts
 const snapshot = chart.export_drawings();

@@ -672,6 +672,38 @@ fn ensure_finite_fields(ctx: &str, fields: &[(&str, f32)]) -> Result<(), JsValue
     Ok(())
 }
 
+#[inline]
+fn finite_or(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() {
+        value
+    } else {
+        fallback
+    }
+}
+
+#[inline]
+fn finite_or_f32(value: f32, fallback: f32) -> f32 {
+    if value.is_finite() {
+        value
+    } else {
+        fallback
+    }
+}
+
+fn normalize_price_range(min: f64, max: f64, fallback_min: f64, fallback_max: f64) -> (f64, f64) {
+    let mut lo = finite_or(min, fallback_min);
+    let mut hi = finite_or(max, fallback_max);
+    if hi < lo {
+        std::mem::swap(&mut lo, &mut hi);
+    }
+    (lo, hi)
+}
+
+fn validate_drawing_snapshot(snapshot: &raycore::DrawingSnapshot) -> Result<(), String> {
+    let mut manager = raycore::DrawingManager::new();
+    manager.replace_from_snapshot(snapshot.clone())
+}
+
 const DRAWING_STORE_VERSION: u32 = 1;
 const CHART_PERSISTENCE_VERSION: u32 = 1;
 
@@ -2001,6 +2033,18 @@ impl RayCore {
         } else {
             None
         };
+        let axis_ticks_visible = js_get_path(options, &["rightPriceScale", "ticksVisible"])
+            .or_else(|| js_get_path(options, &["priceScale", "ticksVisible"]))
+            .or_else(|| js_get_path(options, &["priceScale", "ticks_visible"]))
+            .and_then(|v| v.as_bool());
+        let price_scale_tick_density = js_get_path(options, &["rightPriceScale", "tickDensity"])
+            .or_else(|| js_get_path(options, &["priceScale", "tickDensity"]))
+            .or_else(|| js_get_path(options, &["rightPriceScale", "tickMarkDensity"]))
+            .or_else(|| js_get_path(options, &["priceScale", "tickMarkDensity"]))
+            .or_else(|| js_get(options, "priceScaleTickDensity"))
+            .and_then(|v| v.as_f64())
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .map(|v| v as f32);
 
         let crosshair_mode = js_get_path(options, &["crosshair", "mode"])
             .or_else(|| js_get(options, "crosshairMode"))
@@ -2214,6 +2258,12 @@ impl RayCore {
                 if let Some(visible) = axis_border_visible {
                     style.axis_border_visible = visible;
                 }
+                if let Some(visible) = axis_ticks_visible {
+                    style.axis_ticks_visible = visible;
+                }
+                if let Some(density) = price_scale_tick_density {
+                    style.price_scale_tick_mark_density = density;
+                }
 
                 if let Some(color) = vert_patch.color {
                     style.crosshair_vert_line.color = color;
@@ -2360,6 +2410,10 @@ impl RayCore {
         }
         if let Some(color) = axis_border_color {
             self.theme_config.colors.axis_border = color;
+            css_changed = true;
+        }
+        if let Some(density) = price_scale_tick_density {
+            self.theme_config.layout.price_scale_tick_mark_density = density;
             css_changed = true;
         }
         if let Some(color) = bullish_color {
@@ -3116,6 +3170,38 @@ impl RayCore {
         let s = self.inner.borrow();
         let style = &s.engine.style;
         let viewport = &s.engine.viewport;
+        let layout_id = layout_id.unwrap_or_default();
+        let start_bar = finite_or(viewport.start_bar, 0.0).max(0.0);
+        let mut end_bar = finite_or(
+            viewport.end_bar,
+            start_bar + raycore::core::constants::DEFAULT_INITIAL_VISIBLE_BARS,
+        );
+        if end_bar < start_bar {
+            end_bar = start_bar;
+        }
+        let (price_min, price_max) = normalize_price_range(
+            viewport.price_min,
+            viewport.price_max,
+            0.0,
+            raycore::core::constants::DEFAULT_PRICE_MAX,
+        );
+        let scale_margin_top = finite_or(
+            viewport.scale_margin_top,
+            raycore::core::constants::DEFAULT_SCALE_MARGIN_TOP,
+        )
+        .clamp(0.0, 0.5);
+        let scale_margin_bottom = finite_or(
+            viewport.scale_margin_bottom,
+            raycore::core::constants::DEFAULT_SCALE_MARGIN_BOTTOM,
+        )
+        .clamp(0.0, 0.5);
+        let price_scale_tick_density = finite_or_f32(
+            style.price_scale_tick_mark_density,
+            raycore::core::constants::DEFAULT_PRICE_SCALE_TICK_MARK_DENSITY as f32,
+        )
+        .max(0.1);
+        let volume_visible =
+            viewport.volume_height_ratio.is_finite() && viewport.volume_height_ratio > 0.0;
 
         let options = serde_json::json!({
             "symbol": self.symbol,
@@ -3134,6 +3220,8 @@ impl RayCore {
             "rightPriceScale": {
                 "borderColor": style.axis_border_color,
                 "borderVisible": style.axis_border_visible,
+                "ticksVisible": style.axis_ticks_visible,
+                "tickDensity": price_scale_tick_density,
             },
             "timeScale": {
                 "borderColor": style.axis_border_color,
@@ -3162,9 +3250,11 @@ impl RayCore {
             "priceScale": {
                 "mode": price_scale_mode_key(viewport.price_scale_mode),
                 "margins": {
-                    "top": viewport.scale_margin_top,
-                    "bottom": viewport.scale_margin_bottom,
+                    "top": scale_margin_top,
+                    "bottom": scale_margin_bottom,
                 },
+                "ticksVisible": style.axis_ticks_visible,
+                "tickDensity": price_scale_tick_density,
             },
             "candles": {
                 "upColor": style.bullish_color,
@@ -3186,6 +3276,7 @@ impl RayCore {
             "volume": {
                 "upColor": style.bullish_volume_color,
                 "downColor": style.bearish_volume_color,
+                "visible": volume_visible,
             },
             "lastPriceLine": {
                 "visible": style.last_price_line.visible,
@@ -3204,14 +3295,22 @@ impl RayCore {
         let pane_entries: Vec<PersistedSubPane> = s
             .subpanes
             .iter()
-            .map(|sp| PersistedSubPane {
-                id: sp.id,
-                study_id: sp.study_id,
-                indicator_type: sp.indicator_type.clone(),
-                height_css: sp.get_height(),
-                auto_scale: sp.auto_scale,
-                price_min: sp.viewport.price_min,
-                price_max: sp.viewport.price_max,
+            .map(|sp| {
+                let (pane_price_min, pane_price_max) = normalize_price_range(
+                    sp.viewport.price_min,
+                    sp.viewport.price_max,
+                    0.0,
+                    raycore::core::constants::DEFAULT_PRICE_MAX,
+                );
+                PersistedSubPane {
+                    id: sp.id,
+                    study_id: sp.study_id,
+                    indicator_type: sp.indicator_type.clone(),
+                    height_css: finite_or(sp.get_height(), 160.0).max(0.0),
+                    auto_scale: sp.auto_scale,
+                    price_min: pane_price_min,
+                    price_max: pane_price_max,
+                }
             })
             .collect();
 
@@ -3230,25 +3329,48 @@ impl RayCore {
 
         let snapshot = ChartPersistenceState {
             version: CHART_PERSISTENCE_VERSION,
-            layout_id: layout_id.unwrap_or_default(),
+            layout_id: layout_id.clone(),
             options,
             viewport: PersistedViewport {
-                start_bar: viewport.start_bar,
-                end_bar: viewport.end_bar,
-                price_min: viewport.price_min,
-                price_max: viewport.price_max,
+                start_bar,
+                end_bar,
+                price_min,
+                price_max,
                 price_locked: viewport.price_locked,
                 price_scale_mode: price_scale_mode_key(viewport.price_scale_mode).to_string(),
-                scale_margin_top: viewport.scale_margin_top,
-                scale_margin_bottom: viewport.scale_margin_bottom,
+                scale_margin_top,
+                scale_margin_bottom,
                 auto_scroll: viewport.auto_scroll,
             },
             panes: pane_entries,
             drawings,
         };
 
-        serde_json::to_string(&snapshot).unwrap_or_else(|_| {
-            r#"{"version":1,"layoutId":"","options":{},"viewport":{"startBar":0,"endBar":100,"priceMin":0,"priceMax":100,"priceLocked":false,"priceScaleMode":"normal","scaleMarginTop":0.2,"scaleMarginBottom":0.1,"autoScroll":true},"panes":[],"drawings":{"version":1,"main":{"version":1,"drawings":[]},"subpanes":[]}}"#.to_string()
+        serde_json::to_string(&snapshot).unwrap_or_else(|err| {
+            log::error!("export_persistence_state: failed to serialize snapshot: {err}");
+            let fallback = ChartPersistenceState {
+                version: CHART_PERSISTENCE_VERSION,
+                layout_id,
+                options: serde_json::json!({}),
+                viewport: PersistedViewport {
+                    start_bar: 0.0,
+                    end_bar: raycore::core::constants::DEFAULT_INITIAL_VISIBLE_BARS,
+                    price_min: 0.0,
+                    price_max: raycore::core::constants::DEFAULT_PRICE_MAX,
+                    price_locked: false,
+                    price_scale_mode: "normal".to_string(),
+                    scale_margin_top: raycore::core::constants::DEFAULT_SCALE_MARGIN_TOP,
+                    scale_margin_bottom: raycore::core::constants::DEFAULT_SCALE_MARGIN_BOTTOM,
+                    auto_scroll: true,
+                },
+                panes: Vec::new(),
+                drawings: DrawingStore {
+                    version: DRAWING_STORE_VERSION,
+                    main: raycore::DrawingSnapshot::default(),
+                    subpanes: Vec::new(),
+                },
+            };
+            serde_json::to_string(&fallback).unwrap_or_else(|_| "{}".to_string())
         })
     }
 
@@ -3264,20 +3386,56 @@ impl RayCore {
             )));
         }
 
+        validate_drawing_snapshot(&snapshot.drawings.main).map_err(|e| {
+            js_err(format!(
+                "Invalid main-pane drawings in persistence snapshot: {e}"
+            ))
+        })?;
+        for pane in &snapshot.drawings.subpanes {
+            validate_drawing_snapshot(&pane.drawings).map_err(|e| {
+                js_err(format!(
+                    "Invalid drawings for pane {} in persistence snapshot: {e}",
+                    pane.pane_id
+                ))
+            })?;
+        }
+
         self.apply_options(json_value_to_js(&snapshot.options));
 
         {
             let mut s = self.inner.borrow_mut();
             let vp = &mut s.engine.viewport;
+            let start_bar = finite_or(snapshot.viewport.start_bar, 0.0).max(0.0);
+            let mut end_bar = finite_or(
+                snapshot.viewport.end_bar,
+                start_bar + raycore::core::constants::DEFAULT_INITIAL_VISIBLE_BARS,
+            );
+            if end_bar < start_bar {
+                end_bar = start_bar;
+            }
+            let (price_min, price_max) = normalize_price_range(
+                snapshot.viewport.price_min,
+                snapshot.viewport.price_max,
+                0.0,
+                raycore::core::constants::DEFAULT_PRICE_MAX,
+            );
             vp.set_price_scale_mode(raycore::PriceScaleMode::from_str(
                 snapshot.viewport.price_scale_mode.as_str(),
             ));
-            vp.set_range(snapshot.viewport.start_bar, snapshot.viewport.end_bar);
-            vp.price_min = snapshot.viewport.price_min;
-            vp.price_max = snapshot.viewport.price_max;
+            vp.set_range(start_bar, end_bar);
+            vp.price_min = price_min;
+            vp.price_max = price_max;
             vp.price_locked = snapshot.viewport.price_locked;
-            vp.scale_margin_top = snapshot.viewport.scale_margin_top.clamp(0.0, 0.5);
-            vp.scale_margin_bottom = snapshot.viewport.scale_margin_bottom.clamp(0.0, 0.5);
+            vp.scale_margin_top = finite_or(
+                snapshot.viewport.scale_margin_top,
+                raycore::core::constants::DEFAULT_SCALE_MARGIN_TOP,
+            )
+            .clamp(0.0, 0.5);
+            vp.scale_margin_bottom = finite_or(
+                snapshot.viewport.scale_margin_bottom,
+                raycore::core::constants::DEFAULT_SCALE_MARGIN_BOTTOM,
+            )
+            .clamp(0.0, 0.5);
             vp.auto_scroll = snapshot.viewport.auto_scroll;
         }
 
@@ -3354,10 +3512,17 @@ impl RayCore {
                     continue;
                 };
                 if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == actual_id) {
-                    sp.set_height(pane.height_css);
+                    let height_css = finite_or(pane.height_css, 160.0).max(0.0);
+                    let (pane_price_min, pane_price_max) = normalize_price_range(
+                        pane.price_min,
+                        pane.price_max,
+                        0.0,
+                        raycore::core::constants::DEFAULT_PRICE_MAX,
+                    );
+                    sp.set_height(height_css);
                     sp.auto_scale = pane.auto_scale;
-                    sp.viewport.price_min = pane.price_min;
-                    sp.viewport.price_max = pane.price_max;
+                    sp.viewport.price_min = pane_price_min;
+                    sp.viewport.price_max = pane_price_max;
                     sp.viewport.price_locked = !pane.auto_scale;
                 }
             }
@@ -3400,14 +3565,20 @@ impl RayCore {
                 .collect(),
         };
 
-        serde_json::to_string(&payload).unwrap_or_else(|_| {
-            r#"{"version":1,"main":{"version":1,"drawings":[]},"subpanes":[]}"#.to_string()
+        serde_json::to_string(&payload).unwrap_or_else(|err| {
+            log::error!("export_drawings: failed to serialize drawing snapshot: {err}");
+            let fallback = DrawingStore {
+                version: DRAWING_STORE_VERSION,
+                main: raycore::DrawingSnapshot::default(),
+                subpanes: Vec::new(),
+            };
+            serde_json::to_string(&fallback).unwrap_or_else(|_| "{}".to_string())
         })
     }
 
     /// Restore all drawings (main pane + indicator subpanes) from JSON.
     ///
-    /// Existing drawings are replaced. Unknown subpane IDs in the payload are ignored.
+    /// Existing drawings are replaced atomically. Unknown subpane IDs in the payload are ignored.
     pub fn import_drawings(&mut self, json: &str) -> Result<(), JsValue> {
         let payload: DrawingStore = serde_json::from_str(json)
             .map_err(|e| js_err(format!("Invalid drawing snapshot JSON: {e}")))?;
@@ -3417,6 +3588,24 @@ impl RayCore {
                 "Unsupported drawing store version {} (max supported {})",
                 payload.version, DRAWING_STORE_VERSION
             )));
+        }
+
+        validate_drawing_snapshot(&payload.main)
+            .map_err(|e| js_err(format!("Invalid main-pane drawing snapshot: {e}")))?;
+        let existing_pane_ids: HashSet<u32> = {
+            let s = self.inner.borrow();
+            s.subpanes.iter().map(|sp| sp.id).collect()
+        };
+        for pane_store in &payload.subpanes {
+            if !existing_pane_ids.contains(&pane_store.pane_id) {
+                continue;
+            }
+            validate_drawing_snapshot(&pane_store.drawings).map_err(|e| {
+                js_err(format!(
+                    "Invalid drawing snapshot for subpane {}: {e}",
+                    pane_store.pane_id
+                ))
+            })?;
         }
 
         let mut s = self.inner.borrow_mut();
