@@ -6,6 +6,7 @@
 //! The sole production backend is Canvas2D (WASM). A no-op backend exists
 //! for native compilation (benchmarks, tests).
 
+use crate::core::constants::{DEFAULT_PRICE_AXIS_OPTIMAL_WIDTH, PRICE_AXIS_LABEL_OFFSET};
 use crate::core::data::BarArray;
 use crate::core::indicators::render::types::DrawInstruction;
 use crate::core::series::{LineStyle, SeriesCollection};
@@ -109,7 +110,7 @@ impl ChartStyle {
     /// Price axis label offset (LWC Constants.LabelOffset = 5).
     #[inline]
     pub fn price_axis_label_offset(&self) -> f64 {
-        5.0
+        PRICE_AXIS_LABEL_OFFSET
     }
     /// Extra in-axis inset used when clamping Y-axis label boxes.
     /// Keeps crosshair/live-price labels fully inside at top/bottom edges.
@@ -126,6 +127,7 @@ impl ChartStyle {
 
     /// Computed optimal price axis width (CSS px) for a given max text width.
     /// LWC: borderSize + tickLength + paddingInner + paddingOuter + LabelOffset + textWidth
+    /// Ensures minimum width of DEFAULT_PRICE_AXIS_OPTIMAL_WIDTH (34px).
     #[inline]
     pub fn price_axis_width(&self, max_text_width: f64) -> f64 {
         let raw = self.axis_border_size as f64
@@ -134,6 +136,8 @@ impl ChartStyle {
             + self.price_axis_padding_outer()
             + self.price_axis_label_offset()
             + max_text_width;
+        // Ensure minimum width (LWC DefaultOptimalWidth)
+        let raw = raw.max(DEFAULT_PRICE_AXIS_OPTIMAL_WIDTH);
         // LWC suggestPriceScaleWidth: make even
         let w = raw.ceil() as u32;
         (w + (w % 2)) as f64
@@ -167,11 +171,10 @@ impl ChartStyle {
     pub fn time_axis_padding_horizontal(&self) -> f64 {
         9.0 * self.font_size as f64 / 12.0
     }
-    /// Time axis labelBottomOffset.
-    /// Tuned slightly tighter to reduce excess blank space at the bottom edge.
+    /// Time axis labelBottomOffset: `4 * fontSize / 12` (LWC default).
     #[inline]
     pub fn time_axis_label_bottom_offset(&self) -> f64 {
-        2.0 * self.font_size as f64 / 12.0
+        4.0 * self.font_size as f64 / 12.0
     }
 
     /// Crosshair label additional padding (LWC: `2/12 * fontSize`).

@@ -164,6 +164,16 @@ pub const X_TICK_MIN_COUNT: f64 = 2.0;
 pub const X_TICK_MAX_COUNT: f64 = 12.0;
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Axis Dimensions (LWC Constants)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// LWC DefaultOptimalWidth — minimum price axis width when no labels present.
+pub const DEFAULT_PRICE_AXIS_OPTIMAL_WIDTH: f64 = 34.0;
+
+/// LWC LabelOffset — spacing between tick and label text.
+pub const PRICE_AXIS_LABEL_OFFSET: f64 = 5.0;
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Animation & Visual Effects
 // ═══════════════════════════════════════════════════════════════════════════════
 
