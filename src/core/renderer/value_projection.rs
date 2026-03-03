@@ -94,22 +94,26 @@ pub fn collect_last_values(
     let step = y_tick_step_internal(vp, pane_ph, dpr, style);
 
     // Main candlestick last value (pending-aware read via BarArray::get).
+    //
+    // LWC behaviour: the last-price label is ALWAYS included regardless of
+    // whether the price is currently inside the visible candle area.  The
+    // rendering side clamps the label to the top/bottom edge of the axis
+    // (via `compute_right_axis_label_geometry`), keeping it visible even
+    // when the user has scaled the price axis so the last price is off-screen.
     if bars.len() > 0 {
         if let Some(last) = bars.get(bars.len() - 1) {
             let y_phys = price_to_y(last.close as f64, vp, candle_h);
-            if y_phys >= 0.0 && y_phys <= candle_h {
-                let color = if last.close >= last.open {
-                    style.bullish_color
-                } else {
-                    style.bearish_color
-                };
-                out.push(ProjectedLastValue {
-                    price: last.close as f64,
-                    y_phys,
-                    color,
-                    label: format_scale_value(vp, last.close as f64, step),
-                });
-            }
+            let color = if last.close >= last.open {
+                style.bullish_color
+            } else {
+                style.bearish_color
+            };
+            out.push(ProjectedLastValue {
+                price: last.close as f64,
+                y_phys,
+                color,
+                label: format_scale_value(vp, last.close as f64, step),
+            });
         }
     }
 
@@ -123,9 +127,6 @@ pub fn collect_last_values(
             None => continue,
         };
         let y_phys = price_to_y(last_val, vp, candle_h);
-        if y_phys < 0.0 || y_phys > candle_h {
-            continue;
-        }
         out.push(ProjectedLastValue {
             price: last_val,
             y_phys,

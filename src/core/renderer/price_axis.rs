@@ -376,35 +376,18 @@ impl PriceAxisRenderer {
         let font = style.axis_font(dpr);
         self.base_ctx.set_font(&font);
         let metrics = RightAxisLabelMetrics::from_style(style, dpr);
-        let half_h = right_axis_label_height_bmp(&metrics, dpr, 0.0) / 2.0;
-
-        let mut layout: Vec<LabelRect> = labels
-            .iter()
-            .enumerate()
-            .map(|(i, item)| LabelRect {
-                y_center: item.y_phys.round(),
-                half_height: half_h,
-                priority: 50,
-                index: i,
-            })
-            .collect();
-        resolve_label_overlaps(&mut layout, label_h);
 
         let css_font = format!("{}px {}", style.font_size, style.font_family);
         let text_color = style.crosshair_label_text;
-        for (i, item) in labels.iter().enumerate() {
+        for (_i, item) in labels.iter().enumerate() {
             let text_w = self
                 .text_cache
                 .measure(&self.base_ctx, &item.label, &font)
                 .ceil();
-            let y_mid = layout
-                .get(i)
-                .map(|l| l.y_center)
-                .unwrap_or_else(|| item.y_phys.round());
-            let geom = match compute_right_axis_label_geometry(
+            let mut geom = match compute_right_axis_label_geometry(
                 w,
                 label_h,
-                y_mid,
+                item.y_phys,
                 text_w,
                 dpr,
                 &metrics,
@@ -415,7 +398,21 @@ impl PriceAxisRenderer {
                 None => continue,
             };
 
+            // Last-price labels: no edge clamping — the label moves naturally
+            // with the price and clips at canvas bounds.  Also no corner
+            // radius — sharp rectangular label matching the axis style.
+            let total_h_bmp = right_axis_label_height_bmp(&metrics, dpr, 0.0);
+            let tick_h_bmp = dpr.floor().max(1.0);
+            let y_mid_raw = item.y_phys.round() - (dpr * 0.5).floor();
+            let y_top = (y_mid_raw + tick_h_bmp / 2.0 - total_h_bmp / 2.0).floor();
+            geom.y_mid = y_mid_raw;
+            geom.y_top = y_top;
+            geom.y_bottom = y_top + total_h_bmp;
+            geom.text_y_css = (geom.y_top + geom.y_bottom) / 2.0 / dpr;
+            geom.radius = 0.0;
+
             draw_right_axis_label_background(&self.base_ctx, &geom, &item.color);
+            draw_right_axis_label_tick(&self.base_ctx, &geom, &item.color, dpr);
             draw_right_axis_label_text(
                 &self.base_ctx,
                 &mut self.text_cache,
