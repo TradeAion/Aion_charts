@@ -33,7 +33,7 @@ Download the latest `raycore-wasm.tar.gz` from [Releases](https://github.com/dev
   await init();
 
   const chart = await RayCore.create_chart('chart', {
-    renderer: 'auto',       // 'webgpu', 'canvas2d', or 'auto'
+    renderer: 'webgpu',     // default is 'webgpu'; 'auto' also prefers WebGPU
     autoRender: true,        // starts RAF loop automatically
     theme: 'dark',           // 'dark' or 'light'
     symbol: 'BTCUSD',

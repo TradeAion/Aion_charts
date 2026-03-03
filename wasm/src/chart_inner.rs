@@ -158,6 +158,10 @@ pub struct ExactPixelSizes {
 
 /// Internal chart state shared between event closures and the public API.
 pub struct ChartInner {
+    /// Requested renderer mode from create-time options (`auto`/`webgpu`/`canvas2d`).
+    pub requested_renderer_mode: String,
+    /// Actual active backend name (`webgpu` or `canvas2d`).
+    pub active_renderer_name: String,
     pub engine: ChartEngine,
     pub overlay: OverlayRenderer,
     pub price_axis_renderer: PriceAxisRenderer,

@@ -51,4 +51,13 @@ pub mod price_axis;
 #[cfg(target_arch = "wasm32")]
 pub mod time_axis;
 
+#[cfg(target_arch = "wasm32")]
+pub mod pipeline_manager;
+
+#[cfg(target_arch = "wasm32")]
+pub mod wgpu_context;
+
+#[cfg(target_arch = "wasm32")]
+pub mod wgpu_backend;
+
 pub mod value_projection;

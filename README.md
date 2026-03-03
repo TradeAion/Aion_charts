@@ -18,7 +18,7 @@ import init, { RayCore } from 'raycore-wasm';
 await init();
 
 const chart = await RayCore.create_chart('container', {
-  renderer: 'auto',
+  renderer: 'webgpu',
   autoRender: true,
   theme: 'dark',
 });

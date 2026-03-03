@@ -125,6 +125,12 @@ export interface ReplayOptions {
  */
 export interface CreateChartOptions {
   /**
+   * Renderer selection strategy.
+   * `"auto"` and `"webgpu"` both prefer WebGPU and fall back to Canvas2D.
+   * @default 'webgpu'
+   */
+  renderer?: 'auto' | 'webgpu' | 'canvas2d';
+  /**
    * Theme preset or custom theme.
    * @default 'dark'
    */
@@ -204,6 +210,13 @@ export interface ResizeEvent extends BaseChartEvent {
   height: number;
 }
 
+export interface RendererFallbackEvent extends BaseChartEvent {
+  type: 'rendererFallback';
+  requested: 'auto' | 'webgpu' | 'canvas2d';
+  active: 'canvas2d';
+  reason: string;
+}
+
 export interface DrawingCreatedEvent extends BaseChartEvent {
   type: 'drawingCreated';
   id: number;
@@ -231,6 +244,7 @@ export interface ChartEventMap {
   chartTypeChange:     ChartTypeChangeEvent;
   priceScaleChange:    PriceScaleChangeEvent;
   resize:              ResizeEvent;
+  rendererFallback:    RendererFallbackEvent;
   drawingCreated:      DrawingCreatedEvent;
   drawingSelected:     DrawingSelectedEvent;
   error:               ErrorEvent;
@@ -480,6 +494,7 @@ export declare class RayCore {
   /**
    * Apply a partial options update at runtime.
    * Only provided fields are changed; everything else stays unchanged.
+   * Note: `renderer` is create-time only and is ignored here.
    *
    * @example
    * ```ts
@@ -1244,12 +1259,12 @@ export declare class RayCore {
 
   // ── Misc ───────────────────────────────────────────────────────────────────
 
-  /** Name of the active renderer backend: `"canvas2d"`. */
+  /** Name of the active renderer backend: `"webgpu"` or `"canvas2d"`. */
   renderer_name(): string;
 
   /**
    * Returns the list of available renderer backends.
-   * @example `["canvas2d"]`
+   * @example `["webgpu", "canvas2d"]` or `["canvas2d"]`
    */
   static get_supported_renderers(): string[];
 

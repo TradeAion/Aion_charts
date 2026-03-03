@@ -25,7 +25,7 @@ use raycore::{
     MarkerPosition, MarkerShape, MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint,
     OverlayRenderer, PriceAxisRenderer, PriceLineOptions, RendererBackend, ResourceLimits,
     RuntimeEvent, SeriesId, SeriesMarker, SnapshotMtfResolver, TimeAxisRenderer, TimeRange,
-    Viewport,
+    Viewport, GpuContext, WgpuRenderer,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -55,6 +55,16 @@ use subpane::{IndicatorConfig, PaneHeightCoordinator, SubPane, SubPaneSeparatorS
 fn init_logging() {
     console_error_panic_hook::set_once();
     let _ = console_log::init_with_level(log::Level::Info);
+}
+
+fn webgpu_available() -> bool {
+    let window = match web_sys::window() {
+        Some(w) => w,
+        None => return false,
+    };
+    js_sys::Reflect::get(&window.navigator(), &JsValue::from_str("gpu"))
+        .map(|v| !v.is_undefined() && !v.is_null())
+        .unwrap_or(false)
 }
 
 fn get_dpr() -> f64 {
@@ -166,6 +176,80 @@ fn crosshair_mode_key(mode: raycore::CrosshairMode) -> &'static str {
 
 fn replay_edge_behavior_key(behavior: ReplayEdgeBehavior) -> &'static str {
     behavior.as_key()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RendererModeRequest {
+    Auto,
+    WebGpu,
+    Canvas2D,
+}
+
+impl RendererModeRequest {
+    fn from_str(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "webgpu" => Self::WebGpu,
+            "canvas2d" => Self::Canvas2D,
+            _ => Self::Auto,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::WebGpu => "webgpu",
+            Self::Canvas2D => "canvas2d",
+        }
+    }
+}
+
+struct RendererResolution {
+    backend: RendererBackend,
+    active: &'static str,
+    fallback_reason: Option<String>,
+}
+
+async fn resolve_renderer_backend(
+    requested: RendererModeRequest,
+    canvas: web_sys::HtmlCanvasElement,
+    pane_pw: u32,
+    pane_ph: u32,
+    dpr: f64,
+) -> Result<RendererResolution, JsValue> {
+    let try_webgpu = matches!(requested, RendererModeRequest::Auto | RendererModeRequest::WebGpu);
+    let mut fallback_reason = None;
+
+    if try_webgpu {
+        if webgpu_available() {
+            match GpuContext::new(
+                wgpu::SurfaceTarget::Canvas(canvas.clone()),
+                pane_pw.max(1),
+                pane_ph.max(1),
+            )
+            .await
+            {
+                Ok(gpu) => {
+                    return Ok(RendererResolution {
+                        backend: RendererBackend::WebGPU(WgpuRenderer::new(gpu)),
+                        active: "webgpu",
+                        fallback_reason: None,
+                    });
+                }
+                Err(err) => {
+                    fallback_reason = Some(format!("webgpu initialization failed: {err}"));
+                }
+            }
+        } else {
+            fallback_reason = Some("webgpu is not available in this browser".to_string());
+        }
+    }
+
+    let canvas_renderer = Canvas2DRenderer::new(canvas, dpr).map_err(|e| JsValue::from_str(&e))?;
+    Ok(RendererResolution {
+        backend: RendererBackend::Canvas2D(canvas_renderer),
+        active: "canvas2d",
+        fallback_reason,
+    })
 }
 
 fn js_err(message: impl Into<String>) -> JsValue {
@@ -777,6 +861,7 @@ struct ChartPersistenceState {
 pub struct RayCore {
     inner: SharedInner,
     mtf_resolver: Arc<SnapshotMtfResolver>,
+    active_renderer_name: String,
     symbol: String,
     interval: String,
     _closures: Vec<Closure<dyn FnMut(web_sys::Event)>>,
@@ -809,12 +894,14 @@ pub struct RayCore {
 
 #[wasm_bindgen]
 impl RayCore {
-    /// Create with a specific renderer backend (Canvas2D only).
-    pub async fn create_with(container_id: &str, _renderer: &str) -> Result<RayCore, JsValue> {
+    /// Create with a specific renderer backend (`auto`, `webgpu`, `canvas2d`).
+    pub async fn create_with(container_id: &str, renderer: &str) -> Result<RayCore, JsValue> {
         init_logging();
 
         let layout = WidgetLayout::new(container_id)?;
         let dpr = get_dpr();
+        let requested_renderer = RendererModeRequest::from_str(renderer);
+        let requested_renderer_str = requested_renderer.as_str().to_string();
 
         // Set initial axis sizes so CSS grid can compute pane dimensions
         let style = raycore::ChartStyle::default();
@@ -833,7 +920,8 @@ impl RayCore {
         let pane_ph = (pane_css_h * dpr).round() as u32;
 
         log::info!(
-            "RayCore: creating Canvas2D — pane CSS {}x{}, physical {}x{}, dpr={}",
+            "RayCore: creating '{}' — pane CSS {}x{}, physical {}x{}, dpr={}",
+            requested_renderer.as_str(),
             pane_css_w,
             pane_css_h,
             pane_pw,
@@ -841,12 +929,25 @@ impl RayCore {
             dpr
         );
 
-        // Create Canvas2D renderer backend (only for the pane/chart canvas)
-        let backend = {
-            let r = Canvas2DRenderer::new(layout.pane.chart.clone(), dpr)
-                .map_err(|e| JsValue::from_str(&e))?;
-            RendererBackend::Canvas2D(r)
-        };
+        // Create pane renderer backend (pane/chart canvas only).
+        let resolution = resolve_renderer_backend(
+            requested_renderer,
+            layout.pane.chart.clone(),
+            pane_pw.max(1),
+            pane_ph.max(1),
+            dpr,
+        )
+        .await?;
+        let active_renderer_name = resolution.active.to_string();
+        if let Some(reason) = &resolution.fallback_reason {
+            log::warn!(
+                "RayCore: renderer '{}' fell back to '{}': {}",
+                requested_renderer.as_str(),
+                active_renderer_name,
+                reason
+            );
+        }
+        let backend = resolution.backend;
 
         // Pane overlay renderer (also gets reference to base chart canvas for base-layer drawings)
         let mut overlay = OverlayRenderer::new(layout.pane.top.clone(), dpr)
@@ -870,6 +971,13 @@ impl RayCore {
 
         // Engine only manages the pane
         let mut engine = ChartEngine::new(backend, pane_pw.max(1), pane_ph.max(1), dpr);
+        if let Some(reason) = resolution.fallback_reason.clone() {
+            engine.event_bus.emit(raycore::ChartEvent::RendererFallback {
+                requested: requested_renderer.as_str().to_string(),
+                active: active_renderer_name.clone(),
+                reason,
+            });
+        }
         let mtf_resolver = Arc::new(SnapshotMtfResolver::default());
         engine.indicators.set_mtf_resolver(mtf_resolver.clone());
         let interaction = InteractionHandler::new();
@@ -880,6 +988,8 @@ impl RayCore {
         let pane_coordinator = PaneHeightCoordinator::new(pane_css_h);
 
         let inner = Rc::new(RefCell::new(ChartInner {
+            requested_renderer_mode: requested_renderer_str.clone(),
+            active_renderer_name: active_renderer_name.clone(),
             engine,
             overlay,
             price_axis_renderer,
@@ -1802,6 +1912,7 @@ impl RayCore {
         Ok(RayCore {
             inner,
             mtf_resolver,
+            active_renderer_name,
             symbol: "DEMO".to_string(),
             interval: "1m".to_string(),
             _closures: closures,
@@ -1825,11 +1936,14 @@ impl RayCore {
     // ── Public API ───────────────────────────────────────────────────────────
 
     pub fn renderer_name(&self) -> String {
-        self.inner.borrow().engine.renderer_name().to_string()
+        self.active_renderer_name.clone()
     }
 
     pub fn get_supported_renderers() -> js_sys::Array {
         let arr = js_sys::Array::new();
+        if webgpu_available() {
+            arr.push(&JsValue::from_str("webgpu"));
+        }
         arr.push(&JsValue::from_str("canvas2d"));
         arr
     }
@@ -1843,6 +1957,7 @@ impl RayCore {
     /// ```js
     /// {
     ///   theme: "dark" | "light" | { colors: {...}, crosshair: {...}, ... },
+    ///   renderer: "webgpu" | "canvas2d" | "auto",
     ///   autoRender: true,
     ///   symbol: "BTCUSD",
     ///   interval: "1D",
@@ -1870,8 +1985,11 @@ impl RayCore {
             return Err(js_err("container must be an HTMLElement or a string ID"));
         };
 
-        // Always use Canvas2D
-        let mut chart = Self::create_with(&container_id, "canvas2d").await?;
+        // Default to WebGPU unless a renderer option is explicitly provided.
+        let requested_renderer = js_get_str(&options, "renderer")
+            .map(|v| RendererModeRequest::from_str(&v))
+            .unwrap_or(RendererModeRequest::WebGpu);
+        let mut chart = Self::create_with(&container_id, requested_renderer.as_str()).await?;
 
         // Apply theme
         if let Some(theme_val) = js_get(&options, "theme") {
@@ -1922,6 +2040,17 @@ impl RayCore {
             return;
         }
         let mut css_changed = false;
+
+        if js_get(&options, "renderer").is_some() {
+            self.inner
+                .borrow_mut()
+                .engine
+                .event_bus
+                .emit(raycore::ChartEvent::Error {
+                    message: "renderer is create-time only; apply_options({ renderer }) is ignored"
+                        .to_string(),
+                });
+        }
 
         // Theme
         if let Some(theme_val) = js_get(&options, "theme") {

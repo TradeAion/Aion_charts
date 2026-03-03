@@ -19,11 +19,16 @@ static create_chart(
 
 **Parameters:**
 - `container` — DOM element or element ID string
-- `options.renderer` — `'auto'` (default), `'webgpu'`, or `'canvas2d'`
+- `options.renderer` — `'webgpu'` (default), `'auto'`, or `'canvas2d'`
 - `options.autoRender` — `true` to start RAF loop automatically
 - `options.theme` — `'dark'`, `'light'`
 - `options.symbol` — symbol string (e.g. `'BTCUSD'`)
 - `options.interval` — interval string (e.g. `'1m'`, `'1h'`, `'1D'`)
+
+Renderer resolution:
+- `'webgpu'`: attempts WebGPU first, then falls back to Canvas2D on failure
+- `'auto'`: same preference as `'webgpu'` (WebGPU-first with fallback)
+- `'canvas2d'`: always uses Canvas2D directly
 
 ### `apply_options(options)`
 
@@ -32,6 +37,10 @@ Update chart options at runtime.
 ```ts
 apply_options(options: { theme?: 'dark' | 'light' }): void
 ```
+
+Notes:
+- `renderer` is create-time only.
+- `apply_options({ renderer: ... })` is ignored and emits an `error` event.
 
 ### `dispose()`
 
@@ -329,6 +338,7 @@ Subscribe to chart events:
 | `resize` | `{ width, height }` |
 | `drawingCreated` | `{ id, tool }` |
 | `drawingSelected` | `{ id }` |
+| `rendererFallback` | `{ requested, active, reason }` |
 | `error` | `{ message }` |
 
 ---
@@ -365,6 +375,6 @@ ws.split_active('vertical');
 
 Returns `['webgpu', 'canvas2d']` or `['canvas2d']` depending on browser support.
 
-### `RayCore.renderer_name()`
+### `chart.renderer_name()`
 
 Returns the active renderer name (`'webgpu'` or `'canvas2d'`).

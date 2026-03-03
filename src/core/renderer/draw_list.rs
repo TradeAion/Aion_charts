@@ -4,7 +4,8 @@
 //! GeometryGenerator. The renderer is "dumb" — it just draws these primitives.
 
 /// A filled rectangle in physical pixel coordinates.
-#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ColoredRect {
     /// Left edge X in physical pixels.
     pub x: f32,
@@ -22,7 +23,8 @@ pub struct ColoredRect {
 }
 
 /// A line segment in physical pixel coordinates for rendering.
-#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct LineSegment {
     /// Start X in physical pixels.
     pub x1: f32,
@@ -46,7 +48,8 @@ pub struct LineSegment {
 /// An area segment (trapezoid) for smooth area chart fills.
 /// Top edge follows the line from (x1, y1) to (x2, y2).
 /// Bottom edge is horizontal at y = bottom.
-#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct AreaSegment {
     /// Left X in physical pixels.
     pub x1: f32,

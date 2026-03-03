@@ -1,8 +1,8 @@
-//! # RayCore — High-Performance Canvas2D Charting Engine
+//! # RayCore — High-Performance GPU Charting Engine
 //!
 //! RayCore is a Rust/WebAssembly financial charting library designed for
-//! professional-grade performance and visual quality. It uses Canvas2D for
-//! reliable, high-quality rendering on web platforms.
+//! professional-grade performance and visual quality. It supports WebGPU
+//! with Canvas2D fallback on web platforms.
 //!
 //! ## Architecture Overview
 //!
@@ -37,7 +37,7 @@
 //! - [`core::data`] — OHLCV bar storage with O(1) append operations
 //! - [`core::viewport`] — Coordinate transformations and price scaling
 //! - [`core::engine`] — Central chart engine coordinating all components
-//! - [`core::renderer`] — Canvas2D rendering backend
+//! - [`core::renderer`] — WebGPU + Canvas2D rendering backends
 //! - [`core::interaction`] — Mouse/touch event handling
 //! - [`core::studies`] — Technical indicators (SMA, EMA, RSI, MACD)
 //! - [`core::drawings`] — User annotations (trend lines, rays, etc.)
@@ -60,7 +60,7 @@
 //!
 //! ## Platform Support
 //!
-//! - **Web**: Chrome, Firefox, Safari via Canvas2D
+//! - **Web**: Chrome, Firefox, Safari (Canvas2D; WebGPU where supported)
 
 pub mod core;
 pub mod group;
@@ -245,6 +245,12 @@ pub use crate::core::demo_data::generate_sample_data;
 /// Canvas2D renderer (WASM only).
 #[cfg(target_arch = "wasm32")]
 pub use crate::core::renderer::canvas2d::Canvas2DRenderer;
+
+/// WebGPU context and renderer (WASM only).
+#[cfg(target_arch = "wasm32")]
+pub use crate::core::renderer::wgpu_backend::WgpuRenderer;
+#[cfg(target_arch = "wasm32")]
+pub use crate::core::renderer::wgpu_context::GpuContext;
 
 /// Overlay renderer for crosshair/annotations (WASM only).
 #[cfg(target_arch = "wasm32")]

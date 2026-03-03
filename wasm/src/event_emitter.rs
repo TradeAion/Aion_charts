@@ -266,6 +266,27 @@ pub fn chart_event_to_js(event: &raycore::ChartEvent) -> JsValue {
                 &JsValue::from_f64(*height),
             );
         }
+        raycore::ChartEvent::RendererFallback {
+            requested,
+            active,
+            reason,
+        } => {
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("requested"),
+                &JsValue::from_str(requested),
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("active"),
+                &JsValue::from_str(active),
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("reason"),
+                &JsValue::from_str(reason),
+            );
+        }
         raycore::ChartEvent::Error { message } => {
             let _ = js_sys::Reflect::set(
                 &obj,

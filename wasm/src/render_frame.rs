@@ -205,6 +205,7 @@ pub(crate) fn do_render_frame(
             ref active_subpane_id,
             ..
         } = *s;
+        let dashed_on_overlay = engine.renderer_name() == "webgpu";
         let indicator_draw_instructions = engine.indicators.collect_sorted_draw_instructions();
         let main_crosshair = if active_subpane_id.is_some() && engine.crosshair.active {
             let mut ch = engine.crosshair;
@@ -230,7 +231,7 @@ pub(crate) fn do_render_frame(
             pane_pw,
             pane_ph,
             engine.v_pixel_ratio,
-            false,
+            dashed_on_overlay,
         );
         overlay.render_price_lines(
             &engine.price_lines,

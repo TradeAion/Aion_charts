@@ -3,7 +3,7 @@
 //! The `ChartRenderer` trait splits rendering into discrete phases:
 //! candles, volume, grid, lines, text, crosshair — each as a separate pass.
 //!
-//! The sole production backend is Canvas2D (WASM). A no-op backend exists
+//! Production backends on WASM are WebGPU and Canvas2D. A no-op backend exists
 //! for native compilation (benchmarks, tests).
 
 use crate::core::constants::{DEFAULT_PRICE_AXIS_OPTIMAL_WIDTH, PRICE_AXIS_LABEL_OFFSET};
@@ -298,7 +298,7 @@ pub struct TickMark {
 /// The rendering pipeline is split into discrete phases so that the
 /// engine can call individual phases for custom z-ordering.
 ///
-/// Canvas2D is the sole production backend.
+/// WebGPU and Canvas2D are production backends on wasm32.
 pub trait ChartRenderer {
     fn name(&self) -> &str;
     fn resize(&mut self, physical_width: u32, physical_height: u32, dpr: f64);
@@ -355,8 +355,10 @@ pub trait ChartRenderer {
 }
 
 /// Enum wrapper so ChartEngine can hold the renderer without dyn dispatch overhead.
-/// Canvas2D is the sole production backend; Noop exists for native compilation.
+/// WebGPU + Canvas2D are supported on wasm32; Noop exists for native compilation.
 pub enum RendererBackend {
+    #[cfg(target_arch = "wasm32")]
+    WebGPU(super::wgpu_backend::WgpuRenderer),
     #[cfg(target_arch = "wasm32")]
     Canvas2D(super::canvas2d::Canvas2DRenderer),
     /// No-op backend for native builds (benchmarks, tests). Never renders anything.
@@ -368,6 +370,8 @@ impl ChartRenderer for RendererBackend {
     fn name(&self) -> &str {
         match self {
             #[cfg(target_arch = "wasm32")]
+            Self::WebGPU(r) => r.name(),
+            #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.name(),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Noop => "noop",
@@ -376,6 +380,8 @@ impl ChartRenderer for RendererBackend {
 
     fn resize(&mut self, pw: u32, ph: u32, dpr: f64) {
         match self {
+            #[cfg(target_arch = "wasm32")]
+            Self::WebGPU(r) => r.resize(pw, ph, dpr),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.resize(pw, ph, dpr),
             #[cfg(not(target_arch = "wasm32"))]
@@ -388,6 +394,8 @@ impl ChartRenderer for RendererBackend {
     fn is_valid(&self) -> bool {
         match self {
             #[cfg(target_arch = "wasm32")]
+            Self::WebGPU(r) => r.is_valid(),
+            #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.is_valid(),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Noop => true,
@@ -396,6 +404,8 @@ impl ChartRenderer for RendererBackend {
 
     fn begin_frame(&mut self, ctx: &RenderContext) -> Result<(), String> {
         match self {
+            #[cfg(target_arch = "wasm32")]
+            Self::WebGPU(r) => r.begin_frame(ctx),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.begin_frame(ctx),
             #[cfg(not(target_arch = "wasm32"))]
@@ -409,6 +419,8 @@ impl ChartRenderer for RendererBackend {
     fn draw_grid(&mut self, ctx: &RenderContext) -> Result<(), String> {
         match self {
             #[cfg(target_arch = "wasm32")]
+            Self::WebGPU(r) => r.draw_grid(ctx),
+            #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.draw_grid(ctx),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Noop => {
@@ -420,6 +432,8 @@ impl ChartRenderer for RendererBackend {
 
     fn draw_bottom_drawings(&mut self, ctx: &RenderContext) -> Result<(), String> {
         match self {
+            #[cfg(target_arch = "wasm32")]
+            Self::WebGPU(r) => r.draw_bottom_drawings(ctx),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.draw_bottom_drawings(ctx),
             #[cfg(not(target_arch = "wasm32"))]
@@ -433,6 +447,8 @@ impl ChartRenderer for RendererBackend {
     fn draw_candles(&mut self, ctx: &RenderContext) -> Result<(), String> {
         match self {
             #[cfg(target_arch = "wasm32")]
+            Self::WebGPU(r) => r.draw_candles(ctx),
+            #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.draw_candles(ctx),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Noop => {
@@ -444,6 +460,8 @@ impl ChartRenderer for RendererBackend {
 
     fn draw_volume(&mut self, ctx: &RenderContext) -> Result<(), String> {
         match self {
+            #[cfg(target_arch = "wasm32")]
+            Self::WebGPU(r) => r.draw_volume(ctx),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.draw_volume(ctx),
             #[cfg(not(target_arch = "wasm32"))]
@@ -457,6 +475,8 @@ impl ChartRenderer for RendererBackend {
     fn draw_lines(&mut self, ctx: &RenderContext) -> Result<(), String> {
         match self {
             #[cfg(target_arch = "wasm32")]
+            Self::WebGPU(r) => r.draw_lines(ctx),
+            #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.draw_lines(ctx),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Noop => {
@@ -468,6 +488,8 @@ impl ChartRenderer for RendererBackend {
 
     fn draw_text(&mut self, ctx: &RenderContext) -> Result<(), String> {
         match self {
+            #[cfg(target_arch = "wasm32")]
+            Self::WebGPU(r) => r.draw_text(ctx),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.draw_text(ctx),
             #[cfg(not(target_arch = "wasm32"))]
@@ -481,6 +503,8 @@ impl ChartRenderer for RendererBackend {
     fn draw_crosshair(&mut self, ctx: &RenderContext) -> Result<(), String> {
         match self {
             #[cfg(target_arch = "wasm32")]
+            Self::WebGPU(r) => r.draw_crosshair(ctx),
+            #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.draw_crosshair(ctx),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Noop => {
@@ -492,6 +516,8 @@ impl ChartRenderer for RendererBackend {
 
     fn end_frame(&mut self) -> Result<(), String> {
         match self {
+            #[cfg(target_arch = "wasm32")]
+            Self::WebGPU(r) => r.end_frame(),
             #[cfg(target_arch = "wasm32")]
             Self::Canvas2D(r) => r.end_frame(),
             #[cfg(not(target_arch = "wasm32"))]

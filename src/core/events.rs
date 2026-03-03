@@ -115,6 +115,16 @@ pub enum ChartEvent {
         height: f64,
     },
 
+    /// Renderer request could not be satisfied and fell back.
+    RendererFallback {
+        /// Requested renderer mode (`auto`, `webgpu`, `canvas2d`).
+        requested: String,
+        /// Active renderer after fallback (currently `canvas2d`).
+        active: String,
+        /// Human-readable fallback reason.
+        reason: String,
+    },
+
     /// An error occurred during chart operation.
     Error {
         /// Human-readable error message.
@@ -138,6 +148,7 @@ impl ChartEvent {
             Self::PriceScaleChange { .. } => "priceScaleChange",
             Self::ChartTypeChange { .. } => "chartTypeChange",
             Self::Resize { .. } => "resize",
+            Self::RendererFallback { .. } => "rendererFallback",
             Self::Error { .. } => "error",
         }
     }
@@ -154,6 +165,7 @@ impl ChartEvent {
         "priceScaleChange",
         "chartTypeChange",
         "resize",
+        "rendererFallback",
         "error",
     ];
 }
@@ -322,9 +334,10 @@ mod tests {
 
     #[test]
     fn all_event_names_are_valid() {
-        assert_eq!(ChartEvent::ALL_EVENT_NAMES.len(), 11);
+        assert_eq!(ChartEvent::ALL_EVENT_NAMES.len(), 12);
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"crosshairMove"));
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"error"));
+        assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"rendererFallback"));
     }
 
     #[test]

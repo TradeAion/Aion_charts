@@ -32,7 +32,7 @@ export function Chart({ theme = 'dark', symbol = 'BTCUSD', interval = '1m' }: Ch
       if (disposed || !containerRef.current) return;
 
       const chart = await RayCore.create_chart(containerRef.current, {
-        renderer: 'auto',
+        renderer: 'webgpu',
         autoRender: true,
         theme,
         symbol,
@@ -88,7 +88,7 @@ onMounted(async () => {
   if (!container.value) return;
 
   chart = await RayCore.create_chart(container.value, {
-    renderer: 'auto',
+    renderer: 'webgpu',
     autoRender: true,
     theme: props.theme ?? 'dark',
   });
@@ -122,7 +122,7 @@ watch(() => props.theme, (t) => {
   onMount(async () => {
     await init();
     chart = await RayCore.create_chart(container, {
-      renderer: 'auto',
+      renderer: 'webgpu',
       autoRender: true,
       theme,
     });
@@ -150,7 +150,7 @@ watch(() => props.theme, (t) => {
   await init();
 
   const chart = await RayCore.create_chart('chart', {
-    renderer: 'auto',
+    renderer: 'webgpu',
     autoRender: true,
     theme: 'dark',
   });

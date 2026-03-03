@@ -51,6 +51,7 @@
       color: #22C55E;
       border: 1px solid #22C55E33;
     }
+    .badge.webgpu { background: #1a3328; color: #22C55E; border-color: #22C55E33; }
     .badge.canvas2d { background: #1a2a3a; color: #3B82F6; border-color: #3B82F633; }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -685,12 +686,11 @@
   </div>
 
   <script type="module">
-    // Always load the newest local WASM artifact in the demo.
-    const wasmBuildToken = String(Date.now());
-    const wasmModule = await import(`../wasm/pkg/raycore_wasm.js?v=${wasmBuildToken}`);
+    // Demo uses the current local wasm/pkg artifact directly.
+    const wasmModule = await import('../wasm/pkg/raycore_wasm.js');
     const init = wasmModule.default;
     const { RayCore, ChartGroup, ChartWorkspace } = wasmModule;
-    const wasmBinaryUrl = `../wasm/pkg/raycore_wasm_bg.wasm?v=${wasmBuildToken}`;
+    const wasmBinaryUrl = '../wasm/pkg/raycore_wasm_bg.wasm';
 
     // ═══════════════════════════════════════════════════════════════════════
     // DOM & State
@@ -714,6 +714,8 @@
     let streamInterval = null;
     let volumeVisible = true;
     let hudBaseStatus = '';
+    let requestedRenderer = 'webgpu';
+    let rendererFallbackText = '';
     const replaySession = {
       speedBarsPerSecond: 1,
       edgeBehavior: 'auto_pause',
@@ -729,8 +731,10 @@
     }
 
     function updateBadge(name) {
-      badge.textContent = 'Canvas2D';
-      badge.className = 'badge canvas2d';
+      const key = String(name || '').toLowerCase();
+      const normalized = key === 'webgpu' ? 'webgpu' : 'canvas2d';
+      badge.textContent = normalized === 'webgpu' ? 'WebGPU' : 'Canvas2D';
+      badge.className = `badge ${normalized}`;
     }
 
     function hexToRgba(hex) {
@@ -750,7 +754,8 @@
 
     function updateHudStatus(text) {
       if (typeof text === 'string') hudBaseStatus = text;
-      hudStatus.textContent = `${hudBaseStatus}${replayStatusSuffix()}`;
+      const fallback = rendererFallbackText ? ` · ${rendererFallbackText}` : '';
+      hudStatus.textContent = `${hudBaseStatus}${fallback}${replayStatusSuffix()}`;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -789,6 +794,8 @@
     // Chart Creation
     // ═══════════════════════════════════════════════════════════════════════
     async function createChart(renderer) {
+      requestedRenderer = renderer;
+      rendererFallbackText = '';
       if (workspace) { workspace.dispose(); workspace.free(); workspace = null; }
       if (core) { core.dispose(); core.free(); core = null; }
       Array.from(container.children).forEach(el => {
@@ -809,13 +816,20 @@
         const hostId = workspace.pane_host_id(paneId);
 
         core = await RayCore.create_chart(hostId, {
+          renderer,
           autoRender: true,
           theme: isDark ? 'dark' : 'light',
         });
 
         currentRenderer = core.renderer_name();
         updateBadge(currentRenderer);
+        const rendererSelect = $('renderer-select');
+        if (rendererSelect) rendererSelect.value = requestedRenderer;
 
+        core.on('rendererFallback', e => {
+          rendererFallbackText = `fallback ${e.requested}→${e.active}`;
+          updateHudStatus();
+        });
         core.set_data_arrays(demoData.open, demoData.high, demoData.low, demoData.close, demoData.volume, demoData.timestamps);
         core.set_chart_type(activeChartType);
         core.set_volume_visible(volumeVisible);
@@ -838,6 +852,22 @@
         console.error(e);
         showError(`Init failed: ${e.message || e}`);
       }
+    }
+
+    function renderRendererControls() {
+      rendererGroup.innerHTML = `
+        <span class="toolbar-title" style="margin-right: 4px;">Renderer</span>
+        <select id="renderer-select" class="btn" style="height: 26px; padding: 2px 8px;">
+          <option value="webgpu">WebGPU</option>
+          <option value="auto">Auto</option>
+          <option value="canvas2d">Canvas2D</option>
+        </select>
+      `;
+      const sel = $('renderer-select');
+      sel.value = requestedRenderer;
+      sel.onchange = async () => {
+        await createChart(sel.value);
+      };
     }
 
     function applyReplaySessionOptions() {
@@ -1342,15 +1372,15 @@
     async function boot() {
       try {
         await init(wasmBinaryUrl);
+        renderRendererControls();
         renderChartTypeButtons();
-        updateBadge('canvas2d');
-        await createChart('canvas2d');
+        updateBadge('webgpu');
+        await createChart(requestedRenderer);
       } catch (e) {
         console.error(e);
         showError(`Init failed: ${e.message || e}`);
       }
     }
-    renderChartTypeButtons();
     boot();
   </script>
 </body>
