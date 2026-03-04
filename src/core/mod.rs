@@ -4,6 +4,7 @@ pub mod chart_type;
 pub mod constants;
 pub mod crosshair;
 pub mod data;
+pub mod footprint;
 pub mod demo_data;
 pub mod drawings;
 pub mod engine;

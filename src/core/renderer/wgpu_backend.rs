@@ -677,11 +677,22 @@ impl ChartRenderer for WgpuRenderer {
                     self.draw_line_pass(line_count);
                 }
             }
+            MainChartType::Footprint => {
+                // Rects are pre-computed by ChartEngine::render().
+                // Texts are rendered by the overlay Canvas2D layer (WebGPU can't do text).
+                let count =
+                    self.upload_rects(ctx.footprint_rects, ctx.viewport.width, ctx.viewport.height);
+                self.draw_rect_pass(count);
+            }
         }
         Ok(())
     }
 
     fn draw_volume(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        // Footprint chart integrates volume directly into the cells — skip separate volume bars.
+        if ctx.main_chart_type == crate::core::chart_type::MainChartType::Footprint {
+            return Ok(());
+        }
         let pane_w = ctx.viewport.width as f64;
         let pane_h = ctx.viewport.height as f64;
         let vol_rects = geometry_generator::generate_volume_rects(

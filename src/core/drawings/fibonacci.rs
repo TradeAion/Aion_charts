@@ -197,6 +197,7 @@ impl Drawing for FibonacciDrawing {
                 g: c[1],
                 b: c[2],
                 a: c[3],
+                align: Default::default(),
             });
         }
 

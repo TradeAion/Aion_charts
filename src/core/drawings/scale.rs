@@ -232,6 +232,7 @@ impl Drawing for ScaleDrawing {
             g: c[1],
             b: c[2],
             a: c[3],
+            align: Default::default(),
         });
 
         // Scale tool is hold-only: never show anchor circles

@@ -28,6 +28,7 @@ pub fn rgba_str(c: &[f32; 4]) -> String {
 }
 pub mod baseline_utils;
 pub mod draw_list;
+pub mod footprint_generator;
 pub mod geometry_generator;
 pub mod line_generator;
 pub mod series;

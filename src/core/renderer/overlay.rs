@@ -983,4 +983,44 @@ impl OverlayRenderer {
             let _ = self.ctx.fill_text(text, x, y);
         }
     }
+
+    /// Render footprint text labels on the overlay canvas.
+    ///
+    /// This is called for **both** Canvas2D and WebGPU backends so the text
+    /// always appears on the top-most Canvas2D layer (z-index:2).
+    /// Coordinates in `texts` are already in physical pixels.
+    pub fn render_footprint_texts(&self, texts: &[crate::core::renderer::draw_list::DrawText]) {
+        if texts.is_empty() {
+            return;
+        }
+
+        let font_family = crate::core::renderer::theme::FONT_FAMILY;
+        self.ctx.set_text_baseline("middle");
+
+        let mut prev_size: Option<f32> = None;
+        let mut prev_color: Option<[f32; 4]> = None;
+        let mut prev_align: Option<&str> = None;
+
+        for t in texts {
+            if prev_size != Some(t.font_size) {
+                let font = format!("{}px {}", t.font_size, font_family);
+                self.ctx.set_font(&font);
+                prev_size = Some(t.font_size);
+            }
+
+            let color = [t.r, t.g, t.b, t.a];
+            if prev_color != Some(color) {
+                self.ctx.set_fill_style_str(&rgba(&color));
+                prev_color = Some(color);
+            }
+
+            let align_str = t.align.as_canvas_str();
+            if prev_align != Some(align_str) {
+                self.ctx.set_text_align(align_str);
+                prev_align = Some(align_str);
+            }
+
+            let _ = self.ctx.fill_text(&t.text, t.x as f64, t.y as f64);
+        }
+    }
 }

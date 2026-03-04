@@ -21,6 +21,7 @@
 //! engine.set_main_chart_type(MainChartType::OhlcBars);
 //! ```
 
+use crate::core::footprint::FootprintOptions;
 use serde::{Deserialize, Serialize};
 
 /// The main chart type — how the primary OHLC data is rendered.
@@ -37,6 +38,9 @@ pub enum MainChartType {
     Area,
     /// Heikin-Ashi candles (smoothed trend visualization).
     HeikinAshi,
+    /// Footprint chart — order-flow visualization with bid/ask volume at each price level.
+    /// Requires footprint data to be set separately via `ChartEngine::set_footprint_data()`.
+    Footprint,
 }
 
 impl MainChartType {
@@ -48,6 +52,7 @@ impl MainChartType {
             "line" => Self::Line,
             "area" => Self::Area,
             "heikin_ashi" | "heikinashi" | "ha" => Self::HeikinAshi,
+            "footprint" | "fp" | "order_flow" | "orderflow" => Self::Footprint,
             _ => Self::Candlestick,
         }
     }
@@ -60,6 +65,7 @@ impl MainChartType {
             Self::Line => "line",
             Self::Area => "area",
             Self::HeikinAshi => "heikin_ashi",
+            Self::Footprint => "footprint",
         }
     }
 
@@ -71,16 +77,21 @@ impl MainChartType {
             Self::Line => "Line",
             Self::Area => "Area",
             Self::HeikinAshi => "Heikin-Ashi",
+            Self::Footprint => "Footprint",
         }
     }
 
     /// Whether this chart type uses full OHLC data (vs just close).
     pub fn uses_ohlc(&self) -> bool {
-        matches!(self, Self::Candlestick | Self::OhlcBars | Self::HeikinAshi)
+        matches!(
+            self,
+            Self::Candlestick | Self::OhlcBars | Self::HeikinAshi | Self::Footprint
+        )
     }
 
     /// Whether this chart type shows volume by default.
     pub fn shows_volume(&self) -> bool {
+        // Footprint integrates volume directly into the chart, no separate volume pane needed
         matches!(self, Self::Candlestick | Self::OhlcBars | Self::HeikinAshi)
     }
 
@@ -92,6 +103,7 @@ impl MainChartType {
             Self::Line,
             Self::Area,
             Self::HeikinAshi,
+            Self::Footprint,
         ]
     }
 }
@@ -125,6 +137,10 @@ pub struct MainChartOptions {
     pub area_top_color: [f32; 4],
     /// Fill color for Area chart type (bottom/fade).
     pub area_bottom_color: [f32; 4],
+
+    // ── Footprint options ──
+    /// Full footprint chart configuration. Only used when chart_type is Footprint.
+    pub footprint: FootprintOptions,
 }
 
 impl Default for MainChartOptions {
@@ -144,6 +160,8 @@ impl Default for MainChartOptions {
             line_width: 2.0,
             area_top_color: theme.series_defaults.area_top_fill,
             area_bottom_color: theme.series_defaults.area_bottom_fill,
+            // Footprint defaults
+            footprint: FootprintOptions::default(),
         }
     }
 }
@@ -172,6 +190,15 @@ mod tests {
         );
         assert_eq!(MainChartType::from_str("ha"), MainChartType::HeikinAshi);
         assert_eq!(
+            MainChartType::from_str("footprint"),
+            MainChartType::Footprint
+        );
+        assert_eq!(MainChartType::from_str("fp"), MainChartType::Footprint);
+        assert_eq!(
+            MainChartType::from_str("order_flow"),
+            MainChartType::Footprint
+        );
+        assert_eq!(
             MainChartType::from_str("unknown"),
             MainChartType::Candlestick
         );
@@ -191,12 +218,13 @@ mod tests {
         assert!(MainChartType::Candlestick.uses_ohlc());
         assert!(MainChartType::OhlcBars.uses_ohlc());
         assert!(MainChartType::HeikinAshi.uses_ohlc());
+        assert!(MainChartType::Footprint.uses_ohlc());
         assert!(!MainChartType::Line.uses_ohlc());
         assert!(!MainChartType::Area.uses_ohlc());
     }
 
     #[test]
     fn test_all_chart_types_count() {
-        assert_eq!(MainChartType::all().len(), 5);
+        assert_eq!(MainChartType::all().len(), 6);
     }
 }

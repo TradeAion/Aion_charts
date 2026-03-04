@@ -1113,11 +1113,12 @@
       area: 'Area',
       heikin_ashi: 'Heikin Ashi',
       baseline: 'Baseline',
+      footprint: 'Footprint',
     };
-    const preferredChartTypeOrder = ['candlestick', 'ohlc', 'line', 'area', 'heikin_ashi', 'baseline'];
+    const preferredChartTypeOrder = ['candlestick', 'ohlc', 'line', 'area', 'heikin_ashi', 'baseline', 'footprint'];
 
     function availableChartTypes() {
-      const fallback = ['candlestick', 'ohlc', 'line', 'area', 'heikin_ashi'];
+      const fallback = ['candlestick', 'ohlc', 'line', 'area', 'heikin_ashi', 'footprint'];
       let raw = '';
       try {
         if (typeof RayCore.get_available_chart_types === 'function') {

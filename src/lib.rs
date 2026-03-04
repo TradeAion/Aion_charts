@@ -78,8 +78,14 @@ pub use crate::core::viewport::{PriceScaleMode, Viewport};
 /// Central chart engine.
 pub use crate::core::engine::ChartEngine;
 
-/// Main chart type (candlestick, OHLC bars, line, area, etc.).
+/// Main chart type (candlestick, OHLC bars, line, area, footprint, etc.).
 pub use crate::core::chart_type::{MainChartOptions, MainChartType};
+
+/// Footprint (order-flow) chart data types and options.
+pub use crate::core::footprint::{
+    DiagonalImbalanceType, FootprintBar, FootprintData, FootprintDisplayMode, FootprintLevel,
+    FootprintOptions, ImbalanceType, VolumeColorIntensity,
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Re-exports: Rendering
@@ -237,6 +243,9 @@ pub use crate::group::sync_manager::{LinkKey as GroupLinkKey, SyncFeature, SyncM
 
 /// Generate sample OHLCV data for testing.
 pub use crate::core::demo_data::generate_sample_data;
+
+/// Generate synthetic footprint data from OHLCV bars for demo/testing.
+pub use crate::core::demo_data::generate_footprint_from_bars;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Re-exports: WASM-specific

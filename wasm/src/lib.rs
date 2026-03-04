@@ -2921,6 +2921,184 @@ impl RayCore {
         Ok(())
     }
 
+    // ── Footprint data ───────────────────────────────────────────────────────
+
+    /// Set footprint (order-flow) data for a specific bar.
+    ///
+    /// `bar_index`: the bar index in the main data array.
+    /// `prices`: price levels (ascending order).
+    /// `bid_volumes`: bid volume at each price level.
+    /// `ask_volumes`: ask volume at each price level.
+    ///
+    /// All three arrays must be the same length.
+    pub fn set_footprint_bar(
+        &mut self,
+        bar_index: usize,
+        prices: &[f32],
+        bid_volumes: &[f32],
+        ask_volumes: &[f32],
+    ) -> Result<(), JsValue> {
+        let len = prices.len();
+        if bid_volumes.len() != len || ask_volumes.len() != len {
+            return Err(JsValue::from_str(&format!(
+                "footprint arrays length mismatch: prices={} bid_volumes={} ask_volumes={}",
+                len,
+                bid_volumes.len(),
+                ask_volumes.len()
+            )));
+        }
+
+        let levels: Vec<raycore::FootprintLevel> = (0..len)
+            .map(|i| raycore::FootprintLevel {
+                price: prices[i],
+                bid_volume: bid_volumes[i],
+                ask_volume: ask_volumes[i],
+            })
+            .collect();
+
+        let fp_bar = raycore::FootprintBar { levels };
+        self.inner
+            .borrow_mut()
+            .engine
+            .set_footprint_bar(bar_index, fp_bar);
+        self.dirty.set(true);
+        Ok(())
+    }
+
+    /// Set footprint data from a JSON string for bulk loading.
+    ///
+    /// Expected format: `[{"bar_index": 0, "levels": [{"price": 100.0, "bid": 150, "ask": 200}, ...]}]`
+    pub fn set_footprint_data_json(&mut self, json: &str) -> Result<(), JsValue> {
+        let parsed: Vec<serde_json::Value> =
+            serde_json::from_str(json).map_err(|e| JsValue::from_str(&format!("JSON parse error: {}", e)))?;
+
+        let mut inner = self.inner.borrow_mut();
+        inner.engine.clear_footprint_data();
+
+        for item in &parsed {
+            let bar_index = item["bar_index"]
+                .as_u64()
+                .ok_or_else(|| JsValue::from_str("missing bar_index"))? as usize;
+            let levels_arr = item["levels"]
+                .as_array()
+                .ok_or_else(|| JsValue::from_str("missing levels array"))?;
+
+            let levels: Vec<raycore::FootprintLevel> = levels_arr
+                .iter()
+                .map(|l| raycore::FootprintLevel {
+                    price: l["price"].as_f64().unwrap_or(0.0) as f32,
+                    bid_volume: l["bid"].as_f64().unwrap_or(0.0) as f32,
+                    ask_volume: l["ask"].as_f64().unwrap_or(0.0) as f32,
+                })
+                .collect();
+
+            inner
+                .engine
+                .set_footprint_bar(bar_index, raycore::FootprintBar { levels });
+        }
+        drop(inner);
+        self.dirty.set(true);
+        Ok(())
+    }
+
+    /// Clear all footprint data.
+    pub fn clear_footprint_data(&mut self) {
+        self.inner.borrow_mut().engine.clear_footprint_data();
+        self.dirty.set(true);
+    }
+
+    /// Set footprint display mode.
+    /// Accepted values: "bid_ask", "delta", "volume", "delta_profile", "volume_profile".
+    pub fn set_footprint_display_mode(&mut self, mode: &str) {
+        let m = raycore::FootprintDisplayMode::from_str(mode);
+        self.inner
+            .borrow_mut()
+            .engine
+            .set_footprint_display_mode(m);
+        self.dirty.set(true);
+        log::info!("set_footprint_display_mode: {}", m.as_str());
+    }
+
+    /// Set footprint tick size (price granularity). Pass 0.0 for auto-detection.
+    pub fn set_footprint_tick_size(&mut self, tick_size: f32) {
+        self.inner
+            .borrow_mut()
+            .engine
+            .set_footprint_tick_size(tick_size);
+        self.dirty.set(true);
+    }
+
+    /// Configure footprint options from a JSON object.
+    ///
+    /// Supported keys:
+    /// - `display_mode`: string ("bid_ask", "delta", "volume", etc.)
+    /// - `tick_size`: number
+    /// - `imbalance_ratio`: number (default 3.0)
+    /// - `show_imbalances`: boolean
+    /// - `show_poc`: boolean
+    /// - `show_value_area`: boolean
+    /// - `value_area_pct`: number (0.0-1.0, default 0.70)
+    /// - `show_delta_bar`: boolean
+    /// - `show_volume_text`: boolean
+    /// - `show_unfinished_auction`: boolean
+    pub fn set_footprint_options(&mut self, json: &str) -> Result<(), JsValue> {
+        let v: serde_json::Value = serde_json::from_str(json)
+            .map_err(|e| JsValue::from_str(&format!("JSON parse error: {}", e)))?;
+
+        let mut inner = self.inner.borrow_mut();
+        let opts = &mut inner.engine.main_chart_options.footprint;
+
+        if let Some(s) = v["display_mode"].as_str() {
+            opts.display_mode = raycore::FootprintDisplayMode::from_str(s);
+        }
+        if let Some(n) = v["tick_size"].as_f64() {
+            opts.tick_size = n as f32;
+        }
+        if let Some(n) = v["imbalance_ratio"].as_f64() {
+            opts.imbalance_ratio = n as f32;
+        }
+        if let Some(b) = v["show_imbalances"].as_bool() {
+            opts.show_imbalances = b;
+        }
+        if let Some(b) = v["show_stacked_imbalances"].as_bool() {
+            opts.show_stacked_imbalances = b;
+        }
+        if let Some(b) = v["show_diagonal_imbalances"].as_bool() {
+            opts.show_diagonal_imbalances = b;
+        }
+        if let Some(b) = v["show_poc"].as_bool() {
+            opts.show_poc = b;
+        }
+        if let Some(b) = v["show_value_area"].as_bool() {
+            opts.show_value_area = b;
+        }
+        if let Some(n) = v["value_area_pct"].as_f64() {
+            opts.value_area_pct = n as f32;
+        }
+        if let Some(b) = v["show_delta_bar"].as_bool() {
+            opts.show_delta_bar = b;
+        }
+        if let Some(b) = v["show_volume_text"].as_bool() {
+            opts.show_volume_text = b;
+        }
+        if let Some(b) = v["show_unfinished_auction"].as_bool() {
+            opts.show_unfinished_auction = b;
+        }
+        if let Some(b) = v["show_cumulative_delta"].as_bool() {
+            opts.show_cumulative_delta = b;
+        }
+        if let Some(n) = v["font_size"].as_f64() {
+            opts.font_size = n as f32;
+        }
+        if let Some(n) = v["min_cell_height"].as_f64() {
+            opts.min_cell_height = n as f32;
+        }
+
+        drop(inner);
+        self.dirty.set(true);
+        Ok(())
+    }
+
     // ── Demo mode ────────────────────────────────────────────────────────────
 
     pub fn demo_mode(&mut self) {
@@ -4086,7 +4264,7 @@ impl RayCore {
     /// Set the main chart type.
     ///
     /// Accepted values: "candlestick", "candles", "ohlc", "bars", "line", "area",
-    /// "heikin_ashi", "ha".
+    /// "heikin_ashi", "ha", "footprint", "fp", "order_flow".
     pub fn set_chart_type(&mut self, chart_type: &str) {
         use raycore::MainChartType;
         let ct = MainChartType::from_str(chart_type);

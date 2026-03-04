@@ -16,9 +16,11 @@ use crate::core::data::{Bar, BarArray};
 use crate::core::drawings::types::DrawingGeometry;
 use crate::core::drawings::DrawingManager;
 use crate::core::events::EventBus;
+use crate::core::footprint::{FootprintBar, FootprintData, FootprintDisplayMode, FootprintOptions};
 use crate::core::indicators::IndicatorManager;
 use crate::core::markers::MarkerManager;
 use crate::core::price_line::PriceLineManager;
+use crate::core::renderer::draw_list::DrawText;
 use crate::core::renderer::traits::{
     ChartStyle, CrosshairState, RenderContext, Renderer, RendererBackend,
 };
@@ -86,10 +88,16 @@ pub struct ChartEngine {
     pub h_pixel_ratio: f64,
     /// Vertical pixel ratio: exact `bitmapHeight / cssHeight`.
     pub v_pixel_ratio: f64,
-    /// Main chart type (candlestick, OHLC bars, line, area, etc.).
+    /// Main chart type (candlestick, OHLC bars, line, area, footprint, etc.).
     pub main_chart_type: MainChartType,
     /// Options for the main chart rendering.
     pub main_chart_options: MainChartOptions,
+    /// Footprint (order-flow) data for the Footprint chart type.
+    pub footprint_data: FootprintData,
+    /// Footprint text labels from the last render frame.
+    /// Populated during draw_candles so the overlay Canvas2D layer can render them
+    /// (WebGPU cannot render text natively).
+    pub footprint_texts: Vec<DrawText>,
     /// Event bus — collects events for the platform layer to drain and forward.
     pub event_bus: EventBus,
 }
@@ -218,6 +226,8 @@ impl ChartEngine {
             v_pixel_ratio: dpr,
             main_chart_type: MainChartType::default(),
             main_chart_options: MainChartOptions::default(),
+            footprint_data: FootprintData::new(),
+            footprint_texts: Vec::new(),
             event_bus: EventBus::new(),
         }
     }
@@ -232,10 +242,16 @@ impl ChartEngine {
         self.main_chart_type
     }
 
-    /// Set the main chart type (candlestick, OHLC bars, line, area, etc.).
+    /// Set the main chart type (candlestick, OHLC bars, line, area, footprint, etc.).
     pub fn set_main_chart_type(&mut self, chart_type: MainChartType) {
         self.main_chart_type = chart_type;
         self.main_chart_options.chart_type = chart_type;
+
+        // Auto-generate footprint data from OHLCV bars when switching to Footprint
+        // and no footprint data is loaded yet.
+        if chart_type == MainChartType::Footprint {
+            self.ensure_footprint_data();
+        }
     }
 
     /// Get the main chart options.
@@ -247,6 +263,9 @@ impl ChartEngine {
     pub fn set_main_chart_options(&mut self, options: MainChartOptions) {
         self.main_chart_type = options.chart_type;
         self.main_chart_options = options;
+        if self.main_chart_type == MainChartType::Footprint {
+            self.ensure_footprint_data();
+        }
     }
 
     /// Replace all bar data.
@@ -258,6 +277,12 @@ impl ChartEngine {
         // Update studies with new data
         self.studies.update_studies(&self.bars);
         self.indicators.on_set_data(&self.bars);
+
+        // Clear stale footprint data — if in footprint mode, re-generate from new bars.
+        self.footprint_data.clear();
+        if self.main_chart_type == MainChartType::Footprint {
+            self.ensure_footprint_data();
+        }
 
         // LWC-like initial zoom: derive visible bars from default bar spacing (6 CSS px).
         // Fallback to legacy constant if dimensions are not ready yet.
@@ -606,6 +631,54 @@ impl ChartEngine {
         }
     }
 
+    // ── Footprint data management ────────────────────────────────────────
+
+    /// Ensure footprint data exists. If empty, auto-generates synthetic data
+    /// from the current OHLCV bars so the chart has something to display.
+    pub fn ensure_footprint_data(&mut self) {
+        if self.footprint_data.is_empty() && !self.bars.is_empty() {
+            let tick_size = self.main_chart_options.footprint.tick_size;
+            // Collect bars into a Vec for the generator
+            let bar_vec: Vec<Bar> = (0..self.bars.len())
+                .map(|i| self.bars.get_unchecked(i))
+                .collect();
+            self.footprint_data =
+                crate::core::demo_data::generate_footprint_from_bars(&bar_vec, tick_size);
+        }
+    }
+
+    /// Set footprint data for a specific bar index.
+    /// Levels should be sorted by price ascending.
+    pub fn set_footprint_bar(&mut self, bar_idx: usize, bar: FootprintBar) {
+        self.footprint_data.set_bar(bar_idx, bar);
+    }
+
+    /// Set footprint data for multiple bars at once (bulk load).
+    pub fn set_footprint_bars(&mut self, bars: Vec<(usize, FootprintBar)>) {
+        self.footprint_data.set_bars(bars);
+    }
+
+    /// Clear all footprint data.
+    pub fn clear_footprint_data(&mut self) {
+        self.footprint_data.clear();
+    }
+
+    /// Get footprint options (mutable) for configuration.
+    pub fn footprint_options_mut(&mut self) -> &mut FootprintOptions {
+        &mut self.main_chart_options.footprint
+    }
+
+    /// Set footprint display mode.
+    pub fn set_footprint_display_mode(&mut self, mode: FootprintDisplayMode) {
+        self.main_chart_options.footprint.display_mode = mode;
+    }
+
+    /// Set footprint tick size (price granularity per row).
+    /// Pass 0.0 for auto-detection.
+    pub fn set_footprint_tick_size(&mut self, tick_size: f32) {
+        self.main_chart_options.footprint.tick_size = tick_size;
+    }
+
     // ── Study management ────────────────────────────────────────────────
 
     /// Create a new study instance.
@@ -757,6 +830,31 @@ impl ChartEngine {
             self.viewport.price_invalidated = false;
         }
 
+        // Pre-generate footprint geometry so both backends get identical output
+        // and text labels are available for the overlay Canvas2D layer.
+        let footprint_rects = if self.main_chart_type == MainChartType::Footprint
+            && !self.footprint_data.is_empty()
+        {
+            let pane_w = self.viewport.width as f64;
+            let pane_h = self.viewport.height as f64;
+            let geom = crate::core::renderer::footprint_generator::generate_footprint_geometry(
+                &self.bars,
+                &self.viewport,
+                &self.style,
+                &self.footprint_data,
+                &self.main_chart_options.footprint,
+                pane_w,
+                pane_h,
+                self.h_pixel_ratio,
+                self.v_pixel_ratio,
+            );
+            self.footprint_texts = geom.texts;
+            geom.rects
+        } else {
+            self.footprint_texts.clear();
+            Vec::new()
+        };
+
         let indicator_draw_instructions = self.indicators.collect_sorted_draw_instructions();
         let ctx = RenderContext {
             bars: &self.bars,
@@ -773,6 +871,9 @@ impl ChartEngine {
             main_chart_type: self.main_chart_type,
             main_chart_options: &self.main_chart_options,
             bottom_drawings,
+            footprint_data: &self.footprint_data,
+            footprint_rects: &footprint_rects,
+            footprint_texts: &self.footprint_texts,
         };
 
         self.renderer.render_frame(&ctx)

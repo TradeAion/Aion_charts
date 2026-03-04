@@ -154,6 +154,40 @@ impl Canvas2DRenderer {
         self.ctx.fill();
     }
 
+    /// Draw footprint volume text labels using Canvas2D fillText.
+    /// Kept as a utility — primary text rendering goes through the overlay layer.
+    #[allow(dead_code)]
+    fn draw_footprint_texts(&self, texts: &[crate::core::renderer::draw_list::DrawText]) {
+        if texts.is_empty() {
+            return;
+        }
+
+        let font_family = crate::core::renderer::theme::FONT_FAMILY;
+        self.ctx.set_text_baseline("middle");
+
+        let mut prev_size: Option<f32> = None;
+        let mut prev_color: Option<[f32; 4]> = None;
+
+        for t in texts {
+            // Update font size when it changes
+            if prev_size != Some(t.font_size) {
+                let font = format!("{}px {}", t.font_size, font_family);
+                self.ctx.set_font(&font);
+                prev_size = Some(t.font_size);
+            }
+
+            // Update color when it changes
+            let color = [t.r, t.g, t.b, t.a];
+            if prev_color != Some(color) {
+                self.ctx.set_fill_style_str(&rgba(&color));
+                prev_color = Some(color);
+            }
+
+            self.ctx.set_text_align("center");
+            let _ = self.ctx.fill_text(&t.text, t.x as f64, t.y as f64);
+        }
+    }
+
     fn draw_drawing_geometry(&self, geom: &DrawingGeometry) {
         for r in &geom.rects {
             if r.w <= 0.0 || r.h <= 0.0 {
@@ -366,12 +400,21 @@ impl ChartRenderer for Canvas2DRenderer {
                 );
                 self.draw_rects(&rects);
             }
+            MainChartType::Footprint => {
+                // Rects are pre-computed by ChartEngine::render().
+                // Texts are rendered by the overlay layer (render_footprint_texts).
+                self.draw_rects(ctx.footprint_rects);
+            }
         }
 
         Ok(())
     }
 
     fn draw_volume(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        // Footprint chart integrates volume directly into the cells — skip separate volume bars.
+        if ctx.main_chart_type == crate::core::chart_type::MainChartType::Footprint {
+            return Ok(());
+        }
         let pane_w = self.physical_width as f64;
         let pane_h = self.physical_height as f64;
         let vol_rects = geometry_generator::generate_volume_rects(

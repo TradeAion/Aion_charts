@@ -255,6 +255,9 @@ pub(crate) fn do_render_frame(
             &top_drawings,
             Some(&engine.bars),
         );
+        // Footprint text labels — rendered on overlay for both WebGPU and Canvas2D
+        // so text always appears on top of the chart data.
+        overlay.render_footprint_texts(&engine.footprint_texts);
         overlay.render_dashed_series(
             &engine.series,
             &engine.viewport,

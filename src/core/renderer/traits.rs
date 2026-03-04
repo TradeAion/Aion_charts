@@ -280,6 +280,14 @@ pub struct RenderContext<'a> {
     pub main_chart_options: &'a crate::core::chart_type::MainChartOptions,
     /// Drawings that should render below chart data (idle, non-hovered).
     pub bottom_drawings: &'a [DrawingGeometry],
+    /// Footprint data for order-flow visualization (only used when main_chart_type is Footprint).
+    pub footprint_data: &'a crate::core::footprint::FootprintData,
+    /// Pre-computed footprint rects from geometry generator.
+    /// Populated by ChartEngine::render() so both Canvas2D and WebGPU get identical geometry.
+    pub footprint_rects: &'a [super::draw_list::ColoredRect],
+    /// Pre-computed footprint text labels.
+    /// Also stored on ChartEngine::footprint_texts for overlay rendering on WebGPU.
+    pub footprint_texts: &'a [super::draw_list::DrawText],
 }
 
 /// Tick mark for axis rendering.
