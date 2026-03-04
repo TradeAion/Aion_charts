@@ -238,6 +238,54 @@ impl ReplayEdgeBehavior {
 /// Helper methods that destructure `self` to satisfy the borrow checker.
 /// Each method borrows `interaction` and `engine` fields separately.
 impl ChartInner {
+    /// Resolve a Ctrl+OHLC snap target at the current pointer position.
+    ///
+    /// Uses the nearest valid bar index (clamped to data bounds) so snapping
+    /// never resolves to empty/future space when data exists.
+    fn resolve_ohlc_snap_target(
+        &self,
+        x_css: f64,
+        y_css: f64,
+        pane_css_w: f64,
+        pane_css_h: f64,
+    ) -> Option<OhlcSnapTarget> {
+        let bars_len = self.engine.bars.len();
+        if bars_len == 0 || pane_css_w <= 0.0 || pane_css_h <= 0.0 {
+            return None;
+        }
+
+        let bar_idx = self
+            .engine
+            .viewport
+            .bar_index_at_pixel(x_css, pane_css_w, bars_len)
+            .unwrap_or_else(|| {
+                let raw = self.engine.viewport.pixel_to_bar(x_css, pane_css_w).floor();
+                raw.clamp(0.0, (bars_len - 1) as f64) as usize
+            });
+
+        let snap_price = snap_to_ohlc_price(
+            &self.engine.bars,
+            bar_idx,
+            y_css.clamp(0.0, pane_css_h),
+            &self.engine.viewport,
+            pane_css_h,
+        );
+        let snap_x_css = self.engine.viewport.bar_center_css(bar_idx, pane_css_w);
+        let snap_y_css = self
+            .engine
+            .viewport
+            .price_to_css_y(snap_price, pane_css_h)
+            .clamp(0.0, pane_css_h);
+
+        Some(OhlcSnapTarget {
+            bar_idx,
+            bar: bar_idx as f64 + 0.5,
+            price: snap_price,
+            x_css: snap_x_css,
+            y_css: snap_y_css,
+        })
+    }
+
     fn replay_last_timestamp(&self) -> Option<u64> {
         self.replay_archive.last().map(|bar| bar.timestamp)
     }
@@ -629,20 +677,21 @@ impl ChartInner {
         // Candles occupy the top (1 - volume_ratio) of the pane; volume is below.
         let candle_css_h = ph * self.engine.viewport.candle_height_frac();
         let mut price = self.engine.viewport.pixel_to_price(y, candle_css_h);
+        let ctrl_drawing_snap_active = ctrl_pressed
+            && (self.engine.drawings.is_tool_active()
+                || self.engine.drawings.is_creating()
+                || self.engine.drawings.selected_id.is_some()
+                || self.interaction.drawing_drag_active);
+        let ctrl_snap_target = if ctrl_drawing_snap_active {
+            self.resolve_ohlc_snap_target(x, y, pw, ph)
+        } else {
+            None
+        };
 
         // Ctrl-key OHLC magnet snapping (works during drawing creation/drag)
-        if ctrl_pressed {
-            if let Some(bar_idx) =
-                self.engine
-                    .viewport
-                    .bar_index_at_pixel(x, pw, self.engine.bars.len())
-            {
-                // Snap to nearest OHLC price
-                price =
-                    snap_to_ohlc_price(&self.engine.bars, bar_idx, y, &self.engine.viewport, ph);
-                // Anchor to the candle center (bar slot midpoint), not bar boundary.
-                bar = bar_idx as f64 + 0.5;
-            }
+        if let Some(snap) = ctrl_snap_target {
+            price = snap.price;
+            bar = snap.bar;
         }
 
         let mut is_drawing_drag = false;
@@ -652,8 +701,9 @@ impl ChartInner {
         {
             let drawings = &mut self.engine.drawings;
             if drawings.is_creating() {
-                // Shift-key angle snapping (45° increments) for line-based tools
-                let (final_bar, final_price) = if shift_pressed {
+                // Shift-key angle snapping (45° increments) for line-based tools.
+                // Ctrl+OHLC snap takes precedence over angle snap.
+                let (final_bar, final_price) = if shift_pressed && !ctrl_drawing_snap_active {
                     // Only apply angle snap for line-based tools (not Brush, HLine, VLine)
                     let tool = drawings.creation_tool();
                     let should_snap = matches!(
@@ -683,8 +733,9 @@ impl ChartInner {
                     drawings.get(id).map(|d| d.state()),
                     Some(raycore::core::drawings::types::DrawingState::Dragging { .. })
                 ) {
-                    // Apply angle snapping during anchor drag too
-                    let (final_bar, final_price) = if shift_pressed {
+                    // Apply angle snapping during anchor drag too.
+                    // Ctrl+OHLC snap takes precedence over angle snap.
+                    let (final_bar, final_price) = if shift_pressed && !ctrl_drawing_snap_active {
                         let tool = drawings.tool_of(id);
                         let should_snap = matches!(
                             tool,
@@ -750,8 +801,18 @@ impl ChartInner {
         }
 
         if is_drawing_drag {
-            // Suppress crosshair while dragging a drawing
-            self.engine.crosshair.active = false;
+            // Show snap target while Ctrl-ohlc snapping during drag so users can
+            // see exactly where the anchor will land.
+            if let Some(snap) = ctrl_snap_target {
+                self.engine.crosshair.active = true;
+                self.engine.crosshair.x = snap.x_css;
+                self.engine.crosshair.y = snap.y_css;
+                self.engine.crosshair.bar_index = Some(snap.bar_idx);
+                self.engine.crosshair.price = snap.price;
+            } else {
+                // Existing behavior outside Ctrl-snap drag.
+                self.engine.crosshair.active = false;
+            }
             return; // don't move chart while dragging drawing
         }
 
@@ -771,6 +832,15 @@ impl ChartInner {
             dpr,
         );
 
+        if let Some(snap) = ctrl_snap_target {
+            // Keep visual crosshair locked to the same OHLC point used by drawing snap.
+            engine.crosshair.active = true;
+            engine.crosshair.x = snap.x_css;
+            engine.crosshair.y = snap.y_css;
+            engine.crosshair.bar_index = Some(snap.bar_idx);
+            engine.crosshair.price = snap.price;
+        }
+
         // Emit crosshair move event
         if engine.crosshair.active {
             let bar_idx = engine.crosshair.bar_index;
@@ -785,14 +855,32 @@ impl ChartInner {
         }
     }
 
-    pub fn on_pointer_down(&mut self, x: f64, y: f64, zone: HitZone) {
+    pub fn on_pointer_down(
+        &mut self,
+        x: f64,
+        y: f64,
+        zone: HitZone,
+        _shift_pressed: bool,
+        ctrl_pressed: bool,
+    ) {
         let (pw, ph) = self.layout.pane_css_size();
 
         if zone == HitZone::Chart {
-            let bar = self.engine.viewport.pixel_to_bar(x, pw);
+            let mut bar = self.engine.viewport.pixel_to_bar(x, pw);
             // Use candle area height — consistent with point_to_css / price_to_css_y.
             let candle_css_h = ph * self.engine.viewport.candle_height_frac();
-            let price = self.engine.viewport.pixel_to_price(y, candle_css_h);
+            let mut price = self.engine.viewport.pixel_to_price(y, candle_css_h);
+            let ctrl_drawing_snap_active = ctrl_pressed
+                && (self.engine.drawings.is_tool_active()
+                    || self.engine.drawings.is_creating()
+                    || self.engine.drawings.selected_id.is_some());
+            if let Some(snap) = ctrl_drawing_snap_active
+                .then(|| self.resolve_ohlc_snap_target(x, y, pw, ph))
+                .flatten()
+            {
+                bar = snap.bar;
+                price = snap.price;
+            }
 
             let mut should_return = false;
             let mut drag_cursor: Option<&'static str> = None;
@@ -1114,6 +1202,15 @@ pub fn wheel_css_pos(e: &web_sys::WheelEvent, el: &web_sys::Element) -> (f64, f6
 // ═══════════════════════════════════════════════════════════════════════════════
 
 use std::f64::consts::PI;
+
+#[derive(Debug, Clone, Copy)]
+struct OhlcSnapTarget {
+    bar_idx: usize,
+    bar: f64,
+    price: f64,
+    x_css: f64,
+    y_css: f64,
+}
 
 /// Snap endpoint to nearest 45° angle from anchor point.
 ///

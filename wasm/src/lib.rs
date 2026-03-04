@@ -1187,6 +1187,8 @@ impl RayCore {
                     }
 
                     let (x, y) = event_css_pos(&pe, &pane_c);
+                    let shift_pressed = pe.shift_key();
+                    let ctrl_pressed = pe.ctrl_key() || pe.meta_key(); // meta for Mac Cmd
                     let Ok(mut s) = inner.try_borrow_mut() else {
                         return;
                     };
@@ -1224,7 +1226,7 @@ impl RayCore {
                         return;
                     }
 
-                    s.on_pointer_down(x, y, HitZone::Chart);
+                    s.on_pointer_down(x, y, HitZone::Chart, shift_pressed, ctrl_pressed);
                     let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
                     let _ = html_el.set_pointer_capture(pe.pointer_id());
 
@@ -1567,7 +1569,7 @@ impl RayCore {
                     };
                     s.interaction.is_touch = pe.pointer_type() == "touch";
                     s.on_pointer_enter(HitZone::PriceAxis);
-                    s.on_pointer_down(0.0, y, HitZone::PriceAxis);
+                    s.on_pointer_down(0.0, y, HitZone::PriceAxis, false, false);
                     let html_el: &web_sys::HtmlElement = price_c.unchecked_ref();
                     let _ = html_el.set_pointer_capture(pe.pointer_id());
                 }));
@@ -1740,7 +1742,7 @@ impl RayCore {
                     };
                     s.interaction.is_touch = pe.pointer_type() == "touch";
                     s.on_pointer_enter(HitZone::TimeAxis);
-                    s.on_pointer_down(x, 0.0, HitZone::TimeAxis);
+                    s.on_pointer_down(x, 0.0, HitZone::TimeAxis, false, false);
                     let html_el: &web_sys::HtmlElement = time_c.unchecked_ref();
                     let _ = html_el.set_pointer_capture(pe.pointer_id());
                 }));

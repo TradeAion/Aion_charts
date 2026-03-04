@@ -28,10 +28,13 @@ pub struct BrushDrawing {
 impl BrushDrawing {
     pub fn new(bar_index: f64, price: f64) -> Self {
         let id = next_drawing_id();
+        let mut style = DrawingStyle::default();
+        // Brush should render thicker than line-based tools for better visibility.
+        style.line_width = 2.5;
         Self {
             id,
             state: DrawingState::Creating { step: 1 },
-            style: DrawingStyle::default(),
+            style,
             anchors: vec![
                 AnchorPoint::new(bar_index, price),
                 AnchorPoint::new(bar_index, price),
