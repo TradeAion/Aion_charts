@@ -6,7 +6,6 @@
 //! Production backends on WASM are WebGPU and Canvas2D. A no-op backend exists
 //! for native compilation (benchmarks, tests).
 
-use crate::core::constants::{DEFAULT_PRICE_AXIS_OPTIMAL_WIDTH, PRICE_AXIS_LABEL_OFFSET};
 use crate::core::data::BarArray;
 use crate::core::drawings::types::DrawingGeometry;
 use crate::core::indicators::render::types::DrawInstruction;
@@ -93,25 +92,33 @@ pub struct ChartStyle {
 impl ChartStyle {
     // ── LWC-derived computed paddings (all in CSS px) ──
 
-    /// Price axis paddingInner: `fontSize/12 * tickLength`.
+    /// Compact axis padding target in CSS px.
+    /// Keeps layout tight while still accommodating text at varying font sizes.
+    #[inline]
+    fn compact_axis_padding_css(&self) -> f64 {
+        ((2.5 / 12.0) * self.font_size as f64).clamp(2.0, 3.0)
+    }
+
+    /// Price axis left padding (inside edge to text).
     #[inline]
     pub fn price_axis_padding_inner(&self) -> f64 {
-        self.font_size as f64 / 12.0 * self.axis_tick_length as f64
+        self.compact_axis_padding_css()
     }
-    /// Price axis paddingOuter: same as paddingInner in LWC.
+    /// Price axis right padding (text to outer edge).
     #[inline]
     pub fn price_axis_padding_outer(&self) -> f64 {
-        self.font_size as f64 / 12.0 * self.axis_tick_length as f64
+        self.compact_axis_padding_css()
     }
     /// Price axis paddingTop/Bottom: `2.5/12 * fontSize`.
     #[inline]
     pub fn price_axis_padding_tb(&self) -> f64 {
         2.5 / 12.0 * self.font_size as f64
     }
-    /// Price axis label offset (LWC Constants.LabelOffset = 5).
+    /// Price axis label offset.
+    /// Reduced from LWC's default to remove extra right-side whitespace.
     #[inline]
     pub fn price_axis_label_offset(&self) -> f64 {
-        PRICE_AXIS_LABEL_OFFSET
+        0.0
     }
     /// Extra in-axis inset used when clamping Y-axis label boxes.
     /// Keeps crosshair/live-price labels fully inside at top/bottom edges.
@@ -127,55 +134,50 @@ impl ChartStyle {
     }
 
     /// Computed optimal price axis width (CSS px) for a given max text width.
-    /// LWC: borderSize + tickLength + paddingInner + paddingOuter + LabelOffset + textWidth
-    /// Ensures minimum width of DEFAULT_PRICE_AXIS_OPTIMAL_WIDTH (34px).
+    /// Compact mode: border + left/right padding + text width.
     #[inline]
     pub fn price_axis_width(&self, max_text_width: f64) -> f64 {
         let raw = self.axis_border_size as f64
-            + self.axis_tick_length as f64
             + self.price_axis_padding_inner()
             + self.price_axis_padding_outer()
-            + self.price_axis_label_offset()
             + max_text_width;
-        // Ensure minimum width (LWC DefaultOptimalWidth)
-        let raw = raw.max(DEFAULT_PRICE_AXIS_OPTIMAL_WIDTH);
-        // LWC suggestPriceScaleWidth: make even
+        // Keep a small practical floor so the axis never collapses on empty data.
+        let raw = raw.max(12.0);
         let w = raw.ceil() as u32;
         (w + (w % 2)) as f64
     }
 
     /// Time axis optimal height (CSS px).
-    /// LWC: borderSize + tickLength + fontSize + paddingTop + paddingBottom + labelBottomOffset
+    /// Compact mode: border + fontSize + top/bottom padding.
     #[inline]
     pub fn time_axis_height(&self) -> f64 {
         let fs = self.font_size as f64;
         self.axis_border_size as f64
-            + self.axis_tick_length as f64
             + fs
             + self.time_axis_padding_top()
             + self.time_axis_padding_bottom()
-            + self.time_axis_label_bottom_offset()
     }
 
-    /// Time axis paddingTop: `3 * fontSize / 12`.
+    /// Time axis top padding.
     #[inline]
     pub fn time_axis_padding_top(&self) -> f64 {
-        3.0 * self.font_size as f64 / 12.0
+        self.compact_axis_padding_css()
     }
-    /// Time axis paddingBottom: same.
+    /// Time axis bottom padding.
     #[inline]
     pub fn time_axis_padding_bottom(&self) -> f64 {
-        3.0 * self.font_size as f64 / 12.0
+        self.compact_axis_padding_css()
     }
     /// Time axis paddingHorizontal: `9 * fontSize / 12`.
     #[inline]
     pub fn time_axis_padding_horizontal(&self) -> f64 {
         9.0 * self.font_size as f64 / 12.0
     }
-    /// Time axis labelBottomOffset: `4 * fontSize / 12` (LWC default).
+    /// Additional bottom offset under X-axis labels.
+    /// Compact mode keeps this at zero to avoid extra whitespace.
     #[inline]
     pub fn time_axis_label_bottom_offset(&self) -> f64 {
-        4.0 * self.font_size as f64 / 12.0
+        0.0
     }
 
     /// Crosshair label additional padding (LWC: `2/12 * fontSize`).

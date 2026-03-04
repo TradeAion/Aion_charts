@@ -96,23 +96,7 @@ impl TimeAxisRenderer {
             self.base_ctx.fill_rect(0.0, 0.0, w, border_size);
         }
 
-        // Tick marks (small vertical bars below the border)
-        let tick_length = (style.axis_tick_length as f64 * dpr).round();
-        let tick_width = (1.0 * dpr).floor().max(1.0);
-        let tick_offset = (dpr * 0.5).floor();
-
-        if style.axis_ticks_visible {
-            self.base_ctx
-                .set_fill_style_str(&rgba(&style.axis_border_color));
-            for t in ticks {
-                if t.pixel < 0.0 || t.pixel > pane_w {
-                    continue;
-                }
-                let x = t.pixel.round();
-                self.base_ctx
-                    .fill_rect(x - tick_offset, 0.0, tick_width, tick_length);
-            }
-        }
+        // Tick marks are intentionally hidden; keep tick values for label placement.
 
         // Tick labels — draw in media (CSS) coordinate space for sharp text.
         self.base_ctx.save();
@@ -126,7 +110,7 @@ impl TimeAxisRenderer {
 
         let padding_top_css = style.time_axis_padding_top();
         let fs_css = style.font_size as f64;
-        let text_y_css = (border_size + tick_length) / dpr + padding_top_css + fs_css / 2.0;
+        let text_y_css = border_size / dpr + padding_top_css + fs_css / 2.0;
         let pane_css_w_axis = pane_w / dpr;
 
         for t in ticks {
@@ -209,7 +193,6 @@ impl TimeAxisRenderer {
 
         // Label height excludes labelBottomOffset (LWC y2 calculation in time-axis-view-renderer.ts).
         let border_size = style.axis_border_size as f64;
-        let tick_length = style.axis_tick_length as f64;
         let padding_top = style.time_axis_padding_top();
         let padding_bottom = style.time_axis_padding_bottom();
         let fs = style.font_size as f64;
@@ -217,7 +200,7 @@ impl TimeAxisRenderer {
         // Keep the label box inside the time-axis bounds with a small top inset
         // so it doesn't bleed over the border at extreme DPR/zoom combinations.
         let by1_css = style.time_axis_crosshair_label_top_inset();
-        let by2_css = (by1_css + border_size + tick_length + padding_top + fs + padding_bottom)
+        let by2_css = (by1_css + border_size + padding_top + fs + padding_bottom)
             .ceil()
             .min(h / dpr);
 
@@ -253,7 +236,7 @@ impl TimeAxisRenderer {
         self.top_ctx.set_text_align("left");
         self.top_ctx.set_text_baseline("middle");
         let text_x_css = lx1 + h_margin;
-        let text_y_css = by1_css + border_size + tick_length + padding_top + fs / 2.0;
+        let text_y_css = by1_css + border_size + padding_top + fs / 2.0;
         let m = self
             .text_cache
             .measure_full(&self.top_ctx, "Apr0", &css_font);

@@ -687,10 +687,11 @@
 
   <script type="module">
     // Demo uses the current local wasm/pkg artifact directly.
-    const wasmModule = await import('../wasm/pkg/raycore_wasm.js');
+    const cacheBust = Date.now().toString();
+    const wasmModule = await import(`../wasm/pkg/raycore_wasm.js?v=${cacheBust}`);
     const init = wasmModule.default;
     const { RayCore, ChartGroup, ChartWorkspace } = wasmModule;
-    const wasmBinaryUrl = '../wasm/pkg/raycore_wasm_bg.wasm';
+    const wasmBinaryUrl = `../wasm/pkg/raycore_wasm_bg.wasm?v=${cacheBust}`;
 
     // ═══════════════════════════════════════════════════════════════════════
     // DOM & State

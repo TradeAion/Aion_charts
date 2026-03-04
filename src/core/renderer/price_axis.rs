@@ -223,24 +223,7 @@ impl PriceAxisRenderer {
             self.base_ctx.fill_rect(0.0, 0.0, border_size, h);
         }
 
-        // Tick marks (small horizontal bars at the border edge)
-        // Clipped against full canvas height (h), not candle area
-        let tick_length = (style.axis_tick_length as f64 * dpr).round();
-        let tick_height = (1.0 * dpr).floor().max(1.0);
-        let tick_offset = (dpr * 0.5).floor();
-
-        if style.axis_ticks_visible {
-            self.base_ctx
-                .set_fill_style_str(&rgba(&style.axis_border_color));
-            for t in ticks {
-                if t.pixel < 0.0 || t.pixel > h {
-                    continue;
-                }
-                let y = t.pixel.round();
-                self.base_ctx
-                    .fill_rect(0.0, y - tick_offset, tick_length, tick_height);
-            }
-        }
+        // Tick marks are intentionally hidden; keep tick values for label placement.
 
         // Tick labels — draw in media (CSS) coordinate space for sharp text.
         // LWC pattern: save → scale(dpr,dpr) → draw text with CSS-px font → restore.
@@ -256,7 +239,7 @@ impl PriceAxisRenderer {
         self.base_ctx.set_text_baseline("middle");
 
         let padding_inner_css = style.price_axis_padding_inner();
-        let text_x_css = tick_length / dpr + padding_inner_css;
+        let text_x_css = border_size / dpr + padding_inner_css;
 
         // Clip labels against full canvas height
         let h_css = h / dpr;
@@ -738,7 +721,8 @@ impl RightAxisLabelMetrics {
             padding_inner: style.price_axis_padding_inner() * dpr,
             padding_outer: style.price_axis_padding_outer() * dpr,
             padding_tb: style.price_axis_padding_tb() * dpr,
-            tick_size: (style.axis_tick_length as f64 * dpr).round(),
+            // Axis tick marks are hidden in compact mode; don't reserve connector width.
+            tick_size: 0.0,
             border_size: (style.axis_border_size as f64 * dpr).max(1.0).floor(),
             edge_inset: (style.price_axis_label_edge_inset() * dpr).round(),
             full_label_inside_gap: (style.price_axis_full_label_inside_gap() * dpr).round(),

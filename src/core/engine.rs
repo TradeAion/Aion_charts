@@ -246,12 +246,6 @@ impl ChartEngine {
     pub fn set_main_chart_type(&mut self, chart_type: MainChartType) {
         self.main_chart_type = chart_type;
         self.main_chart_options.chart_type = chart_type;
-
-        // Auto-generate footprint data from OHLCV bars when switching to Footprint
-        // and no footprint data is loaded yet.
-        if chart_type == MainChartType::Footprint {
-            self.ensure_footprint_data();
-        }
     }
 
     /// Get the main chart options.
@@ -263,9 +257,6 @@ impl ChartEngine {
     pub fn set_main_chart_options(&mut self, options: MainChartOptions) {
         self.main_chart_type = options.chart_type;
         self.main_chart_options = options;
-        if self.main_chart_type == MainChartType::Footprint {
-            self.ensure_footprint_data();
-        }
     }
 
     /// Replace all bar data.
@@ -278,11 +269,8 @@ impl ChartEngine {
         self.studies.update_studies(&self.bars);
         self.indicators.on_set_data(&self.bars);
 
-        // Clear stale footprint data — if in footprint mode, re-generate from new bars.
+        // Clear stale footprint data when main OHLCV data is replaced.
         self.footprint_data.clear();
-        if self.main_chart_type == MainChartType::Footprint {
-            self.ensure_footprint_data();
-        }
 
         // LWC-like initial zoom: derive visible bars from default bar spacing (6 CSS px).
         // Fallback to legacy constant if dimensions are not ready yet.
@@ -633,20 +621,6 @@ impl ChartEngine {
 
     // ── Footprint data management ────────────────────────────────────────
 
-    /// Ensure footprint data exists. If empty, auto-generates synthetic data
-    /// from the current OHLCV bars so the chart has something to display.
-    pub fn ensure_footprint_data(&mut self) {
-        if self.footprint_data.is_empty() && !self.bars.is_empty() {
-            let tick_size = self.main_chart_options.footprint.tick_size;
-            // Collect bars into a Vec for the generator
-            let bar_vec: Vec<Bar> = (0..self.bars.len())
-                .map(|i| self.bars.get_unchecked(i))
-                .collect();
-            self.footprint_data =
-                crate::core::demo_data::generate_footprint_from_bars(&bar_vec, tick_size);
-        }
-    }
-
     /// Set footprint data for a specific bar index.
     /// Levels should be sorted by price ascending.
     pub fn set_footprint_bar(&mut self, bar_idx: usize, bar: FootprintBar) {
@@ -677,30 +651,6 @@ impl ChartEngine {
     /// Pass 0.0 for auto-detection.
     pub fn set_footprint_tick_size(&mut self, tick_size: f32) {
         self.main_chart_options.footprint.tick_size = tick_size;
-    }
-
-    /// Get the effective tick size for footprint generation.
-    /// If the user set an explicit tick_size > 0, use that.
-    /// Otherwise, estimate from the average bar range of existing data.
-    fn effective_footprint_tick_size(&self) -> f32 {
-        let configured = self.main_chart_options.footprint.tick_size;
-        if configured > 0.0 {
-            return configured;
-        }
-        // Auto-detect from bar data
-        let n = self.bars.len().min(50); // sample last 50 bars
-        if n == 0 {
-            return 1.0;
-        }
-        let start = self.bars.len() - n;
-        let avg_range: f32 = (start..self.bars.len())
-            .map(|i| {
-                let b = self.bars.get_unchecked(i);
-                b.high - b.low
-            })
-            .sum::<f32>()
-            / n as f32;
-        crate::core::demo_data::round_tick_size_pub(avg_range / 10.0)
     }
 
     // ── Study management ────────────────────────────────────────────────
@@ -764,14 +714,6 @@ impl ChartEngine {
         self.studies.update_studies(&self.bars);
         self.indicators.on_incremental_update(&self.bars);
 
-        // Generate footprint data for the new bar if in Footprint mode
-        if self.main_chart_type == MainChartType::Footprint && !self.footprint_data.is_empty() {
-            let tick = self.effective_footprint_tick_size();
-            let bar_idx = self.bars.len() - 1;
-            let fp_bar = crate::core::demo_data::generate_footprint_for_single_bar(&bar, tick);
-            self.footprint_data.set_bar(bar_idx, fp_bar);
-        }
-
         // LWC-style viewport advance: if auto_scroll is enabled AND the previous
         // last bar was inside the visible range, shift the viewport right by
         // exactly 1 bar so the new bar comes into view at the same position the
@@ -809,14 +751,6 @@ impl ChartEngine {
         let len = self.bars.len();
 
         self.bars.update_last(bar);
-
-        // Regenerate footprint data for the updated bar if in Footprint mode
-        if self.main_chart_type == MainChartType::Footprint && !self.footprint_data.is_empty() {
-            let tick = self.effective_footprint_tick_size();
-            let bar_idx = len - 1;
-            let fp_bar = crate::core::demo_data::generate_footprint_for_single_bar(&bar, tick);
-            self.footprint_data.set_bar(bar_idx, fp_bar);
-        }
 
         // Recalculate studies for the last bar only
         // Reset last_calculated_index to len-1 so only the last bar is recalculated
@@ -857,8 +791,8 @@ impl ChartEngine {
 
     /// Main render — called once per frame.
     /// Only renders the pane (candles + volume). Axes are rendered separately.
-    /// `y_ticks` and `x_ticks` are pre-computed by the WASM layer so
-    /// both the grid and axis renderers share the same tick marks.
+    /// `y_ticks` and `x_ticks` are provided by the WASM layer. The current
+    /// WASM pipeline passes empty slices to disable axis tick generation.
     pub fn render(
         &mut self,
         y_ticks: &[crate::core::renderer::traits::TickMark],

@@ -759,6 +759,52 @@ fn ensure_finite_fields(ctx: &str, fields: &[(&str, f32)]) -> Result<(), JsValue
     Ok(())
 }
 
+fn build_footprint_levels(
+    ctx: &str,
+    prices: &[f32],
+    bid_volumes: &[f32],
+    ask_volumes: &[f32],
+) -> Result<Vec<raycore::FootprintLevel>, JsValue> {
+    let len = prices.len();
+    ensure_equal_len("prices", len, "bid_volumes", bid_volumes.len())?;
+    ensure_equal_len("prices", len, "ask_volumes", ask_volumes.len())?;
+    ensure_finite_slice("prices", prices)?;
+    ensure_finite_slice("bid_volumes", bid_volumes)?;
+    ensure_finite_slice("ask_volumes", ask_volumes)?;
+
+    for i in 1..len {
+        if prices[i] < prices[i - 1] {
+            return Err(js_err(format!(
+                "{}: prices must be sorted ascending (index {}: {} < {})",
+                ctx,
+                i,
+                prices[i],
+                prices[i - 1]
+            )));
+        }
+    }
+    if let Some((idx, v)) = bid_volumes.iter().enumerate().find(|(_, v)| **v < 0.0) {
+        return Err(js_err(format!(
+            "{}: bid_volumes must be >= 0 (index {}: {})",
+            ctx, idx, v
+        )));
+    }
+    if let Some((idx, v)) = ask_volumes.iter().enumerate().find(|(_, v)| **v < 0.0) {
+        return Err(js_err(format!(
+            "{}: ask_volumes must be >= 0 (index {}: {})",
+            ctx, idx, v
+        )));
+    }
+
+    Ok((0..len)
+        .map(|i| raycore::FootprintLevel {
+            price: prices[i],
+            bid_volume: bid_volumes[i],
+            ask_volume: ask_volumes[i],
+        })
+        .collect())
+}
+
 #[inline]
 fn finite_or(value: f64, fallback: f64) -> f64 {
     if value.is_finite() {
@@ -2942,64 +2988,183 @@ impl RayCore {
         bid_volumes: &[f32],
         ask_volumes: &[f32],
     ) -> Result<(), JsValue> {
-        let len = prices.len();
-        if bid_volumes.len() != len || ask_volumes.len() != len {
-            return Err(JsValue::from_str(&format!(
-                "footprint arrays length mismatch: prices={} bid_volumes={} ask_volumes={}",
-                len,
-                bid_volumes.len(),
-                ask_volumes.len()
+        let levels = build_footprint_levels(
+            "set_footprint_bar",
+            prices,
+            bid_volumes,
+            ask_volumes,
+        )?;
+
+        let mut inner = self.inner.borrow_mut();
+        let bar_count = inner.engine.bars.len();
+        if bar_index >= bar_count {
+            return Err(js_err(format!(
+                "set_footprint_bar: bar_index {} out of range (bars={})",
+                bar_index, bar_count
+            )));
+        }
+        inner
+            .engine
+            .set_footprint_bar(bar_index, raycore::FootprintBar { levels });
+        drop(inner);
+        self.dirty.set(true);
+        Ok(())
+    }
+
+    /// Bulk set footprint data with typed arrays (fast path for external feeds).
+    ///
+    /// Layout:
+    /// - `bar_indices`: one entry per footprint bar.
+    /// - `level_offsets`: length must be `bar_indices.len() + 1`.
+    ///   Each bar `i` uses level range `[level_offsets[i], level_offsets[i + 1])`.
+    /// - `prices`, `bid_volumes`, `ask_volumes`: flattened level arrays.
+    ///
+    /// Example:
+    /// - bar_indices = [10, 11]
+    /// - level_offsets = [0, 3, 5]
+    /// - levels for bar 10 = [0..3), bar 11 = [3..5)
+    pub fn set_footprint_data_arrays(
+        &mut self,
+        bar_indices: &[u32],
+        level_offsets: &[u32],
+        prices: &[f32],
+        bid_volumes: &[f32],
+        ask_volumes: &[f32],
+    ) -> Result<(), JsValue> {
+        ensure_equal_len("prices", prices.len(), "bid_volumes", bid_volumes.len())?;
+        ensure_equal_len("prices", prices.len(), "ask_volumes", ask_volumes.len())?;
+        ensure_finite_slice("prices", prices)?;
+        ensure_finite_slice("bid_volumes", bid_volumes)?;
+        ensure_finite_slice("ask_volumes", ask_volumes)?;
+
+        if level_offsets.len() != bar_indices.len() + 1 {
+            return Err(js_err(format!(
+                "set_footprint_data_arrays: level_offsets length must be bar_indices.len()+1 ({} != {}+1)",
+                level_offsets.len(),
+                bar_indices.len()
+            )));
+        }
+        if level_offsets.first().copied().unwrap_or(0) != 0 {
+            return Err(js_err(
+                "set_footprint_data_arrays: level_offsets[0] must be 0",
+            ));
+        }
+        if let Some((i, _)) = level_offsets
+            .windows(2)
+            .enumerate()
+            .find(|(_, w)| w[1] < w[0])
+        {
+            return Err(js_err(format!(
+                "set_footprint_data_arrays: level_offsets must be non-decreasing (index {})",
+                i + 1
+            )));
+        }
+        let total_levels = prices.len();
+        let last_offset = level_offsets.last().copied().unwrap_or(0) as usize;
+        if last_offset != total_levels {
+            return Err(js_err(format!(
+                "set_footprint_data_arrays: last level offset {} must equal level array length {}",
+                last_offset, total_levels
             )));
         }
 
-        let levels: Vec<raycore::FootprintLevel> = (0..len)
-            .map(|i| raycore::FootprintLevel {
-                price: prices[i],
-                bid_volume: bid_volumes[i],
-                ask_volume: ask_volumes[i],
-            })
-            .collect();
+        let mut inner = self.inner.borrow_mut();
+        let bar_count = inner.engine.bars.len();
+        let mut bars = Vec::with_capacity(bar_indices.len());
+        for i in 0..bar_indices.len() {
+            let bar_index = bar_indices[i] as usize;
+            if bar_index >= bar_count {
+                return Err(js_err(format!(
+                    "set_footprint_data_arrays: bar_index {} out of range (bars={})",
+                    bar_index, bar_count
+                )));
+            }
+            let start = level_offsets[i] as usize;
+            let end = level_offsets[i + 1] as usize;
+            let levels = build_footprint_levels(
+                "set_footprint_data_arrays",
+                &prices[start..end],
+                &bid_volumes[start..end],
+                &ask_volumes[start..end],
+            )?;
+            bars.push((bar_index, raycore::FootprintBar { levels }));
+        }
 
-        let fp_bar = raycore::FootprintBar { levels };
-        self.inner
-            .borrow_mut()
-            .engine
-            .set_footprint_bar(bar_index, fp_bar);
+        inner.engine.set_footprint_bars(bars);
+        drop(inner);
         self.dirty.set(true);
         Ok(())
     }
 
     /// Set footprint data from a JSON string for bulk loading.
     ///
-    /// Expected format: `[{"bar_index": 0, "levels": [{"price": 100.0, "bid": 150, "ask": 200}, ...]}]`
+    /// Expected format:
+    /// `[{"bar_index": 0, "levels": [{"price": 100.0, "bid": 150, "ask": 200}, ...]}]`
+    ///
+    /// Also accepts aliases:
+    /// - `barIndex` / `index` for `bar_index`
+    /// - `bid_volume` / `bidVolume` for `bid`
+    /// - `ask_volume` / `askVolume` for `ask`
     pub fn set_footprint_data_json(&mut self, json: &str) -> Result<(), JsValue> {
         let parsed: Vec<serde_json::Value> =
             serde_json::from_str(json).map_err(|e| JsValue::from_str(&format!("JSON parse error: {}", e)))?;
 
         let mut inner = self.inner.borrow_mut();
-        inner.engine.clear_footprint_data();
+        let bar_count = inner.engine.bars.len();
+        let mut bars = Vec::with_capacity(parsed.len());
 
         for item in &parsed {
-            let bar_index = item["bar_index"]
-                .as_u64()
-                .ok_or_else(|| JsValue::from_str("missing bar_index"))? as usize;
-            let levels_arr = item["levels"]
-                .as_array()
-                .ok_or_else(|| JsValue::from_str("missing levels array"))?;
+            let bar_index = item
+                .get("bar_index")
+                .or_else(|| item.get("barIndex"))
+                .or_else(|| item.get("index"))
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| js_err("set_footprint_data_json: missing bar_index"))?
+                as usize;
+            if bar_index >= bar_count {
+                return Err(js_err(format!(
+                    "set_footprint_data_json: bar_index {} out of range (bars={})",
+                    bar_index, bar_count
+                )));
+            }
 
-            let levels: Vec<raycore::FootprintLevel> = levels_arr
-                .iter()
-                .map(|l| raycore::FootprintLevel {
-                    price: l["price"].as_f64().unwrap_or(0.0) as f32,
-                    bid_volume: l["bid"].as_f64().unwrap_or(0.0) as f32,
-                    ask_volume: l["ask"].as_f64().unwrap_or(0.0) as f32,
-                })
-                .collect();
+            let levels_arr = item
+                .get("levels")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| js_err("set_footprint_data_json: missing levels array"))?;
 
-            inner
-                .engine
-                .set_footprint_bar(bar_index, raycore::FootprintBar { levels });
+            let mut prices = Vec::with_capacity(levels_arr.len());
+            let mut bids = Vec::with_capacity(levels_arr.len());
+            let mut asks = Vec::with_capacity(levels_arr.len());
+            for level in levels_arr {
+                let price = level
+                    .get("price")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| js_err("set_footprint_data_json: level missing price"))?
+                    as f32;
+                let bid = level
+                    .get("bid")
+                    .or_else(|| level.get("bid_volume"))
+                    .or_else(|| level.get("bidVolume"))
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| js_err("set_footprint_data_json: level missing bid volume"))?
+                    as f32;
+                let ask = level
+                    .get("ask")
+                    .or_else(|| level.get("ask_volume"))
+                    .or_else(|| level.get("askVolume"))
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| js_err("set_footprint_data_json: level missing ask volume"))?
+                    as f32;
+                prices.push(price);
+                bids.push(bid);
+                asks.push(ask);
+            }
+
+            let levels = build_footprint_levels("set_footprint_data_json", &prices, &bids, &asks)?;
+            bars.push((bar_index, raycore::FootprintBar { levels }));
         }
+        inner.engine.set_footprint_bars(bars);
         drop(inner);
         self.dirty.set(true);
         Ok(())
@@ -6578,6 +6743,66 @@ impl RayCore {
         } else {
             inner.engine.upsert_bar(bar).map_err(js_err)
         }
+    }
+
+    /// Upsert a main bar and atomically set its footprint levels.
+    ///
+    /// This is the preferred real-time API for external order-flow feeds:
+    /// one call updates OHLCV + footprint for the same logical bar.
+    pub fn upsert_bar_with_footprint(
+        &self,
+        timestamp: u64,
+        open: f32,
+        high: f32,
+        low: f32,
+        close: f32,
+        volume: f32,
+        prices: &[f32],
+        bid_volumes: &[f32],
+        ask_volumes: &[f32],
+    ) -> Result<(), JsValue> {
+        ensure_finite_fields(
+            "upsert_bar_with_footprint",
+            &[
+                ("open", open),
+                ("high", high),
+                ("low", low),
+                ("close", close),
+                ("volume", volume),
+            ],
+        )?;
+        let levels = build_footprint_levels(
+            "upsert_bar_with_footprint",
+            prices,
+            bid_volumes,
+            ask_volumes,
+        )?;
+
+        let bar = Bar {
+            timestamp,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            _pad: 0.0,
+        };
+        let mut inner = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| js_err("upsert_bar_with_footprint: runtime busy"))?;
+        if inner.replay_active {
+            return Err(js_err(
+                "upsert_bar_with_footprint is not supported while replay is active",
+            ));
+        }
+
+        inner.engine.upsert_bar(bar).map_err(js_err)?;
+        let bar_index = inner.engine.bars.len().saturating_sub(1);
+        inner
+            .engine
+            .set_footprint_bar(bar_index, raycore::FootprintBar { levels });
+        Ok(())
     }
 
     /// Append a single point to a line/area/baseline overlay series.
