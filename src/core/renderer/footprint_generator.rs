@@ -865,21 +865,7 @@ fn adaptive_font_size(max_font: f32, cell_h: f64) -> f32 {
 
 /// Auto-detect tick size from footprint levels.
 fn auto_tick_size(bar: &FootprintBar) -> f32 {
-    if bar.levels.len() < 2 {
-        return 1.0;
-    }
-    let mut min_diff = f32::MAX;
-    for i in 1..bar.levels.len() {
-        let diff = (bar.levels[i].price - bar.levels[i - 1].price).abs();
-        if diff > 0.0 && diff < min_diff {
-            min_diff = diff;
-        }
-    }
-    if min_diff == f32::MAX || min_diff <= 0.0 {
-        1.0
-    } else {
-        min_diff
-    }
+    bar.inferred_tick_size()
 }
 
 /// Blend color `over` on top of `base` using standard alpha compositing.

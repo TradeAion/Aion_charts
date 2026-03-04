@@ -18,14 +18,14 @@
 //!   - subpane: Indicator subpane management
 
 use raycore::{
-    generate_footprint_sample_data, generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions, BaselineSeriesOptions,
-    Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup, ChartPaneId, ChartStyle,
-    CrosshairMagnetMode, CrosshairSnapshot, DataRange, GpuContext, HistogramPoint,
-    HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint, LineSeriesOptions, LineStyle,
-    MainChartType, MarkerPosition, MarkerShape, MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint,
-    OverlayRenderer, PriceAxisRenderer, PriceLineOptions, RendererBackend, ResourceLimits,
-    RuntimeEvent, SeriesId, SeriesMarker, SnapshotMtfResolver, TimeAxisRenderer, TimeRange,
-    Viewport, WgpuRenderer,
+    generate_footprint_sample_data, generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions,
+    BaselineSeriesOptions, Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup,
+    ChartPaneId, ChartStyle, CrosshairMagnetMode, CrosshairSnapshot, DataRange, GpuContext,
+    HistogramPoint, HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint,
+    LineSeriesOptions, LineStyle, MainChartType, MarkerPosition, MarkerShape, MtfMode, MtfRequest,
+    MtfResolvedSample, OhlcPoint, OverlayRenderer, PriceAxisRenderer, PriceLineOptions,
+    RendererBackend, ResourceLimits, RuntimeEvent, SeriesId, SeriesMarker, SnapshotMtfResolver,
+    TimeAxisRenderer, TimeRange, Viewport, WgpuRenderer,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -1314,12 +1314,12 @@ impl RayCore {
             let cb = Closure::<dyn FnMut(web_sys::WheelEvent)>::wrap(Box::new(
                 move |e: web_sys::WheelEvent| {
                     e.prevent_default();
-                    let (x, _y) = wheel_css_pos(&e, &pane_c);
+                    let (x, y) = wheel_css_pos(&e, &pane_c);
                     let Ok(mut s) = inner.try_borrow_mut() else {
                         return;
                     };
                     s.on_pointer_enter(HitZone::Chart);
-                    s.on_pane_wheel(x, e.delta_x(), e.delta_y(), e.delta_mode());
+                    s.on_pane_wheel(x, y, e.delta_x(), e.delta_y(), e.delta_mode());
                 },
             ));
             let opts = web_sys::AddEventListenerOptions::new();
@@ -2988,12 +2988,7 @@ impl RayCore {
         bid_volumes: &[f32],
         ask_volumes: &[f32],
     ) -> Result<(), JsValue> {
-        let levels = build_footprint_levels(
-            "set_footprint_bar",
-            prices,
-            bid_volumes,
-            ask_volumes,
-        )?;
+        let levels = build_footprint_levels("set_footprint_bar", prices, bid_volumes, ask_volumes)?;
 
         let mut inner = self.inner.borrow_mut();
         let bar_count = inner.engine.bars.len();
@@ -3106,8 +3101,8 @@ impl RayCore {
     /// - `bid_volume` / `bidVolume` for `bid`
     /// - `ask_volume` / `askVolume` for `ask`
     pub fn set_footprint_data_json(&mut self, json: &str) -> Result<(), JsValue> {
-        let parsed: Vec<serde_json::Value> =
-            serde_json::from_str(json).map_err(|e| JsValue::from_str(&format!("JSON parse error: {}", e)))?;
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(json)
+            .map_err(|e| JsValue::from_str(&format!("JSON parse error: {}", e)))?;
 
         let mut inner = self.inner.borrow_mut();
         let bar_count = inner.engine.bars.len();
@@ -3180,10 +3175,7 @@ impl RayCore {
     /// Accepted values: "bid_ask", "delta", "volume", "delta_profile", "volume_profile".
     pub fn set_footprint_display_mode(&mut self, mode: &str) {
         let m = raycore::FootprintDisplayMode::from_str(mode);
-        self.inner
-            .borrow_mut()
-            .engine
-            .set_footprint_display_mode(m);
+        self.inner.borrow_mut().engine.set_footprint_display_mode(m);
         self.dirty.set(true);
         log::info!("set_footprint_display_mode: {}", m.as_str());
     }
@@ -3195,6 +3187,23 @@ impl RayCore {
             .engine
             .set_footprint_tick_size(tick_size);
         self.dirty.set(true);
+    }
+
+    /// Enable/disable footprint pane two-axis zoom (X+Y) for wheel and pinch.
+    pub fn set_footprint_xy_zoom_enabled(&mut self, enabled: bool) {
+        self.inner
+            .borrow_mut()
+            .engine
+            .set_footprint_zoom_price_with_time(enabled);
+        self.dirty.set(true);
+    }
+
+    /// Return whether footprint pane two-axis zoom (X+Y) is enabled.
+    pub fn get_footprint_xy_zoom_enabled(&self) -> bool {
+        self.inner
+            .borrow()
+            .engine
+            .footprint_zoom_price_with_time()
     }
 
     /// Configure footprint options from a JSON object.
@@ -3210,6 +3219,7 @@ impl RayCore {
     /// - `show_delta_bar`: boolean
     /// - `show_volume_text`: boolean
     /// - `show_unfinished_auction`: boolean
+    /// - `zoom_price_with_time`: boolean (footprint wheel/pinch X+Y zoom)
     pub fn set_footprint_options(&mut self, json: &str) -> Result<(), JsValue> {
         let v: serde_json::Value = serde_json::from_str(json)
             .map_err(|e| JsValue::from_str(&format!("JSON parse error: {}", e)))?;
@@ -3262,6 +3272,9 @@ impl RayCore {
         if let Some(n) = v["min_cell_height"].as_f64() {
             opts.min_cell_height = n as f32;
         }
+        if let Some(b) = v["zoom_price_with_time"].as_bool() {
+            opts.zoom_price_with_time = b;
+        }
 
         drop(inner);
         self.dirty.set(true);
@@ -3292,7 +3305,8 @@ impl RayCore {
         let num_bars = 600;
         let interval_ms = 60_000;
         let start_ms = now_ms - (num_bars as u64) * interval_ms;
-        let (bars, footprint) = generate_footprint_sample_data(num_bars, start_ms, interval_ms, 0.0);
+        let (bars, footprint) =
+            generate_footprint_sample_data(num_bars, start_ms, interval_ms, 0.0);
 
         let mut inner = self.inner.borrow_mut();
         inner.engine.set_main_chart_type(MainChartType::Footprint);
@@ -6217,10 +6231,11 @@ impl RayCore {
                     e.prevent_default();
                     let rect = chart_c.get_bounding_client_rect();
                     let x = e.client_x() as f64 - rect.left();
+                    let y = e.client_y() as f64 - rect.top();
                     let Ok(mut s) = inner.try_borrow_mut() else {
                         return;
                     };
-                    s.on_pane_wheel(x, e.delta_x(), e.delta_y(), e.delta_mode());
+                    s.on_pane_wheel(x, y, e.delta_x(), e.delta_y(), e.delta_mode());
                 },
             ));
             let opts = web_sys::AddEventListenerOptions::new();

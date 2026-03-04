@@ -394,6 +394,7 @@
       <button class="btn" id="stream-toggle">▶ Live</button>
       <button class="btn active" id="volume-toggle">Volume</button>
       <button class="btn active" id="autoscroll-toggle">Auto</button>
+      <button class="btn active" id="footprint-xy-zoom-toggle">XY Zoom</button>
     </div>
 
     <div class="toolbar-section" style="margin-left: auto;" id="renderer-group"></div>
@@ -714,6 +715,7 @@
     let activeDrawTool = 'none';
     let streamInterval = null;
     let volumeVisible = true;
+    let footprintXyZoomEnabled = true;
     let hudBaseStatus = '';
     let requestedRenderer = 'webgpu';
     let rendererFallbackText = '';
@@ -904,6 +906,21 @@
       core.set_chart_type(type);
     }
 
+    function applyFootprintXyZoomSetting() {
+      if (!core || typeof core.set_footprint_xy_zoom_enabled !== 'function') return;
+      core.set_footprint_xy_zoom_enabled(footprintXyZoomEnabled);
+    }
+
+    function syncFootprintXyZoomToggle() {
+      const btn = $('footprint-xy-zoom-toggle');
+      if (!btn) return;
+      btn.classList.toggle('active', footprintXyZoomEnabled);
+      btn.textContent = footprintXyZoomEnabled ? 'XY Zoom' : 'X Zoom';
+      btn.title = activeChartType === 'footprint'
+        ? 'Footprint wheel/pinch zoom mode'
+        : 'Applies when Footprint mode is active';
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // Chart Creation
     // ═══════════════════════════════════════════════════════════════════════
@@ -947,6 +964,7 @@
           rendererFallbackText = `fallback ${e.requested}→${e.active}`;
           updateHudStatus();
         });
+        applyFootprintXyZoomSetting();
         loadDemoDataForChartType(activeChartType);
         core.set_volume_visible(volumeVisible);
 
@@ -1165,6 +1183,7 @@
       chartTypeButtonsHost.querySelectorAll('button[data-chart-type]').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.chartType === activeChartType);
       });
+      syncFootprintXyZoomToggle();
     }
 
     function renderChartTypeButtons() {
@@ -1482,6 +1501,13 @@
       btn.classList.toggle('active', enabled);
       if (core) core.set_auto_scroll(enabled);
     };
+
+    $('footprint-xy-zoom-toggle').onclick = () => {
+      footprintXyZoomEnabled = !footprintXyZoomEnabled;
+      syncFootprintXyZoomToggle();
+      applyFootprintXyZoomSetting();
+    };
+    syncFootprintXyZoomToggle();
 
     // ═══════════════════════════════════════════════════════════════════════
     // Boot

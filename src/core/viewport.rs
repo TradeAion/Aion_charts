@@ -405,40 +405,18 @@ impl Viewport {
         self.price_invalidated = true;
     }
 
-    pub fn pan_clamped(&mut self, delta_bars: f64, data_len: usize) {
-        let span = self.end_bar - self.start_bar;
-        // LWC-style boundaries: allow scrolling until only MIN_VISIBLE_BARS of
-        // real data remain on screen in either direction (fixLeftEdge /
-        // fixRightEdge both false, MinVisibleBarsCount = MIN_VISIBLE_BARS).
-        // Old formula used span*0.5 which locked the canvas at half a screen
-        // from the data edge — far too restrictive compared to LWC.
-        let min_vis = MIN_VISIBLE_BARS.min(data_len as f64);
-        let lo = min_vis - span; // scroll left until only min_vis bars visible
-        let hi = data_len as f64 - min_vis; // scroll right until only min_vis bars visible
-
-        let new_start = (self.start_bar + delta_bars).clamp(lo, hi);
-        self.start_bar = new_start;
-        self.end_bar = new_start + span;
-        self.price_invalidated = true;
+    /// Pan horizontally with unrestricted range.
+    ///
+    /// `data_len` is intentionally ignored to preserve API compatibility for
+    /// existing callers that used clamped panning before.
+    pub fn pan_clamped(&mut self, delta_bars: f64, _data_len: usize) {
+        self.pan(delta_bars);
     }
 
-    /// Clamp viewport so it doesn't scroll too far past data boundaries.
-    /// LWC-style: allows scrolling until only MIN_VISIBLE_BARS of data remain
-    /// visible on screen in either direction (matches LWC's MinVisibleBarsCount
-    /// logic with fixLeftEdge/fixRightEdge both false).
-    pub fn clamp_to_data(&mut self, data_len: usize) {
-        let span = self.end_bar - self.start_bar;
-        let min_vis = MIN_VISIBLE_BARS.min(data_len as f64);
-        let lo = min_vis - span;
-        let hi = data_len as f64 - min_vis;
-        if self.start_bar < lo {
-            self.start_bar = lo;
-            self.end_bar = lo + span;
-        } else if self.start_bar > hi {
-            self.start_bar = hi;
-            self.end_bar = hi + span;
-        }
-    }
+    /// No-op boundary clamp for unrestricted horizontal navigation.
+    ///
+    /// Kept for API compatibility at call sites that still invoke clamping.
+    pub fn clamp_to_data(&mut self, _data_len: usize) {}
 
     pub fn zoom(&mut self, focal_bar: f64, factor: f64) {
         let left = focal_bar - self.start_bar;
@@ -606,10 +584,10 @@ mod tests {
         let mut vp = Viewport::new(800, 600);
         vp.set_range(0.0, 100.0);
 
-        vp.pan_clamped(-50.0, 200); // Try to pan left beyond start
+        vp.pan_clamped(-50.0, 200);
 
-        // Should stop at start (with some allowance for left edge)
-        assert!(vp.start_bar >= -100.0); // Can go some bars left
+        assert_eq!(vp.start_bar, -50.0);
+        assert_eq!(vp.end_bar, 50.0);
     }
 
     #[test]
@@ -617,10 +595,10 @@ mod tests {
         let mut vp = Viewport::new(800, 600);
         vp.set_range(0.0, 100.0);
 
-        vp.pan_clamped(500.0, 200); // Try to pan way past end
+        vp.pan_clamped(500.0, 200);
 
-        // Should be clamped to reasonable range
-        assert!(vp.end_bar <= 400.0); // 2x data len max
+        assert_eq!(vp.start_bar, 500.0);
+        assert_eq!(vp.end_bar, 600.0);
     }
 
     // ── Price scale modes ──

@@ -10,7 +10,8 @@
 
 use crate::core::chart_type::{MainChartOptions, MainChartType};
 use crate::core::constants::{
-    DEFAULT_BAR_SPACING_CSS, DEFAULT_INITIAL_VISIBLE_BARS, MIN_VISIBLE_BARS,
+    DEFAULT_BAR_SPACING_CSS, DEFAULT_INITIAL_VISIBLE_BARS, DEGENERATE_PRICE_RANGE_FALLBACK,
+    MIN_VISIBLE_BARS,
 };
 use crate::core::data::{Bar, BarArray};
 use crate::core::drawings::types::DrawingGeometry;
@@ -244,8 +245,31 @@ impl ChartEngine {
 
     /// Set the main chart type (candlestick, OHLC bars, line, area, footprint, etc.).
     pub fn set_main_chart_type(&mut self, chart_type: MainChartType) {
+        let prev_chart_type = self.main_chart_type;
         self.main_chart_type = chart_type;
         self.main_chart_options.chart_type = chart_type;
+
+        if prev_chart_type != chart_type && chart_type == MainChartType::Footprint {
+            // Footprint mode should initialize from a sane, readable viewport.
+            // If current time range is completely outside available bars (e.g. user
+            // panned far into future space), re-anchor to recent data.
+            if !self.bars.is_empty() {
+                let data_len = self.bars.len() as f64;
+                let has_time_overlap =
+                    self.viewport.end_bar > 0.0 && self.viewport.start_bar < data_len;
+                if !has_time_overlap {
+                    let span =
+                        (self.viewport.end_bar - self.viewport.start_bar).max(MIN_VISIBLE_BARS);
+                    let visible = span.min(data_len.max(MIN_VISIBLE_BARS));
+                    self.viewport.set_range(data_len - visible, data_len);
+                }
+            }
+            // Don't inherit stale locked price scale from non-footprint mode.
+            self.viewport.price_locked = false;
+            self.auto_fit_price_for_current_chart();
+        } else {
+            self.viewport.price_invalidated = true;
+        }
     }
 
     /// Get the main chart options.
@@ -255,8 +279,8 @@ impl ChartEngine {
 
     /// Set main chart options.
     pub fn set_main_chart_options(&mut self, options: MainChartOptions) {
-        self.main_chart_type = options.chart_type;
         self.main_chart_options = options;
+        self.set_main_chart_type(self.main_chart_options.chart_type);
     }
 
     /// Replace all bar data.
@@ -285,7 +309,7 @@ impl ChartEngine {
         self.viewport.set_range((len as f64) - visible, len as f64);
 
         if !self.viewport.price_locked {
-            self.viewport.auto_fit_price(&self.bars);
+            self.auto_fit_price_for_current_chart();
         }
         Ok(())
     }
@@ -300,6 +324,9 @@ impl ChartEngine {
     ) -> Result<(), String> {
         self.set_data(bars)?;
         self.footprint_data = footprint;
+        if !self.viewport.price_locked {
+            self.auto_fit_price_for_current_chart();
+        }
         Ok(())
     }
 
@@ -328,7 +355,7 @@ impl ChartEngine {
     pub fn zoom_to_range(&mut self, start: u64, end: u64) {
         self.viewport.set_range(start as f64, end as f64);
         if !self.viewport.price_locked {
-            self.viewport.auto_fit_price(&self.bars);
+            self.auto_fit_price_for_current_chart();
         }
     }
 
@@ -638,11 +665,17 @@ impl ChartEngine {
     /// Levels should be sorted by price ascending.
     pub fn set_footprint_bar(&mut self, bar_idx: usize, bar: FootprintBar) {
         self.footprint_data.set_bar(bar_idx, bar);
+        if self.main_chart_type == MainChartType::Footprint && !self.viewport.price_locked {
+            self.auto_fit_price_for_current_chart();
+        }
     }
 
     /// Set footprint data for multiple bars at once (bulk load).
     pub fn set_footprint_bars(&mut self, bars: Vec<(usize, FootprintBar)>) {
         self.footprint_data.set_bars(bars);
+        if self.main_chart_type == MainChartType::Footprint && !self.viewport.price_locked {
+            self.auto_fit_price_for_current_chart();
+        }
     }
 
     /// Clear all footprint data.
@@ -664,6 +697,16 @@ impl ChartEngine {
     /// Pass 0.0 for auto-detection.
     pub fn set_footprint_tick_size(&mut self, tick_size: f32) {
         self.main_chart_options.footprint.tick_size = tick_size;
+    }
+
+    /// Enable/disable coupled time+price zoom behavior for footprint pane wheel/pinch.
+    pub fn set_footprint_zoom_price_with_time(&mut self, enabled: bool) {
+        self.main_chart_options.footprint.zoom_price_with_time = enabled;
+    }
+
+    /// Returns whether footprint pane wheel/pinch uses coupled time+price zoom.
+    pub fn footprint_zoom_price_with_time(&self) -> bool {
+        self.main_chart_options.footprint.zoom_price_with_time
     }
 
     // ── Study management ────────────────────────────────────────────────
@@ -693,11 +736,197 @@ impl ChartEngine {
         self.studies.update_studies(&self.bars);
     }
 
+    fn auto_fit_price_for_current_chart(&mut self) {
+        self.viewport.auto_fit_price(&self.bars);
+        self.expand_price_range_for_visible_footprint_bounds();
+        self.enforce_footprint_min_cell_height_unlocked();
+    }
+
+    fn visible_footprint_internal_bounds(&self) -> Option<(f64, f64)> {
+        if self.main_chart_type != MainChartType::Footprint
+            || self.footprint_data.is_empty()
+            || self.bars.is_empty()
+        {
+            return None;
+        }
+        let start = (self.viewport.start_bar.floor() as usize)
+            .saturating_sub(1)
+            .min(self.bars.len());
+        let end = ((self.viewport.end_bar.ceil() as usize) + 1).min(self.bars.len());
+        if start >= end {
+            return None;
+        }
+
+        let fixed_tick = (self.main_chart_options.footprint.tick_size > 0.0)
+            .then_some(self.main_chart_options.footprint.tick_size as f64);
+        let mut min_internal = f64::INFINITY;
+        let mut max_internal = f64::NEG_INFINITY;
+        let mut any = false;
+
+        for i in start..end {
+            let Some(fp_bar) = self.footprint_data.get_bar(i) else {
+                continue;
+            };
+            if fp_bar.levels.is_empty() {
+                continue;
+            }
+            let tick = fixed_tick.unwrap_or_else(|| fp_bar.inferred_tick_size() as f64);
+            if !tick.is_finite() || tick <= 0.0 {
+                continue;
+            }
+            for level in &fp_bar.levels {
+                let lo = self.viewport.price_to_internal(level.price as f64);
+                let hi = self.viewport.price_to_internal(level.price as f64 + tick);
+                if !lo.is_finite() || !hi.is_finite() {
+                    continue;
+                }
+                let lvl_min = lo.min(hi);
+                let lvl_max = lo.max(hi);
+                min_internal = min_internal.min(lvl_min);
+                max_internal = max_internal.max(lvl_max);
+                any = true;
+            }
+        }
+
+        any.then_some((min_internal, max_internal))
+    }
+
+    fn footprint_required_range_with_margins(&self) -> Option<f64> {
+        let (data_min, data_max) = self.visible_footprint_internal_bounds()?;
+        let internal_frac =
+            1.0 - self.viewport.scale_margin_top - self.viewport.scale_margin_bottom;
+        if internal_frac <= 0.0 {
+            return None;
+        }
+        let raw_range = data_max - data_min;
+        Some(if raw_range > 0.0 {
+            raw_range / internal_frac
+        } else {
+            DEGENERATE_PRICE_RANGE_FALLBACK / internal_frac
+        })
+    }
+
+    fn expand_price_range_for_visible_footprint_bounds(&mut self) {
+        let (data_min, data_max) = match self.visible_footprint_internal_bounds() {
+            Some(v) => v,
+            None => return,
+        };
+        let internal_frac =
+            1.0 - self.viewport.scale_margin_top - self.viewport.scale_margin_bottom;
+        if internal_frac <= 0.0 {
+            return;
+        }
+        let raw_range = data_max - data_min;
+        let full_range = if raw_range > 0.0 {
+            raw_range / internal_frac
+        } else {
+            DEGENERATE_PRICE_RANGE_FALLBACK / internal_frac
+        };
+        let required_min = data_min - full_range * self.viewport.scale_margin_bottom;
+        let required_max = required_min + full_range;
+        if !required_min.is_finite() || !required_max.is_finite() || required_max <= required_min {
+            return;
+        }
+        if required_min < self.viewport.price_min || required_max > self.viewport.price_max {
+            self.viewport.price_min = self.viewport.price_min.min(required_min);
+            self.viewport.price_max = self.viewport.price_max.max(required_max);
+        }
+    }
+
+    fn representative_visible_footprint_tick_size(&self) -> Option<f64> {
+        if self.main_chart_options.footprint.tick_size > 0.0 {
+            return Some(self.main_chart_options.footprint.tick_size as f64);
+        }
+        if self.footprint_data.is_empty() || self.bars.is_empty() {
+            return None;
+        }
+        let start = (self.viewport.start_bar.floor() as usize)
+            .saturating_sub(1)
+            .min(self.bars.len());
+        let end = ((self.viewport.end_bar.ceil() as usize) + 1).min(self.bars.len());
+        if start >= end {
+            return None;
+        }
+        let mut ticks = Vec::with_capacity(end - start);
+        for i in start..end {
+            if let Some(fp_bar) = self.footprint_data.get_bar(i) {
+                let tick = fp_bar.inferred_tick_size() as f64;
+                if tick.is_finite() && tick > 0.0 {
+                    ticks.push(tick);
+                }
+            }
+        }
+        if ticks.is_empty() {
+            return None;
+        }
+        ticks.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let mid = ticks.len() / 2;
+        Some(if ticks.len() % 2 == 0 {
+            (ticks[mid - 1] + ticks[mid]) * 0.5
+        } else {
+            ticks[mid]
+        })
+    }
+
+    fn enforce_footprint_min_cell_height_unlocked(&mut self) {
+        if self.main_chart_type != MainChartType::Footprint || self.viewport.price_locked {
+            return;
+        }
+        let min_cell_css = self.main_chart_options.footprint.min_cell_height as f64;
+        if !min_cell_css.is_finite() || min_cell_css <= 0.0 {
+            return;
+        }
+        let pane_h = self.viewport.height as f64;
+        if pane_h <= 1.0 {
+            return;
+        }
+        let min_cell_px = min_cell_css * self.v_pixel_ratio.max(1.0);
+        if !min_cell_px.is_finite() || min_cell_px <= 0.0 {
+            return;
+        }
+        let tick_size = match self.representative_visible_footprint_tick_size() {
+            Some(t) => t,
+            None => return,
+        };
+
+        let current_range = self.viewport.price_max - self.viewport.price_min;
+        if !current_range.is_finite() || current_range <= 0.0 {
+            return;
+        }
+        let mid_internal = (self.viewport.price_min + self.viewport.price_max) * 0.5;
+        if !mid_internal.is_finite() {
+            return;
+        }
+        let mid_price = self.viewport.internal_to_price(mid_internal);
+        let up_price = mid_price + tick_size;
+        if !mid_price.is_finite() || !up_price.is_finite() {
+            return;
+        }
+        let tick_internal = (self.viewport.price_to_internal(up_price)
+            - self.viewport.price_to_internal(mid_price))
+        .abs();
+        if !tick_internal.is_finite() || tick_internal <= 0.0 {
+            return;
+        }
+
+        let max_range_for_min_cell = tick_internal * pane_h / min_cell_px;
+        if !max_range_for_min_cell.is_finite() || max_range_for_min_cell <= 0.0 {
+            return;
+        }
+        let min_safe_range = self.footprint_required_range_with_margins().unwrap_or(0.0);
+        let target_range = max_range_for_min_cell.max(min_safe_range);
+        if current_range > target_range {
+            let half = target_range * 0.5;
+            self.viewport.price_min = mid_internal - half;
+            self.viewport.price_max = mid_internal + half;
+        }
+    }
+
     /// Auto-fit price axis to visible data if not locked.
     /// Call this after panning/zooming when price_locked is false.
     pub fn auto_fit_price_if_unlocked(&mut self) {
         if !self.viewport.price_locked {
-            self.viewport.auto_fit_price(&self.bars);
+            self.auto_fit_price_for_current_chart();
         }
     }
 
@@ -752,7 +981,7 @@ impl ChartEngine {
             let h = bar.high as f64;
             let l = bar.low as f64;
             if h > self.viewport.price_max || l < self.viewport.price_min {
-                self.viewport.auto_fit_price(&self.bars);
+                self.auto_fit_price_for_current_chart();
             }
         }
         Ok(())
@@ -786,7 +1015,7 @@ impl ChartEngine {
             let h = bar.high as f64;
             let l = bar.low as f64;
             if h > self.viewport.price_max || l < self.viewport.price_min {
-                self.viewport.auto_fit_price(&self.bars);
+                self.auto_fit_price_for_current_chart();
             }
         }
         Ok(())
@@ -813,9 +1042,10 @@ impl ChartEngine {
         bottom_drawings: &[DrawingGeometry],
     ) -> Result<(), String> {
         if self.viewport.price_invalidated && !self.viewport.price_locked {
-            self.viewport.auto_fit_price(&self.bars);
+            self.auto_fit_price_for_current_chart();
             self.viewport.price_invalidated = false;
         }
+        self.enforce_footprint_min_cell_height_unlocked();
 
         // Pre-generate footprint geometry so both backends get identical output
         // and text labels are available for the overlay Canvas2D layer.
@@ -873,7 +1103,11 @@ mod tests {
         ensure_strictly_increasing_bar_timestamps, ensure_strictly_increasing_timestamps,
         ChartEngine, UpsertAction,
     };
+    use crate::core::chart_type::MainChartType;
     use crate::core::data::Bar;
+    use crate::core::footprint::{FootprintBar, FootprintData, FootprintLevel};
+    use crate::core::renderer::traits::RendererBackend;
+    use crate::core::renderer::transforms::price_to_y;
 
     fn mk_bar(ts: u64) -> Bar {
         Bar {
@@ -935,5 +1169,161 @@ mod tests {
     #[test]
     fn upsert_action_for_older_timestamp_is_error() {
         assert!(ChartEngine::resolve_upsert_action("x", Some(1000), 999).is_err());
+    }
+
+    #[test]
+    fn footprint_min_cell_height_guard_shrinks_unlocked_price_range() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        engine.set_main_chart_type(MainChartType::Footprint);
+        engine.main_chart_options.footprint.tick_size = 0.25;
+        engine.main_chart_options.footprint.min_cell_height = 20.0;
+
+        let bars: Vec<Bar> = (0..50)
+            .map(|i| Bar {
+                timestamp: 1_000 + i,
+                open: 100.0,
+                high: 110.0,
+                low: 90.0,
+                close: 100.0,
+                volume: 1.0,
+                _pad: 0.0,
+            })
+            .collect();
+
+        let mut fp = FootprintData::new();
+        for i in 0..50usize {
+            let mut levels = Vec::new();
+            for j in 0..8usize {
+                levels.push(FootprintLevel {
+                    price: 99.0 + (j as f32) * 0.25,
+                    bid_volume: 10.0,
+                    ask_volume: 10.0,
+                });
+            }
+            fp.set_bar(i, FootprintBar { levels });
+        }
+
+        engine.set_data_with_footprint(bars, fp).unwrap();
+
+        let range = engine.viewport.price_max - engine.viewport.price_min;
+        let max_allowed_range = 0.25 * (engine.viewport.height as f64) / 20.0;
+        assert!(
+            range <= max_allowed_range + 1e-6,
+            "range {range} should be <= {max_allowed_range} to respect min cell height"
+        );
+    }
+
+    #[test]
+    fn switch_to_footprint_reanchors_out_of_data_time_range_and_unlocks_price() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        let bars: Vec<Bar> = (0..120)
+            .map(|i| Bar {
+                timestamp: 1_000 + i,
+                open: 100.0 + i as f32 * 0.1,
+                high: 101.0 + i as f32 * 0.1,
+                low: 99.0 + i as f32 * 0.1,
+                close: 100.5 + i as f32 * 0.1,
+                volume: 1.0,
+                _pad: 0.0,
+            })
+            .collect();
+        engine.set_data(bars).unwrap();
+
+        // Simulate user panned far into future space and locked price on another chart type.
+        engine.viewport.set_range(10_000.0, 10_120.0);
+        engine.viewport.price_locked = true;
+
+        engine.set_main_chart_type(MainChartType::Footprint);
+
+        let data_len = engine.bars.len() as f64;
+        assert!(
+            engine.viewport.end_bar > 0.0 && engine.viewport.start_bar < data_len,
+            "footprint init should bring time range back onto data"
+        );
+        assert!(
+            !engine.viewport.price_locked,
+            "footprint init should unlock inherited stale price lock"
+        );
+    }
+
+    #[test]
+    fn switch_to_footprint_preserves_time_range_when_already_overlapping_data() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        let bars: Vec<Bar> = (0..200)
+            .map(|i| Bar {
+                timestamp: 1_000 + i,
+                open: 100.0,
+                high: 102.0,
+                low: 99.0,
+                close: 101.0,
+                volume: 1.0,
+                _pad: 0.0,
+            })
+            .collect();
+        engine.set_data(bars).unwrap();
+
+        engine.viewport.set_range(40.0, 140.0);
+        let before_start = engine.viewport.start_bar;
+        let before_end = engine.viewport.end_bar;
+
+        engine.set_main_chart_type(MainChartType::Footprint);
+
+        assert!(
+            (engine.viewport.start_bar - before_start).abs() < 1e-9,
+            "should keep overlapping time range start"
+        );
+        assert!(
+            (engine.viewport.end_bar - before_end).abs() < 1e-9,
+            "should keep overlapping time range end"
+        );
+    }
+
+    #[test]
+    fn footprint_autofit_includes_top_tick_extension() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        engine.main_chart_options.footprint.tick_size = 0.5;
+        engine.set_main_chart_type(MainChartType::Footprint);
+
+        let bars: Vec<Bar> = (0..20)
+            .map(|i| Bar {
+                timestamp: 1_000 + i,
+                open: 100.0,
+                high: 100.0,
+                low: 99.0,
+                close: 99.5,
+                volume: 1.0,
+                _pad: 0.0,
+            })
+            .collect();
+        let mut fp = FootprintData::new();
+        for i in 0..20usize {
+            fp.set_bar(
+                i,
+                FootprintBar {
+                    levels: vec![
+                        FootprintLevel {
+                            price: 99.0,
+                            bid_volume: 10.0,
+                            ask_volume: 12.0,
+                        },
+                        FootprintLevel {
+                            price: 100.0,
+                            bid_volume: 14.0,
+                            ask_volume: 8.0,
+                        },
+                    ],
+                },
+            );
+        }
+
+        engine.set_data_with_footprint(bars, fp).unwrap();
+
+        // Top cell boundary is level.price + tick => 100.5.
+        // It must be inside pane coordinates (not clipped at y <= 0).
+        let y_top = price_to_y(100.5, &engine.viewport, engine.viewport.height as f64);
+        assert!(
+            y_top > 0.0,
+            "footprint top extension should not initialize clipped at the pane top"
+        );
     }
 }

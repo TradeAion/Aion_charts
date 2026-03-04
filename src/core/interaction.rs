@@ -142,6 +142,7 @@ pub struct InteractionHandler {
     pub pinch_start_distance: f64,
     pinch_start_bar_span: f64,
     pinch_start_center_bar: f64,
+    pinch_start_price_anchor_internal: f64,
     pinch_start_price_range: f64,
     pinch_start_price_mid: f64,
     pinch_prev_scale: f64,
@@ -195,6 +196,7 @@ impl InteractionHandler {
             pinch_start_distance: 0.0,
             pinch_start_bar_span: 0.0,
             pinch_start_center_bar: 0.0,
+            pinch_start_price_anchor_internal: 0.0,
             pinch_start_price_range: 0.0,
             pinch_start_price_mid: 0.0,
             pinch_prev_scale: 1.0,
@@ -252,9 +254,11 @@ impl InteractionHandler {
     pub fn pinch_start(
         &mut self,
         cx: f64,
-        _cy: f64,
+        cy: f64,
         distance: f64,
         pane_css_w: f64,
+        pane_css_h: f64,
+        zoom_price_with_time: bool,
         viewport: &Viewport,
     ) {
         self.pinch_active = true;
@@ -272,11 +276,26 @@ impl InteractionHandler {
         // Price range snapshot
         self.pinch_start_price_range = viewport.price_max - viewport.price_min;
         self.pinch_start_price_mid = (viewport.price_min + viewport.price_max) / 2.0;
+        if zoom_price_with_time {
+            let candle_css_h = (pane_css_h * viewport.candle_height_frac()).max(1.0);
+            let focal_y_css = cy.clamp(0.0, candle_css_h);
+            let focal_price = viewport.pixel_to_price(focal_y_css, candle_css_h);
+            self.pinch_start_price_anchor_internal = viewport.price_to_internal(focal_price);
+        } else {
+            self.pinch_start_price_anchor_internal = self.pinch_start_price_mid;
+        }
     }
 
     /// Update pinch gesture. Called from WASM on touchmove with 2 touches.
     /// `scale` = current_distance / start_distance.
-    pub fn pinch_update(&mut self, scale: f64, viewport: &mut Viewport, bars: &BarArray) {
+    /// When `zoom_price_with_time` is true (footprint), applies two-axis zoom.
+    pub fn pinch_update(
+        &mut self,
+        scale: f64,
+        zoom_price_with_time: bool,
+        viewport: &mut Viewport,
+        bars: &BarArray,
+    ) {
         if !self.pinch_active {
             return;
         }
@@ -294,12 +313,21 @@ impl InteractionHandler {
         viewport.zoom(self.pinch_start_center_bar, factor);
         viewport.clamp_to_data(bars.len());
 
-        // Price zoom — scale around midpoint
-        if viewport.price_locked {
+        if zoom_price_with_time {
+            // Footprint mode: zoom price around the initial pinch focal Y value.
+            Self::zoom_price_around_internal_anchor(
+                viewport,
+                self.pinch_start_price_anchor_internal,
+                factor,
+            );
+            viewport.price_locked = true;
+        } else if viewport.price_locked {
+            // Existing behavior: when user explicitly locked scale, keep midpoint zoom.
             let half = self.pinch_start_price_range / 2.0 / scale.max(MIN_PINCH_SCALE);
             viewport.price_min = self.pinch_start_price_mid - half;
             viewport.price_max = self.pinch_start_price_mid + half;
         } else {
+            // Existing behavior for unlocked non-footprint charts.
             viewport.auto_fit_price(bars);
         }
     }
@@ -687,15 +715,18 @@ impl InteractionHandler {
     }
 
     /// Wheel event on the chart pane.
-    /// LWC: deltaY → zoomTime(scrollPosition, zoomScale)
-    ///       deltaX → scrollChart(deltaX * -80)
+    /// LWC baseline: deltaY → time zoom, deltaX → time scroll.
+    /// Footprint mode can optionally apply cursor-anchored Y zoom as well.
     pub fn pane_wheel(
         &mut self,
         x: f64,
+        y: f64,
         delta_x: f64,
         delta_y: f64,
         delta_mode: u32,
         pane_css_w: f64,
+        pane_css_h: f64,
+        zoom_price_with_time: bool,
         viewport: &mut Viewport,
         bars: &BarArray,
     ) {
@@ -724,7 +755,14 @@ impl InteractionHandler {
 
             viewport.zoom(focal_bar, factor);
             viewport.clamp_to_data(bars.len());
-            if !viewport.price_locked {
+            if zoom_price_with_time {
+                let candle_css_h = (pane_css_h * viewport.candle_height_frac()).max(1.0);
+                let focal_y_css = y.clamp(0.0, candle_css_h);
+                let focal_price = viewport.pixel_to_price(focal_y_css, candle_css_h);
+                let focal_internal = viewport.price_to_internal(focal_price);
+                Self::zoom_price_around_internal_anchor(viewport, focal_internal, factor);
+                viewport.price_locked = true;
+            } else if !viewport.price_locked {
                 viewport.auto_fit_price(bars);
             }
         }
@@ -748,10 +786,13 @@ impl InteractionHandler {
         delta_y: f64,
         delta_mode: u32,
         pane_css_w: f64,
+        pane_css_h: f64,
         viewport: &mut Viewport,
         bars: &BarArray,
     ) {
-        self.pane_wheel(x, 0.0, delta_y, delta_mode, pane_css_w, viewport, bars);
+        self.pane_wheel(
+            x, 0.0, 0.0, delta_y, delta_mode, pane_css_w, pane_css_h, false, viewport, bars,
+        );
     }
 
     /// Wheel event on the price axis — zoom price range.
@@ -786,6 +827,24 @@ impl InteractionHandler {
     /// Enable/disable replay trim mode cursor policy.
     pub fn set_replay_chart_trim_mode(&mut self, enabled: bool) {
         self.replay_chart_trim_mode = enabled;
+    }
+
+    #[inline]
+    fn zoom_price_around_internal_anchor(
+        viewport: &mut Viewport,
+        anchor_internal: f64,
+        factor: f64,
+    ) {
+        if !anchor_internal.is_finite() || !factor.is_finite() || factor <= 0.0 {
+            return;
+        }
+        let old_min = viewport.price_min;
+        let old_max = viewport.price_max;
+        if !old_min.is_finite() || !old_max.is_finite() || old_max <= old_min {
+            return;
+        }
+        viewport.price_min = anchor_internal - (anchor_internal - old_min) * factor;
+        viewport.price_max = anchor_internal + (old_max - anchor_internal) * factor;
     }
 
     /// Get the current cursor style hint.
@@ -908,4 +967,161 @@ fn magnet_snap_ohlc_price(
         }
     }
     best_price
+}
+
+#[cfg(test)]
+mod tests {
+    use super::InteractionHandler;
+    use crate::core::data::{Bar, BarArray};
+    use crate::core::viewport::Viewport;
+
+    fn mk_bars(len: usize) -> BarArray {
+        let mut out = Vec::with_capacity(len);
+        for i in 0..len {
+            let base = 100.0 + i as f32 * 0.25;
+            out.push(Bar {
+                timestamp: i as u64 + 1,
+                open: base,
+                high: base + 1.0,
+                low: base - 1.0,
+                close: base + 0.2,
+                volume: 10.0 + i as f32,
+                _pad: 0.0,
+            });
+        }
+        let mut bars = BarArray::new();
+        bars.set(out);
+        bars
+    }
+
+    fn approx_eq(a: f64, b: f64, eps: f64) -> bool {
+        (a - b).abs() <= eps
+    }
+
+    #[test]
+    fn footprint_wheel_zooms_time_and_price_and_locks() {
+        let mut ih = InteractionHandler::new();
+        let bars = mk_bars(240);
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(20.0, 120.0);
+        vp.price_min = 100.0;
+        vp.price_max = 200.0;
+        vp.price_locked = false;
+
+        let start_span = vp.end_bar - vp.start_bar;
+        let start_price_span = vp.price_max - vp.price_min;
+
+        ih.pane_wheel(
+            400.0, 180.0, 0.0, -120.0, 0, 800.0, 600.0, true, &mut vp, &bars,
+        );
+
+        let end_span = vp.end_bar - vp.start_bar;
+        let end_price_span = vp.price_max - vp.price_min;
+        assert!(end_span < start_span, "time span should shrink on zoom-in");
+        assert!(
+            end_price_span < start_price_span,
+            "price span should shrink on footprint zoom-in"
+        );
+        assert!(
+            vp.price_locked,
+            "footprint pane zoom should lock price scale"
+        );
+    }
+
+    #[test]
+    fn non_footprint_wheel_preserves_locked_price_range() {
+        let mut ih = InteractionHandler::new();
+        let bars = mk_bars(240);
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(20.0, 120.0);
+        vp.price_min = 123.0;
+        vp.price_max = 234.0;
+        vp.price_locked = true;
+        let start_min = vp.price_min;
+        let start_max = vp.price_max;
+
+        ih.pane_wheel(
+            400.0, 180.0, 0.0, -120.0, 0, 800.0, 600.0, false, &mut vp, &bars,
+        );
+
+        assert!(
+            approx_eq(vp.price_min, start_min, 1e-9),
+            "non-footprint pane wheel should not change locked price min"
+        );
+        assert!(
+            approx_eq(vp.price_max, start_max, 1e-9),
+            "non-footprint pane wheel should not change locked price max"
+        );
+        assert!(vp.price_locked, "locked scale should remain locked");
+    }
+
+    #[test]
+    fn footprint_wheel_keeps_cursor_price_anchor() {
+        let mut ih = InteractionHandler::new();
+        let bars = mk_bars(240);
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(20.0, 120.0);
+        vp.price_min = 100.0;
+        vp.price_max = 200.0;
+        vp.price_locked = false;
+
+        let y_css = 140.0;
+        let candle_css_h = 600.0 * vp.candle_height_frac();
+        let before_price = vp.pixel_to_price(y_css, candle_css_h);
+
+        ih.pane_wheel(
+            300.0, y_css, 0.0, -90.0, 0, 800.0, 600.0, true, &mut vp, &bars,
+        );
+
+        let after_price = vp.pixel_to_price(y_css, candle_css_h);
+        assert!(
+            approx_eq(before_price, after_price, 1e-6),
+            "cursor-anchored Y zoom should preserve the focal price"
+        );
+    }
+
+    #[test]
+    fn footprint_pinch_zooms_time_and_price_and_locks() {
+        let mut ih = InteractionHandler::new();
+        let bars = mk_bars(240);
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(20.0, 120.0);
+        vp.price_min = 100.0;
+        vp.price_max = 200.0;
+        vp.price_locked = false;
+
+        let start_span = vp.end_bar - vp.start_bar;
+        let start_price_span = vp.price_max - vp.price_min;
+
+        ih.pinch_start(400.0, 170.0, 100.0, 800.0, 600.0, true, &vp);
+        ih.pinch_update(1.2, true, &mut vp, &bars);
+
+        let end_span = vp.end_bar - vp.start_bar;
+        let end_price_span = vp.price_max - vp.price_min;
+        assert!(end_span < start_span, "pinch should zoom time span");
+        assert!(
+            end_price_span < start_price_span,
+            "pinch should zoom price span"
+        );
+        assert!(vp.price_locked, "footprint pinch should lock price scale");
+    }
+
+    #[test]
+    fn non_footprint_pinch_does_not_force_lock() {
+        let mut ih = InteractionHandler::new();
+        let bars = mk_bars(240);
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(20.0, 120.0);
+        vp.price_min = 100.0;
+        vp.price_max = 200.0;
+        vp.price_locked = false;
+
+        ih.pinch_start(400.0, 170.0, 100.0, 800.0, 600.0, false, &vp);
+        ih.pinch_update(1.2, false, &mut vp, &bars);
+
+        assert!(
+            !vp.price_locked,
+            "non-footprint pinch should keep unlocked auto-fit behavior"
+        );
+    }
 }

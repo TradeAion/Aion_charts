@@ -12,8 +12,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use raycore::{
-    Bar, ChartEngine, HitZone, InteractionHandler, OverlayRenderer, PriceAxisRenderer,
-    TimeAxisRenderer,
+    Bar, ChartEngine, HitZone, InteractionHandler, MainChartType, OverlayRenderer,
+    PriceAxisRenderer, TimeAxisRenderer,
 };
 
 use crate::canvas_manager::WidgetLayout;
@@ -955,14 +955,27 @@ impl ChartInner {
         }
     }
 
-    pub fn on_pane_wheel(&mut self, x: f64, dx: f64, dy: f64, dm: u32) {
-        let (pw, _) = self.layout.pane_css_size();
+    pub fn on_pane_wheel(&mut self, x: f64, y: f64, dx: f64, dy: f64, dm: u32) {
+        let (pw, ph) = self.layout.pane_css_size();
         let Self {
             interaction,
             engine,
             ..
         } = self;
-        interaction.pane_wheel(x, dx, dy, dm, pw, &mut engine.viewport, &engine.bars);
+        let zoom_price_with_time = engine.main_chart_type == MainChartType::Footprint
+            && engine.main_chart_options.footprint.zoom_price_with_time;
+        interaction.pane_wheel(
+            x,
+            y,
+            dx,
+            dy,
+            dm,
+            pw,
+            ph,
+            zoom_price_with_time,
+            &mut engine.viewport,
+            &engine.bars,
+        );
 
         // Emit visible range change after zoom/pan
         engine
@@ -1003,23 +1016,33 @@ impl ChartInner {
     }
 
     pub fn on_time_axis_wheel(&mut self, x: f64, dy: f64, dm: u32) {
-        let (pw, _) = self.layout.pane_css_size();
+        let (pw, ph) = self.layout.pane_css_size();
         let Self {
             interaction,
             engine,
             ..
         } = self;
-        interaction.time_axis_wheel(x, dy, dm, pw, &mut engine.viewport, &engine.bars);
+        interaction.time_axis_wheel(x, dy, dm, pw, ph, &mut engine.viewport, &engine.bars);
     }
 
     pub fn on_pinch_start(&mut self, cx: f64, cy: f64, distance: f64) {
-        let (pw, _) = self.layout.pane_css_size();
+        let (pw, ph) = self.layout.pane_css_size();
         let Self {
             interaction,
             engine,
             ..
         } = self;
-        interaction.pinch_start(cx, cy, distance, pw, &engine.viewport);
+        let zoom_price_with_time = engine.main_chart_type == MainChartType::Footprint
+            && engine.main_chart_options.footprint.zoom_price_with_time;
+        interaction.pinch_start(
+            cx,
+            cy,
+            distance,
+            pw,
+            ph,
+            zoom_price_with_time,
+            &engine.viewport,
+        );
     }
 
     pub fn on_pinch_update(&mut self, scale: f64) {
@@ -1028,7 +1051,14 @@ impl ChartInner {
             engine,
             ..
         } = self;
-        interaction.pinch_update(scale, &mut engine.viewport, &engine.bars);
+        let zoom_price_with_time = engine.main_chart_type == MainChartType::Footprint
+            && engine.main_chart_options.footprint.zoom_price_with_time;
+        interaction.pinch_update(
+            scale,
+            zoom_price_with_time,
+            &mut engine.viewport,
+            &engine.bars,
+        );
     }
 
     pub fn on_pinch_end(&mut self) {

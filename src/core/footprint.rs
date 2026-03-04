@@ -208,6 +208,38 @@ impl FootprintBar {
         self.total_ask() - self.total_bid()
     }
 
+    /// Infer a representative tick size from adjacent price levels.
+    ///
+    /// Uses the median positive level-to-level diff to avoid overreacting to
+    /// occasional outlier spacing or floating-point noise.
+    pub fn inferred_tick_size(&self) -> f32 {
+        if self.levels.len() < 2 {
+            return 1.0;
+        }
+        let mut diffs: Vec<f32> = self
+            .levels
+            .windows(2)
+            .filter_map(|w| {
+                let d = (w[1].price - w[0].price).abs();
+                if d.is_finite() && d > f32::EPSILON {
+                    Some(d)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if diffs.is_empty() {
+            return 1.0;
+        }
+        diffs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let mid = diffs.len() / 2;
+        if diffs.len() % 2 == 0 {
+            (diffs[mid - 1] + diffs[mid]) * 0.5
+        } else {
+            diffs[mid]
+        }
+    }
+
     /// Find the Point of Control — the price level with the highest total volume.
     /// Returns (level_index, &FootprintLevel) or None if empty.
     pub fn poc(&self) -> Option<(usize, &FootprintLevel)> {
@@ -555,6 +587,8 @@ pub struct FootprintOptions {
     pub delta_bar_height: f32,
     /// Volume color intensity scaling mode.
     pub volume_color_intensity: VolumeColorIntensity,
+    /// Whether pane wheel/pinch zoom should scale both time and price axes.
+    pub zoom_price_with_time: bool,
 }
 
 /// How volume magnitude affects cell color intensity.
@@ -624,6 +658,7 @@ impl Default for FootprintOptions {
             show_delta_bar: true,
             delta_bar_height: 16.0,
             volume_color_intensity: VolumeColorIntensity::Linear,
+            zoom_price_with_time: true,
         }
     }
 }
@@ -709,6 +744,42 @@ mod tests {
         let (idx, level) = bar.poc().unwrap();
         assert_eq!(idx, 1); // 200 + 800 = 1000, highest
         assert_eq!(level.price, 100.5);
+    }
+
+    #[test]
+    fn test_inferred_tick_size_median() {
+        let bar = sample_bar();
+        assert!((bar.inferred_tick_size() - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_inferred_tick_size_ignores_tiny_outlier() {
+        let bar = FootprintBar {
+            levels: vec![
+                FootprintLevel {
+                    price: 100.0,
+                    bid_volume: 1.0,
+                    ask_volume: 1.0,
+                },
+                FootprintLevel {
+                    price: 100.000001,
+                    bid_volume: 1.0,
+                    ask_volume: 1.0,
+                },
+                FootprintLevel {
+                    price: 100.5,
+                    bid_volume: 1.0,
+                    ask_volume: 1.0,
+                },
+                FootprintLevel {
+                    price: 101.0,
+                    bid_volume: 1.0,
+                    ask_volume: 1.0,
+                },
+            ],
+        };
+        // diffs are [~1e-6, ~0.499999, 0.5] -> median should stay around 0.5
+        assert!((bar.inferred_tick_size() - 0.5).abs() < 1e-3);
     }
 
     #[test]

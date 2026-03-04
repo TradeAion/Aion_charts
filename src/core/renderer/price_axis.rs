@@ -162,6 +162,12 @@ impl PriceAxisRenderer {
                 if w > max_w {
                     max_w = w;
                 }
+                if let Some(countdown) = item.countdown.as_ref() {
+                    let countdown_w = self.text_cache.measure(&self.base_ctx, countdown, &font);
+                    if countdown_w > max_w {
+                        max_w = countdown_w;
+                    }
+                }
             }
         }
 
@@ -379,15 +385,27 @@ impl PriceAxisRenderer {
         let css_font = format!("{}px {}", style.font_size, style.font_family);
         let text_color = style.crosshair_label_text;
         for (_i, item) in labels.iter().enumerate() {
-            let text_w = self
+            let price_text_w = self
                 .text_cache
                 .measure(&self.base_ctx, &item.label, &font)
                 .ceil();
+            let countdown_text_w = item
+                .countdown
+                .as_ref()
+                .map(|countdown| {
+                    self.text_cache
+                        .measure(&self.base_ctx, countdown, &font)
+                        .ceil()
+                })
+                .unwrap_or(0.0);
+            // Keep both rows centered within the same chip by anchoring geometry
+            // with the widest rendered row width.
+            let anchor_text_w = price_text_w.max(countdown_text_w);
             let mut geom = match compute_right_axis_label_geometry(
                 w,
                 label_h,
                 item.y_phys,
-                text_w,
+                anchor_text_w,
                 dpr,
                 &metrics,
                 0.0,
@@ -422,6 +440,8 @@ impl PriceAxisRenderer {
             geom.y_bottom = y_top + total_h_bmp;
             // Price text is vertically centered in the first row.
             geom.text_y_css = (y_top + y_top + single_h_bmp) / 2.0 / dpr;
+            geom.text_x_css =
+                centered_full_width_label_text_x_css(&geom, price_text_w, dpr, &metrics);
             geom.radius = 0.0;
 
             draw_right_axis_label_background(&self.base_ctx, &geom, &item.color);
@@ -443,6 +463,12 @@ impl PriceAxisRenderer {
                     (countdown_y_top + countdown_y_top + single_h_bmp) / 2.0 / dpr;
                 let mut countdown_geom = geom;
                 countdown_geom.text_y_css = countdown_y_css;
+                countdown_geom.text_x_css = centered_full_width_label_text_x_css(
+                    &countdown_geom,
+                    countdown_text_w,
+                    dpr,
+                    &metrics,
+                );
                 draw_right_axis_label_text(
                     &self.base_ctx,
                     &mut self.text_cache,
@@ -915,6 +941,19 @@ fn draw_right_axis_label_text(
     let m = text_cache.measure_full(ctx, text, font_css);
     let _ = ctx.fill_text(text, geom.text_x_css, geom.text_y_css + m.y_mid_correction);
     ctx.restore();
+}
+
+#[inline]
+fn centered_full_width_label_text_x_css(
+    geom: &RightAxisLabelGeometry,
+    text_w_phys: f64,
+    dpr: f64,
+    metrics: &RightAxisLabelMetrics,
+) -> f64 {
+    let center_x_phys = (geom.x_inside + geom.x_outside) / 2.0;
+    let text_left_phys = (center_x_phys - text_w_phys / 2.0)
+        .max(geom.x_inside + geom.tick_size + metrics.padding_inner);
+    text_left_phys / dpr
 }
 
 fn get_2d_ctx(canvas: &HtmlCanvasElement, label: &str) -> Result<CanvasRenderingContext2d, String> {
