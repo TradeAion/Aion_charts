@@ -48,6 +48,21 @@ pub fn generate_sample_data(n: usize, start_ms: u64, interval_ms: u64) -> Vec<Ba
     bars
 }
 
+/// Generate a complete synthetic footprint demo dataset.
+///
+/// Returns both OHLCV bars and per-bar footprint levels aligned by bar index.
+/// This is the dedicated generator for demo footprint mode.
+pub fn generate_footprint_sample_data(
+    n: usize,
+    start_ms: u64,
+    interval_ms: u64,
+    tick_size: f32,
+) -> (Vec<Bar>, FootprintData) {
+    let bars = generate_sample_data(n, start_ms, interval_ms);
+    let footprint = generate_footprint_from_bars(&bars, tick_size);
+    (bars, footprint)
+}
+
 /// Generate synthetic footprint data from existing OHLCV bars.
 ///
 /// Distributes the bar's total volume across price levels between low and high,
@@ -325,6 +340,16 @@ mod tests {
                 let diff = bar.levels[1].price - bar.levels[0].price;
                 assert!((diff - 50.0).abs() < 0.01);
             }
+        }
+    }
+
+    #[test]
+    fn test_generate_footprint_sample_data_bundle() {
+        let (bars, fp) = generate_footprint_sample_data(12, 1000, 60_000, 0.0);
+        assert_eq!(bars.len(), 12);
+        assert_eq!(fp.len(), 12);
+        for i in 0..12 {
+            assert!(fp.get_bar(i).is_some());
         }
     }
 }

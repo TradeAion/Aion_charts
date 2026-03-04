@@ -887,6 +887,23 @@
     }
     const demoData = createDemoData();
 
+    function loadDemoDataForChartType(type) {
+      if (!core) return;
+      if (type === 'footprint' && typeof core.demo_mode_footprint === 'function') {
+        core.demo_mode_footprint();
+      } else {
+        core.set_data_arrays(
+          demoData.open,
+          demoData.high,
+          demoData.low,
+          demoData.close,
+          demoData.volume,
+          demoData.timestamps
+        );
+      }
+      core.set_chart_type(type);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // Chart Creation
     // ═══════════════════════════════════════════════════════════════════════
@@ -930,8 +947,7 @@
           rendererFallbackText = `fallback ${e.requested}→${e.active}`;
           updateHudStatus();
         });
-        core.set_data_arrays(demoData.open, demoData.high, demoData.low, demoData.close, demoData.volume, demoData.timestamps);
-        core.set_chart_type(activeChartType);
+        loadDemoDataForChartType(activeChartType);
         core.set_volume_visible(volumeVisible);
 
         core.on('crosshairMove', e => { hudPrice.textContent = e.price > 0 ? e.price.toFixed(2) : ''; });
@@ -1165,7 +1181,7 @@
         btn.onclick = () => {
           activeChartType = type;
           syncChartTypeButtons();
-          if (core) core.set_chart_type(type);
+          if (core) loadDemoDataForChartType(type);
         };
         chartTypeButtonsHost.appendChild(btn);
       });

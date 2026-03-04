@@ -680,8 +680,35 @@ impl ChartRenderer for WgpuRenderer {
             MainChartType::Footprint => {
                 // Rects are pre-computed by ChartEngine::render().
                 // Texts are rendered by the overlay Canvas2D layer (WebGPU can't do text).
-                let count =
-                    self.upload_rects(ctx.footprint_rects, ctx.viewport.width, ctx.viewport.height);
+                //
+                // If footprint data is not loaded yet, fall back to candles so
+                // switching chart type never blanks the pane.
+                let fallback_candle_rects;
+                let rects: &[ColoredRect] = if ctx.footprint_rects.is_empty() {
+                    let bullish_border = ctx
+                        .main_chart_options
+                        .up_border_color
+                        .unwrap_or(ctx.style.wick_bullish_color);
+                    let bearish_border = ctx
+                        .main_chart_options
+                        .down_border_color
+                        .unwrap_or(ctx.style.wick_bearish_color);
+                    fallback_candle_rects = geometry_generator::generate_candle_rects(
+                        ctx.bars,
+                        ctx.viewport,
+                        ctx.style,
+                        bullish_border,
+                        bearish_border,
+                        pane_w,
+                        pane_h,
+                        ctx.h_pixel_ratio,
+                        ctx.v_pixel_ratio,
+                    );
+                    &fallback_candle_rects
+                } else {
+                    ctx.footprint_rects
+                };
+                let count = self.upload_rects(rects, ctx.viewport.width, ctx.viewport.height);
                 self.draw_rect_pass(count);
             }
         }

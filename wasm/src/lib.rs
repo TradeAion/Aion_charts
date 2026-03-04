@@ -18,7 +18,7 @@
 //!   - subpane: Indicator subpane management
 
 use raycore::{
-    generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions, BaselineSeriesOptions,
+    generate_footprint_sample_data, generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions, BaselineSeriesOptions,
     Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup, ChartPaneId, ChartStyle,
     CrosshairMagnetMode, CrosshairSnapshot, DataRange, GpuContext, HistogramPoint,
     HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint, LineSeriesOptions, LineStyle,
@@ -3280,6 +3280,28 @@ impl RayCore {
             Ok(()) => log::info!("demo_mode: {} bars loaded", num_bars),
             Err(e) => log::error!("demo_mode failed: {}", e),
         }
+        self.dirty.set(true);
+    }
+
+    /// Load synthetic demo data dedicated for footprint chart mode.
+    ///
+    /// This generates OHLCV bars plus aligned per-bar footprint levels and
+    /// switches the chart type to `footprint`.
+    pub fn demo_mode_footprint(&mut self) {
+        let now_ms = js_sys::Date::now() as u64;
+        let num_bars = 600;
+        let interval_ms = 60_000;
+        let start_ms = now_ms - (num_bars as u64) * interval_ms;
+        let (bars, footprint) = generate_footprint_sample_data(num_bars, start_ms, interval_ms, 0.0);
+
+        let mut inner = self.inner.borrow_mut();
+        inner.engine.set_main_chart_type(MainChartType::Footprint);
+        match inner.engine.set_data_with_footprint(bars, footprint) {
+            Ok(()) => log::info!("demo_mode_footprint: {} bars loaded", num_bars),
+            Err(e) => log::error!("demo_mode_footprint failed: {}", e),
+        }
+        drop(inner);
+        self.dirty.set(true);
     }
 
     // ── Viewport control ─────────────────────────────────────────────────────

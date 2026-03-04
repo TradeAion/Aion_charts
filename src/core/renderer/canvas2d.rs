@@ -403,7 +403,33 @@ impl ChartRenderer for Canvas2DRenderer {
             MainChartType::Footprint => {
                 // Rects are pre-computed by ChartEngine::render().
                 // Texts are rendered by the overlay layer (render_footprint_texts).
-                self.draw_rects(ctx.footprint_rects);
+                //
+                // If footprint data is not loaded yet, fall back to candles so
+                // switching chart type never blanks the pane.
+                if ctx.footprint_rects.is_empty() {
+                    let bullish_border = ctx
+                        .main_chart_options
+                        .up_border_color
+                        .unwrap_or(ctx.style.wick_bullish_color);
+                    let bearish_border = ctx
+                        .main_chart_options
+                        .down_border_color
+                        .unwrap_or(ctx.style.wick_bearish_color);
+                    let rects = geometry_generator::generate_candle_rects(
+                        ctx.bars,
+                        ctx.viewport,
+                        ctx.style,
+                        bullish_border,
+                        bearish_border,
+                        pane_w,
+                        pane_h,
+                        ctx.h_pixel_ratio,
+                        ctx.v_pixel_ratio,
+                    );
+                    self.draw_rects(&rects);
+                } else {
+                    self.draw_rects(ctx.footprint_rects);
+                }
             }
         }
 

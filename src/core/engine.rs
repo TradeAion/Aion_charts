@@ -290,6 +290,19 @@ impl ChartEngine {
         Ok(())
     }
 
+    /// Replace all bar data and footprint data in one operation.
+    ///
+    /// Footprint levels are expected to be indexed against the provided `bars`.
+    pub fn set_data_with_footprint(
+        &mut self,
+        bars: Vec<Bar>,
+        footprint: FootprintData,
+    ) -> Result<(), String> {
+        self.set_data(bars)?;
+        self.footprint_data = footprint;
+        Ok(())
+    }
+
     /// Recompute user indicator runtime instances against current in-memory bars.
     pub fn recompute_indicators(&mut self) {
         self.indicators.on_set_data(&self.bars);

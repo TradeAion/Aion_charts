@@ -244,6 +244,9 @@ pub use crate::group::sync_manager::{LinkKey as GroupLinkKey, SyncFeature, SyncM
 /// Generate sample OHLCV data for testing.
 pub use crate::core::demo_data::generate_sample_data;
 
+/// Generate synthetic OHLCV + footprint dataset for demo footprint mode.
+pub use crate::core::demo_data::generate_footprint_sample_data;
+
 /// Generate synthetic footprint data from OHLCV bars for demo/testing.
 pub use crate::core::demo_data::generate_footprint_from_bars;
 
