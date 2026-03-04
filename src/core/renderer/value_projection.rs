@@ -27,6 +27,9 @@ pub struct ProjectedLastValue {
     pub color: [f32; 4],
     /// Formatted label text for the current price-scale mode.
     pub label: String,
+    /// Optional countdown string (e.g. "00:39") — rendered on a second line
+    /// below the price label, TradingView-style.
+    pub countdown: Option<String>,
 }
 
 /// Candle-area height in physical pixels.
@@ -111,6 +114,7 @@ pub fn collect_last_values(
             y_phys,
             color,
             label: format_scale_value(vp, last_price, step),
+            countdown: None,
         });
     }
 
@@ -129,6 +133,7 @@ pub fn collect_last_values(
             y_phys,
             color: s.series_color(),
             label: format_scale_value(vp, last_val, step),
+            countdown: None,
         });
     }
 

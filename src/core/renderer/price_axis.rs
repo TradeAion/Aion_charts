@@ -9,13 +9,15 @@
 #![cfg(target_arch = "wasm32")]
 
 use crate::core::chart_type::MainChartType;
+use crate::core::formatters::format_countdown;
 use crate::core::price_line::PriceLineManager;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
+use crate::core::renderer::tick_marks::infer_bar_interval_ms;
 use crate::core::renderer::traits::{ChartStyle, CrosshairState, TickMark};
 use crate::core::renderer::value_projection::{
     candle_area_height_ph, collect_last_values, format_scale_value, price_to_pane_y_phys,
-    y_tick_step_internal,
+    y_tick_step_internal, ProjectedLastValue,
 };
 use crate::core::series::SeriesCollection;
 use crate::core::viewport::Viewport;
@@ -152,9 +154,10 @@ impl PriceAxisRenderer {
 
         // Last-value labels (same source as pane last-price lines).
         if style.last_price_line.label_visible {
-            for item in
-                collect_last_values(series, bars, main_chart_type, vp, style, pane_ph, self.dpr)
-            {
+            let mut items: Vec<_> =
+                collect_last_values(series, bars, main_chart_type, vp, style, pane_ph, self.dpr);
+            append_countdown_to_labels(&mut items, bars);
+            for item in &items {
                 let w = self.text_cache.measure(&self.base_ctx, &item.label, &font);
                 if w > max_w {
                     max_w = w;
@@ -376,11 +379,12 @@ impl PriceAxisRenderer {
 
         let w = self.pw as f64;
 
-        let labels =
+        let mut labels =
             collect_last_values(series, bars, main_chart_type, vp, style, pane_ph, self.dpr);
         if labels.is_empty() {
             return;
         }
+        append_countdown_to_labels(&mut labels, bars);
 
         let dpr = self.dpr;
         let candle_h = candle_area_height_ph(vp, pane_ph);
@@ -410,17 +414,31 @@ impl PriceAxisRenderer {
                 None => continue,
             };
 
-            // Last-price labels: no edge clamping — the label moves naturally
-            // with the price and clips at canvas bounds.  Also no corner
-            // radius — sharp rectangular label matching the axis style.
-            let total_h_bmp = right_axis_label_height_bmp(&metrics, dpr, 0.0);
+            let has_countdown = item.countdown.is_some();
+
+            // Single-line height for the price row.
+            let single_h_bmp = right_axis_label_height_bmp(&metrics, dpr, 0.0);
+            // Total label height: 2 rows when countdown exists, 1 row otherwise.
+            let total_h_bmp = if has_countdown {
+                single_h_bmp * 2.0
+            } else {
+                single_h_bmp
+            };
             let tick_h_bmp = dpr.floor().max(1.0);
             let y_mid_raw = item.y_phys.round() - (dpr * 0.5).floor();
-            let y_top = (y_mid_raw + tick_h_bmp / 2.0 - total_h_bmp / 2.0).floor();
+
+            // Position the chip so the price row is centered on y_mid_raw,
+            // with the countdown row extending below.
+            let y_top = if has_countdown {
+                (y_mid_raw + tick_h_bmp / 2.0 - single_h_bmp / 2.0).floor()
+            } else {
+                (y_mid_raw + tick_h_bmp / 2.0 - total_h_bmp / 2.0).floor()
+            };
             geom.y_mid = y_mid_raw;
             geom.y_top = y_top;
             geom.y_bottom = y_top + total_h_bmp;
-            geom.text_y_css = (geom.y_top + geom.y_bottom) / 2.0 / dpr;
+            // Price text is vertically centered in the first row.
+            geom.text_y_css = (y_top + y_top + single_h_bmp) / 2.0 / dpr;
             geom.radius = 0.0;
 
             draw_right_axis_label_background(&self.base_ctx, &geom, &item.color);
@@ -434,6 +452,24 @@ impl PriceAxisRenderer {
                 &geom,
                 dpr,
             );
+
+            // Render countdown on the second row (below the price).
+            if let Some(ref countdown) = item.countdown {
+                let countdown_y_top = y_top + single_h_bmp;
+                let countdown_y_css =
+                    (countdown_y_top + countdown_y_top + single_h_bmp) / 2.0 / dpr;
+                let mut countdown_geom = geom;
+                countdown_geom.text_y_css = countdown_y_css;
+                draw_right_axis_label_text(
+                    &self.base_ctx,
+                    &mut self.text_cache,
+                    countdown,
+                    &css_font,
+                    &text_color,
+                    &countdown_geom,
+                    dpr,
+                );
+            }
         }
     }
 
@@ -654,6 +690,32 @@ impl PriceAxisRenderer {
                 dpr,
             );
         }
+    }
+}
+
+/// Append a bar-close countdown string to the first (main series) label.
+///
+/// Uses inferred bar interval from timestamp deltas and `js_sys::Date::now()`
+/// to compute the time remaining until the current bar closes.
+/// The countdown is appended as ` MM:SS` (or `H:MM:SS` / `Xd HH:MM:SS`).
+fn append_countdown_to_labels(
+    labels: &mut [ProjectedLastValue],
+    bars: &crate::core::data::BarArray,
+) {
+    if labels.is_empty() || bars.len() < 2 {
+        return;
+    }
+    let interval_ms = match infer_bar_interval_ms(bars) {
+        Some(v) if v > 0 => v as f64,
+        _ => return,
+    };
+    let last_ts = bars.timestamp(bars.len() - 1) as f64;
+    let now_ms = js_sys::Date::now();
+    let bar_close_ms = last_ts + interval_ms;
+    let remaining_ms = bar_close_ms - now_ms;
+
+    if let Some(countdown_str) = format_countdown(remaining_ms) {
+        labels[0].countdown = Some(countdown_str);
     }
 }
 

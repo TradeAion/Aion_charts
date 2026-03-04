@@ -129,7 +129,7 @@ pub fn compute_x_ticks(
     out
 }
 
-fn infer_bar_interval_ms(bars: &crate::core::data::BarArray) -> Option<i64> {
+pub fn infer_bar_interval_ms(bars: &crate::core::data::BarArray) -> Option<i64> {
     let len = bars.len();
     if len < 2 {
         return None;

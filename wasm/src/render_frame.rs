@@ -233,6 +233,7 @@ pub(crate) fn do_render_frame(
             ref mut overlay,
             ref engine,
             ref active_subpane_id,
+            ref symbol,
             ..
         } = *s;
         let dashed_on_overlay = engine.renderer_name() == "webgpu";
@@ -283,6 +284,15 @@ pub(crate) fn do_render_frame(
             pane_css_w,
             pane_css_h,
             anim_time,
+        );
+        overlay.render_asset_name_chip(
+            symbol,
+            &engine.bars,
+            engine.main_chart_options.chart_type,
+            &engine.viewport,
+            &engine.style,
+            pane_css_w,
+            pane_css_h,
         );
         overlay.render_markers(
             &engine.markers,

@@ -524,6 +524,115 @@ impl OverlayRenderer {
         clear_canvas_line_dash(&self.ctx);
     }
 
+    /// Render the asset-name chip (e.g. "BTCUSD") on the pane overlay, anchored
+    /// to the right edge at the last price Y.
+    ///
+    /// TradingView-style: the chip sits to the LEFT of the price-axis label,
+    /// with rounded corners on the left and a flat right edge that visually
+    /// connects to the price chip in the axis.
+    pub fn render_asset_name_chip(
+        &mut self,
+        symbol: &str,
+        bars: &BarArray,
+        main_chart_type: MainChartType,
+        viewport: &Viewport,
+        style: &ChartStyle,
+        pane_css_w: f64,
+        pane_css_h: f64,
+    ) {
+        if symbol.is_empty() || !style.last_price_line.label_visible {
+            return;
+        }
+
+        let dpr = self.dpr;
+        let pane_ph = pane_css_h * dpr;
+
+        // Get the last price and its color (same source as the price-axis label).
+        let (last_price, color) =
+            match main_series_last_price_and_color(bars, main_chart_type, style) {
+                Some(v) => v,
+                None => return,
+            };
+
+        let y_phys = price_to_pane_y_phys(last_price, viewport, pane_ph);
+        // Clip: if Y is outside pane bounds, skip.
+        if y_phys < 0.0 || y_phys > pane_ph {
+            return;
+        }
+
+        // ── Replicate price-axis label height calculation exactly ──
+        // (same math as right_axis_label_height_bmp + y_top in price_axis.rs)
+        let fs_phys = style.font_size as f64 * dpr;
+        let padding_tb_phys = style.price_axis_padding_tb() * dpr;
+        let total_h_raw = fs_phys + padding_tb_phys * 2.0;
+        let tick_h_bmp = dpr.floor().max(1.0) as i32;
+        let mut single_h_bmp = total_h_raw.round() as i32;
+        if single_h_bmp % 2 != tick_h_bmp % 2 {
+            single_h_bmp += 1;
+        }
+        let single_h_bmp = single_h_bmp.max(1) as f64;
+
+        // Same y_top as price chip's first row (physical pixels).
+        let y_mid_raw = y_phys.round() - (dpr * 0.5).floor();
+        let tick_h = dpr.floor().max(1.0);
+        let y_top_phys = (y_mid_raw + tick_h / 2.0 - single_h_bmp / 2.0).floor();
+
+        // Convert to CSS for overlay drawing.
+        let chip_h_css = single_h_bmp / dpr;
+        let chip_y_css = y_top_phys / dpr;
+
+        // ── Horizontal sizing ──
+        let padding_lr = 5.0; // CSS px
+        let radius_css = 1.5; // subtle corner radius
+
+        let fs = style.font_size as f64;
+        let css_font = format!("{}px {}", fs, style.font_family);
+        self.ctx.save();
+        let _ = self.ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
+        self.ctx.set_font(&css_font);
+        let text_w = self.text_cache.measure(&self.ctx, symbol, &css_font);
+
+        let chip_w_css = text_w + padding_lr * 2.0;
+        let chip_x_css = pane_css_w - chip_w_css; // flush right
+
+        let r = radius_css;
+
+        // ── Draw background: rounded-left, square-right ──
+        self.ctx.set_fill_style_str(&rgba(&color));
+        self.ctx.begin_path();
+        self.ctx.move_to(chip_x_css + r, chip_y_css);
+        self.ctx.line_to(chip_x_css + chip_w_css, chip_y_css);
+        self.ctx
+            .line_to(chip_x_css + chip_w_css, chip_y_css + chip_h_css);
+        self.ctx.line_to(chip_x_css + r, chip_y_css + chip_h_css);
+        let _ = self.ctx.arc_to(
+            chip_x_css,
+            chip_y_css + chip_h_css,
+            chip_x_css,
+            chip_y_css + chip_h_css - r,
+            r,
+        );
+        self.ctx.line_to(chip_x_css, chip_y_css + r);
+        let _ = self
+            .ctx
+            .arc_to(chip_x_css, chip_y_css, chip_x_css + r, chip_y_css, r);
+        self.ctx.close_path();
+        self.ctx.fill();
+
+        // ── Draw text ──
+        self.ctx
+            .set_fill_style_str(&rgba(&style.crosshair_label_text));
+        self.ctx.set_text_align("center");
+        self.ctx.set_text_baseline("middle");
+        let _ = self.ctx.fill_text(
+            symbol,
+            chip_x_css + chip_w_css / 2.0,
+            chip_y_css + chip_h_css / 2.0,
+        );
+
+        self.ctx.restore();
+    }
+
     /// Render custom price lines.
     ///
     /// Each line is a horizontal line at a specified price, spanning the full pane width.

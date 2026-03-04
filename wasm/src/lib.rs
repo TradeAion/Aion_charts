@@ -1016,6 +1016,7 @@ impl RayCore {
             replay_edge_behavior: ReplayEdgeBehavior::AutoPause,
             replay_last_tick_ms: 0.0,
             replay_tick_accum_bars: 0.0,
+            symbol: "DEMO".to_string(),
         }));
 
         let mut closures: Vec<Closure<dyn FnMut(web_sys::Event)>> = Vec::new();
@@ -2019,7 +2020,8 @@ impl RayCore {
 
         // Apply symbol
         if let Some(symbol) = js_get_str(&options, "symbol") {
-            chart.symbol = symbol;
+            chart.symbol = symbol.clone();
+            chart.inner.borrow_mut().symbol = symbol;
         }
 
         // Apply interval
@@ -2078,11 +2080,13 @@ impl RayCore {
         // Symbol
         if let Some(symbol) = js_get_str(&options, "symbol") {
             self.symbol = symbol.clone();
-            self.inner
-                .borrow_mut()
-                .engine
-                .event_bus
-                .emit(raycore::ChartEvent::SymbolChange { symbol });
+            {
+                let mut s = self.inner.borrow_mut();
+                s.symbol = symbol.clone();
+                s.engine
+                    .event_bus
+                    .emit(raycore::ChartEvent::SymbolChange { symbol });
+            }
         }
 
         // Interval
@@ -3261,6 +3265,10 @@ impl RayCore {
 
     pub fn set_symbol(&mut self, symbol: &str) {
         self.symbol = symbol.to_string();
+        {
+            let mut s = self.inner.borrow_mut();
+            s.symbol = symbol.to_string();
+        }
         self.inner
             .borrow_mut()
             .engine

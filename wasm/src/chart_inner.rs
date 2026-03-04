@@ -199,6 +199,8 @@ pub struct ChartInner {
     pub replay_last_tick_ms: f64,
     /// Fractional bar accumulator for frame-based playback.
     pub replay_tick_accum_bars: f64,
+    /// Symbol name (e.g. "BTCUSD") — used by the asset-name chip overlay.
+    pub symbol: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -185,6 +185,36 @@ pub fn format_crosshair_time(ms: u64) -> String {
     format!("{}", ms)
 }
 
+// ── Countdown formatting ─────────────────────────────────────────────────────
+
+/// Format a remaining duration in milliseconds as a compact countdown string.
+///
+/// - Less than 1 hour: `MM:SS`
+/// - 1 hour to < 24 hours: `H:MM:SS`
+/// - 24 hours or more: `Xd HH:MM:SS`
+///
+/// Returns `None` if `remaining_ms` is zero or negative.
+pub fn format_countdown(remaining_ms: f64) -> Option<String> {
+    if remaining_ms <= 0.0 {
+        return None;
+    }
+    let total_secs = (remaining_ms / 1000.0).ceil() as u64;
+    let secs = total_secs % 60;
+    let total_mins = total_secs / 60;
+    let mins = total_mins % 60;
+    let total_hours = total_mins / 60;
+    let hours = total_hours % 24;
+    let days = total_hours / 24;
+
+    if days > 0 {
+        Some(format!("{}d {:02}:{:02}:{:02}", days, hours, mins, secs))
+    } else if total_hours > 0 {
+        Some(format!("{}:{:02}:{:02}", hours, mins, secs))
+    } else {
+        Some(format!("{:02}:{:02}", mins, secs))
+    }
+}
+
 // ── Tick step computation (LWC-like 1-2-2.5-5 series) ───────────────────────
 
 /// Compute a "nice" step value for axis ticks.
