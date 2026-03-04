@@ -162,6 +162,90 @@ pub fn generate_footprint_from_bars(bars: &[Bar], tick_size: f32) -> FootprintDa
     fp_data
 }
 
+/// Generate synthetic footprint data for a single bar.
+///
+/// Used for incremental live updates — when a new bar is appended or
+/// the last bar is updated, this generates footprint levels without
+/// recalculating the entire dataset.
+///
+/// `tick_size`: price granularity per row. Must be > 0.
+pub fn generate_footprint_for_single_bar(bar: &Bar, tick_size: f32) -> FootprintBar {
+    let low = bar.low;
+    let high = bar.high;
+    let range = high - low;
+    if range <= 0.0 || tick_size <= 0.0 {
+        return FootprintBar::new();
+    }
+
+    let bull = bar.close >= bar.open;
+    let total_vol = bar.volume.max(1.0);
+
+    let level_low = (low / tick_size).floor() * tick_size;
+    let level_high = (high / tick_size).ceil() * tick_size;
+    let num_levels = ((level_high - level_low) / tick_size).round() as usize;
+    let num_levels = num_levels.max(1).min(50);
+
+    let poc_price = if bull {
+        bar.open + (bar.close - bar.open) * 0.4
+    } else {
+        bar.close + (bar.open - bar.close) * 0.4
+    };
+
+    let mut vol_weights: Vec<f64> = Vec::with_capacity(num_levels);
+    let mut weight_sum = 0.0;
+    for j in 0..num_levels {
+        let price = level_low + j as f32 * tick_size;
+        let dist = ((price + tick_size * 0.5 - poc_price) / range).abs() as f64;
+        let w = (-dist * dist * 4.0).exp() + 0.05;
+        vol_weights.push(w);
+        weight_sum += w;
+    }
+
+    // Use timestamp as seed for deterministic but varying noise
+    let mut seed: u64 = bar.timestamp.wrapping_mul(6364136223846793005);
+
+    let mut levels = Vec::with_capacity(num_levels);
+    for j in 0..num_levels {
+        let price = level_low + j as f32 * tick_size;
+        let vol_frac = (vol_weights[j] / weight_sum) as f32;
+        let level_vol = total_vol * vol_frac;
+
+        seed = lcg_next(seed);
+        let noise = lcg_f64(seed) as f32 * 0.3;
+
+        let position_frac = if range > 0.0 {
+            ((price - low) / range).clamp(0.0, 1.0)
+        } else {
+            0.5
+        };
+
+        let ask_ratio = if bull {
+            0.3 + position_frac * 0.4 + noise
+        } else {
+            0.7 - position_frac * 0.4 + noise
+        };
+        let ask_ratio = ask_ratio.clamp(0.05, 0.95);
+
+        levels.push(FootprintLevel {
+            price,
+            bid_volume: (level_vol * (1.0 - ask_ratio)).max(0.0),
+            ask_volume: (level_vol * ask_ratio).max(0.0),
+        });
+    }
+
+    levels.sort_by(|a, b| {
+        a.price
+            .partial_cmp(&b.price)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    FootprintBar { levels }
+}
+
+/// Round a raw tick size to a "nice" number — public wrapper.
+pub fn round_tick_size_pub(raw: f32) -> f32 {
+    round_tick_size(raw)
+}
+
 /// Round a raw tick size to a "nice" number (1, 2, 5, 10, 25, 50, 100, etc.)
 fn round_tick_size(raw: f32) -> f32 {
     if raw <= 0.0 {

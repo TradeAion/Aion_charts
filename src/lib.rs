@@ -247,6 +247,9 @@ pub use crate::core::demo_data::generate_sample_data;
 /// Generate synthetic footprint data from OHLCV bars for demo/testing.
 pub use crate::core::demo_data::generate_footprint_from_bars;
 
+/// Generate synthetic footprint data for a single bar (live updates).
+pub use crate::core::demo_data::generate_footprint_for_single_bar;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Re-exports: WASM-specific
 // ═══════════════════════════════════════════════════════════════════════════════
