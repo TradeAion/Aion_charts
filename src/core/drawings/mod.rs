@@ -342,10 +342,26 @@ impl DrawingManager {
     /// Start dragging a selected drawing (or one of its anchors).
     pub fn start_drag(&mut self, id: u64, anchor_index: Option<usize>, bar_index: f64, price: f64) {
         if let Some(d) = self.get_mut(id) {
+            // For rectangle corner drag, pin the opposite corner for the entire
+            // gesture so crossing over flips naturally instead of "pushing" sides.
+            let (start_bar, start_price) = if d.tool() == DrawingTool::Rectangle {
+                if let Some(ai) = anchor_index {
+                    if let Some(rect) = d.as_any().downcast_ref::<rectangle::RectangleDrawing>() {
+                        rect.opposite_reference_for_anchor(ai)
+                            .unwrap_or((bar_index, price))
+                    } else {
+                        (bar_index, price)
+                    }
+                } else {
+                    (bar_index, price)
+                }
+            } else {
+                (bar_index, price)
+            };
             d.set_state(DrawingState::Dragging {
                 anchor_index,
-                start_bar: bar_index,
-                start_price: price,
+                start_bar,
+                start_price,
             });
         }
     }
@@ -360,8 +376,30 @@ impl DrawingManager {
                     start_price,
                 } => {
                     if let Some(ai) = anchor_index {
-                        // Move single anchor
-                        d.move_anchor(ai, bar_index, price);
+                        // Move single anchor.
+                        if d.tool() == DrawingTool::Rectangle {
+                            if rectangle::RectangleDrawing::is_corner_anchor(ai)
+                                || rectangle::RectangleDrawing::is_edge_anchor(ai)
+                            {
+                                if let Some(rect) =
+                                    d.as_any_mut().downcast_mut::<rectangle::RectangleDrawing>()
+                                {
+                                    rect.move_corner_with_fixed_opposite(
+                                        ai,
+                                        bar_index,
+                                        price,
+                                        start_bar,
+                                        start_price,
+                                    );
+                                } else {
+                                    d.move_anchor(ai, bar_index, price);
+                                }
+                            } else {
+                                d.move_anchor(ai, bar_index, price);
+                            }
+                        } else {
+                            d.move_anchor(ai, bar_index, price);
+                        }
                     } else {
                         // Move entire drawing
                         let delta_bar = bar_index - start_bar;
@@ -601,6 +639,26 @@ mod tests {
     use super::*;
     use crate::core::viewport::Viewport;
 
+    fn approx_eq(a: f64, b: f64) -> bool {
+        (a - b).abs() <= 1e-9
+    }
+
+    fn contains_point(anchors: &[AnchorPoint], bar_index: f64, price: f64) -> bool {
+        anchors.iter().any(|anchor| {
+            approx_eq(anchor.point.bar_index, bar_index) && approx_eq(anchor.point.price, price)
+        })
+    }
+
+    fn bounds(anchors: &[AnchorPoint]) -> (f64, f64, f64, f64) {
+        let a = &anchors[0].point;
+        let b = &anchors[1].point;
+        let left = a.bar_index.min(b.bar_index);
+        let right = a.bar_index.max(b.bar_index);
+        let top = a.price.max(b.price);
+        let bottom = a.price.min(b.price);
+        (left, right, top, bottom)
+    }
+
     fn test_viewport() -> Viewport {
         let mut vp = Viewport::new(800, 600);
         vp.start_bar = 0.0;
@@ -756,5 +814,114 @@ mod tests {
             .expect("restore snapshot");
 
         assert_eq!(restored.hovered_id(), None);
+    }
+
+    #[test]
+    fn rectangle_corner_drag_keeps_opposite_corner_fixed_when_crossing() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Rectangle;
+        let id = manager.start_creating(10.0, 110.0).expect("rectangle id");
+        manager.finalize_creation_step(20.0, 100.0);
+
+        // Cross horizontal axis only: opposite corner must remain pinned exactly.
+        manager.start_drag(id, Some(0), 10.0, 110.0);
+        manager.update_drag(id, 25.0, 105.0);
+
+        let drawing = manager.get(id).expect("rectangle drawing");
+        let anchors = drawing.anchors();
+        assert!(contains_point(anchors, 20.0, 100.0));
+
+        // Drag top-left corner and cross over both axes.
+        manager.update_drag(id, 25.0, 95.0);
+
+        let drawing = manager.get(id).expect("rectangle drawing");
+        let anchors = drawing.anchors();
+        let (left, right, top, bottom) = bounds(anchors);
+        assert!(approx_eq(left, 20.0));
+        assert!(approx_eq(right, 25.0));
+        assert!(approx_eq(top, 100.0));
+        assert!(approx_eq(bottom, 95.0));
+        assert!(contains_point(anchors, 20.0, 100.0));
+
+        // Continue dragging back across to the opposite side.
+        manager.update_drag(id, 5.0, 120.0);
+
+        let drawing = manager.get(id).expect("rectangle drawing");
+        let anchors = drawing.anchors();
+        let (left, right, top, bottom) = bounds(anchors);
+        assert!(approx_eq(left, 5.0));
+        assert!(approx_eq(right, 20.0));
+        assert!(approx_eq(top, 120.0));
+        assert!(approx_eq(bottom, 100.0));
+        assert!(contains_point(anchors, 20.0, 100.0));
+    }
+
+    #[test]
+    fn rectangle_selected_geometry_renders_eight_resize_handles() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Rectangle;
+        manager.start_creating(10.0, 110.0).expect("rectangle id");
+        manager.finalize_creation_step(20.0, 100.0);
+
+        let vp = test_viewport();
+        let (_bottom, top) = manager.generate_all_geometry(&vp, 800.0, 600.0, 1.0, 1.0, 1.0);
+        assert_eq!(top.len(), 1);
+        assert_eq!(top[0].anchors.len(), 8);
+    }
+
+    #[test]
+    fn rectangle_left_edge_drag_keeps_opposite_edge_fixed_after_crossing() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Rectangle;
+        let id = manager.start_creating(10.0, 110.0).expect("rectangle id");
+        manager.finalize_creation_step(20.0, 100.0);
+
+        // Left midpoint handle index = 7.
+        manager.start_drag(id, Some(7), 10.0, 105.0);
+        manager.update_drag(id, 25.0, 105.0);
+
+        let drawing = manager.get(id).expect("rectangle drawing");
+        let anchors = drawing.anchors();
+        let (left, _right, _top, _bottom) = bounds(anchors);
+        assert!(approx_eq(left, 20.0));
+
+        // Continue further to the right; right side must remain pinned.
+        manager.update_drag(id, 26.0, 105.0);
+        let drawing = manager.get(id).expect("rectangle drawing");
+        let anchors = drawing.anchors();
+        let (left, _right, _top, _bottom) = bounds(anchors);
+        assert!(approx_eq(left, 20.0));
+    }
+
+    #[test]
+    fn rectangle_top_edge_hit_and_drag_flips_with_bottom_fixed() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Rectangle;
+        let id = manager.start_creating(10.0, 110.0).expect("rectangle id");
+        manager.finalize_creation_step(20.0, 100.0);
+
+        let vp = test_viewport();
+        let pw = 800.0;
+        let ph = 600.0;
+
+        // Cursor on top border center (not on top-mid anchor point).
+        let edge_x = vp.bar_to_frac(14.0) * pw;
+        let edge_y = vp.price_to_css_y(110.0, ph);
+        let (_hit_id, hit) = manager
+            .hit_test(edge_x, edge_y, &vp, pw, ph)
+            .expect("edge hit");
+
+        // Edge should map to top-mid anchor drag path.
+        assert_eq!(hit.part, HitPart::Anchor(4));
+
+        manager.start_drag(id, Some(4), 14.0, 110.0);
+        manager.update_drag(id, 14.0, 95.0);
+
+        let drawing = manager.get(id).expect("rectangle drawing");
+        let anchors = drawing.anchors();
+        let (_left, _right, top, bottom) = bounds(anchors);
+        // Original bottom (100) stays fixed while dragged top crosses below and flips.
+        assert!(approx_eq(top, 100.0));
+        assert!(approx_eq(bottom, 95.0));
     }
 }

@@ -6083,8 +6083,8 @@ impl RayCore {
                                 _ => None,
                             };
 
-                            // Rectangle: body clicks select only (fall through to pan)
-                            // Edge/anchor clicks start drag
+                            // Rectangle: body clicks select only (fall through to pan).
+                            // Edges are mapped to side anchors, so edge drags resize.
                             if tool == raycore::DrawingTool::Rectangle
                                 && result.part == HitPart::Body
                             {

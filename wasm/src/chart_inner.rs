@@ -911,9 +911,9 @@ impl ChartInner {
                             _ => None,
                         };
 
-                        // Rectangle: body clicks select only and fall through to
-                        // chart pan. Edge clicks move the whole rectangle.
-                        // Anchor clicks resize (move single anchor).
+                        // Rectangle: body clicks select only and fall through to chart pan.
+                        // Edges are hit-tested as side anchors (TM/RM/BM/LM), so
+                        // edge drags resize and can flip while opposite side stays fixed.
                         if tool == raycore::DrawingTool::Rectangle && result.part == HitPart::Body {
                             drawings.select(id);
                             // Don't start drag — fall through to chart pan

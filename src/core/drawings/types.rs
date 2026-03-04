@@ -103,12 +103,17 @@ pub fn cursor_for_drawing_hit(
         HitPart::Anchor(idx) => {
             match tool {
                 DrawingTool::Rectangle => {
-                    // 4-corner rectangle: TL=0, TR=1, BR=2, BL=3
+                    // 8-handle rectangle:
+                    // TL=0, TR=1, BR=2, BL=3, TM=4, RM=5, BM=6, LM=7
                     match idx {
                         0 => "nwse-resize", // top-left
                         1 => "nesw-resize", // top-right
                         2 => "nwse-resize", // bottom-right
                         3 => "nesw-resize", // bottom-left
+                        4 => "ns-resize",   // top-mid
+                        5 => "ew-resize",   // right-mid
+                        6 => "ns-resize",   // bottom-mid
+                        7 => "ew-resize",   // left-mid
                         _ => "move",
                     }
                 }

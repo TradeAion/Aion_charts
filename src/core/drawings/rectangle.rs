@@ -47,6 +47,122 @@ impl RectangleDrawing {
         self.anchors[0].point = DrawingPoint::new(left, top);
         self.anchors[1].point = DrawingPoint::new(right, bottom);
     }
+
+    /// Return the opposite corner (bar, price) for a rectangle corner index:
+    /// 0=TL -> BR, 1=TR -> BL, 2=BR -> TL, 3=BL -> TR.
+    pub(crate) fn opposite_corner(&self, index: usize) -> Option<(f64, f64)> {
+        let (left, right, top, bottom) = self.normalized_bounds();
+        match index {
+            0 => Some((right, bottom)),
+            1 => Some((left, bottom)),
+            2 => Some((left, top)),
+            3 => Some((right, top)),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn is_corner_anchor(index: usize) -> bool {
+        index < 4
+    }
+
+    #[inline]
+    pub(crate) fn is_edge_anchor(index: usize) -> bool {
+        (4..=7).contains(&index)
+    }
+
+    /// Returns a stable opposite reference point to pin during drag:
+    /// - corners: opposite corner
+    /// - edge midpoints: opposite side coordinate (x or y)
+    pub(crate) fn opposite_reference_for_anchor(&self, index: usize) -> Option<(f64, f64)> {
+        let (left, right, top, bottom) = self.normalized_bounds();
+        match index {
+            0 => Some((right, bottom)), // TL -> BR
+            1 => Some((left, bottom)),  // TR -> BL
+            2 => Some((left, top)),     // BR -> TL
+            3 => Some((right, top)),    // BL -> TR
+            4 => Some((f64::NAN, bottom)), // TM -> fix bottom
+            5 => Some((left, f64::NAN)),   // RM -> fix left
+            6 => Some((f64::NAN, top)),    // BM -> fix top
+            7 => Some((right, f64::NAN)),  // LM -> fix right
+            _ => None,
+        }
+    }
+
+    /// Move a rectangle corner while keeping the opposite corner fixed.
+    ///
+    /// This enables natural TradingView-like flipping when the dragged corner
+    /// crosses over the opposite side.
+    pub(crate) fn move_corner_with_fixed_opposite(
+        &mut self,
+        index: usize,
+        bar_index: f64,
+        price: f64,
+        opposite_bar: f64,
+        opposite_price: f64,
+    ) {
+        if Self::is_corner_anchor(index) {
+            // Keep exact dragged + fixed points as the two diagonal anchors.
+            // Rendering/hit-test still normalize bounds, but this prevents the
+            // opposite corner from drifting/shaking when crossing only one axis.
+            self.anchors[0].point = DrawingPoint::new(bar_index, price);
+            self.anchors[1].point = DrawingPoint::new(opposite_bar, opposite_price);
+            return;
+        }
+
+        let (mut left, mut right, mut top, mut bottom) = self.normalized_bounds();
+        match index {
+            4 => {
+                // Top edge midpoint, keep bottom fixed.
+                top = price;
+                bottom = opposite_price;
+            }
+            5 => {
+                // Right edge midpoint, keep left fixed.
+                right = bar_index;
+                left = opposite_bar;
+            }
+            6 => {
+                // Bottom edge midpoint, keep top fixed.
+                bottom = price;
+                top = opposite_price;
+            }
+            7 => {
+                // Left edge midpoint, keep right fixed.
+                left = bar_index;
+                right = opposite_bar;
+            }
+            _ => return,
+        }
+        let norm_left = left.min(right);
+        let norm_right = left.max(right);
+        let norm_top = top.max(bottom);
+        let norm_bottom = top.min(bottom);
+        self.set_from_bounds(norm_left, norm_right, norm_top, norm_bottom);
+    }
+
+    #[inline]
+    fn nearest_edge_anchor(cx: f64, cy: f64, left: f64, right: f64, top: f64, bottom: f64) -> usize {
+        let d_top = (cy - top).abs();
+        let d_right = (right - cx).abs();
+        let d_bottom = (cy - bottom).abs();
+        let d_left = (cx - left).abs();
+
+        let mut best_d = d_top;
+        let mut best_idx = 4; // top-mid
+        if d_right < best_d {
+            best_d = d_right;
+            best_idx = 5; // right-mid
+        }
+        if d_bottom < best_d {
+            best_d = d_bottom;
+            best_idx = 6; // bottom-mid
+        }
+        if d_left < best_d {
+            best_idx = 7; // left-mid
+        }
+        best_idx
+    }
 }
 
 impl Drawing for RectangleDrawing {
@@ -67,9 +183,20 @@ impl Drawing for RectangleDrawing {
         let top = y0.min(y1);
         let bottom = y0.max(y1);
 
-        // Check 4-corner anchors first: TL, TR, BR, BL.
-        let corners = [(left, top), (right, top), (right, bottom), (left, bottom)];
-        for (i, (ax, ay)) in corners.into_iter().enumerate() {
+        // 8 handles: TL, TR, BR, BL, TM, RM, BM, LM.
+        let mid_x = (left + right) * 0.5;
+        let mid_y = (top + bottom) * 0.5;
+        let handles = [
+            (left, top),
+            (right, top),
+            (right, bottom),
+            (left, bottom),
+            (mid_x, top),
+            (right, mid_y),
+            (mid_x, bottom),
+            (left, mid_y),
+        ];
+        for (i, (ax, ay)) in handles.into_iter().enumerate() {
             let d = hit_test::point_to_circle_distance(cx, cy, ax, ay);
             if d <= hit_test::ANCHOR_HIT_THRESHOLD_CSS {
                 return HitResult::hit(HitPart::Anchor(i), d);
@@ -79,17 +206,19 @@ impl Drawing for RectangleDrawing {
         // Check if inside the rectangle fill
         if hit_test::point_in_rect(cx, cy, x0, y0, x1, y1) {
             let d = hit_test::point_to_rect_edge_distance(cx, cy, x0, y0, x1, y1);
-            // Near the edge → Edge (draggable), deep interior → Body (pan pass-through)
+            // Near the edge → side-resize anchor, deep interior → Body (pan pass-through)
             if d <= hit_test::HIT_THRESHOLD_CSS {
-                return HitResult::hit(HitPart::Edge, d);
+                let edge_anchor = Self::nearest_edge_anchor(cx, cy, left, right, top, bottom);
+                return HitResult::hit(HitPart::Anchor(edge_anchor), d);
             }
             return HitResult::hit(HitPart::Body, d);
         }
 
-        // Check edges from outside (within threshold)
+        // Check edges from outside (within threshold) and map to side-resize anchors.
         let d = hit_test::point_to_rect_edge_distance(cx, cy, x0, y0, x1, y1);
         if d <= hit_test::HIT_THRESHOLD_CSS {
-            return HitResult::hit(HitPart::Edge, d);
+            let edge_anchor = Self::nearest_edge_anchor(cx, cy, left, right, top, bottom);
+            return HitResult::hit(HitPart::Anchor(edge_anchor), d);
         }
 
         HitResult::miss()
@@ -216,6 +345,8 @@ impl Drawing for RectangleDrawing {
             let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
             let radius = (self.anchors[0].hit_radius * avg_ratio).round();
             let border_width = (1.0 * avg_ratio).floor().max(1.0);
+            let mx = ((px0 + px1) * 0.5) as f64;
+            let my = ((py0 + py1) * 0.5) as f64;
             geom.anchors = vec![
                 AnchorCircle {
                     cx: px0 as f64,
@@ -249,6 +380,38 @@ impl Drawing for RectangleDrawing {
                     border: *c,
                     border_width,
                 }, // BL
+                AnchorCircle {
+                    cx: mx,
+                    cy: py0 as f64,
+                    radius,
+                    fill: super::default_anchor_color(),
+                    border: *c,
+                    border_width,
+                }, // TM
+                AnchorCircle {
+                    cx: px1 as f64,
+                    cy: my,
+                    radius,
+                    fill: super::default_anchor_color(),
+                    border: *c,
+                    border_width,
+                }, // RM
+                AnchorCircle {
+                    cx: mx,
+                    cy: py1 as f64,
+                    radius,
+                    fill: super::default_anchor_color(),
+                    border: *c,
+                    border_width,
+                }, // BM
+                AnchorCircle {
+                    cx: px0 as f64,
+                    cy: my,
+                    radius,
+                    fill: super::default_anchor_color(),
+                    border: *c,
+                    border_width,
+                }, // LM
             ];
         }
 
@@ -256,35 +419,34 @@ impl Drawing for RectangleDrawing {
     }
 
     fn move_anchor(&mut self, index: usize, bar_index: f64, price: f64) {
-        if self.anchors.len() < 2 {
+        if Self::is_corner_anchor(index) {
+            let Some((opp_bar, opp_price)) = self.opposite_corner(index) else {
+                return;
+            };
+            self.move_corner_with_fixed_opposite(index, bar_index, price, opp_bar, opp_price);
             return;
         }
-        let (mut left, mut right, mut top, mut bottom) = self.normalized_bounds();
 
+        let (mut left, mut right, mut top, mut bottom) = self.normalized_bounds();
         match index {
-            0 => {
-                // TL
-                left = bar_index;
+            4 => {
+                // Top edge midpoint
                 top = price;
             }
-            1 => {
-                // TR
+            5 => {
+                // Right edge midpoint
                 right = bar_index;
-                top = price;
             }
-            2 => {
-                // BR
-                right = bar_index;
+            6 => {
+                // Bottom edge midpoint
                 bottom = price;
             }
-            3 => {
-                // BL
+            7 => {
+                // Left edge midpoint
                 left = bar_index;
-                bottom = price;
             }
             _ => return,
         }
-
         let norm_left = left.min(right);
         let norm_right = left.max(right);
         let norm_top = top.max(bottom);
