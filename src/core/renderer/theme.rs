@@ -129,7 +129,7 @@ pub fn default_style() -> ChartStyle {
         last_price_line: LastPriceLineStyle {
             visible: true,
             width: 1.0,
-            style: LineStyle::Dashed,
+            style: LineStyle::Dotted,
             label_visible: true,
         },
         font_family: FONT_FAMILY.into(),
@@ -408,7 +408,7 @@ impl ThemeConfig {
             last_price_line: ThemeLastPriceLine {
                 visible: true,
                 width: 1.0,
-                style: LineStyle::Dashed,
+                style: LineStyle::Dotted,
                 label_visible: true,
             },
             series_defaults: ThemeSeriesDefaults {
@@ -507,7 +507,7 @@ impl ThemeConfig {
             last_price_line: ThemeLastPriceLine {
                 visible: true,
                 width: 1.0,
-                style: LineStyle::Dashed,
+                style: LineStyle::Dotted,
                 label_visible: true,
             },
             series_defaults: ThemeSeriesDefaults {
