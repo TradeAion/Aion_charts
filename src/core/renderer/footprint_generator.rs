@@ -434,37 +434,44 @@ fn render_bid_ask_cell(
 
     // Volume text — adaptive font size to fit cell
     let effective_font = adaptive_font_size(font_size, cell_h);
+    let avail_half_w = half_w - padding * 2.0 - 4.0; // usable text width per side
     if opts.show_volume_text && effective_font > 0.0 {
         let text_y = cell_y + cell_h * 0.5;
 
         // Bid text (right-aligned within left half)
         if level.bid_volume > 0.0 {
-            texts.push(DrawText {
-                text: format_volume(level.bid_volume),
-                x: (bar_left + half_w - padding - 2.0) as f32,
-                y: text_y as f32,
-                font_size: effective_font,
-                r: opts.text_color[0],
-                g: opts.text_color[1],
-                b: opts.text_color[2],
-                a: opts.text_color[3],
-                align: TextAlign::Right,
-            });
+            let txt = format_volume(level.bid_volume);
+            if text_fits(&txt, effective_font, avail_half_w) {
+                texts.push(DrawText {
+                    text: txt,
+                    x: (bar_left + half_w - padding - 2.0) as f32,
+                    y: text_y as f32,
+                    font_size: effective_font,
+                    r: opts.text_color[0],
+                    g: opts.text_color[1],
+                    b: opts.text_color[2],
+                    a: opts.text_color[3],
+                    align: TextAlign::Right,
+                });
+            }
         }
 
         // Ask text (left-aligned within right half)
         if level.ask_volume > 0.0 {
-            texts.push(DrawText {
-                text: format_volume(level.ask_volume),
-                x: (bar_left + half_w + padding + 2.0) as f32,
-                y: text_y as f32,
-                font_size: effective_font,
-                r: opts.text_color[0],
-                g: opts.text_color[1],
-                b: opts.text_color[2],
-                a: opts.text_color[3],
-                align: TextAlign::Left,
-            });
+            let txt = format_volume(level.ask_volume);
+            if text_fits(&txt, effective_font, avail_half_w) {
+                texts.push(DrawText {
+                    text: txt,
+                    x: (bar_left + half_w + padding + 2.0) as f32,
+                    y: text_y as f32,
+                    font_size: effective_font,
+                    r: opts.text_color[0],
+                    g: opts.text_color[1],
+                    b: opts.text_color[2],
+                    a: opts.text_color[3],
+                    align: TextAlign::Left,
+                });
+            }
         }
     }
 }
@@ -524,23 +531,27 @@ fn render_delta_cell(
 
     // Delta text
     let effective_font = adaptive_font_size(font_size, cell_h);
+    let avail_w = bar_width - opts.cell_padding as f64 * 2.0;
     if opts.show_volume_text && effective_font > 0.0 {
-        let text_color = if delta >= 0.0 {
-            opts.positive_delta_color
-        } else {
-            opts.negative_delta_color
-        };
-        texts.push(DrawText {
-            text: format_delta(delta),
-            x: (bar_left + bar_width * 0.5) as f32,
-            y: (cell_y + cell_h * 0.5) as f32,
-            font_size: effective_font,
-            r: text_color[0],
-            g: text_color[1],
-            b: text_color[2],
-            a: text_color[3],
-            align: TextAlign::Center,
-        });
+        let txt = format_delta(delta);
+        if text_fits(&txt, effective_font, avail_w) {
+            let text_color = if delta >= 0.0 {
+                opts.positive_delta_color
+            } else {
+                opts.negative_delta_color
+            };
+            texts.push(DrawText {
+                text: txt,
+                x: (bar_left + bar_width * 0.5) as f32,
+                y: (cell_y + cell_h * 0.5) as f32,
+                font_size: effective_font,
+                r: text_color[0],
+                g: text_color[1],
+                b: text_color[2],
+                a: text_color[3],
+                align: TextAlign::Center,
+            });
+        }
     }
 }
 
@@ -591,18 +602,22 @@ fn render_volume_cell(
 
     // Volume text
     let effective_font = adaptive_font_size(font_size, cell_h);
+    let avail_w = bar_width - opts.cell_padding as f64 * 2.0;
     if opts.show_volume_text && effective_font > 0.0 {
-        texts.push(DrawText {
-            text: format_volume(vol),
-            x: (bar_left + bar_width * 0.5) as f32,
-            y: (cell_y + cell_h * 0.5) as f32,
-            font_size: effective_font,
-            r: opts.text_color[0],
-            g: opts.text_color[1],
-            b: opts.text_color[2],
-            a: opts.text_color[3],
-            align: TextAlign::Center,
-        });
+        let txt = format_volume(vol);
+        if text_fits(&txt, effective_font, avail_w) {
+            texts.push(DrawText {
+                text: txt,
+                x: (bar_left + bar_width * 0.5) as f32,
+                y: (cell_y + cell_h * 0.5) as f32,
+                font_size: effective_font,
+                r: opts.text_color[0],
+                g: opts.text_color[1],
+                b: opts.text_color[2],
+                a: opts.text_color[3],
+                align: TextAlign::Center,
+            });
+        }
     }
 }
 
@@ -723,17 +738,21 @@ fn render_delta_bar(
 
     // Delta text
     if opts.show_volume_text {
-        texts.push(DrawText {
-            text: format_delta(delta),
-            x: (bar_left + bar_width * 0.5) as f32,
-            y: (y + bar_h * 0.5) as f32,
-            font_size: font_size * 0.9,
-            r: color[0],
-            g: color[1],
-            b: color[2],
-            a: 1.0,
-            align: TextAlign::Center,
-        });
+        let txt = format_delta(delta);
+        let fs = font_size * 0.9;
+        if text_fits(&txt, fs, bar_width) {
+            texts.push(DrawText {
+                text: txt,
+                x: (bar_left + bar_width * 0.5) as f32,
+                y: (y + bar_h * 0.5) as f32,
+                font_size: fs,
+                r: color[0],
+                g: color[1],
+                b: color[2],
+                a: 1.0,
+                align: TextAlign::Center,
+            });
+        }
     }
 }
 
@@ -820,6 +839,15 @@ fn generate_fallback_candle(
 // ═══════════════════════════════════════════════════════════════════════════════
 // Helpers
 // ═══════════════════════════════════════════════════════════════════════════════
+
+/// Estimate whether text fits within the available width.
+/// Uses a rough 0.6 * font_size per character approximation for monospace-like fonts.
+#[inline]
+fn text_fits(text: &str, font_size: f32, available_width: f64) -> bool {
+    let char_w = font_size as f64 * 0.6;
+    let text_w = text.len() as f64 * char_w;
+    text_w <= available_width
+}
 
 /// Compute adaptive font size that fits within a cell.
 /// Returns the font size in physical pixels, or 0.0 if the cell is too small for any text.
