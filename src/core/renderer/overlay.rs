@@ -439,7 +439,9 @@ impl OverlayRenderer {
         // LWC clips against pane bounds, not candle area — the line stays
         // visible as long as it's within the pane, even if the price scale
         // has scrolled the last value near or into the volume region.
-        if bars.len() > 0 {
+        // Skip the horizontal line in Footprint mode — the dense price-level
+        // ladder makes it visually noisy.  Labels on the price axis still render.
+        if bars.len() > 0 && main_chart_type != MainChartType::Footprint {
             if let Some((last_price, color)) =
                 main_series_last_price_and_color(bars, main_chart_type, style)
             {
