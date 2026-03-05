@@ -85,6 +85,101 @@ fn has_exact_widget_sizes(s: &ChartInner) -> bool {
         && es.time_axis_ph > 0
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ResizeSignature {
+    container_w: u32,
+    container_h: u32,
+    pane_pw: u32,
+    pane_ph: u32,
+    price_axis_pw: u32,
+    price_axis_ph: u32,
+    time_axis_pw: u32,
+    time_axis_ph: u32,
+    exact_available: bool,
+    dpr_milli: u32,
+}
+
+fn read_resize_signature(s: &ChartInner, dpr: f64) -> ResizeSignature {
+    let (cw, ch) = s.layout.container_css_size();
+    let exact_available = has_exact_widget_sizes(s);
+    let es = s.exact_sizes;
+
+    let ((pane_pw, pane_ph), (price_axis_pw, price_axis_ph), (time_axis_pw, time_axis_ph)) =
+        if exact_available {
+            (
+                (es.pane_pw, es.pane_ph),
+                (es.price_axis_pw, es.price_axis_ph),
+                (es.time_axis_pw, es.time_axis_ph),
+            )
+        } else {
+            let (pcw, pch) = s.layout.pane_css_size();
+            let (acw, ach) = s.layout.price_axis_css_size();
+            let (tcw, tch) = s.layout.time_axis_css_size();
+            (
+                (((pcw * dpr).round() as u32).max(1), ((pch * dpr).round() as u32).max(1)),
+                (((acw * dpr).round() as u32).max(1), ((ach * dpr).round() as u32).max(1)),
+                (((tcw * dpr).round() as u32).max(1), ((tch * dpr).round() as u32).max(1)),
+            )
+        };
+
+    ResizeSignature {
+        container_w: cw.max(0.0).round() as u32,
+        container_h: ch.max(0.0).round() as u32,
+        pane_pw,
+        pane_ph,
+        price_axis_pw,
+        price_axis_ph,
+        time_axis_pw,
+        time_axis_ph,
+        exact_available,
+        dpr_milli: (dpr * 1000.0).round().max(0.0) as u32,
+    }
+}
+
+fn apply_pending_exact_sizes(s: &mut ChartInner, pending: ExactPixelSizes) {
+    if !pending.available {
+        return;
+    }
+
+    if pending.pane_pw > 0 && pending.pane_ph > 0 {
+        s.exact_sizes.pane_pw = pending.pane_pw;
+        s.exact_sizes.pane_ph = pending.pane_ph;
+    }
+    if pending.price_axis_pw > 0 && pending.price_axis_ph > 0 {
+        s.exact_sizes.price_axis_pw = pending.price_axis_pw;
+        s.exact_sizes.price_axis_ph = pending.price_axis_ph;
+    }
+    if pending.time_axis_pw > 0 && pending.time_axis_ph > 0 {
+        s.exact_sizes.time_axis_pw = pending.time_axis_pw;
+        s.exact_sizes.time_axis_ph = pending.time_axis_ph;
+    }
+    s.exact_sizes.available = true;
+}
+
+fn extract_device_pixel_content_box_size(
+    entry: &web_sys::ResizeObserverEntry,
+) -> Option<(u32, u32)> {
+    let raw = js_sys::Reflect::get(entry, &JsValue::from_str("devicePixelContentBoxSize")).ok()?;
+    if raw.is_undefined() || raw.is_null() {
+        return None;
+    }
+    let arr: &js_sys::Array = raw.unchecked_ref();
+    if arr.length() == 0 {
+        return None;
+    }
+    let item = arr.get(0);
+    let inline_size = js_sys::Reflect::get(&item, &JsValue::from_str("inlineSize"))
+        .ok()
+        .and_then(|v| v.as_f64())?;
+    let block_size = js_sys::Reflect::get(&item, &JsValue::from_str("blockSize"))
+        .ok()
+        .and_then(|v| v.as_f64())?;
+    if inline_size <= 0.0 || block_size <= 0.0 {
+        return None;
+    }
+    Some((inline_size as u32, block_size as u32))
+}
+
 /// Synchronize all widget canvases + renderers from current layout sizes.
 ///
 /// If `prefer_exact` is true and device-pixel-content-box sizes are available,
@@ -918,6 +1013,10 @@ pub struct RayCore {
     _touch_closures: Vec<Closure<dyn FnMut(web_sys::TouchEvent)>>,
     _resize_closure: Option<Closure<dyn Fn(js_sys::Array)>>,
     _resize_observer: Option<web_sys::ResizeObserver>,
+    /// One-shot RAF callback used to coalesce ResizeObserver bursts.
+    _resize_raf_closure: Option<Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>>,
+    /// Pending RAF id for resize coalescing.
+    _resize_raf_id: Rc<Cell<i32>>,
     /// Long-press timer ID (from setTimeout), shared with closures.
     _long_press_timer: Rc<RefCell<Option<i32>>>,
     /// Last touch-tap time for double-tap detection.
@@ -1840,11 +1939,6 @@ impl RayCore {
         // We observe pane + price-axis + time-axis containers and store exact sizes.
         // On each callback we also resize canvases and renderers.
 
-        let container_el: web_sys::HtmlElement = {
-            let borrow = inner.borrow();
-            borrow.layout.container().clone()
-        };
-
         // Grab references to each widget container for the observer
         let pane_container_for_ro: web_sys::Element = {
             let borrow = inner.borrow();
@@ -1859,89 +1953,128 @@ impl RayCore {
             borrow.layout.time_axis_container.clone().unchecked_into()
         };
 
+        let resize_pending_exact = Rc::new(RefCell::new(ExactPixelSizes::default()));
+        let resize_last_applied = Rc::new(RefCell::new(None::<ResizeSignature>));
+        let resize_raf_scheduled = Rc::new(Cell::new(false));
+        let resize_raf_id = Rc::new(Cell::new(0));
+        let resize_raf_closure_slot: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> =
+            Rc::new(RefCell::new(None));
+
         let (resize_closure, resize_observer) = {
             let inner = Rc::clone(&inner);
             let pane_ref = pane_container_for_ro.clone();
             let price_ref = price_container_for_ro.clone();
             let time_ref = time_container_for_ro.clone();
+            let pending_exact = Rc::clone(&resize_pending_exact);
+            let last_applied = Rc::clone(&resize_last_applied);
+            let raf_scheduled = Rc::clone(&resize_raf_scheduled);
+            let raf_id = Rc::clone(&resize_raf_id);
+            let raf_slot = Rc::clone(&resize_raf_closure_slot);
 
             let cb =
                 Closure::<dyn Fn(js_sys::Array)>::wrap(Box::new(move |entries: js_sys::Array| {
-                    // ResizeObserver can fire again while a previous callback is
-                    // still processing on some browsers. Use try_borrow_mut so
-                    // re-entrant notifications are dropped instead of panicking.
-                    let Ok(mut s) = inner.try_borrow_mut() else {
-                        return;
-                    };
-                    let dpr = get_dpr();
-                    s.engine.dpr = dpr;
-
-                    // Try to extract exact device-pixel sizes from entries
-                    let mut got_exact = false;
+                    // Collect exact pixel sizes from all observed widget containers.
+                    // Processing is deferred to a RAF callback so bursts are coalesced.
+                    let mut pending = pending_exact.borrow_mut();
                     for i in 0..entries.length() {
                         let entry: web_sys::ResizeObserverEntry = entries.get(i).unchecked_into();
                         let target = entry.target();
-
-                        // Try device-pixel-content-box (returns exact integer device pixels)
-                        let dpsize = js_sys::Reflect::get(
-                            &entry,
-                            &JsValue::from_str("devicePixelContentBoxSize"),
-                        )
-                        .ok();
-                        let (exact_w, exact_h) = if let Some(ref dp) = dpsize {
-                            if !dp.is_undefined() && !dp.is_null() {
-                                let arr: &js_sys::Array = dp.unchecked_ref();
-                                if arr.length() > 0 {
-                                    let item = arr.get(0);
-                                    let iw = js_sys::Reflect::get(
-                                        &item,
-                                        &JsValue::from_str("inlineSize"),
-                                    )
-                                    .ok()
-                                    .and_then(|v| v.as_f64())
-                                    .unwrap_or(0.0);
-                                    let ih = js_sys::Reflect::get(
-                                        &item,
-                                        &JsValue::from_str("blockSize"),
-                                    )
-                                    .ok()
-                                    .and_then(|v| v.as_f64())
-                                    .unwrap_or(0.0);
-                                    got_exact = true;
-                                    (iw as u32, ih as u32)
-                                } else {
-                                    (0, 0)
-                                }
-                            } else {
-                                (0, 0)
-                            }
-                        } else {
-                            (0, 0)
-                        };
-
-                        if got_exact && exact_w > 0 && exact_h > 0 {
+                        if let Some((exact_w, exact_h)) = extract_device_pixel_content_box_size(&entry)
+                        {
                             if target == pane_ref {
-                                s.exact_sizes.pane_pw = exact_w;
-                                s.exact_sizes.pane_ph = exact_h;
+                                pending.pane_pw = exact_w;
+                                pending.pane_ph = exact_h;
+                                pending.available = true;
                             } else if target == price_ref {
-                                s.exact_sizes.price_axis_pw = exact_w;
-                                s.exact_sizes.price_axis_ph = exact_h;
+                                pending.price_axis_pw = exact_w;
+                                pending.price_axis_ph = exact_h;
+                                pending.available = true;
                             } else if target == time_ref {
-                                s.exact_sizes.time_axis_pw = exact_w;
-                                s.exact_sizes.time_axis_ph = exact_h;
+                                pending.time_axis_pw = exact_w;
+                                pending.time_axis_ph = exact_h;
+                                pending.available = true;
                             }
-                            s.exact_sizes.available = true;
                         }
                     }
+                    drop(pending);
 
-                    sync_widget_sizes(&mut *s, dpr, true);
+                    if raf_scheduled.get() {
+                        return;
+                    }
+                    raf_scheduled.set(true);
 
-                    // Emit resize event
-                    let (cw, ch) = s.layout.container_css_size();
-                    s.engine.event_bus.emit(raycore::ChartEvent::Resize {
-                        width: cw,
-                        height: ch,
-                    });
+                    let inner_for_raf = Rc::clone(&inner);
+                    let pending_for_raf = Rc::clone(&pending_exact);
+                    let last_applied_for_raf = Rc::clone(&last_applied);
+                    let raf_scheduled_for_raf = Rc::clone(&raf_scheduled);
+                    let raf_id_for_raf = Rc::clone(&raf_id);
+                    let raf_slot_for_raf = Rc::clone(&raf_slot);
+
+                    let raf_cb = Closure::<dyn FnMut(f64)>::wrap(Box::new(move |_ts: f64| {
+                        raf_id_for_raf.set(0);
+                        raf_scheduled_for_raf.set(false);
+
+                        let pending_exact = {
+                            let mut pending = pending_for_raf.borrow_mut();
+                            let next = *pending;
+                            *pending = ExactPixelSizes::default();
+                            next
+                        };
+
+                        let Ok(mut s) = inner_for_raf.try_borrow_mut() else {
+                            raf_slot_for_raf.borrow_mut().take();
+                            return;
+                        };
+
+                        apply_pending_exact_sizes(&mut *s, pending_exact);
+
+                        let dpr = get_dpr();
+                        s.engine.dpr = dpr;
+                        let next_signature = read_resize_signature(&*s, dpr);
+                        let should_apply = {
+                            let mut last = last_applied_for_raf.borrow_mut();
+                            if last.as_ref() == Some(&next_signature) {
+                                false
+                            } else {
+                                *last = Some(next_signature);
+                                true
+                            }
+                        };
+                        if should_apply {
+                            sync_widget_sizes(&mut *s, dpr, true);
+
+                            let (cw, ch) = s.layout.container_css_size();
+                            s.engine.event_bus.emit(raycore::ChartEvent::Resize {
+                                width: cw,
+                                height: ch,
+                            });
+                        }
+
+                        raf_slot_for_raf.borrow_mut().take();
+                    }));
+                    *raf_slot.borrow_mut() = Some(raf_cb);
+
+                    let raf_request = if let Some(window) = web_sys::window() {
+                        let borrowed = raf_slot.borrow();
+                        borrowed
+                            .as_ref()
+                            .and_then(|cb| {
+                                window
+                                    .request_animation_frame(cb.as_ref().unchecked_ref())
+                                    .ok()
+                            })
+                    } else {
+                        None
+                    };
+
+                    if let Some(id) = raf_request {
+                        raf_id.set(id);
+                        return;
+                    }
+
+                    raf_scheduled.set(false);
+                    raf_id.set(0);
+                    raf_slot.borrow_mut().take();
                 }));
             let observer = web_sys::ResizeObserver::new(cb.as_ref().unchecked_ref())?;
 
@@ -1957,9 +2090,6 @@ impl RayCore {
             let _ =
                 observe_with_dpcb.call2(&JsValue::NULL, observer.as_ref(), &time_container_for_ro);
 
-            // Also observe the outer container for general layout changes
-            observer.observe(&container_el.clone().unchecked_into());
-
             (cb, observer)
         };
 
@@ -1974,6 +2104,8 @@ impl RayCore {
             _touch_closures: touch_closures,
             _resize_closure: Some(resize_closure),
             _resize_observer: Some(resize_observer),
+            _resize_raf_closure: Some(resize_raf_closure_slot),
+            _resize_raf_id: resize_raf_id,
             _long_press_timer: long_press_timer,
             _last_tap_time: last_tap_time,
             _event_registry: EventListenerRegistry::new(),
@@ -7309,6 +7441,17 @@ impl RayCore {
         if let Some(obs) = self._resize_observer.take() {
             obs.disconnect();
         }
+        let resize_raf_id = self._resize_raf_id.get();
+        if resize_raf_id != 0 {
+            if let Some(window) = web_sys::window() {
+                let _ = window.cancel_animation_frame(resize_raf_id);
+            }
+            self._resize_raf_id.set(0);
+        }
+        if let Some(slot) = &self._resize_raf_closure {
+            slot.borrow_mut().take();
+        }
+        self._resize_raf_closure = None;
 
         // 2. Cancel any pending long-press timer
         if let Some(tid) = self._long_press_timer.borrow_mut().take() {
