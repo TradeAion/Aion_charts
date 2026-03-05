@@ -11,15 +11,15 @@ use wasm_bindgen::prelude::*;
 
 // ── Price formatting (LWC PriceFormatter) ────────────────────────────────────
 
-/// Format a price value with automatic decimal precision based on tick step.
-/// Matches LWC's PriceFormatter._formatAsDecimal logic.
+/// Format a price value with dynamic decimal precision and grouped thousands.
+/// Keeps a minimum of 2 decimal places in normal price mode.
 pub fn format_price(v: f64, step: f64) -> String {
-    let d = decimal_precision(step);
+    let d = decimal_precision(step).max(2);
     // LWC uses Unicode minus \u{2212} for negative (same width as +)
     if v < 0.0 {
-        format!("\u{2212}{:.prec$}", v.abs(), prec = d)
+        format!("\u{2212}{}", format_decimal_grouped(v.abs(), d))
     } else {
-        format!("{:.prec$}", v, prec = d)
+        format_decimal_grouped(v, d)
     }
 }
 
@@ -28,11 +28,11 @@ pub fn format_price(v: f64, step: f64) -> String {
 pub fn format_percent(v: f64, step: f64) -> String {
     let d = decimal_precision(step).min(2);
     if v < 0.0 {
-        format!("\u{2212}{:.prec$}%", v.abs(), prec = d)
+        format!("\u{2212}{}%", format_decimal_grouped(v.abs(), d))
     } else if v > 0.0 {
-        format!("+{:.prec$}%", v, prec = d)
+        format!("+{}%", format_decimal_grouped(v, d))
     } else {
-        format!("{:.prec$}%", v, prec = d)
+        format!("{}%", format_decimal_grouped(v, d))
     }
 }
 
@@ -41,9 +41,9 @@ pub fn format_percent(v: f64, step: f64) -> String {
 pub fn format_indexed(v: f64, step: f64) -> String {
     let d = decimal_precision(step).min(2);
     if v < 0.0 {
-        format!("\u{2212}{:.prec$}", v.abs(), prec = d)
+        format!("\u{2212}{}", format_decimal_grouped(v.abs(), d))
     } else {
-        format!("{:.prec$}", v, prec = d)
+        format_decimal_grouped(v, d)
     }
 }
 
@@ -59,6 +59,35 @@ fn decimal_precision(step: f64) -> usize {
         prec += 1;
     }
     prec
+}
+
+fn format_decimal_grouped(v: f64, precision: usize) -> String {
+    let raw = format!("{:.prec$}", v, prec = precision);
+    let (int_part, frac_part) = match raw.split_once('.') {
+        Some((i, f)) => (i, Some(f)),
+        None => (raw.as_str(), None),
+    };
+    let grouped = add_thousands_separators(int_part);
+    match frac_part {
+        Some(frac) => format!("{}.{}", grouped, frac),
+        None => grouped,
+    }
+}
+
+fn add_thousands_separators(int_part: &str) -> String {
+    if !int_part.bytes().all(|b| b.is_ascii_digit()) {
+        return int_part.to_string();
+    }
+    let len = int_part.len();
+    let mut out = String::with_capacity(len + len / 3);
+    for (i, ch) in int_part.chars().enumerate() {
+        out.push(ch);
+        let rem = len - i - 1;
+        if rem > 0 && rem % 3 == 0 {
+            out.push(',');
+        }
+    }
+    out
 }
 
 // ── Volume formatting (LWC VolumeFormatter) ──────────────────────────────────
@@ -259,4 +288,21 @@ pub fn nice_step_ceiling(raw: f64) -> f64 {
         10.0
     };
     n * mag
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_price;
+
+    #[test]
+    fn format_price_adds_grouping_and_min_two_decimals() {
+        assert_eq!(format_price(240.0, 1.0), "240.00");
+        assert_eq!(format_price(58_780.0, 1.0), "58,780.00");
+    }
+
+    #[test]
+    fn format_price_preserves_higher_precision_when_needed() {
+        assert_eq!(format_price(1.234, 0.001), "1.234");
+        assert_eq!(format_price(-1_234.5, 0.1), "\u{2212}1,234.50");
+    }
 }
