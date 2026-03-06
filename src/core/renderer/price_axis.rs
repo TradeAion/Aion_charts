@@ -239,7 +239,10 @@ impl PriceAxisRenderer {
         self.base_ctx.set_text_baseline("middle");
 
         let padding_inner_css = style.price_axis_padding_inner();
-        let text_x_css = border_size / dpr + padding_inner_css;
+        let tick_length_css = style.axis_tick_length as f64;
+        // LWC: textLeftX = tickMarkLeftX + tickLength + paddingInner
+        // tickMarkLeftX = 0 (at border), so text_x = border + tickLength + paddingInner.
+        let text_x_css = border_size / dpr + tick_length_css + padding_inner_css;
 
         let h_css = h / dpr;
         self.base_ctx
@@ -436,7 +439,7 @@ impl PriceAxisRenderer {
             geom.text_y_css = (y_top + y_top + single_h_bmp) / 2.0 / dpr;
             geom.text_x_css =
                 centered_full_width_label_text_x_css(&geom, price_text_w, dpr, &metrics);
-            geom.radius = 0.0;
+            // LWC: corner radius = 2 * horizontalPixelRatio. Rounded on the outside edge.
 
             draw_right_axis_label_background(&self.base_ctx, &geom, &item.color);
             draw_right_axis_label_tick(&self.base_ctx, &geom, &item.color, dpr);

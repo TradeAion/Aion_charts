@@ -118,10 +118,10 @@ impl ChartStyle {
         2.5 / 12.0 * self.font_size as f64
     }
     /// Price axis label offset.
-    /// Reduced from LWC's default to remove extra right-side whitespace.
+    /// LWC: `Constants.LabelOffset = 5` — extra spacing after text in optimal width.
     #[inline]
     pub fn price_axis_label_offset(&self) -> f64 {
-        0.0
+        crate::core::constants::PRICE_AXIS_LABEL_OFFSET
     }
     /// Extra in-axis inset used when clamping Y-axis label boxes.
     /// Keeps crosshair/live-price labels fully inside at top/bottom edges.
@@ -137,12 +137,16 @@ impl ChartStyle {
     }
 
     /// Computed optimal price axis width (CSS px) for a given max text width.
-    /// Compact mode: border + left/right padding + text width.
+    /// LWC: `ceil(borderSize + tickLength + paddingInner + paddingOuter + LabelOffset + maxTextWidth)`,
+    /// then rounded to the next even number.
+    /// At default fontSize=12: `ceil(1 + 5 + 5 + 5 + 5 + textW)` = `ceil(21 + textW)`.
     #[inline]
     pub fn price_axis_width(&self, max_text_width: f64) -> f64 {
         let raw = self.axis_border_size as f64
+            + self.axis_tick_length as f64
             + self.price_axis_padding_inner()
             + self.price_axis_padding_outer()
+            + self.price_axis_label_offset()
             + max_text_width;
         // Keep a small practical floor so the axis never collapses on empty data.
         let raw = raw.max(12.0);
@@ -151,29 +155,30 @@ impl ChartStyle {
     }
 
     /// Time axis optimal height (CSS px).
-    /// Compact mode: border + fontSize + top/bottom padding.
+    /// LWC: `ceil(borderSize + tickLength + fontSize + paddingTop + paddingBottom + labelBottomOffset)`.
+    /// At default fontSize=12: `ceil(1 + 5 + 12 + 3 + 3 + 4) = 28`.
     #[inline]
     pub fn time_axis_height(&self) -> f64 {
         let fs = self.font_size as f64;
         self.axis_border_size as f64
+            + self.axis_tick_length as f64
             + fs
             + self.time_axis_padding_top()
             + self.time_axis_padding_bottom()
+            + self.time_axis_label_bottom_offset()
     }
 
     /// Time axis top padding.
-    /// Slightly larger than price axis padding for a more spacious x-axis,
-    /// matching TradingView's proportions.
+    /// LWC: `paddingTop = 3 * fontSize / 12`.
     #[inline]
     pub fn time_axis_padding_top(&self) -> f64 {
-        (6.0 / 12.0 * self.font_size as f64).clamp(4.0, 8.0)
+        3.0 / 12.0 * self.font_size as f64
     }
     /// Time axis bottom padding.
-    /// Slightly larger than price axis padding for a more spacious x-axis,
-    /// matching TradingView's proportions.
+    /// LWC: `paddingBottom = 3 * fontSize / 12`.
     #[inline]
     pub fn time_axis_padding_bottom(&self) -> f64 {
-        (6.0 / 12.0 * self.font_size as f64).clamp(4.0, 8.0)
+        3.0 / 12.0 * self.font_size as f64
     }
     /// Time axis paddingHorizontal: `9 * fontSize / 12`.
     #[inline]
@@ -181,10 +186,10 @@ impl ChartStyle {
         9.0 * self.font_size as f64 / 12.0
     }
     /// Additional bottom offset under X-axis labels.
-    /// Compact mode keeps this at zero to avoid extra whitespace.
+    /// LWC: `labelBottomOffset = 4 * fontSize / 12`.
     #[inline]
     pub fn time_axis_label_bottom_offset(&self) -> f64 {
-        0.0
+        4.0 / 12.0 * self.font_size as f64
     }
 
     /// Crosshair label additional padding (LWC: `2/12 * fontSize`).
@@ -193,10 +198,10 @@ impl ChartStyle {
         2.0 / 12.0 * self.font_size as f64
     }
     /// Top inset for X-axis crosshair label box.
-    /// Keeps label fully inside the time-axis border box.
+    /// LWC: label starts at y=0 (covers the border area).
     #[inline]
     pub fn time_axis_crosshair_label_top_inset(&self) -> f64 {
-        self.axis_border_size as f64
+        0.0
     }
 
     /// Effective Y-axis row spacing for price ticks (CSS px).
