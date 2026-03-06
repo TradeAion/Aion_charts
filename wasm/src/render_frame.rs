@@ -189,18 +189,16 @@ pub(crate) fn do_render_frame(
 
     let webgpu_backend = s.engine.renderer_name() == "webgpu";
     if webgpu_backend {
-        // WebGPU idle drawings: preserve label/fill identity via overlay path.
-        // Keep line geometry in bottom layer for z-order behavior.
-        // Clamp fill alpha to avoid visually "covering" candles.
+        // WebGPU idle drawings: promote fills and texts to the overlay so
+        // they render above candles.  Lines stay in the bottom layer for
+        // z-order behaviour.  Fill alpha is kept as-is so it matches the
+        // hovered/active state (no visible opacity pop on hover).
         for geom in &mut base_drawings {
             if !geom.rects.is_empty() {
                 let mut fill_only = geom.clone();
                 fill_only.lines.clear();
                 fill_only.texts.clear();
                 fill_only.anchors.clear();
-                for r in &mut fill_only.rects {
-                    r.a = r.a.min(0.12);
-                }
                 top_drawings.push(fill_only);
                 geom.rects.clear();
             }
