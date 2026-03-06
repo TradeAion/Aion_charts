@@ -4269,6 +4269,9 @@ impl RayCore {
             .replace_from_snapshot(payload.main)
             .map_err(js_err)?;
 
+        // Stamp timestamps on imported drawings from current bar data.
+        s.engine.stamp_drawing_timestamps();
+
         // Clear all subpane drawings first so restore is deterministic.
         for sp in s.subpanes.iter_mut() {
             sp.drawings.clear();

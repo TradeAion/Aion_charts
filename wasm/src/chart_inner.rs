@@ -932,6 +932,7 @@ impl ChartInner {
             }
 
             if should_return {
+                self.engine.stamp_drawing_timestamps();
                 if let Some(cursor) = drag_cursor {
                     self.interaction.drawing_drag_active = true;
                     self.interaction.set_drawing_cursor(Some(cursor));
@@ -982,6 +983,7 @@ impl ChartInner {
                 if let Some((bar, price)) = anchor_pos {
                     drawings.finalize_creation_step(bar, price);
                 }
+                self.engine.stamp_drawing_timestamps();
                 return;
             }
         }
@@ -1001,6 +1003,7 @@ impl ChartInner {
             }
         }
         if ended_drag {
+            self.engine.stamp_drawing_timestamps();
             self.interaction.drawing_drag_active = false;
             self.interaction.set_drawing_cursor(None);
             // Restore crosshair for mouse (touch handled by tracking mode)

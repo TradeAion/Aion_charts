@@ -9,17 +9,34 @@ use crate::core::renderer::draw_list::{ColoredLine, ColoredRect, DrawText};
 
 /// A point in logical chart space (bar index + price).
 /// Survives scroll/zoom/resize — converted to pixels at render time.
+/// An optional `timestamp` anchors the point in absolute time so drawings
+/// can be remapped when bar data changes (e.g. timeframe switch).
 #[derive(Debug, Clone, Copy)]
 pub struct DrawingPoint {
     /// Fractional bar index (e.g. 42.0 = center of bar 42).
     pub bar_index: f64,
     /// Price value.
     pub price: f64,
+    /// Absolute timestamp (epoch millis) corresponding to `bar_index`.
+    /// Used to remap `bar_index` when the underlying bar data changes.
+    pub timestamp: Option<u64>,
 }
 
 impl DrawingPoint {
     pub fn new(bar_index: f64, price: f64) -> Self {
-        Self { bar_index, price }
+        Self {
+            bar_index,
+            price,
+            timestamp: None,
+        }
+    }
+
+    pub fn with_timestamp(bar_index: f64, price: f64, timestamp: u64) -> Self {
+        Self {
+            bar_index,
+            price,
+            timestamp: Some(timestamp),
+        }
     }
 }
 

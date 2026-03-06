@@ -40,6 +40,8 @@ pub struct SerializedAnchorPoint {
 pub struct SerializedDrawingPoint {
     pub bar_index: f64,
     pub price: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,6 +92,7 @@ impl From<DrawingPoint> for SerializedDrawingPoint {
         Self {
             bar_index: value.bar_index,
             price: value.price,
+            timestamp: value.timestamp,
         }
     }
 }
@@ -99,13 +102,18 @@ impl From<&DrawingPoint> for SerializedDrawingPoint {
         Self {
             bar_index: value.bar_index,
             price: value.price,
+            timestamp: value.timestamp,
         }
     }
 }
 
 impl From<SerializedDrawingPoint> for DrawingPoint {
     fn from(value: SerializedDrawingPoint) -> Self {
-        DrawingPoint::new(value.bar_index, value.price)
+        Self {
+            bar_index: value.bar_index,
+            price: value.price,
+            timestamp: value.timestamp,
+        }
     }
 }
 

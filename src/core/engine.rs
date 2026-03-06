@@ -283,11 +283,25 @@ impl ChartEngine {
         self.set_main_chart_type(self.main_chart_options.chart_type);
     }
 
+    /// Stamp timestamps on all drawing anchor points from the current bar data.
+    /// Call after any drawing creation, modification, or drag ends.
+    pub fn stamp_drawing_timestamps(&mut self) {
+        self.drawings.stamp_timestamps(&self.bars);
+    }
+
     /// Replace all bar data.
     pub fn set_data(&mut self, bars: Vec<Bar>) -> Result<(), String> {
         ensure_strictly_increasing_bar_timestamps(&bars)?;
         let len = bars.len();
+
+        // Stamp timestamps on existing drawings from the OLD bar data so they
+        // can be remapped after the data swap.
+        self.drawings.stamp_timestamps(&self.bars);
+
         self.bars.set(bars);
+
+        // Remap drawing positions to the new bar data using stored timestamps.
+        self.drawings.remap_to_new_data(&self.bars);
 
         // Update studies with new data
         self.studies.update_studies(&self.bars);

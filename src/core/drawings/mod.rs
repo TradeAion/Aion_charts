@@ -21,6 +21,8 @@ pub mod trend_line;
 pub mod types;
 pub mod vertical_line;
 
+use crate::core::data::BarArray;
+use crate::core::renderer::value_projection::timestamp_to_bar_index_in_bars;
 use crate::core::viewport::Viewport;
 use drawing::{ensure_next_drawing_id_at_least, Drawing};
 use persistence::{
@@ -555,6 +557,91 @@ impl DrawingManager {
         let snapshot: DrawingSnapshot =
             serde_json::from_str(json).map_err(|e| format!("Invalid drawing JSON: {e}"))?;
         self.replace_from_snapshot(snapshot)
+    }
+
+    /// Resolve a timestamp for a fractional bar index using bar data.
+    /// Returns `None` if bars are empty or the index is out of range.
+    fn resolve_timestamp(bar_index: f64, bars: &BarArray) -> Option<u64> {
+        let len = bars.len();
+        if len == 0 {
+            return None;
+        }
+        let idx = bar_index.round() as isize;
+        if idx < 0 || idx >= len as isize {
+            // Extrapolate for out-of-range indices
+            if len >= 2 {
+                let dt = bars.timestamp(len - 1) as f64 - bars.timestamp(len - 2) as f64;
+                if dt > 0.0 {
+                    let base_ts = bars.timestamp(len - 1) as f64;
+                    let extra = (bar_index - (len - 1) as f64) * dt;
+                    return Some((base_ts + extra).round() as u64);
+                }
+            }
+            if len >= 2 && idx < 0 {
+                let dt = bars.timestamp(1) as f64 - bars.timestamp(0) as f64;
+                if dt > 0.0 {
+                    let base_ts = bars.timestamp(0) as f64;
+                    let extra = bar_index * dt;
+                    return Some((base_ts + extra).round() as u64);
+                }
+            }
+            return None;
+        }
+        Some(bars.timestamp(idx as usize))
+    }
+
+    /// Fill in missing `timestamp` fields on all drawing anchor points
+    /// (and brush intermediate points) using the current bar data.
+    pub fn stamp_timestamps(&mut self, bars: &BarArray) {
+        for drawing in &mut self.drawings {
+            for anchor in drawing.anchors_mut().iter_mut() {
+                if anchor.point.timestamp.is_none() {
+                    anchor.point.timestamp =
+                        Self::resolve_timestamp(anchor.point.bar_index, bars);
+                }
+            }
+            if drawing.tool() == DrawingTool::Brush {
+                if let Some(brush) = drawing.as_any_mut().downcast_mut::<brush::BrushDrawing>() {
+                    for pt in brush.points_mut().iter_mut() {
+                        if pt.timestamp.is_none() {
+                            pt.timestamp = Self::resolve_timestamp(pt.bar_index, bars);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Remap all drawing positions from stored timestamps to new bar indices
+    /// in the given (potentially different-timeframe) bar data.
+    pub fn remap_to_new_data(&mut self, bars: &BarArray) {
+        if bars.len() == 0 {
+            return;
+        }
+        for drawing in &mut self.drawings {
+            // HorizontalLine only depends on price, not bar_index — skip X remap
+            if drawing.tool() == DrawingTool::HorizontalLine {
+                continue;
+            }
+            for anchor in drawing.anchors_mut().iter_mut() {
+                if let Some(ts) = anchor.point.timestamp {
+                    if let Some(new_idx) = timestamp_to_bar_index_in_bars(ts, bars) {
+                        anchor.point.bar_index = new_idx;
+                    }
+                }
+            }
+            if drawing.tool() == DrawingTool::Brush {
+                if let Some(brush) = drawing.as_any_mut().downcast_mut::<brush::BrushDrawing>() {
+                    for pt in brush.points_mut().iter_mut() {
+                        if let Some(ts) = pt.timestamp {
+                            if let Some(new_idx) = timestamp_to_bar_index_in_bars(ts, bars) {
+                                pt.bar_index = new_idx;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn deserialize_one(item: SerializedDrawing) -> Result<Box<dyn Drawing>, String> {

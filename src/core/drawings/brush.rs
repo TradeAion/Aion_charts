@@ -47,6 +47,10 @@ impl BrushDrawing {
         &self.points
     }
 
+    pub(crate) fn points_mut(&mut self) -> &mut Vec<DrawingPoint> {
+        &mut self.points
+    }
+
     pub(crate) fn set_points(&mut self, points: Vec<DrawingPoint>) {
         self.points = points;
     }
