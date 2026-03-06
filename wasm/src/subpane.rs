@@ -784,15 +784,12 @@ impl SubPane {
             self.auto_scale_price_visible(main_viewport.start_bar, main_viewport.end_bar);
         }
 
-        // Compute Y tick marks for this sub-pane's viewport
         // Subpanes have no volume area, so pane_h == candle_h
         let y_ticks = compute_y_ticks(&self.viewport, ph, ph, dpr, style);
         let (bottom_drawings, top_drawings) = self.generate_drawing_geometry(main_viewport);
 
-        // Render chart area (grid, bottom drawings, reference lines, data lines)
         self.render_chart(main_viewport, style, &y_ticks, x_ticks, &bottom_drawings);
 
-        // Render price axis base layer (ticks + labels)
         self.price_axis.render_base(style, &y_ticks);
 
         // Render last-value indicator labels on the price axis (colored pills)

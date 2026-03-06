@@ -10,7 +10,7 @@
 
 use crate::core::chart_type::MainChartType;
 use crate::core::data::BarArray;
-use crate::core::formatters::{format_indexed, format_percent, format_price, nice_step_ceiling};
+use crate::core::formatters::{format_indexed, format_percent, format_price};
 use crate::core::renderer::traits::ChartStyle;
 use crate::core::renderer::transforms::price_to_y;
 use crate::core::series::SeriesCollection;
@@ -44,19 +44,62 @@ pub fn price_to_pane_y_phys(price: f64, vp: &Viewport, pane_ph: f64) -> f64 {
     price_to_y(price, vp, candle_area_height_ph(vp, pane_ph))
 }
 
-/// Shared Y tick-step in internal price-scale space (same policy as tick_marks.rs).
-/// `axis_ph` is the full visible price-axis height in physical pixels.
-#[inline]
+/// Shared Y tick-step in internal price-scale space.
+///
+/// Ported from LWC's `PriceTickMarkBuilder.tickSpan()` which runs three
+/// `PriceTickSpanCalculator` instances with divider sequences
+/// `[2, 2.5, 2]`, `[2, 2, 2.5]`, `[2.5, 2, 2]` and takes the minimum.
 pub fn y_tick_step_internal(vp: &Viewport, axis_ph: f64, dpr: f64, style: &ChartStyle) -> f64 {
     let range = vp.price_max - vp.price_min;
     if range <= 0.0 || axis_ph <= 0.0 || dpr <= 0.0 {
         return 0.0001;
     }
-    // LWC policy: row spacing is typography-driven, not a hardcoded pixel constant.
-    // tickMarkHeight = ceil(fontSize * tickMarkDensity)
-    let row_spacing_css = style.price_scale_tick_mark_spacing_css();
-    let target_count = (axis_ph / (row_spacing_css * dpr)).max(1.0);
-    nice_step_ceiling(range / target_count).max(0.0001)
+    let mark_height = style.price_scale_tick_mark_spacing_css();
+    let scale_height = axis_ph / dpr;
+    let max_tick_span = range * mark_height / scale_height;
+
+    let s1 = lwc_tick_span(range, max_tick_span, &[2.0, 2.5, 2.0]);
+    let s2 = lwc_tick_span(range, max_tick_span, &[2.0, 2.0, 2.5]);
+    let s3 = lwc_tick_span(range, max_tick_span, &[2.5, 2.0, 2.0]);
+
+    s1.min(s2).min(s3).max(0.0001)
+}
+
+const TICK_SPAN_EPS: f64 = 1e-14;
+const FRACTIONAL_DIVIDERS: [f64; 3] = [2.0, 2.5, 2.0];
+
+/// Port of LWC's `PriceTickSpanCalculator.tickSpan()` for base-decimal prices
+/// (base = 0, the common case for financial data).
+fn lwc_tick_span(range: f64, max_tick_span: f64, integral_dividers: &[f64]) -> f64 {
+    let mut span = 10.0_f64.powf(0.0_f64.max(range.log10().ceil()));
+
+    let mut idx = 0usize;
+    let mut c = integral_dividers[0];
+
+    loop {
+        let larger_max = (max_tick_span * c - span) <= TICK_SPAN_EPS;
+        let larger_one = (1.0 - span) <= TICK_SPAN_EPS;
+        if !(larger_max && larger_one) {
+            break;
+        }
+        span /= c;
+        idx += 1;
+        c = integral_dividers[idx % integral_dividers.len()];
+    }
+
+    span = span.max(1.0);
+
+    if (span - 1.0).abs() < TICK_SPAN_EPS {
+        idx = 0;
+        c = FRACTIONAL_DIVIDERS[0];
+        while (max_tick_span * c - span) <= TICK_SPAN_EPS && span > TICK_SPAN_EPS {
+            span /= c;
+            idx += 1;
+            c = FRACTIONAL_DIVIDERS[idx % FRACTIONAL_DIVIDERS.len()];
+        }
+    }
+
+    span
 }
 
 /// Format a raw price according to the active price-scale mode.

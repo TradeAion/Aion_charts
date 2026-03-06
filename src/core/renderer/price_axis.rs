@@ -32,7 +32,6 @@ pub struct PriceAxisRenderer {
     pw: u32,
     ph: u32,
     dpr: f64,
-    /// Shared text width cache for tick labels + crosshair label.
     text_cache: TextWidthCache,
 }
 
@@ -208,9 +207,9 @@ impl PriceAxisRenderer {
 
     /// Render the base layer: background, border, tick marks, tick labels.
     ///
-    /// LWC behaviour: tick marks are clipped against the full canvas bounds,
-    /// NOT the data/candle area. This allows ticks to render into the margin
-    /// areas (e.g. below the candle area where volume is shown).
+    /// LWC behaviour: tick marks are recomputed and redrawn instantly every
+    /// frame with no fade animation.  Labels are placed at exact multiples of
+    /// the tick span so they slide smoothly with the viewport during drag.
     pub fn render_base(&mut self, style: &ChartStyle, ticks: &[TickMark]) {
         let w = self.pw as f64;
         let h = self.ph as f64;
@@ -229,32 +228,27 @@ impl PriceAxisRenderer {
             self.base_ctx.fill_rect(0.0, 0.0, border_size, h);
         }
 
-        // Tick marks are intentionally hidden; keep tick values for label placement.
-
         // Tick labels — draw in media (CSS) coordinate space for sharp text.
         // LWC pattern: save → scale(dpr,dpr) → draw text with CSS-px font → restore.
-        // This lets the browser's native text hinting produce sharp glyphs at all DPR.
         self.base_ctx.save();
         let _ = self.base_ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
 
         let css_font = format!("{}px {}", style.font_size, style.font_family);
         self.base_ctx.set_font(&css_font);
-        self.base_ctx
-            .set_fill_style_str(&rgba(&style.axis_text_color));
         self.base_ctx.set_text_align("left");
         self.base_ctx.set_text_baseline("middle");
 
         let padding_inner_css = style.price_axis_padding_inner();
         let text_x_css = border_size / dpr + padding_inner_css;
 
-        // Clip labels against full canvas height
         let h_css = h / dpr;
+        self.base_ctx
+            .set_fill_style_str(&rgba(&style.axis_text_color));
         for t in ticks {
             let y_css = t.pixel / dpr;
             if y_css < 0.0 || y_css > h_css {
                 continue;
             }
-            // yMidCorrection: precise centering using actualBoundingBoxAscent/Descent
             let m = self
                 .text_cache
                 .measure_full(&self.base_ctx, &t.label, &css_font);
