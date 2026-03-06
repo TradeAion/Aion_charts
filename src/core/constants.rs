@@ -111,6 +111,14 @@ pub const PRICE_SCALE_OFFSET_COEFF: f64 = 0.2;
 /// Minimum coefficient for price scale.
 pub const MIN_PRICE_SCALE_COEFF: f64 = 0.1;
 
+/// Maximum coefficient for price scale (limits zoom-out from start range).
+pub const MAX_PRICE_SCALE_COEFF: f64 = 10.0;
+
+/// Exponential sensitivity for price-axis drag scaling.
+/// Controls how many pane-heights of drag correspond to one e-fold zoom change.
+/// Lower = more responsive. 0.6 calibrated to match TradingView feel.
+pub const PRICE_SCALE_DRAG_SENSITIVITY: f64 = 0.6;
+
 /// Divisor for price step calculation.
 pub const PRICE_STEP_DIVISOR: f64 = 10.0;
 

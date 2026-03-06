@@ -13,16 +13,15 @@ use crate::core::viewport::Viewport;
 
 /// Compute price (Y-axis) tick marks.
 ///
-/// LWC behaviour: tick marks are computed for the full visible price range
-/// and can extend into margin/volume areas. The `pane_h` parameter is the
-/// full pane height, and `candle_h` is the candle area height (used for
-/// coordinate mapping).
+/// Faithfully ports LWC's `PriceTickMarkBuilder._updateMarks()`:
+/// - Tick step is computed from the CANDLE AREA height (the same coordinate
+///   space where ticks are positioned). LWC uses a single `priceScale.height()`
+///   for both step and coordinate mapping.
+/// - Iteration runs HIGH→LOW (top of chart to bottom), matching LWC exactly.
+///   This gives priority to higher-value ticks when spacing is tight.
+/// - Tick alignment uses `high - (high % span)` (LWC's modulo alignment).
 ///
-/// Tick pixel positions are relative to the candle area coordinate system
-/// (where price_min maps to candle_h and price_max maps to 0), but tick
-/// marks can extend beyond this range into the volume area.
-///
-/// Handles all price scale modes (Normal, Log, Percentage, IndexedTo100).
+/// Supports all PriceScaleMode variants: Normal, Logarithmic, Percentage, IndexedTo100.
 pub fn compute_y_ticks(
     vp: &Viewport,
     pane_h: f64,
@@ -35,41 +34,48 @@ pub fn compute_y_ticks(
         return vec![];
     }
 
-    // Tick spacing follows LWC's typography-driven density model.
-    // Use full pane height for spacing calculation so ticks are evenly distributed.
-    let step = y_tick_step_internal(vp, pane_h, dpr, style).max(0.0001);
+    // ── Step computation uses CANDLE AREA height (matches LWC) ──
+    // LWC: maxTickSpan = (high-low) * markHeight / priceScale.height()
+    // We use candle_h so that step transitions match the coordinate space.
+    let step = y_tick_step_internal(vp, candle_h, dpr, style).max(0.0001);
     let min_gap_px = (style.price_scale_tick_mark_spacing_css() * dpr).max(1.0);
 
-    // LWC computes tick range from the logical prices at the TOP and BOTTOM
-    // of the full scale height, not just the data range. This allows ticks
-    // to extend into margin areas.
-    //
-    // Calculate the price that would map to the bottom of the full pane
-    // (below the candle area, in the volume region).
+    // ── Compute high/low: extend range to cover the full pane ──
+    // LWC: high = coordinateToLogical(0), low = coordinateToLogical(height-1)
+    // This extends the price range into margin/volume areas so ticks can
+    // appear outside the data region.
     let price_at_pane_bottom = vp.price_min - (range * (pane_h - candle_h) / candle_h);
+    let high = vp.price_max + step; // slightly above top to catch edge ticks
+    let low = price_at_pane_bottom;
 
-    // Start from below the visible range to catch ticks in the volume area
-    let first = (price_at_pane_bottom / step).ceil() * step;
+    // ── LWC modulo alignment: start at largest multiple of step ≤ high ──
+    // LWC: mod = high % span; mod += (mod < 0) ? span : 0; start = high - mod
+    let mut modulo = high % step;
+    if modulo < 0.0 {
+        modulo += step;
+    }
+    let start = high - modulo;
 
+    // ── Iterate HIGH → LOW (LWC's _updateMarks direction) ──
     let mut out: Vec<TickMark> = Vec::new();
-    let mut v = first;
+    let mut prev_px: Option<f64> = None;
+    let mut v = start;
 
-    // Continue past price_max to ensure we don't miss any ticks
-    while v <= vp.price_max + step {
+    while v > low {
         // Map price to pixel using the candle area coordinate system
         let frac = (v - vp.price_min) / range;
         let px = candle_h * (1.0 - frac);
 
-        // Skip ticks outside the full pane bounds
+        // Skip ticks outside the full pane bounds (with small margin)
         if px < -min_gap_px || px > pane_h + min_gap_px {
-            v += step;
+            v -= step;
             continue;
         }
 
-        // Skip ticks too close to previous
-        if let Some(prev) = out.last() {
-            if (prev.pixel - px).abs() < min_gap_px {
-                v += step;
+        // Skip ticks too close to previous (LWC: abs(coord - prevCoord) < tickMarkHeight)
+        if let Some(prev) = prev_px {
+            if (prev - px).abs() < min_gap_px {
+                v -= step;
                 continue;
             }
         }
@@ -82,7 +88,9 @@ pub fn compute_y_ticks(
             label,
             major: true,
         });
-        v += step;
+
+        prev_px = Some(px);
+        v -= step;
     }
     out
 }

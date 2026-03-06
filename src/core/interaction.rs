@@ -28,11 +28,12 @@
 
 use crate::core::constants::{
     DEFAULT_INITIAL_VISIBLE_BARS, DOUBLE_CLICK_WINDOW_MS, KINETIC_FRICTION_COEFFICIENT,
-    KINETIC_TRIGGER_WINDOW_MS, MIN_GLIDE_VELOCITY, MIN_KINETIC_VELOCITY, MIN_PINCH_SCALE,
-    MIN_PRICE_SCALE_COEFF, PHYSICS_FRAME_MS, PINCH_SCALE_MULTIPLIER, PRICE_SCALE_OFFSET_COEFF,
-    SCROLL_MULTIPLIER, TIME_AXIS_MAX_BAR_MULTIPLIER, TIME_AXIS_MIN_BARS, VELOCITY_SAMPLE_WINDOW_MS,
-    VELOCITY_SMOOTHING_FACTOR, WHEEL_DELTA_LINE_MULTIPLIER, WHEEL_DELTA_PAGE_MULTIPLIER,
-    WHEEL_SPEED_DIVISOR, ZOOM_FACTOR_DIVISOR,
+    KINETIC_TRIGGER_WINDOW_MS, MAX_PRICE_SCALE_COEFF, MIN_GLIDE_VELOCITY, MIN_KINETIC_VELOCITY,
+    MIN_PINCH_SCALE, MIN_PRICE_SCALE_COEFF, PHYSICS_FRAME_MS, PINCH_SCALE_MULTIPLIER,
+    PRICE_SCALE_DRAG_SENSITIVITY, SCROLL_MULTIPLIER, TIME_AXIS_MAX_BAR_MULTIPLIER,
+    TIME_AXIS_MIN_BARS, VELOCITY_SAMPLE_WINDOW_MS, VELOCITY_SMOOTHING_FACTOR,
+    WHEEL_DELTA_LINE_MULTIPLIER, WHEEL_DELTA_PAGE_MULTIPLIER, WHEEL_SPEED_DIVISOR,
+    ZOOM_FACTOR_DIVISOR,
 };
 use crate::core::data::BarArray;
 use crate::core::renderer::traits::{CrosshairMode, CrosshairState};
@@ -581,7 +582,10 @@ impl InteractionHandler {
     }
 
     /// Pointer move on the PRICE AXIS.
-    /// LWC: PriceScale.scaleTo — inverted Y, coefficient formula.
+    /// Exponential delta-based scaling: smooth, symmetric, position-independent.
+    /// Drag UP (y decreases) → zoom IN, drag DOWN (y increases) → zoom OUT.
+    /// Uses an exponential mapping so sensitivity is uniform across the entire
+    /// axis height and round-trips are mathematically perfect.
     pub fn price_axis_pointer_move(&mut self, y: f64, pane_css_h: f64, viewport: &mut Viewport) {
         if self.pressed && self.press_zone == HitZone::PriceAxis {
             let manhattan = (y - self.press_y).abs();
@@ -589,13 +593,13 @@ impl InteractionHandler {
                 self.drag_active = true;
             }
             if self.drag_active && pane_css_h > 1.0 {
-                let h = self.price_scale_height;
-                let inv_y = (h - y).max(0.0);
-                let offset = (h - 1.0) * PRICE_SCALE_OFFSET_COEFF;
-                let scale_coeff = ((self.price_scale_start_y_inv + offset) / (inv_y + offset))
-                    .max(MIN_PRICE_SCALE_COEFF);
+                let delta = self.press_y - y; // positive = moved up = zoom in
+                let sensitivity = self.price_scale_height * PRICE_SCALE_DRAG_SENSITIVITY;
+                let scale = (-delta / sensitivity)
+                    .exp()
+                    .clamp(MIN_PRICE_SCALE_COEFF, MAX_PRICE_SCALE_COEFF);
 
-                let half = self.price_scale_start_range * scale_coeff / 2.0;
+                let half = self.price_scale_start_range * scale / 2.0;
                 let mid = self.price_scale_start_mid;
                 viewport.price_min = mid - half;
                 viewport.price_max = mid + half;

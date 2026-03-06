@@ -93,21 +93,24 @@ impl ChartStyle {
     // ── LWC-derived computed paddings (all in CSS px) ──
 
     /// Compact axis padding target in CSS px.
-    /// Keeps layout tight while still accommodating text at varying font sizes.
+    /// Kept as a utility for future use; current axis paddings use LWC formulas.
     #[inline]
+    #[allow(dead_code)]
     fn compact_axis_padding_css(&self) -> f64 {
         ((2.5 / 12.0) * self.font_size as f64).clamp(2.0, 3.0)
     }
 
     /// Price axis left padding (inside edge to text).
+    /// LWC: `paddingInner = fontSize / 12 * tickLength` where tickLength = 5.
     #[inline]
     pub fn price_axis_padding_inner(&self) -> f64 {
-        self.compact_axis_padding_css()
+        self.font_size as f64 / 12.0 * self.axis_tick_length as f64
     }
     /// Price axis right padding (text to outer edge).
+    /// LWC: `paddingOuter = fontSize / 12 * tickLength`.
     #[inline]
     pub fn price_axis_padding_outer(&self) -> f64 {
-        self.compact_axis_padding_css()
+        self.font_size as f64 / 12.0 * self.axis_tick_length as f64
     }
     /// Price axis paddingTop/Bottom: `2.5/12 * fontSize`.
     #[inline]
@@ -159,14 +162,18 @@ impl ChartStyle {
     }
 
     /// Time axis top padding.
+    /// Slightly larger than price axis padding for a more spacious x-axis,
+    /// matching TradingView's proportions.
     #[inline]
     pub fn time_axis_padding_top(&self) -> f64 {
-        self.compact_axis_padding_css()
+        (6.0 / 12.0 * self.font_size as f64).clamp(4.0, 8.0)
     }
     /// Time axis bottom padding.
+    /// Slightly larger than price axis padding for a more spacious x-axis,
+    /// matching TradingView's proportions.
     #[inline]
     pub fn time_axis_padding_bottom(&self) -> f64 {
-        self.compact_axis_padding_css()
+        (6.0 / 12.0 * self.font_size as f64).clamp(4.0, 8.0)
     }
     /// Time axis paddingHorizontal: `9 * fontSize / 12`.
     #[inline]

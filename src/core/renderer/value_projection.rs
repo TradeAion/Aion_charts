@@ -49,6 +49,11 @@ pub fn price_to_pane_y_phys(price: f64, vp: &Viewport, pane_ph: f64) -> f64 {
 /// Ported from LWC's `PriceTickMarkBuilder.tickSpan()` which runs three
 /// `PriceTickSpanCalculator` instances with divider sequences
 /// `[2, 2.5, 2]`, `[2, 2, 2.5]`, `[2.5, 2, 2]` and takes the minimum.
+///
+/// `axis_ph` must be the CANDLE AREA height in physical pixels — the same
+/// coordinate space where tick positions are mapped. LWC uses a single
+/// `priceScale.height()` for both step and coordinate mapping; we must do
+/// the same to avoid step transitions at wrong zoom levels.
 pub fn y_tick_step_internal(vp: &Viewport, axis_ph: f64, dpr: f64, style: &ChartStyle) -> f64 {
     let range = vp.price_max - vp.price_min;
     if range <= 0.0 || axis_ph <= 0.0 || dpr <= 0.0 {
@@ -68,18 +73,30 @@ pub fn y_tick_step_internal(vp: &Viewport, axis_ph: f64, dpr: f64, style: &Chart
 const TICK_SPAN_EPS: f64 = 1e-14;
 const FRACTIONAL_DIVIDERS: [f64; 3] = [2.0, 2.5, 2.0];
 
+/// LWC default base for `PriceTickSpanCalculator` (100 = 2 decimal places).
+/// This sets `minMovement = 1/BASE = 0.01`, preventing ticks finer than 1 cent.
+const LWC_DEFAULT_BASE: f64 = 100.0;
+
 /// Port of LWC's `PriceTickSpanCalculator.tickSpan()` for base-decimal prices
-/// (base = 0, the common case for financial data).
+/// (base = 100, matching LWC's default PriceScale formatter).
 fn lwc_tick_span(range: f64, max_tick_span: f64, integral_dividers: &[f64]) -> f64 {
+    let min_movement = 1.0 / LWC_DEFAULT_BASE; // 0.01
+
     let mut span = 10.0_f64.powf(0.0_f64.max(range.log10().ceil()));
 
     let mut idx = 0usize;
     let mut c = integral_dividers[0];
 
+    // LWC integral loop — three conditions must ALL be true to continue:
+    // 1. span >= minMovement  (and span > minMovement + eps)
+    // 2. span >= maxTickSpan * c
+    // 3. span >= 1
     loop {
+        let larger_min_movement =
+            (span - min_movement) >= -TICK_SPAN_EPS && span > (min_movement + TICK_SPAN_EPS);
         let larger_max = (max_tick_span * c - span) <= TICK_SPAN_EPS;
         let larger_one = (1.0 - span) <= TICK_SPAN_EPS;
-        if !(larger_max && larger_one) {
+        if !(larger_min_movement && larger_max && larger_one) {
             break;
         }
         span /= c;
@@ -87,12 +104,18 @@ fn lwc_tick_span(range: f64, max_tick_span: f64, integral_dividers: &[f64]) -> f
         c = integral_dividers[idx % integral_dividers.len()];
     }
 
+    // Clamp to minMovement if we got close
+    if span <= min_movement + TICK_SPAN_EPS {
+        span = min_movement;
+    }
+
     span = span.max(1.0);
 
+    // Fractional loop — only enters when span ≈ 1 and base is decimal
     if (span - 1.0).abs() < TICK_SPAN_EPS {
         idx = 0;
         c = FRACTIONAL_DIVIDERS[0];
-        while (max_tick_span * c - span) <= TICK_SPAN_EPS && span > TICK_SPAN_EPS {
+        while (max_tick_span * c - span) <= TICK_SPAN_EPS && span > (min_movement + TICK_SPAN_EPS) {
             span /= c;
             idx += 1;
             c = FRACTIONAL_DIVIDERS[idx % FRACTIONAL_DIVIDERS.len()];
