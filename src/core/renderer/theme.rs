@@ -139,7 +139,7 @@ pub fn default_style() -> ChartStyle {
         axis_tick_length: AXIS_TICK_LENGTH,
         price_scale_tick_mark_density: DEFAULT_PRICE_SCALE_TICK_MARK_DENSITY as f32,
         axis_ticks_visible: true,
-        axis_border_visible: true,
+        axis_border_visible: false,
     }
 }
 
@@ -620,7 +620,7 @@ impl ThemeConfig {
             axis_tick_length: self.layout.axis_tick_length,
             price_scale_tick_mark_density: self.layout.price_scale_tick_mark_density,
             axis_ticks_visible: true,
-            axis_border_visible: true,
+            axis_border_visible: false,
         }
     }
 
@@ -805,5 +805,26 @@ mod tests {
     fn color_to_hex_alpha() {
         let hex = ThemeConfig::color_to_hex(&[1.0, 0.0, 0.0, 0.5]);
         assert_eq!(hex, "#ff00007f");
+    }
+
+    #[test]
+    fn default_axis_borders_are_disabled() {
+        let legacy = default_style();
+        let dark = ThemeConfig::dark().to_chart_style();
+        let light = ThemeConfig::light().to_chart_style();
+
+        assert!(
+            !legacy.axis_border_visible,
+            "legacy default style should ship with axis borders hidden"
+        );
+        assert!(
+            !dark.axis_border_visible,
+            "dark theme default should ship with axis borders hidden"
+        );
+        assert!(
+            !light.axis_border_visible,
+            "light theme default should ship with axis borders hidden"
+        );
+        assert!(legacy.axis_ticks_visible, "tick marks should stay enabled by default");
     }
 }

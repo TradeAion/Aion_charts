@@ -643,39 +643,41 @@ fn render_bid_ask_cell(
     let avail_half_w = half_w - padding * 2.0 - 2.0; // usable text width per side
     if opts.show_volume_text && effective_font > 0.0 {
         let text_y = cell_y + cell_h * 0.5;
+        let bid_text_x = bar_left + half_w * 0.5;
+        let ask_text_x = bar_left + half_w * 1.5;
 
-        // Bid text (right-aligned within left half)
+        // Bid text centered within the left half-cell.
         if level.bid_volume > 0.0 {
             let txt = format_volume(level.bid_volume);
             if text_fits(&txt, effective_font, avail_half_w) {
                 texts.push(DrawText {
                     text: txt,
-                    x: (bar_left + half_w - padding - 2.0) as f32,
+                    x: bid_text_x as f32,
                     y: text_y as f32,
                     font_size: effective_font,
                     r: opts.text_color[0],
                     g: opts.text_color[1],
                     b: opts.text_color[2],
                     a: opts.text_color[3],
-                    align: TextAlign::Right,
+                    align: TextAlign::Center,
                 });
             }
         }
 
-        // Ask text (left-aligned within right half)
+        // Ask text centered within the right half-cell.
         if level.ask_volume > 0.0 {
             let txt = format_volume(level.ask_volume);
             if text_fits(&txt, effective_font, avail_half_w) {
                 texts.push(DrawText {
                     text: txt,
-                    x: (bar_left + half_w + padding + 2.0) as f32,
+                    x: ask_text_x as f32,
                     y: text_y as f32,
                     font_size: effective_font,
                     r: opts.text_color[0],
                     g: opts.text_color[1],
                     b: opts.text_color[2],
                     a: opts.text_color[3],
-                    align: TextAlign::Left,
+                    align: TextAlign::Center,
                 });
             }
         }
@@ -1495,6 +1497,72 @@ mod tests {
                 .iter()
                 .any(|rect| (rect.x - mid_x).abs() < 0.1 && rect.w <= 1.0 && rect.h >= 1.0),
             "row should not emit an internal bid/ask divider"
+        );
+    }
+
+    #[test]
+    fn bid_ask_text_is_centered_within_each_half_cell() {
+        let bars = sample_bars();
+        let mut fp_data = FootprintData::new();
+        fp_data.set_bar(
+            0,
+            FootprintBar {
+                levels: vec![FootprintLevel {
+                    price: 100.0,
+                    bid_volume: 338.0,
+                    ask_volume: 407.0,
+                }],
+            },
+        );
+        let viewport = sample_viewport();
+        let style = ChartStyle::default();
+        let mut opts = FootprintOptions::default();
+        opts.show_poc = false;
+        opts.show_delta_bar = false;
+        opts.show_unfinished_auction = false;
+        opts.show_volume_text = true;
+
+        let geom = generate_footprint_geometry(
+            &bars, &viewport, &style, &fp_data, &opts, 400.0, 300.0, 1.0, 1.0,
+        );
+
+        let left_label = format_volume(338.0);
+        let right_label = format_volume(407.0);
+        let left_text = geom
+            .texts
+            .iter()
+            .find(|text| text.text == left_label)
+            .expect("bid-side text should render");
+        let right_text = geom
+            .texts
+            .iter()
+            .find(|text| text.text == right_label)
+            .expect("ask-side text should render");
+
+        let ladder = geom
+            .base_rects
+            .iter()
+            .find(|rect| {
+                rect.w > rect.h
+                    && left_text.y >= rect.y
+                    && left_text.y <= rect.y + rect.h
+                    && right_text.y >= rect.y
+                    && right_text.y <= rect.y + rect.h
+            })
+            .expect("row background should exist");
+
+        let left_center = ladder.x + ladder.w * 0.25;
+        let right_center = ladder.x + ladder.w * 0.75;
+
+        assert_eq!(left_text.align, TextAlign::Center);
+        assert_eq!(right_text.align, TextAlign::Center);
+        assert!(
+            (left_text.x - left_center).abs() < 0.1,
+            "bid text should be centered in left half-cell"
+        );
+        assert!(
+            (right_text.x - right_center).abs() < 0.1,
+            "ask text should be centered in right half-cell"
         );
     }
 
