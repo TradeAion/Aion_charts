@@ -875,6 +875,80 @@ fn ensure_finite_fields(ctx: &str, fields: &[(&str, f32)]) -> Result<(), JsValue
     Ok(())
 }
 
+fn ensure_strictly_increasing_timestamps(ctx: &str, timestamps: &[u64]) -> Result<(), JsValue> {
+    for i in 1..timestamps.len() {
+        if timestamps[i] <= timestamps[i - 1] {
+            return Err(js_err(format!(
+                "{}: timestamps must be strictly increasing (index {}: {} <= {})",
+                ctx,
+                i,
+                timestamps[i],
+                timestamps[i - 1]
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn build_main_bars_from_arrays(
+    ctx: &str,
+    open: &[f32],
+    high: &[f32],
+    low: &[f32],
+    close: &[f32],
+    volume: &[f32],
+    timestamps: &[u64],
+) -> Result<Vec<Bar>, JsValue> {
+    let count = open.len();
+    ensure_equal_len("open", count, "high", high.len())?;
+    ensure_equal_len("open", count, "low", low.len())?;
+    ensure_equal_len("open", count, "close", close.len())?;
+    ensure_equal_len("open", count, "volume", volume.len())?;
+    ensure_equal_len("open", count, "timestamps", timestamps.len())?;
+    ensure_finite_slice("open", open)?;
+    ensure_finite_slice("high", high)?;
+    ensure_finite_slice("low", low)?;
+    ensure_finite_slice("close", close)?;
+    ensure_finite_slice("volume", volume)?;
+    ensure_strictly_increasing_timestamps(ctx, timestamps)?;
+
+    Ok((0..count)
+        .map(|i| Bar {
+            timestamp: timestamps[i],
+            open: open[i],
+            high: high[i],
+            low: low[i],
+            close: close[i],
+            volume: volume[i],
+            _pad: 0.0,
+        })
+        .collect())
+}
+
+fn ensure_ohlcv_sanity_for_footprint(ctx: &str, bars: &[Bar]) -> Result<(), JsValue> {
+    for (idx, bar) in bars.iter().enumerate() {
+        if bar.high < bar.low {
+            return Err(js_err(format!(
+                "{}: bar {} timestamp {} has high < low ({} < {})",
+                ctx, idx, bar.timestamp, bar.high, bar.low
+            )));
+        }
+        if bar.open < bar.low || bar.open > bar.high {
+            return Err(js_err(format!(
+                "{}: bar {} timestamp {} has open outside [low, high]",
+                ctx, idx, bar.timestamp
+            )));
+        }
+        if bar.close < bar.low || bar.close > bar.high {
+            return Err(js_err(format!(
+                "{}: bar {} timestamp {} has close outside [low, high]",
+                ctx, idx, bar.timestamp
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn build_footprint_levels(
     ctx: &str,
     prices: &[f32],
@@ -919,6 +993,296 @@ fn build_footprint_levels(
             ask_volume: ask_volumes[i],
         })
         .collect())
+}
+
+fn validate_footprint_bar_alignment(
+    ctx: &str,
+    bar_index: usize,
+    bar: &Bar,
+    levels: &[raycore::FootprintLevel],
+) -> Result<(), JsValue> {
+    if levels.is_empty() {
+        return Ok(());
+    }
+    let tick = if levels.len() > 1 {
+        let bar = raycore::FootprintBar {
+            levels: levels.to_vec(),
+        };
+        bar.inferred_tick_size()
+    } else {
+        (bar.high - bar.low).abs().max(0.0001)
+    };
+    let lowest = levels.first().map(|l| l.price).unwrap_or(bar.low);
+    let highest = levels.last().map(|l| l.price + tick).unwrap_or(bar.high);
+    let slack = tick.max((bar.high - bar.low).abs() * 0.05).max(0.0001);
+
+    if lowest > bar.low + slack || highest < bar.high - slack {
+        return Err(js_err(format!(
+            "{}: bar {} timestamp {} footprint range [{:.6}, {:.6}] does not cover OHLC range [{:.6}, {:.6}]",
+            ctx,
+            bar_index,
+            bar.timestamp,
+            lowest,
+            highest,
+            bar.low,
+            bar.high
+        )));
+    }
+    Ok(())
+}
+
+fn build_footprint_data_from_aligned_arrays(
+    ctx: &str,
+    bars: &[Bar],
+    level_offsets: &[u32],
+    prices: &[f32],
+    bid_volumes: &[f32],
+    ask_volumes: &[f32],
+) -> Result<raycore::FootprintData, JsValue> {
+    ensure_equal_len("prices", prices.len(), "bid_volumes", bid_volumes.len())?;
+    ensure_equal_len("prices", prices.len(), "ask_volumes", ask_volumes.len())?;
+    ensure_finite_slice("prices", prices)?;
+    ensure_finite_slice("bid_volumes", bid_volumes)?;
+    ensure_finite_slice("ask_volumes", ask_volumes)?;
+
+    if level_offsets.len() != bars.len() + 1 {
+        return Err(js_err(format!(
+            "{}: level_offsets length must be bars.len()+1 ({} != {}+1)",
+            ctx,
+            level_offsets.len(),
+            bars.len()
+        )));
+    }
+    if level_offsets.first().copied().unwrap_or(0) != 0 {
+        return Err(js_err(format!("{}: level_offsets[0] must be 0", ctx)));
+    }
+    if let Some((i, _)) = level_offsets
+        .windows(2)
+        .enumerate()
+        .find(|(_, w)| w[1] < w[0])
+    {
+        return Err(js_err(format!(
+            "{}: level_offsets must be non-decreasing (index {})",
+            ctx,
+            i + 1
+        )));
+    }
+    let total_levels = prices.len();
+    let last_offset = level_offsets.last().copied().unwrap_or(0) as usize;
+    if last_offset != total_levels {
+        return Err(js_err(format!(
+            "{}: last level offset {} must equal level array length {}",
+            ctx, last_offset, total_levels
+        )));
+    }
+
+    let mut footprint = raycore::FootprintData::new();
+    for i in 0..bars.len() {
+        let start = level_offsets[i] as usize;
+        let end = level_offsets[i + 1] as usize;
+        if start == end {
+            continue;
+        }
+        let bar_ctx = format!("{}: bar {}", ctx, i);
+        let levels = build_footprint_levels(
+            &bar_ctx,
+            &prices[start..end],
+            &bid_volumes[start..end],
+            &ask_volumes[start..end],
+        )?;
+        validate_footprint_bar_alignment(ctx, i, &bars[i], &levels)?;
+        footprint.set_bar(i, raycore::FootprintBar { levels });
+    }
+    Ok(footprint)
+}
+
+fn build_historical_footprint_dataset_from_arrays(
+    ctx: &str,
+    open: &[f32],
+    high: &[f32],
+    low: &[f32],
+    close: &[f32],
+    volume: &[f32],
+    timestamps: &[u64],
+    level_offsets: &[u32],
+    prices: &[f32],
+    bid_volumes: &[f32],
+    ask_volumes: &[f32],
+) -> Result<(Vec<Bar>, raycore::FootprintData), JsValue> {
+    let bars = build_main_bars_from_arrays(ctx, open, high, low, close, volume, timestamps)?;
+    ensure_ohlcv_sanity_for_footprint(ctx, &bars)?;
+    let footprint =
+        build_footprint_data_from_aligned_arrays(ctx, &bars, level_offsets, prices, bid_volumes, ask_volumes)?;
+    Ok((bars, footprint))
+}
+
+fn parse_color_json_value(value: &serde_json::Value) -> Option<[f32; 4]> {
+    match value {
+        serde_json::Value::String(s) => parse_css_color(s),
+        serde_json::Value::Array(items) if items.len() == 4 => {
+            let mut out = [0.0; 4];
+            for (idx, item) in items.iter().enumerate() {
+                let mut v = item.as_f64()? as f32;
+                if idx < 3 && v > 1.0 {
+                    v /= 255.0;
+                } else if idx == 3 && v > 1.0 {
+                    v /= 255.0;
+                }
+                out[idx] = clamp01(v);
+            }
+            Some(out)
+        }
+        _ => None,
+    }
+}
+
+fn parse_historical_footprint_json_dataset(
+    json: &str,
+) -> Result<(Vec<Bar>, raycore::FootprintData), JsValue> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| js_err(format!("JSON parse error: {}", e)))?;
+
+    let items = match parsed {
+        serde_json::Value::Array(items) => items,
+        serde_json::Value::Object(map) => map
+            .get("bars")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .ok_or_else(|| js_err("set_data_with_footprint_json: expected array or object with bars array"))?,
+        _ => {
+            return Err(js_err(
+                "set_data_with_footprint_json: expected array or object with bars array",
+            ))
+        }
+    };
+
+    let mut bars = Vec::with_capacity(items.len());
+    let mut footprint = raycore::FootprintData::new();
+
+    for (bar_index, item) in items.iter().enumerate() {
+        let timestamp = item
+            .get("timestamp")
+            .or_else(|| item.get("time"))
+            .or_else(|| item.get("ts"))
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| {
+                js_err(format!(
+                    "set_data_with_footprint_json: bar {} missing timestamp",
+                    bar_index
+                ))
+            })?;
+        let open = item
+            .get("open")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| js_err(format!("set_data_with_footprint_json: bar {} missing open", bar_index)))?
+            as f32;
+        let high = item
+            .get("high")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| js_err(format!("set_data_with_footprint_json: bar {} missing high", bar_index)))?
+            as f32;
+        let low = item
+            .get("low")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| js_err(format!("set_data_with_footprint_json: bar {} missing low", bar_index)))?
+            as f32;
+        let close = item
+            .get("close")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| js_err(format!("set_data_with_footprint_json: bar {} missing close", bar_index)))?
+            as f32;
+        let volume = item
+            .get("volume")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| js_err(format!("set_data_with_footprint_json: bar {} missing volume", bar_index)))?
+            as f32;
+
+        ensure_finite_fields(
+            "set_data_with_footprint_json",
+            &[
+                ("open", open),
+                ("high", high),
+                ("low", low),
+                ("close", close),
+                ("volume", volume),
+            ],
+        )?;
+
+        let bar = Bar {
+            timestamp,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            _pad: 0.0,
+        };
+        bars.push(bar);
+
+        let levels_arr = item
+            .get("levels")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        if levels_arr.is_empty() {
+            continue;
+        }
+
+        let mut prices = Vec::with_capacity(levels_arr.len());
+        let mut bids = Vec::with_capacity(levels_arr.len());
+        let mut asks = Vec::with_capacity(levels_arr.len());
+        for (level_index, level) in levels_arr.iter().enumerate() {
+            let price = level
+                .get("price")
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| {
+                    js_err(format!(
+                        "set_data_with_footprint_json: bar {} level {} missing price",
+                        bar_index, level_index
+                    ))
+                })? as f32;
+            let bid = level
+                .get("bid")
+                .or_else(|| level.get("bid_volume"))
+                .or_else(|| level.get("bidVolume"))
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| {
+                    js_err(format!(
+                        "set_data_with_footprint_json: bar {} level {} missing bid volume",
+                        bar_index, level_index
+                    ))
+                })? as f32;
+            let ask = level
+                .get("ask")
+                .or_else(|| level.get("ask_volume"))
+                .or_else(|| level.get("askVolume"))
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| {
+                    js_err(format!(
+                        "set_data_with_footprint_json: bar {} level {} missing ask volume",
+                        bar_index, level_index
+                    ))
+                })? as f32;
+            prices.push(price);
+            bids.push(bid);
+            asks.push(ask);
+        }
+
+        let level_ctx = format!("set_data_with_footprint_json: bar {}", bar_index);
+        let levels = build_footprint_levels(&level_ctx, &prices, &bids, &asks)?;
+        validate_footprint_bar_alignment(
+            "set_data_with_footprint_json",
+            bar_index,
+            bars.last().expect("just pushed bar"),
+            &levels,
+        )?;
+        footprint.set_bar(bar_index, raycore::FootprintBar { levels });
+    }
+
+    let timestamps: Vec<u64> = bars.iter().map(|b| b.timestamp).collect();
+    ensure_strictly_increasing_timestamps("set_data_with_footprint_json", &timestamps)?;
+    ensure_ohlcv_sanity_for_footprint("set_data_with_footprint_json", &bars)?;
+    Ok((bars, footprint))
 }
 
 #[inline]
@@ -2535,18 +2899,13 @@ impl RayCore {
             if let Some(auto) = auto_scroll {
                 s.engine.viewport.auto_scroll = auto;
             }
-            if let Some(top) = margin_top {
-                s.engine.viewport.scale_margin_top = top;
-            }
-            if let Some(bottom) = margin_bottom {
-                s.engine.viewport.scale_margin_bottom = bottom;
+            if margin_top.is_some() || margin_bottom.is_some() {
+                let top = margin_top.unwrap_or(s.engine.viewport.scale_margin_top);
+                let bottom = margin_bottom.unwrap_or(s.engine.viewport.scale_margin_bottom);
+                s.engine.set_price_scale_margins(top, bottom);
             }
             if let Some(visible) = volume_visible {
-                s.engine.viewport.volume_height_ratio = if visible {
-                    raycore::core::constants::DEFAULT_VOLUME_HEIGHT_RATIO as f32
-                } else {
-                    0.0
-                };
+                s.engine.set_user_volume_visible(visible);
             }
             if let Some(chart_type_key) = chart_type.as_deref() {
                 let next_chart_type = MainChartType::from_str(chart_type_key);
@@ -3088,29 +3447,9 @@ impl RayCore {
         volume: &[f32],
         timestamps: &[u64],
     ) -> Result<(), JsValue> {
-        let count = open.len();
-        ensure_equal_len("open", count, "high", high.len())?;
-        ensure_equal_len("open", count, "low", low.len())?;
-        ensure_equal_len("open", count, "close", close.len())?;
-        ensure_equal_len("open", count, "volume", volume.len())?;
-        ensure_equal_len("open", count, "timestamps", timestamps.len())?;
-        ensure_finite_slice("open", open)?;
-        ensure_finite_slice("high", high)?;
-        ensure_finite_slice("low", low)?;
-        ensure_finite_slice("close", close)?;
-        ensure_finite_slice("volume", volume)?;
-
-        let bars: Vec<Bar> = (0..count)
-            .map(|i| Bar {
-                timestamp: timestamps[i],
-                open: open[i],
-                high: high[i],
-                low: low[i],
-                close: close[i],
-                volume: volume[i],
-                _pad: 0.0,
-            })
-            .collect();
+        let bars =
+            build_main_bars_from_arrays("set_data_arrays", open, high, low, close, volume, timestamps)?;
+        let count = bars.len();
         {
             let mut inner = self.inner.borrow_mut();
             if inner.replay_active {
@@ -3123,6 +3462,82 @@ impl RayCore {
         }
         self.dirty.set(true);
         log::info!("set_data_arrays: {} bars", count);
+        Ok(())
+    }
+
+    /// Atomically load OHLCV bars plus aligned footprint data from typed arrays.
+    ///
+    /// This is the canonical historical footprint initialization path for
+    /// production integrations. `level_offsets` is bar-aligned and must have
+    /// length `bars.len() + 1`; sparse bars use empty ranges.
+    pub fn set_data_with_footprint_arrays(
+        &mut self,
+        open: &[f32],
+        high: &[f32],
+        low: &[f32],
+        close: &[f32],
+        volume: &[f32],
+        timestamps: &[u64],
+        level_offsets: &[u32],
+        prices: &[f32],
+        bid_volumes: &[f32],
+        ask_volumes: &[f32],
+    ) -> Result<(), JsValue> {
+        let (bars, footprint) = build_historical_footprint_dataset_from_arrays(
+            "set_data_with_footprint_arrays",
+            open,
+            high,
+            low,
+            close,
+            volume,
+            timestamps,
+            level_offsets,
+            prices,
+            bid_volumes,
+            ask_volumes,
+        )?;
+
+        let mut inner = self.inner.borrow_mut();
+        if inner.replay_active {
+            return Err(js_err(
+                "set_data_with_footprint_arrays is not supported while replay is active",
+            ));
+        }
+        let count = bars.len();
+        inner
+            .engine
+            .set_data_with_footprint(bars, footprint)
+            .map_err(js_err)?;
+        drop(inner);
+        self.dirty.set(true);
+        log::info!("set_data_with_footprint_arrays: {} bars", count);
+        Ok(())
+    }
+
+    /// Atomically load OHLCV bars plus footprint levels from JSON.
+    ///
+    /// Expected canonical format:
+    /// `[{"timestamp": 1710000000000, "open": 100.0, "high": 101.0, "low": 99.5, "close": 100.5, "volume": 2500.0, "levels": [{"price": 99.5, "bid": 120.0, "ask": 80.0}]}]`
+    ///
+    /// Also accepts `{ "bars": [...] }` as the top-level wrapper and the
+    /// existing `bid_volume` / `bidVolume` / `ask_volume` / `askVolume` level aliases.
+    pub fn set_data_with_footprint_json(&mut self, json: &str) -> Result<(), JsValue> {
+        let (bars, footprint) = parse_historical_footprint_json_dataset(json)?;
+
+        let mut inner = self.inner.borrow_mut();
+        if inner.replay_active {
+            return Err(js_err(
+                "set_data_with_footprint_json is not supported while replay is active",
+            ));
+        }
+        let count = bars.len();
+        inner
+            .engine
+            .set_data_with_footprint(bars, footprint)
+            .map_err(js_err)?;
+        drop(inner);
+        self.dirty.set(true);
+        log::info!("set_data_with_footprint_json: {} bars", count);
         Ok(())
     }
 
@@ -3366,6 +3781,9 @@ impl RayCore {
     /// Supported keys:
     /// - `display_mode`: string ("bid_ask", "delta", "volume", etc.)
     /// - `tick_size`: number
+    /// - `palette`: string (`"blue_red"` default, `"green_red"`)
+    /// - `gradient_style`: string (`"soft_glow"` default, `"strong_glow"`, `"no_glow"`)
+    /// - `poc_color`: CSS color string or `[r, g, b, a]`
     /// - `imbalance_ratio`: number (default 3.0)
     /// - `show_imbalances`: boolean
     /// - `show_poc`: boolean
@@ -3381,12 +3799,30 @@ impl RayCore {
 
         let mut inner = self.inner.borrow_mut();
         let opts = &mut inner.engine.main_chart_options.footprint;
+        let mut refresh_semantic_theme = false;
 
         if let Some(s) = v["display_mode"].as_str() {
             opts.display_mode = raycore::FootprintDisplayMode::from_str(s);
         }
         if let Some(n) = v["tick_size"].as_f64() {
             opts.tick_size = n as f32;
+        }
+        if let Some(s) = v["palette"].as_str() {
+            opts.palette = raycore::FootprintPalette::from_str(s);
+            refresh_semantic_theme = true;
+        }
+        if let Some(s) = v["gradient_style"]
+            .as_str()
+            .or_else(|| v["gradientStyle"].as_str())
+        {
+            opts.gradient_style = raycore::FootprintGradientStyle::from_str(s);
+            refresh_semantic_theme = true;
+        }
+        if let Some(value) = v.get("poc_color").or_else(|| v.get("pocColor")) {
+            let color = parse_color_json_value(value)
+                .ok_or_else(|| js_err("set_footprint_options: invalid poc_color"))?;
+            opts.poc_color = color;
+            refresh_semantic_theme = true;
         }
         if let Some(n) = v["imbalance_ratio"].as_f64() {
             opts.imbalance_ratio = n as f32;
@@ -3429,6 +3865,9 @@ impl RayCore {
         }
         if let Some(b) = v["zoom_price_with_time"].as_bool() {
             opts.zoom_price_with_time = b;
+        }
+        if refresh_semantic_theme {
+            opts.apply_semantic_theme();
         }
 
         drop(inner);
@@ -3878,8 +4317,7 @@ impl RayCore {
             raycore::core::constants::DEFAULT_PRICE_SCALE_TICK_MARK_DENSITY as f32,
         )
         .max(0.1);
-        let volume_visible =
-            viewport.volume_height_ratio.is_finite() && viewport.volume_height_ratio > 0.0;
+        let volume_visible = s.engine.user_volume_visible();
 
         let options = serde_json::json!({
             "symbol": self.symbol,
@@ -4082,7 +4520,6 @@ impl RayCore {
 
         {
             let mut s = self.inner.borrow_mut();
-            let vp = &mut s.engine.viewport;
             let start_bar = finite_or(snapshot.viewport.start_bar, 0.0).max(0.0);
             let mut end_bar = finite_or(
                 snapshot.viewport.end_bar,
@@ -4097,24 +4534,28 @@ impl RayCore {
                 0.0,
                 raycore::core::constants::DEFAULT_PRICE_MAX,
             );
-            vp.set_price_scale_mode(raycore::PriceScaleMode::from_str(
-                snapshot.viewport.price_scale_mode.as_str(),
-            ));
-            vp.set_range(start_bar, end_bar);
-            vp.price_min = price_min;
-            vp.price_max = price_max;
-            vp.price_locked = snapshot.viewport.price_locked;
-            vp.scale_margin_top = finite_or(
+            {
+                let vp = &mut s.engine.viewport;
+                vp.set_price_scale_mode(raycore::PriceScaleMode::from_str(
+                    snapshot.viewport.price_scale_mode.as_str(),
+                ));
+                vp.set_range(start_bar, end_bar);
+                vp.price_min = price_min;
+                vp.price_max = price_max;
+                vp.price_locked = snapshot.viewport.price_locked;
+                vp.auto_scroll = snapshot.viewport.auto_scroll;
+            }
+            let margin_top = finite_or(
                 snapshot.viewport.scale_margin_top,
                 raycore::core::constants::DEFAULT_SCALE_MARGIN_TOP,
             )
             .clamp(0.0, 0.5);
-            vp.scale_margin_bottom = finite_or(
+            let margin_bottom = finite_or(
                 snapshot.viewport.scale_margin_bottom,
                 raycore::core::constants::DEFAULT_SCALE_MARGIN_BOTTOM,
             )
             .clamp(0.0, 0.5);
-            vp.auto_scroll = snapshot.viewport.auto_scroll;
+            s.engine.set_price_scale_margins(margin_top, margin_bottom);
         }
 
         let existing_descriptors: Vec<(u32, u32, String)> = {
@@ -4468,16 +4909,12 @@ impl RayCore {
 
     /// Show/hide volume bars in the main pane.
     pub fn set_volume_visible(&mut self, visible: bool) {
-        self.inner.borrow_mut().engine.viewport.volume_height_ratio = if visible {
-            raycore::core::constants::DEFAULT_VOLUME_HEIGHT_RATIO as f32
-        } else {
-            0.0
-        };
+        self.inner.borrow_mut().engine.set_user_volume_visible(visible);
     }
 
     /// Whether volume bars are currently visible in the main pane.
     pub fn get_volume_visible(&self) -> bool {
-        self.inner.borrow().engine.viewport.volume_height_ratio > 0.0
+        self.inner.borrow().engine.user_volume_visible()
     }
 
     /// Set the font size for axis labels (in CSS pixels).
@@ -4588,10 +5025,10 @@ impl RayCore {
     /// Set the price scale margins (top and bottom as fractions 0.0-1.0).
     /// Default is 0.2 top, 0.1 bottom.
     pub fn set_price_scale_margins(&mut self, top: f64, bottom: f64) {
-        let mut s = self.inner.borrow_mut();
-        s.engine.viewport.scale_margin_top = top.clamp(0.0, 0.5);
-        s.engine.viewport.scale_margin_bottom = bottom.clamp(0.0, 0.5);
-        s.engine.viewport.price_invalidated = true;
+        self.inner
+            .borrow_mut()
+            .engine
+            .set_price_scale_margins(top, bottom);
     }
 
     /// Enable or disable auto-scroll on new bars.
@@ -7716,6 +8153,7 @@ fn ids_to_js_array(ids: Vec<ChartPaneId>) -> js_sys::Array {
 #[cfg(test)]
 mod tests {
     use super::{
+        build_historical_footprint_dataset_from_arrays, parse_historical_footprint_json_dataset,
         parse_main_viewport_preset, reset_main_viewport_and_emit, resolve_synced_crosshair_state,
     };
     use raycore::core::events::ChartEvent;
@@ -7832,5 +8270,115 @@ mod tests {
             }
             other => panic!("expected VisibleRangeChange, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn build_historical_footprint_dataset_from_arrays_round_trips() {
+        let open = [100.0, 101.0];
+        let high = [101.0, 102.0];
+        let low = [99.0, 100.5];
+        let close = [100.5, 101.5];
+        let volume = [500.0, 700.0];
+        let timestamps = [1_000_u64, 2_000_u64];
+        let level_offsets = [0_u32, 2, 4];
+        let prices = [99.0, 100.0, 100.5, 101.5];
+        let bid = [120.0, 80.0, 90.0, 60.0];
+        let ask = [110.0, 140.0, 100.0, 150.0];
+
+        let (bars, footprint) = build_historical_footprint_dataset_from_arrays(
+            "test",
+            &open,
+            &high,
+            &low,
+            &close,
+            &volume,
+            &timestamps,
+            &level_offsets,
+            &prices,
+            &bid,
+            &ask,
+        )
+        .unwrap();
+
+        assert_eq!(bars.len(), 2);
+        assert_eq!(footprint.len(), 2);
+        let first = footprint.get_bar(0).unwrap();
+        assert_eq!(first.levels.len(), 2);
+        assert_eq!(first.levels[0].price, 99.0);
+        assert_eq!(first.levels[1].ask_volume, 140.0);
+    }
+
+    #[test]
+    fn build_historical_footprint_dataset_from_arrays_rejects_misaligned_bar_range() {
+        let open = [100.0];
+        let high = [101.0];
+        let low = [99.0];
+        let close = [100.5];
+        let volume = [500.0];
+        let timestamps = [1_000_u64];
+        let level_offsets = [0_u32, 1];
+        let prices = [105.0];
+        let bid = [120.0];
+        let ask = [110.0];
+
+        let err = build_historical_footprint_dataset_from_arrays(
+            "test",
+            &open,
+            &high,
+            &low,
+            &close,
+            &volume,
+            &timestamps,
+            &level_offsets,
+            &prices,
+            &bid,
+            &ask,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.as_string()
+                .unwrap_or_default()
+                .contains("does not cover OHLC range"),
+            "expected alignment error, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn parse_historical_footprint_json_dataset_round_trips() {
+        let json = r#"{
+            "bars": [
+                {
+                    "timestamp": 1000,
+                    "open": 100.0,
+                    "high": 101.0,
+                    "low": 99.0,
+                    "close": 100.5,
+                    "volume": 500.0,
+                    "levels": [
+                        {"price": 99.0, "bid": 120.0, "ask": 80.0},
+                        {"price": 100.0, "bidVolume": 90.0, "askVolume": 140.0}
+                    ]
+                },
+                {
+                    "timestamp": 2000,
+                    "open": 101.0,
+                    "high": 102.0,
+                    "low": 100.5,
+                    "close": 101.5,
+                    "volume": 700.0,
+                    "levels": []
+                }
+            ]
+        }"#;
+
+        let (bars, footprint) = parse_historical_footprint_json_dataset(json).unwrap();
+
+        assert_eq!(bars.len(), 2);
+        assert_eq!(bars[1].timestamp, 2_000);
+        assert_eq!(footprint.len(), 1);
+        assert!(footprint.get_bar(0).is_some());
+        assert!(footprint.get_bar(1).is_none());
     }
 }

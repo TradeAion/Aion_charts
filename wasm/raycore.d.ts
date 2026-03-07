@@ -118,6 +118,31 @@ export interface ReplayOptions {
   edgeBehavior?: ReplayEdgeBehavior;
 }
 
+export type FootprintPalette = 'blue_red' | 'green_red';
+export type FootprintGradientStyle = 'soft_glow' | 'strong_glow' | 'no_glow';
+
+export interface FootprintOptionsPatch {
+  display_mode?: 'bid_ask' | 'delta' | 'volume' | 'delta_profile' | 'volume_profile';
+  tick_size?: number;
+  palette?: FootprintPalette;
+  gradient_style?: FootprintGradientStyle;
+  poc_color?: RgbaColor | string;
+  imbalance_ratio?: number;
+  show_imbalances?: boolean;
+  show_stacked_imbalances?: boolean;
+  show_diagonal_imbalances?: boolean;
+  show_poc?: boolean;
+  show_value_area?: boolean;
+  value_area_pct?: number;
+  show_delta_bar?: boolean;
+  show_volume_text?: boolean;
+  show_unfinished_auction?: boolean;
+  show_cumulative_delta?: boolean;
+  font_size?: number;
+  min_cell_height?: number;
+  zoom_price_with_time?: boolean;
+}
+
 /**
  * Options for `RayCore.create_chart()` and `chart.apply_options()`.
  * All fields are optional. Omitted fields use defaults on creation
@@ -638,6 +663,89 @@ export declare class RayCore {
   ): void;
 
   /**
+   * Canonical historical footprint initialization API.
+   * Atomically loads OHLCV bars plus aligned footprint levels.
+   * `level_offsets.length` must equal `bar_count + 1`.
+   */
+  set_data_with_footprint_arrays(
+    open:          Float32Array,
+    high:          Float32Array,
+    low:           Float32Array,
+    close:         Float32Array,
+    volume:        Float32Array,
+    timestamps:    BigUint64Array,
+    level_offsets: Uint32Array,
+    prices:        Float32Array,
+    bid_volumes:   Float32Array,
+    ask_volumes:   Float32Array,
+  ): void;
+
+  /**
+   * Canonical historical footprint initialization API using JSON.
+   * Accepts either an array of `{ timestamp, open, high, low, close, volume, levels }`
+   * objects or `{ bars: [...] }`.
+   */
+  set_data_with_footprint_json(json: string): void;
+
+  /**
+   * Legacy compatibility method for patching a single footprint bar by bar index.
+   */
+  set_footprint_bar(
+    bar_index: number,
+    prices: Float32Array,
+    bid_volumes: Float32Array,
+    ask_volumes: Float32Array,
+  ): void;
+
+  /**
+   * Legacy compatibility method for bulk footprint patch/update by explicit bar indices.
+   */
+  set_footprint_data_arrays(
+    bar_indices: Uint32Array,
+    level_offsets: Uint32Array,
+    prices: Float32Array,
+    bid_volumes: Float32Array,
+    ask_volumes: Float32Array,
+  ): void;
+
+  /**
+   * Legacy compatibility method for bulk footprint patch/update from JSON.
+   */
+  set_footprint_data_json(json: string): void;
+
+  /**
+   * Set footprint display mode.
+   */
+  set_footprint_display_mode(
+    mode: 'bid_ask' | 'delta' | 'volume' | 'delta_profile' | 'volume_profile' | string,
+  ): void;
+
+  /**
+   * Semantic footprint theming and behavior options.
+   */
+  set_footprint_options(json: string): void;
+
+  /**
+   * Set footprint tick size. Pass 0 for auto-detection.
+   */
+  set_footprint_tick_size(tick_size: number): void;
+
+  /**
+   * Enable or disable coupled X+Y zoom while footprint mode is active.
+   */
+  set_footprint_xy_zoom_enabled(enabled: boolean): void;
+
+  /**
+   * Return whether footprint XY zoom is enabled.
+   */
+  get_footprint_xy_zoom_enabled(): boolean;
+
+  /**
+   * Clear all footprint data.
+   */
+  clear_footprint_data(): void;
+
+  /**
    * LWC-style upsert: appends a new bar if the timestamp is newer than the last,
    * or updates the last bar in-place if timestamps match.
    * Ideal for live-tick streaming.
@@ -649,6 +757,22 @@ export declare class RayCore {
     low:       number,
     close:     number,
     volume:    number,
+  ): void;
+
+  /**
+   * Canonical live footprint API.
+   * Atomically appends/updates OHLCV plus footprint levels for the same logical bar.
+   */
+  upsert_bar_with_footprint(
+    timestamp: bigint,
+    open: number,
+    high: number,
+    low: number,
+    close: number,
+    volume: number,
+    prices: Float32Array,
+    bid_volumes: Float32Array,
+    ask_volumes: Float32Array,
   ): void;
 
   /**
@@ -696,7 +820,8 @@ export declare class RayCore {
    * Switch the main chart type.
    *
    * Accepted values: `"candlestick"`, `"candles"`, `"ohlc"`, `"bars"`,
-   * `"line"`, `"area"`, `"heikin_ashi"`, `"ha"`, `"baseline"`.
+   * `"line"`, `"area"`, `"heikin_ashi"`, `"ha"`, `"baseline"`,
+   * `"footprint"`, `"fp"`, `"order_flow"`.
    *
    * Fires the `chartTypeChange` event.
    */

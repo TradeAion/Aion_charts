@@ -23,10 +23,12 @@
 
 use crate::core::data::BarArray;
 use crate::core::footprint::{
-    FootprintBar, FootprintData, FootprintDisplayMode, FootprintOptions, ImbalanceType,
-    VolumeColorIntensity,
+    FootprintBar, FootprintData, FootprintDisplayMode, FootprintGradientStyle, FootprintOptions,
+    ImbalanceType, VolumeColorIntensity,
 };
-use crate::core::renderer::draw_list::{ColoredRect, DrawText, TextAlign};
+use crate::core::renderer::draw_list::{
+    ColoredRect, DrawText, HorizontalGradientRect, TextAlign,
+};
 use crate::core::renderer::series::CandleSizing;
 use crate::core::renderer::traits::ChartStyle;
 use crate::core::renderer::transforms::{bar_to_x, color4, price_to_y};
@@ -40,8 +42,12 @@ use crate::core::viewport::Viewport;
 /// Canvas2D renders rects via fill_rect and texts via fillText.
 /// WebGPU renders rects via instanced quads; texts via overlay Canvas2D.
 pub struct FootprintGeometry {
-    /// All colored rectangles (cell backgrounds, POC markers, value area fills, etc.).
-    pub rects: Vec<ColoredRect>,
+    /// Flat geometry rendered beneath gradient-filled cells.
+    pub base_rects: Vec<ColoredRect>,
+    /// Smooth horizontal cell fills.
+    pub gradient_rects: Vec<HorizontalGradientRect>,
+    /// Flat geometry rendered above gradient-filled cells.
+    pub overlay_rects: Vec<ColoredRect>,
     /// Text labels (volume numbers, delta values).
     pub texts: Vec<DrawText>,
 }
@@ -80,14 +86,18 @@ pub fn generate_footprint_geometry(
 
     if start >= end {
         return FootprintGeometry {
-            rects: Vec::new(),
+            base_rects: Vec::new(),
+            gradient_rects: Vec::new(),
+            overlay_rects: Vec::new(),
             texts: Vec::new(),
         };
     }
 
     let visible_bars = end - start;
     // Pre-allocate conservatively: ~20 rects per bar (cells + decorations)
-    let mut rects = Vec::with_capacity(visible_bars * 20);
+    let mut base_rects = Vec::with_capacity(visible_bars * 10);
+    let mut gradient_rects = Vec::with_capacity(visible_bars * 12);
+    let mut overlay_rects = Vec::with_capacity(visible_bars * 14);
     let mut texts = Vec::with_capacity(visible_bars * 10);
 
     let font_size = fp_opts.font_size * v_ratio as f32;
@@ -102,14 +112,36 @@ pub fn generate_footprint_geometry(
             None => {
                 // No footprint data — render as a simple candlestick fallback
                 generate_fallback_candle(
-                    i, bar.open, bar.high, bar.low, bar.close, viewport, style, pane_w, candle_h,
-                    &sizing, &mut rects,
+                    i,
+                    bar.open,
+                    bar.high,
+                    bar.low,
+                    bar.close,
+                    viewport,
+                    style,
+                    pane_w,
+                    candle_h,
+                    &sizing,
+                    &mut overlay_rects,
                 );
                 continue;
             }
         };
 
         if fp_bar.levels.is_empty() {
+            generate_fallback_candle(
+                i,
+                bar.open,
+                bar.high,
+                bar.low,
+                bar.close,
+                viewport,
+                style,
+                pane_w,
+                candle_h,
+                &sizing,
+                &mut overlay_rects,
+            );
             continue;
         }
 
@@ -164,6 +196,10 @@ pub fn generate_footprint_geometry(
         // encompass the raw OHLC range.  Both use the same Y coordinate space
         // (volume_height_ratio = 0 → candle_area == full pane) so they are
         // properly connected.
+        //
+        // Keep candle geometry in the later overlay layer instead of the flat
+        // background layer. That guarantees the candle stays visible over the
+        // ladder background/fills in both Canvas2D and WebGPU.
         {
             let bull = bar.close >= bar.open;
             let (cr, cg, cb, ca) = if bull {
@@ -198,7 +234,7 @@ pub fn generate_footprint_geometry(
 
             // Upper wick
             if body_top > high_y {
-                rects.push(ColoredRect {
+                overlay_rects.push(ColoredRect {
                     x: wick_x as f32,
                     y: high_y as f32,
                     w: wick_w as f32,
@@ -211,7 +247,7 @@ pub fn generate_footprint_geometry(
             }
             // Lower wick
             if low_y > body_bottom {
-                rects.push(ColoredRect {
+                overlay_rects.push(ColoredRect {
                     x: wick_x as f32,
                     y: (body_bottom + 1.0) as f32,
                     w: wick_w as f32,
@@ -226,7 +262,7 @@ pub fn generate_footprint_geometry(
             // Body
             let body_w = candle_w.max(1.0);
             let body_h = (body_bottom - body_top + 1.0).max(1.0);
-            rects.push(ColoredRect {
+            overlay_rects.push(ColoredRect {
                 x: slot_left as f32,
                 y: body_top as f32,
                 w: body_w as f32,
@@ -291,7 +327,7 @@ pub fn generate_footprint_geometry(
             let ladder_h = (ladder_bottom - ladder_top).max(1.0);
 
             let (cbr, cbg, cbb, _) = color4(&fp_opts.cell_bg_color);
-            rects.push(ColoredRect {
+            base_rects.push(ColoredRect {
                 x: bar_left as f32,
                 y: ladder_top as f32,
                 w: bar_width as f32,
@@ -318,6 +354,7 @@ pub fn generate_footprint_geometry(
             }
 
             let cell_y = y_top;
+            let (cell_frame_y, cell_frame_h) = compact_cell_visual_rect(cell_y, cell_h);
 
             // Check if this level contains the POC price (works across aggregation)
             let is_poc = poc
@@ -334,44 +371,67 @@ pub fn generate_footprint_geometry(
                 ImbalanceType::None
             };
 
-            // ── Cell dividers — horizontal between rows, vertical between bid/ask ──
-            let (dr, dg, db, da) = color4(&style.grid_color);
-            // Horizontal divider at top of cell
-            rects.push(ColoredRect {
+            // ── Cell outline — proper row border, no internal bid/ask divider ──
+            let (dr, dg, db, da) = color4(&fp_opts.cell_border_color);
+            // Top border
+            overlay_rects.push(ColoredRect {
                 x: bar_left as f32,
-                y: cell_y as f32,
+                y: cell_frame_y as f32,
                 w: bar_width as f32,
                 h: 1.0,
                 r: dr,
                 g: dg,
                 b: db,
-                a: da * 0.5,
+                a: da,
             });
-            // Vertical divider between bid and ask
-            let mid_x = bar_left + bar_width * 0.5;
-            rects.push(ColoredRect {
-                x: mid_x as f32,
-                y: cell_y as f32,
+            // Left border
+            overlay_rects.push(ColoredRect {
+                x: bar_left as f32,
+                y: cell_frame_y as f32,
                 w: 1.0,
-                h: cell_h as f32,
+                h: cell_frame_h as f32,
                 r: dr,
                 g: dg,
                 b: db,
-                a: da * 0.5,
+                a: da,
             });
+            // Right border
+            overlay_rects.push(ColoredRect {
+                x: (bar_left + bar_width - 1.0).max(bar_left) as f32,
+                y: cell_frame_y as f32,
+                w: 1.0,
+                h: cell_frame_h as f32,
+                r: dr,
+                g: dg,
+                b: db,
+                a: da,
+            });
+            // Bottom border only for the last row so shared row separators stay 1px.
+            if level_idx == 0 {
+                overlay_rects.push(ColoredRect {
+                    x: bar_left as f32,
+                    y: (cell_frame_y + cell_frame_h - 1.0).max(cell_frame_y) as f32,
+                    w: bar_width as f32,
+                    h: 1.0,
+                    r: dr,
+                    g: dg,
+                    b: db,
+                    a: da,
+                });
+            }
 
             // ── Render volume bars / text based on display mode ──
             match fp_opts.display_mode {
                 FootprintDisplayMode::BidAsk => {
                     render_bid_ask_cell(
-                        &mut rects,
+                        &mut gradient_rects,
                         &mut texts,
                         fp_opts,
                         level,
                         bar_left,
-                        cell_y,
+                        cell_frame_y,
                         bar_width,
-                        cell_h,
+                        cell_frame_h,
                         max_side_vol,
                         font_size,
                         imbalance,
@@ -379,53 +439,53 @@ pub fn generate_footprint_geometry(
                 }
                 FootprintDisplayMode::Delta => {
                     render_delta_cell(
-                        &mut rects,
+                        &mut gradient_rects,
                         &mut texts,
                         fp_opts,
                         level,
                         bar_left,
-                        cell_y,
+                        cell_frame_y,
                         bar_width,
-                        cell_h,
+                        cell_frame_h,
                         max_delta_abs,
                         font_size,
                     );
                 }
                 FootprintDisplayMode::Volume => {
                     render_volume_cell(
-                        &mut rects,
+                        &mut gradient_rects,
                         &mut texts,
                         fp_opts,
                         level,
                         bar_left,
-                        cell_y,
+                        cell_frame_y,
                         bar_width,
-                        cell_h,
+                        cell_frame_h,
                         max_total_vol,
                         font_size,
                     );
                 }
                 FootprintDisplayMode::DeltaProfile => {
                     render_delta_profile_cell(
-                        &mut rects,
+                        &mut gradient_rects,
                         fp_opts,
                         level,
                         bar_left,
-                        cell_y,
+                        cell_frame_y,
                         bar_width,
-                        cell_h,
+                        cell_frame_h,
                         max_delta_abs,
                     );
                 }
                 FootprintDisplayMode::VolumeProfile => {
                     render_volume_profile_cell(
-                        &mut rects,
+                        &mut gradient_rects,
                         fp_opts,
                         level,
                         bar_left,
-                        cell_y,
+                        cell_frame_y,
                         bar_width,
-                        cell_h,
+                        cell_frame_h,
                         max_total_vol,
                     );
                 }
@@ -436,22 +496,22 @@ pub fn generate_footprint_geometry(
                 let poc_w = (bar_width * fp_opts.poc_width as f64).max(2.0);
                 let (pr, pg, pb, pa) = color4(&fp_opts.poc_color);
                 // Left POC marker
-                rects.push(ColoredRect {
+                overlay_rects.push(ColoredRect {
                     x: bar_left as f32,
-                    y: cell_y as f32,
+                    y: cell_frame_y as f32,
                     w: poc_w as f32,
-                    h: cell_h as f32,
+                    h: cell_frame_h as f32,
                     r: pr,
                     g: pg,
                     b: pb,
                     a: pa,
                 });
                 // Right POC marker
-                rects.push(ColoredRect {
+                overlay_rects.push(ColoredRect {
                     x: (bar_left + bar_width - poc_w) as f32,
-                    y: cell_y as f32,
+                    y: cell_frame_y as f32,
                     w: poc_w as f32,
-                    h: cell_h as f32,
+                    h: cell_frame_h as f32,
                     r: pr,
                     g: pg,
                     b: pb,
@@ -462,9 +522,9 @@ pub fn generate_footprint_geometry(
             // ── Unfinished auction markers ──
             if unfinished_low && level_idx == 0 {
                 let (ur, ug, ub, ua) = color4(&fp_opts.unfinished_auction_color);
-                rects.push(ColoredRect {
+                overlay_rects.push(ColoredRect {
                     x: bar_left as f32,
-                    y: (cell_y + cell_h - 2.0) as f32,
+                    y: (cell_frame_y + cell_frame_h - 2.0).max(cell_frame_y) as f32,
                     w: bar_width as f32,
                     h: 2.0,
                     r: ur,
@@ -475,9 +535,9 @@ pub fn generate_footprint_geometry(
             }
             if unfinished_high && level_idx == levels.len() - 1 {
                 let (ur, ug, ub, ua) = color4(&fp_opts.unfinished_auction_color);
-                rects.push(ColoredRect {
+                overlay_rects.push(ColoredRect {
                     x: bar_left as f32,
-                    y: cell_y as f32,
+                    y: cell_frame_y as f32,
                     w: bar_width as f32,
                     h: 2.0,
                     r: ur,
@@ -491,13 +551,25 @@ pub fn generate_footprint_geometry(
         // ── Delta summary bar at bar bottom ──
         if fp_opts.show_delta_bar {
             render_delta_bar(
-                &mut rects, &mut texts, fp_opts, fp_bar, bar_left, candle_h, bar_width, font_size,
+                &mut overlay_rects,
+                &mut texts,
+                fp_opts,
+                fp_bar,
+                bar_left,
+                candle_h,
+                bar_width,
+                font_size,
                 v_ratio,
             );
         }
     }
 
-    FootprintGeometry { rects, texts }
+    FootprintGeometry {
+        base_rects,
+        gradient_rects,
+        overlay_rects,
+        texts,
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -506,7 +578,7 @@ pub fn generate_footprint_geometry(
 
 /// BidAsk mode: bid volume bar + text on left, ask volume bar + text on right.
 fn render_bid_ask_cell(
-    rects: &mut Vec<ColoredRect>,
+    gradient_rects: &mut Vec<HorizontalGradientRect>,
     texts: &mut Vec<DrawText>,
     opts: &FootprintOptions,
     level: &crate::core::footprint::FootprintLevel,
@@ -526,24 +598,22 @@ fn render_bid_ask_cell(
     let bid_bar_w = (half_w - padding * 2.0) * bid_frac as f64;
     let bid_color = match imbalance {
         ImbalanceType::SellImbalance => opts.sell_imbalance_color,
-        _ => intensity_blend(
-            opts.sell_color,
+        _ => opts.sell_color,
+    };
+    if bid_bar_w > 0.5 {
+        push_horizontal_gradient_rects(
+            gradient_rects,
+            bar_left + half_w - padding - bid_bar_w,
+            cell_y + 1.0,
+            bid_bar_w,
+            (cell_h - 2.0).max(1.0),
+            bid_color,
             opts.cell_bg_color,
             bid_frac,
             &opts.volume_color_intensity,
-        ),
-    };
-    if bid_bar_w > 0.5 {
-        rects.push(ColoredRect {
-            x: (bar_left + half_w - padding - bid_bar_w) as f32,
-            y: (cell_y + 1.0) as f32,
-            w: bid_bar_w as f32,
-            h: (cell_h - 2.0).max(1.0) as f32,
-            r: bid_color[0],
-            g: bid_color[1],
-            b: bid_color[2],
-            a: bid_color[3],
-        });
+            opts.gradient_style,
+            HorizontalGradientDirection::RightToLeft,
+        );
     }
 
     // Ask (buy) side — right half, bar grows from center to right
@@ -551,24 +621,22 @@ fn render_bid_ask_cell(
     let ask_bar_w = (half_w - padding * 2.0) * ask_frac as f64;
     let ask_color = match imbalance {
         ImbalanceType::BuyImbalance => opts.buy_imbalance_color,
-        _ => intensity_blend(
-            opts.buy_color,
+        _ => opts.buy_color,
+    };
+    if ask_bar_w > 0.5 {
+        push_horizontal_gradient_rects(
+            gradient_rects,
+            bar_left + half_w + padding,
+            cell_y + 1.0,
+            ask_bar_w,
+            (cell_h - 2.0).max(1.0),
+            ask_color,
             opts.cell_bg_color,
             ask_frac,
             &opts.volume_color_intensity,
-        ),
-    };
-    if ask_bar_w > 0.5 {
-        rects.push(ColoredRect {
-            x: (bar_left + half_w + padding) as f32,
-            y: (cell_y + 1.0) as f32,
-            w: ask_bar_w as f32,
-            h: (cell_h - 2.0).max(1.0) as f32,
-            r: ask_color[0],
-            g: ask_color[1],
-            b: ask_color[2],
-            a: ask_color[3],
-        });
+            opts.gradient_style,
+            HorizontalGradientDirection::LeftToRight,
+        );
     }
 
     // Volume text — adaptive font size to fit cell
@@ -617,7 +685,7 @@ fn render_bid_ask_cell(
 
 /// Delta mode: single delta value per level with color coding.
 fn render_delta_cell(
-    rects: &mut Vec<ColoredRect>,
+    gradient_rects: &mut Vec<HorizontalGradientRect>,
     texts: &mut Vec<DrawText>,
     opts: &FootprintOptions,
     level: &crate::core::footprint::FootprintLevel,
@@ -633,19 +701,9 @@ fn render_delta_cell(
     let padding = opts.cell_padding as f64;
 
     let color = if delta >= 0.0 {
-        intensity_blend(
-            opts.positive_delta_color,
-            opts.cell_bg_color,
-            delta_frac,
-            &opts.volume_color_intensity,
-        )
+        opts.positive_delta_color
     } else {
-        intensity_blend(
-            opts.negative_delta_color,
-            opts.cell_bg_color,
-            delta_frac,
-            &opts.volume_color_intensity,
-        )
+        opts.negative_delta_color
     };
 
     // Delta bar filling from center
@@ -656,16 +714,23 @@ fn render_delta_cell(
         } else {
             bar_left + bar_width * 0.5 - fill_w
         };
-        rects.push(ColoredRect {
-            x: x as f32,
-            y: (cell_y + 1.0) as f32,
-            w: fill_w as f32,
-            h: (cell_h - 2.0).max(1.0) as f32,
-            r: color[0],
-            g: color[1],
-            b: color[2],
-            a: color[3],
-        });
+        push_horizontal_gradient_rects(
+            gradient_rects,
+            x,
+            cell_y + 1.0,
+            fill_w,
+            (cell_h - 2.0).max(1.0),
+            color,
+            opts.cell_bg_color,
+            delta_frac,
+            &opts.volume_color_intensity,
+            opts.gradient_style,
+            if delta >= 0.0 {
+                HorizontalGradientDirection::LeftToRight
+            } else {
+                HorizontalGradientDirection::RightToLeft
+            },
+        );
     }
 
     // Delta text
@@ -696,7 +761,7 @@ fn render_delta_cell(
 
 /// Volume mode: single total volume per level.
 fn render_volume_cell(
-    rects: &mut Vec<ColoredRect>,
+    gradient_rects: &mut Vec<HorizontalGradientRect>,
     texts: &mut Vec<DrawText>,
     opts: &FootprintOptions,
     level: &crate::core::footprint::FootprintLevel,
@@ -717,26 +782,26 @@ fn render_volume_cell(
     } else {
         opts.sell_color
     };
-    let color = intensity_blend(
-        base_color,
-        opts.cell_bg_color,
-        vol_frac,
-        &opts.volume_color_intensity,
-    );
-
     // Volume fill bar
     let fill_w = (bar_width - padding * 2.0) * vol_frac as f64;
     if fill_w > 0.5 {
-        rects.push(ColoredRect {
-            x: (bar_left + padding) as f32,
-            y: (cell_y + 1.0) as f32,
-            w: fill_w as f32,
-            h: (cell_h - 2.0).max(1.0) as f32,
-            r: color[0],
-            g: color[1],
-            b: color[2],
-            a: color[3],
-        });
+        push_horizontal_gradient_rects(
+            gradient_rects,
+            bar_left + padding,
+            cell_y + 1.0,
+            fill_w,
+            (cell_h - 2.0).max(1.0),
+            base_color,
+            opts.cell_bg_color,
+            vol_frac,
+            &opts.volume_color_intensity,
+            opts.gradient_style,
+            if is_bullish {
+                HorizontalGradientDirection::LeftToRight
+            } else {
+                HorizontalGradientDirection::RightToLeft
+            },
+        );
     }
 
     // Volume text
@@ -762,7 +827,7 @@ fn render_volume_cell(
 
 /// Delta Profile mode: horizontal bar showing delta magnitude.
 fn render_delta_profile_cell(
-    rects: &mut Vec<ColoredRect>,
+    gradient_rects: &mut Vec<HorizontalGradientRect>,
     opts: &FootprintOptions,
     level: &crate::core::footprint::FootprintLevel,
     bar_left: f64,
@@ -790,22 +855,29 @@ fn render_delta_profile_cell(
         } else {
             bar_left + bar_width * 0.5 - fill_w
         };
-        rects.push(ColoredRect {
-            x: x as f32,
-            y: (cell_y + 1.0) as f32,
-            w: fill_w as f32,
-            h: (cell_h - 2.0).max(1.0) as f32,
-            r: color[0],
-            g: color[1],
-            b: color[2],
-            a: color[3],
-        });
+        push_horizontal_gradient_rects(
+            gradient_rects,
+            x,
+            cell_y + 1.0,
+            fill_w,
+            (cell_h - 2.0).max(1.0),
+            color,
+            opts.cell_bg_color,
+            delta_frac,
+            &opts.volume_color_intensity,
+            opts.gradient_style,
+            if delta >= 0.0 {
+                HorizontalGradientDirection::LeftToRight
+            } else {
+                HorizontalGradientDirection::RightToLeft
+            },
+        );
     }
 }
 
 /// Volume Profile mode: horizontal bar showing total volume.
 fn render_volume_profile_cell(
-    rects: &mut Vec<ColoredRect>,
+    gradient_rects: &mut Vec<HorizontalGradientRect>,
     opts: &FootprintOptions,
     level: &crate::core::footprint::FootprintLevel,
     bar_left: f64,
@@ -828,16 +900,23 @@ fn render_volume_profile_cell(
     };
 
     if fill_w > 0.5 {
-        rects.push(ColoredRect {
-            x: (bar_left + padding) as f32,
-            y: (cell_y + 1.0) as f32,
-            w: fill_w as f32,
-            h: (cell_h - 2.0).max(1.0) as f32,
-            r: color[0],
-            g: color[1],
-            b: color[2],
-            a: color[3],
-        });
+        push_horizontal_gradient_rects(
+            gradient_rects,
+            bar_left + padding,
+            cell_y + 1.0,
+            fill_w,
+            (cell_h - 2.0).max(1.0),
+            color,
+            opts.cell_bg_color,
+            vol_frac,
+            &opts.volume_color_intensity,
+            opts.gradient_style,
+            if is_bullish {
+                HorizontalGradientDirection::LeftToRight
+            } else {
+                HorizontalGradientDirection::RightToLeft
+            },
+        );
     }
 }
 
@@ -1032,8 +1111,9 @@ fn intensity_blend(
     bg: [f32; 4],
     frac: f32,
     mode: &VolumeColorIntensity,
+    gradient_style: FootprintGradientStyle,
 ) -> [f32; 4] {
-    let t = match mode {
+    let base_t = match mode {
         VolumeColorIntensity::None => 0.6, // Fixed opacity
         VolumeColorIntensity::Linear => 0.2 + 0.8 * frac,
         VolumeColorIntensity::Logarithmic => {
@@ -1044,13 +1124,107 @@ fn intensity_blend(
             }
         }
     };
+    let (min_t, curve, alpha_floor, glow_mix) = match gradient_style {
+        FootprintGradientStyle::SoftGlow => (0.20, 1.15_f32, 0.18, 0.10),
+        FootprintGradientStyle::StrongGlow => (0.24, 1.35_f32, 0.22, 0.18),
+        FootprintGradientStyle::NoGlow => (0.16, 1.00_f32, 0.12, 0.00),
+    };
+    let t = (min_t + (1.0 - min_t) * base_t.powf(curve)).clamp(0.0, 1.0);
+    let tint = [
+        color[0] + (1.0 - color[0]) * glow_mix,
+        color[1] + (1.0 - color[1]) * glow_mix,
+        color[2] + (1.0 - color[2]) * glow_mix,
+        color[3],
+    ];
 
     [
-        bg[0] + (color[0] - bg[0]) * t,
-        bg[1] + (color[1] - bg[1]) * t,
-        bg[2] + (color[2] - bg[2]) * t,
-        (color[3] * t).clamp(0.0, 1.0),
+        bg[0] + (tint[0] - bg[0]) * t,
+        bg[1] + (tint[1] - bg[1]) * t,
+        bg[2] + (tint[2] - bg[2]) * t,
+        (alpha_floor + color[3] * t * (1.0 - alpha_floor)).clamp(0.0, 1.0),
     ]
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HorizontalGradientDirection {
+    LeftToRight,
+    RightToLeft,
+}
+
+fn push_horizontal_gradient_rects(
+    rects: &mut Vec<HorizontalGradientRect>,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    base_color: [f32; 4],
+    bg: [f32; 4],
+    frac: f32,
+    mode: &VolumeColorIntensity,
+    gradient_style: FootprintGradientStyle,
+    direction: HorizontalGradientDirection,
+) {
+    if w <= 0.5 || h <= 0.5 {
+        return;
+    }
+
+    let flat = intensity_blend(base_color, bg, frac, mode, gradient_style);
+    let (origin_mix, edge_glow_mix, origin_alpha) = match gradient_style {
+        FootprintGradientStyle::SoftGlow => (0.44_f32, 0.12_f32, 0.62_f32),
+        FootprintGradientStyle::StrongGlow => (0.34_f32, 0.20_f32, 0.56_f32),
+        FootprintGradientStyle::NoGlow => (1.0_f32, 0.0_f32, 1.0_f32),
+    };
+
+    let origin = [
+        bg[0] + (flat[0] - bg[0]) * origin_mix,
+        bg[1] + (flat[1] - bg[1]) * origin_mix,
+        bg[2] + (flat[2] - bg[2]) * origin_mix,
+        (flat[3] * origin_alpha).clamp(0.0, 1.0),
+    ];
+    let edge = [
+        flat[0] + (1.0 - flat[0]) * edge_glow_mix,
+        flat[1] + (1.0 - flat[1]) * edge_glow_mix,
+        flat[2] + (1.0 - flat[2]) * edge_glow_mix,
+        flat[3],
+    ];
+    let (left, right) = match direction {
+        HorizontalGradientDirection::LeftToRight => (origin, edge),
+        HorizontalGradientDirection::RightToLeft => (edge, origin),
+    };
+
+    rects.push(HorizontalGradientRect {
+        x: x as f32,
+        y: y as f32,
+        w: w as f32,
+        h: h as f32,
+        left_r: left[0],
+        left_g: left[1],
+        left_b: left[2],
+        left_a: left[3],
+        right_r: right[0],
+        right_g: right[1],
+        right_b: right[2],
+        right_a: right[3],
+    });
+}
+
+fn compact_cell_visual_rect(cell_y: f64, cell_h: f64) -> (f64, f64) {
+    if cell_h <= 6.0 {
+        return (cell_y, cell_h.max(1.0));
+    }
+
+    let compact_ratio = if cell_h >= 36.0 {
+        0.60
+    } else if cell_h >= 24.0 {
+        0.66
+    } else if cell_h >= 14.0 {
+        0.74
+    } else {
+        0.84
+    };
+    let visual_h = (cell_h * compact_ratio).round().clamp(1.0, cell_h);
+    let inset = ((cell_h - visual_h) * 0.5).floor();
+    (cell_y + inset, visual_h)
 }
 
 /// Format volume for display (compact notation).
@@ -1092,6 +1266,34 @@ fn format_delta(delta: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::data::{Bar, BarArray};
+    use crate::core::footprint::{FootprintBar, FootprintData, FootprintLevel, FootprintOptions};
+    use crate::core::renderer::traits::ChartStyle;
+    use crate::core::viewport::Viewport;
+
+    fn sample_viewport() -> Viewport {
+        let mut viewport = Viewport::new(400, 300);
+        viewport.start_bar = -0.5;
+        viewport.end_bar = 1.5;
+        viewport.price_min = 99.0;
+        viewport.price_max = 102.0;
+        viewport.volume_height_ratio = 0.0;
+        viewport
+    }
+
+    fn sample_bars() -> BarArray {
+        let mut bars = BarArray::new();
+        bars.set(vec![Bar {
+            timestamp: 1,
+            open: 100.2,
+            high: 101.4,
+            low: 99.8,
+            close: 100.9,
+            volume: 50.0,
+            _pad: 0.0,
+        }]);
+        bars
+    }
 
     #[test]
     fn test_format_volume() {
@@ -1124,6 +1326,52 @@ mod tests {
     }
 
     #[test]
+    fn soft_glow_gradient_emits_single_smooth_gradient_rect() {
+        let mut rects = Vec::new();
+        push_horizontal_gradient_rects(
+            &mut rects,
+            10.0,
+            20.0,
+            24.0,
+            8.0,
+            [0.2, 0.4, 0.9, 1.0],
+            [0.08, 0.09, 0.12, 1.0],
+            0.9,
+            &crate::core::footprint::VolumeColorIntensity::Linear,
+            crate::core::footprint::FootprintGradientStyle::SoftGlow,
+            HorizontalGradientDirection::LeftToRight,
+        );
+
+        assert_eq!(rects.len(), 1, "soft glow should emit a single smooth gradient rect");
+        let rect = rects.first().unwrap();
+        assert!(rect.left_r < rect.right_r);
+        assert!(rect.left_a < rect.right_a);
+    }
+
+    #[test]
+    fn no_glow_gradient_emits_single_flat_rect() {
+        let mut rects = Vec::new();
+        push_horizontal_gradient_rects(
+            &mut rects,
+            10.0,
+            20.0,
+            24.0,
+            8.0,
+            [0.9, 0.2, 0.3, 1.0],
+            [0.08, 0.09, 0.12, 1.0],
+            0.9,
+            &crate::core::footprint::VolumeColorIntensity::Linear,
+            crate::core::footprint::FootprintGradientStyle::NoGlow,
+            HorizontalGradientDirection::RightToLeft,
+        );
+
+        assert_eq!(rects.len(), 1, "no glow should stay flat");
+        let rect = rects.first().unwrap();
+        assert!((rect.left_r - rect.right_r).abs() < 1e-6);
+        assert!((rect.left_a - rect.right_a).abs() < 1e-6);
+    }
+
+    #[test]
     fn test_auto_tick_size() {
         let bar = crate::core::footprint::FootprintBar {
             levels: vec![
@@ -1145,5 +1393,172 @@ mod tests {
             ],
         };
         assert_eq!(auto_tick_size(&bar), 0.5);
+    }
+
+    #[test]
+    fn populated_footprint_bar_keeps_candle_in_overlay_layer() {
+        let bars = sample_bars();
+        let mut fp_data = FootprintData::new();
+        fp_data.set_bar(
+            0,
+            FootprintBar {
+                levels: vec![
+                    FootprintLevel {
+                        price: 100.0,
+                        bid_volume: 15.0,
+                        ask_volume: 20.0,
+                    },
+                    FootprintLevel {
+                        price: 100.5,
+                        bid_volume: 25.0,
+                        ask_volume: 18.0,
+                    },
+                    FootprintLevel {
+                        price: 101.0,
+                        bid_volume: 11.0,
+                        ask_volume: 30.0,
+                    },
+                ],
+            },
+        );
+        let viewport = sample_viewport();
+        let style = ChartStyle::default();
+        let opts = FootprintOptions::default();
+
+        let geom = generate_footprint_geometry(
+            &bars, &viewport, &style, &fp_data, &opts, 400.0, 300.0, 1.0, 1.0,
+        );
+
+        let ladder_left = geom
+            .base_rects
+            .iter()
+            .map(|rect| rect.x)
+            .fold(f32::INFINITY, f32::min);
+        assert!(ladder_left.is_finite(), "ladder background should exist");
+        assert!(
+            geom.overlay_rects.iter().any(|rect| rect.x + rect.w <= ladder_left),
+            "candle geometry should render in the later overlay layer left of the ladder"
+        );
+    }
+
+    #[test]
+    fn empty_level_footprint_bar_falls_back_to_candle() {
+        let bars = sample_bars();
+        let mut fp_data = FootprintData::new();
+        fp_data.set_bar(0, FootprintBar::new());
+        let viewport = sample_viewport();
+        let style = ChartStyle::default();
+        let opts = FootprintOptions::default();
+
+        let geom = generate_footprint_geometry(
+            &bars, &viewport, &style, &fp_data, &opts, 400.0, 300.0, 1.0, 1.0,
+        );
+
+        assert!(
+            geom.gradient_rects.is_empty(),
+            "bars with no footprint levels should not emit ladder gradients"
+        );
+        assert!(
+            geom.overlay_rects.iter().any(|rect| rect.w >= 1.0 && rect.h >= 1.0),
+            "bars with empty footprint levels should still show a fallback candle"
+        );
+    }
+
+    #[test]
+    fn bid_ask_cells_use_outer_border_without_center_divider() {
+        let bars = sample_bars();
+        let mut fp_data = FootprintData::new();
+        fp_data.set_bar(
+            0,
+            FootprintBar {
+                levels: vec![FootprintLevel {
+                    price: 100.0,
+                    bid_volume: 15.0,
+                    ask_volume: 20.0,
+                }],
+            },
+        );
+        let viewport = sample_viewport();
+        let style = ChartStyle::default();
+        let mut opts = FootprintOptions::default();
+        opts.show_poc = false;
+        opts.show_delta_bar = false;
+        opts.show_unfinished_auction = false;
+        opts.show_volume_text = false;
+
+        let geom = generate_footprint_geometry(
+            &bars, &viewport, &style, &fp_data, &opts, 400.0, 300.0, 1.0, 1.0,
+        );
+
+        let ladder = geom
+            .base_rects
+            .iter()
+            .max_by(|a, b| a.w.partial_cmp(&b.w).unwrap_or(std::cmp::Ordering::Equal))
+            .expect("ladder background should exist");
+        let mid_x = ladder.x + ladder.w * 0.5;
+        let right_x = ladder.x + ladder.w - 1.0;
+
+        assert!(
+            geom.overlay_rects
+                .iter()
+                .any(|rect| (rect.x - ladder.x).abs() < 0.1 && rect.w <= 1.0 && rect.h >= 1.0),
+            "row should include a left border"
+        );
+        assert!(
+            geom.overlay_rects
+                .iter()
+                .any(|rect| (rect.x - right_x).abs() < 0.1 && rect.w <= 1.0 && rect.h >= 1.0),
+            "row should include a right border"
+        );
+        assert!(
+            !geom.overlay_rects
+                .iter()
+                .any(|rect| (rect.x - mid_x).abs() < 0.1 && rect.w <= 1.0 && rect.h >= 1.0),
+            "row should not emit an internal bid/ask divider"
+        );
+    }
+
+    #[test]
+    fn zoomed_in_rows_are_visually_compacted_inside_tick_band() {
+        let bars = sample_bars();
+        let mut fp_data = FootprintData::new();
+        fp_data.set_bar(
+            0,
+            FootprintBar {
+                levels: vec![FootprintLevel {
+                    price: 100.0,
+                    bid_volume: 21.0,
+                    ask_volume: 34.0,
+                }],
+            },
+        );
+        let viewport = sample_viewport();
+        let style = ChartStyle::default();
+        let mut opts = FootprintOptions::default();
+        opts.show_poc = false;
+        opts.show_delta_bar = false;
+        opts.show_unfinished_auction = false;
+        opts.show_volume_text = false;
+
+        let geom = generate_footprint_geometry(
+            &bars, &viewport, &style, &fp_data, &opts, 400.0, 300.0, 1.0, 1.0,
+        );
+
+        let ladder = geom
+            .base_rects
+            .iter()
+            .max_by(|a, b| a.w.partial_cmp(&b.w).unwrap_or(std::cmp::Ordering::Equal))
+            .expect("ladder background should exist");
+        let left_border = geom
+            .overlay_rects
+            .iter()
+            .find(|rect| (rect.x - ladder.x).abs() < 0.1 && rect.w <= 1.0 && rect.h > 1.0)
+            .expect("left border should exist");
+
+        let raw_cell_h = 100.0_f64;
+        assert!(
+            (left_border.h as f64) < raw_cell_h * 0.85,
+            "zoomed-in rows should be visually compacted instead of filling the full tick band"
+        );
     }
 }

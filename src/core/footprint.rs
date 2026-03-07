@@ -19,8 +19,8 @@
 //! # Data Flow
 //!
 //! ```text
-//! JS: chart.set_footprint_data(bar_index, levels)
-//!   → FootprintData::set_bar(bar_idx, FootprintBar)
+//! JS: chart.set_data_with_footprint_arrays(...)
+//!   → ChartEngine::set_data_with_footprint(...)
 //!     → Geometry generator reads FootprintData during draw_candles
 //!       → Renders bid/ask cells, POC marker, value area, imbalances
 //! ```
@@ -516,6 +516,85 @@ impl FootprintData {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Footprint Theme
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// High-level footprint directional palette.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum FootprintPalette {
+    /// Blue for buying / positive states, red for selling / negative states.
+    #[default]
+    BlueRed,
+    /// Green for buying / positive states, red for selling / negative states.
+    GreenRed,
+}
+
+impl FootprintPalette {
+    pub fn from_str(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "green_red" | "green-red" | "greenred" => Self::GreenRed,
+            _ => Self::BlueRed,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::BlueRed => "blue_red",
+            Self::GreenRed => "green_red",
+        }
+    }
+}
+
+/// How aggressively footprint fills should glow/intensify.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum FootprintGradientStyle {
+    /// Subtle production-safe glow and opacity ramp.
+    #[default]
+    SoftGlow,
+    /// Stronger emphasis with brighter highlights.
+    StrongGlow,
+    /// Flat fills with no extra glow emphasis.
+    NoGlow,
+}
+
+impl FootprintGradientStyle {
+    pub fn from_str(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "strong_glow" | "strong-glow" | "strongglow" => Self::StrongGlow,
+            "no_glow" | "no-glow" | "noglow" | "none" | "flat" => Self::NoGlow,
+            _ => Self::SoftGlow,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SoftGlow => "soft_glow",
+            Self::StrongGlow => "strong_glow",
+            Self::NoGlow => "no_glow",
+        }
+    }
+}
+
+fn clamp01(value: f32) -> f32 {
+    value.clamp(0.0, 1.0)
+}
+
+fn with_alpha(mut color: [f32; 4], alpha: f32) -> [f32; 4] {
+    color[3] = clamp01(alpha);
+    color
+}
+
+fn mix_rgb(a: [f32; 4], b: [f32; 4], t: f32, alpha: f32) -> [f32; 4] {
+    let t = clamp01(t);
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+        clamp01(alpha),
+    ]
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Footprint Options — pro configuration
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -524,6 +603,12 @@ impl FootprintData {
 pub struct FootprintOptions {
     /// Display mode (BidAsk, Delta, Volume, etc.).
     pub display_mode: FootprintDisplayMode,
+
+    /// Directional palette family used by all footprint states.
+    pub palette: FootprintPalette,
+
+    /// Intensity/glow treatment for footprint fills.
+    pub gradient_style: FootprintGradientStyle,
 
     /// Tick size — price granularity per row.
     /// E.g., 0.5 means each row covers a $0.50 range.
@@ -633,6 +718,60 @@ impl FootprintOptions {
         let text_target = (self.font_size.max(0.0) as f64 * 0.45 + 0.5).clamp(5.0, 7.0);
         base.max(text_target)
     }
+
+    /// Refresh derived directional/neutral colors from the semantic palette.
+    pub fn apply_semantic_theme(&mut self) {
+        use crate::core::renderer::theme::{ch, BEARISH};
+
+        let blue = [ch(0x35), ch(0x59), ch(0xE9), 1.0];
+        let red = [ch(0xFB), ch(0x37), ch(0x48), 1.0];
+        let green = [ch(0x00), ch(0xC8), ch(0x72), 1.0];
+        let bearish = with_alpha(BEARISH, 1.0);
+        let neutral_bg = [0.10, 0.11, 0.14, 0.92];
+        let neutral_border = [0.57, 0.61, 0.72, 0.14];
+        let neutral_text = [0.88, 0.90, 0.96, 1.0];
+        let neutral_va = [0.52, 0.56, 0.67, 0.08];
+        let neutral_high = [0.95, 0.97, 1.0, 0.12];
+
+        let (buy_base, sell_base) = match self.palette {
+            FootprintPalette::BlueRed => (blue, red),
+            FootprintPalette::GreenRed => (green, bearish),
+        };
+
+        let (base_alpha, emphasis_alpha, stacked_alpha, border_alpha, va_alpha, high_alpha) =
+            match self.gradient_style {
+                FootprintGradientStyle::SoftGlow => (0.90, 0.38, 0.52, 0.14, 0.08, 0.12),
+                FootprintGradientStyle::StrongGlow => (0.96, 0.50, 0.66, 0.18, 0.10, 0.16),
+                FootprintGradientStyle::NoGlow => (0.84, 0.26, 0.34, 0.10, 0.06, 0.08),
+            };
+
+        self.buy_color = with_alpha(buy_base, base_alpha);
+        self.sell_color = with_alpha(sell_base, base_alpha);
+        self.buy_imbalance_color = mix_rgb(buy_base, [1.0, 1.0, 1.0, 1.0], 0.10, emphasis_alpha);
+        self.sell_imbalance_color =
+            mix_rgb(sell_base, [1.0, 1.0, 1.0, 1.0], 0.08, emphasis_alpha);
+        self.stacked_buy_imbalance_color =
+            mix_rgb(buy_base, [1.0, 1.0, 1.0, 1.0], 0.16, stacked_alpha);
+        self.stacked_sell_imbalance_color =
+            mix_rgb(sell_base, [1.0, 1.0, 1.0, 1.0], 0.12, stacked_alpha);
+        self.diagonal_imbalance_color = mix_rgb(
+            self.poc_color,
+            [1.0, 1.0, 1.0, 1.0],
+            0.06,
+            emphasis_alpha * 0.9,
+        );
+        self.positive_delta_color = with_alpha(buy_base, 0.92);
+        self.negative_delta_color = with_alpha(sell_base, 0.92);
+        self.cell_bg_color = neutral_bg;
+        self.cell_border_color = with_alpha(neutral_border, border_alpha);
+        self.text_color = neutral_text;
+        self.high_volume_color = with_alpha(neutral_high, high_alpha);
+        self.cum_delta_positive_color = with_alpha(buy_base, base_alpha * 0.82);
+        self.cum_delta_negative_color = with_alpha(sell_base, base_alpha * 0.82);
+        self.value_area_color = with_alpha(neutral_va, va_alpha);
+        self.unfinished_auction_color =
+            mix_rgb(self.poc_color, [0.92, 0.94, 1.0, 1.0], 0.08, emphasis_alpha * 0.9);
+    }
 }
 
 /// How volume magnitude affects cell color intensity.
@@ -649,11 +788,12 @@ pub enum VolumeColorIntensity {
 
 impl Default for FootprintOptions {
     fn default() -> Self {
-        // Import theme helpers for consistent colors
-        use crate::core::renderer::theme::{ch, BEARISH, BULLISH};
+        use crate::core::renderer::theme::ch;
 
-        Self {
+        let mut opts = Self {
             display_mode: FootprintDisplayMode::BidAsk,
+            palette: FootprintPalette::BlueRed,
+            gradient_style: FootprintGradientStyle::SoftGlow,
             tick_size: 0.0, // auto
 
             // Imbalance settings
@@ -669,28 +809,28 @@ impl Default for FootprintOptions {
             poc_width: 0.06,
             show_value_area: true,
             value_area_pct: 0.70,
-            value_area_color: [0.5, 0.5, 0.6, 0.08],
+            value_area_color: [0.0, 0.0, 0.0, 0.0],
 
             // Unfinished auction
             show_unfinished_auction: true,
-            unfinished_auction_color: [ch(0xFF), ch(0xA5), ch(0x00), 0.7], // Orange
+            unfinished_auction_color: [0.0, 0.0, 0.0, 0.0],
 
             // Colors
-            buy_color: BULLISH,
-            sell_color: BEARISH,
-            buy_imbalance_color: [ch(0x00), ch(0xE6), ch(0x76), 0.35], // Bright green
-            sell_imbalance_color: [ch(0xFF), ch(0x45), ch(0x45), 0.35], // Bright red
-            stacked_buy_imbalance_color: [ch(0x00), ch(0xFF), ch(0x88), 0.5],
-            stacked_sell_imbalance_color: [ch(0xFF), ch(0x22), ch(0x22), 0.5],
-            diagonal_imbalance_color: [ch(0xFF), ch(0xD7), ch(0x00), 0.4],
-            positive_delta_color: [ch(0x35), ch(0x59), ch(0xE9), 0.9],
-            negative_delta_color: [ch(0xFB), ch(0x37), ch(0x48), 0.9],
-            cell_bg_color: [0.12, 0.12, 0.15, 0.9],
-            cell_border_color: [0.5, 0.5, 0.55, 0.12],
-            text_color: [0.85, 0.85, 0.9, 1.0],
-            high_volume_color: [1.0, 1.0, 1.0, 0.15],
-            cum_delta_positive_color: [ch(0x35), ch(0x59), ch(0xE9), 0.7],
-            cum_delta_negative_color: [ch(0xFB), ch(0x37), ch(0x48), 0.7],
+            buy_color: [0.0, 0.0, 0.0, 0.0],
+            sell_color: [0.0, 0.0, 0.0, 0.0],
+            buy_imbalance_color: [0.0, 0.0, 0.0, 0.0],
+            sell_imbalance_color: [0.0, 0.0, 0.0, 0.0],
+            stacked_buy_imbalance_color: [0.0, 0.0, 0.0, 0.0],
+            stacked_sell_imbalance_color: [0.0, 0.0, 0.0, 0.0],
+            diagonal_imbalance_color: [0.0, 0.0, 0.0, 0.0],
+            positive_delta_color: [0.0, 0.0, 0.0, 0.0],
+            negative_delta_color: [0.0, 0.0, 0.0, 0.0],
+            cell_bg_color: [0.0, 0.0, 0.0, 0.0],
+            cell_border_color: [0.0, 0.0, 0.0, 0.0],
+            text_color: [0.0, 0.0, 0.0, 0.0],
+            high_volume_color: [0.0, 0.0, 0.0, 0.0],
+            cum_delta_positive_color: [0.0, 0.0, 0.0, 0.0],
+            cum_delta_negative_color: [0.0, 0.0, 0.0, 0.0],
 
             // Layout
             min_cell_height: 1.0,
@@ -703,7 +843,9 @@ impl Default for FootprintOptions {
             delta_bar_height: 16.0,
             volume_color_intensity: VolumeColorIntensity::Linear,
             zoom_price_with_time: true,
-        }
+        };
+        opts.apply_semantic_theme();
+        opts
     }
 }
 
@@ -933,6 +1075,79 @@ mod tests {
             let parsed = FootprintDisplayMode::from_str(s);
             assert_eq!(*mode, parsed);
         }
+    }
+
+    #[test]
+    fn test_palette_roundtrip() {
+        for palette in &[FootprintPalette::BlueRed, FootprintPalette::GreenRed] {
+            let parsed = FootprintPalette::from_str(palette.as_str());
+            assert_eq!(*palette, parsed);
+        }
+    }
+
+    #[test]
+    fn test_gradient_style_roundtrip() {
+        for style in &[
+            FootprintGradientStyle::SoftGlow,
+            FootprintGradientStyle::StrongGlow,
+            FootprintGradientStyle::NoGlow,
+        ] {
+            let parsed = FootprintGradientStyle::from_str(style.as_str());
+            assert_eq!(*style, parsed);
+        }
+    }
+
+    #[test]
+    fn default_palette_is_blue_red_without_extra_green_or_orange_states() {
+        let opts = FootprintOptions::default();
+        assert_eq!(opts.palette, FootprintPalette::BlueRed);
+        assert_eq!(opts.gradient_style, FootprintGradientStyle::SoftGlow);
+
+        assert!(
+            opts.buy_color[2] > opts.buy_color[1] && opts.buy_color[2] > opts.buy_color[0],
+            "default buy color should be blue-dominant"
+        );
+        assert!(
+            opts.sell_color[0] > opts.sell_color[1] && opts.sell_color[0] > opts.sell_color[2],
+            "default sell color should be red-dominant"
+        );
+        assert!(
+            opts.positive_delta_color[2] > opts.positive_delta_color[1],
+            "positive delta should stay in the positive palette family"
+        );
+        assert!(
+            opts.negative_delta_color[0] > opts.negative_delta_color[2],
+            "negative delta should stay in the negative palette family"
+        );
+        assert!(
+            opts.unfinished_auction_color[0] >= 0.75 && opts.unfinished_auction_color[1] >= 0.65,
+            "unfinished auction should use POC/neutral accenting instead of orange"
+        );
+    }
+
+    #[test]
+    fn green_red_palette_updates_all_directional_states() {
+        let mut opts = FootprintOptions::default();
+        opts.palette = FootprintPalette::GreenRed;
+        opts.apply_semantic_theme();
+
+        assert!(
+            opts.buy_color[1] > opts.buy_color[0] && opts.buy_color[1] > opts.buy_color[2],
+            "green_red buy state should be green-dominant"
+        );
+        assert!(
+            opts.positive_delta_color[1] > opts.positive_delta_color[0]
+                && opts.positive_delta_color[1] > opts.positive_delta_color[2],
+            "green_red positive delta should be green-dominant"
+        );
+        assert!(
+            opts.cum_delta_positive_color[1] > opts.cum_delta_positive_color[0],
+            "green_red cumulative positive delta should stay green"
+        );
+        assert!(
+            opts.sell_color[0] > opts.sell_color[1] && opts.sell_color[0] > opts.sell_color[2],
+            "green_red sell state should remain red-dominant"
+        );
     }
 
     #[test]

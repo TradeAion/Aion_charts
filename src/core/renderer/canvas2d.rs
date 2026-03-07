@@ -7,7 +7,9 @@
 #![cfg(target_arch = "wasm32")]
 
 use crate::core::drawings::types::DrawingGeometry;
-use crate::core::renderer::draw_list::{AreaSegment, ColoredRect, LineSegment};
+use crate::core::renderer::draw_list::{
+    AreaSegment, ColoredRect, HorizontalGradientRect, LineSegment,
+};
 use crate::core::renderer::geometry_generator;
 use crate::core::renderer::traits::{ChartRenderer, RenderContext};
 use wasm_bindgen::prelude::*;
@@ -69,6 +71,27 @@ impl Canvas2DRenderer {
                 rect.a,
             );
             self.ctx.set_fill_style_str(&color);
+            self.ctx
+                .fill_rect(rect.x as f64, rect.y as f64, rect.w as f64, rect.h as f64);
+        }
+    }
+
+    fn draw_horizontal_gradient_rects(&self, rects: &[HorizontalGradientRect]) {
+        for rect in rects {
+            if rect.w <= 0.0 || rect.h <= 0.0 {
+                continue;
+            }
+            let left = [rect.left_r, rect.left_g, rect.left_b, rect.left_a];
+            let right = [rect.right_r, rect.right_g, rect.right_b, rect.right_a];
+            let gradient = self.ctx.create_linear_gradient(
+                rect.x as f64,
+                rect.y as f64,
+                (rect.x + rect.w) as f64,
+                rect.y as f64,
+            );
+            let _ = gradient.add_color_stop(0.0, &rgba(&left));
+            let _ = gradient.add_color_stop(1.0, &rgba(&right));
+            self.ctx.set_fill_style_canvas_gradient(&gradient);
             self.ctx
                 .fill_rect(rect.x as f64, rect.y as f64, rect.w as f64, rect.h as f64);
         }
@@ -406,7 +429,10 @@ impl ChartRenderer for Canvas2DRenderer {
                 //
                 // If footprint data is not loaded yet, fall back to candles so
                 // switching chart type never blanks the pane.
-                if ctx.footprint_rects.is_empty() {
+                if ctx.footprint_base_rects.is_empty()
+                    && ctx.footprint_gradient_rects.is_empty()
+                    && ctx.footprint_overlay_rects.is_empty()
+                {
                     let bullish_border = ctx
                         .main_chart_options
                         .up_border_color
@@ -428,7 +454,9 @@ impl ChartRenderer for Canvas2DRenderer {
                     );
                     self.draw_rects(&rects);
                 } else {
-                    self.draw_rects(ctx.footprint_rects);
+                    self.draw_rects(ctx.footprint_base_rects);
+                    self.draw_horizontal_gradient_rects(ctx.footprint_gradient_rects);
+                    self.draw_rects(ctx.footprint_overlay_rects);
                 }
             }
         }

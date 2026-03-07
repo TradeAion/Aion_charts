@@ -129,9 +129,12 @@ pub(crate) fn do_render_frame(
             &engine.series,
             &engine.bars,
             engine.main_chart_options.chart_type,
+            &engine.footprint_data,
+            &engine.main_chart_options.footprint,
             &engine.price_lines,
             &engine.viewport,
             pane_ph,
+            engine.v_pixel_ratio,
         );
 
         // Include subpane tick labels in width measurement so they don't clip
@@ -291,10 +294,13 @@ pub(crate) fn do_render_frame(
             symbol,
             &engine.bars,
             engine.main_chart_options.chart_type,
+            &engine.footprint_data,
+            &engine.main_chart_options.footprint,
             &engine.viewport,
             &engine.style,
             pane_css_w,
             pane_css_h,
+            engine.v_pixel_ratio,
         );
         overlay.render_markers(
             &engine.markers,
@@ -337,9 +343,12 @@ pub(crate) fn do_render_frame(
             &engine.series,
             &engine.bars,
             engine.main_chart_options.chart_type,
+            &engine.footprint_data,
+            &engine.main_chart_options.footprint,
             &engine.viewport,
             &engine.style,
             pane_ph,
+            engine.v_pixel_ratio,
         );
         price_axis_renderer.render_price_line_labels(
             &engine.price_lines,

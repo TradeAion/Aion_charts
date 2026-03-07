@@ -22,6 +22,30 @@ pub struct ColoredRect {
     pub a: f32,
 }
 
+/// A horizontally interpolated rectangle in physical pixel coordinates.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct HorizontalGradientRect {
+    /// Left edge X in physical pixels.
+    pub x: f32,
+    /// Top edge Y in physical pixels.
+    pub y: f32,
+    /// Width in physical pixels.
+    pub w: f32,
+    /// Height in physical pixels.
+    pub h: f32,
+    /// RGBA color at the left edge.
+    pub left_r: f32,
+    pub left_g: f32,
+    pub left_b: f32,
+    pub left_a: f32,
+    /// RGBA color at the right edge.
+    pub right_r: f32,
+    pub right_g: f32,
+    pub right_b: f32,
+    pub right_a: f32,
+}
+
 /// A line segment in physical pixel coordinates for rendering.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]

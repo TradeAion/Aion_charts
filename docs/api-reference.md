@@ -89,6 +89,98 @@ Update the most recent bar in-place (for live streaming).
 
 Load 600 sample bars for testing.
 
+### `set_data_with_footprint_arrays(open, high, low, close, volume, timestamps, level_offsets, prices, bid_volumes, ask_volumes)`
+
+Atomically load OHLCV bars plus aligned footprint levels from typed arrays.
+
+```ts
+set_data_with_footprint_arrays(
+  open: Float32Array,
+  high: Float32Array,
+  low: Float32Array,
+  close: Float32Array,
+  volume: Float32Array,
+  timestamps: BigUint64Array,
+  level_offsets: Uint32Array,
+  prices: Float32Array,
+  bid_volumes: Float32Array,
+  ask_volumes: Float32Array,
+): void
+```
+
+Notes:
+- This is the canonical historical footprint initialization API for production use.
+- `level_offsets.length` must equal `bar_count + 1`.
+- Sparse footprint bars use empty ranges, for example `level_offsets[i] === level_offsets[i + 1]`.
+- Validation is atomic: invalid payloads fail without partially replacing chart state.
+
+### `set_data_with_footprint_json(json)`
+
+Atomically load OHLCV bars plus footprint levels from JSON.
+
+Canonical format:
+
+```json
+[
+  {
+    "timestamp": 1710000000000,
+    "open": 100.0,
+    "high": 101.0,
+    "low": 99.5,
+    "close": 100.5,
+    "volume": 2500.0,
+    "levels": [
+      { "price": 99.5, "bid": 120.0, "ask": 80.0 },
+      { "price": 100.0, "bidVolume": 90.0, "askVolume": 140.0 }
+    ]
+  }
+]
+```
+
+Also accepted: `{ "bars": [...] }`.
+
+### `upsert_bar_with_footprint(timestamp, open, high, low, close, volume, prices, bid_volumes, ask_volumes)`
+
+Atomically append/update a live OHLCV bar and its footprint levels in one call.
+
+This is the canonical live-update API for production footprint integrations.
+
+### Legacy compatibility footprint setters
+
+The following methods remain supported for patch/update workflows and backward compatibility:
+
+- `set_footprint_bar(...)`
+- `set_footprint_data_arrays(...)`
+- `set_footprint_data_json(...)`
+
+For new historical footprint initialization, prefer `set_data_with_footprint_arrays(...)` or `set_data_with_footprint_json(...)`.
+
+### Production example
+
+```ts
+chart.set_chart_type('footprint');
+chart.set_data_with_footprint_arrays(
+  opens,
+  highs,
+  lows,
+  closes,
+  volumes,
+  timestamps,
+  levelOffsets,
+  prices,
+  bidVolumes,
+  askVolumes,
+);
+```
+
+### Compatibility example
+
+```ts
+chart.set_data_arrays(opens, highs, lows, closes, volumes, timestamps);
+chart.set_chart_type('footprint');
+chart.set_footprint_data_arrays(barIndices, levelOffsets, prices, bidVolumes, askVolumes);
+```
+
 ---
 
 ## Replay
@@ -171,10 +263,19 @@ Toggle auto-scroll to latest bar on new data.
 ### `set_chart_type(type)`
 
 ```ts
-set_chart_type(type: 'candlestick' | 'ohlc' | 'line' | 'area' | 'heikin_ashi' | 'baseline'): void
+set_chart_type(type: 'candlestick' | 'ohlc' | 'line' | 'area' | 'heikin_ashi' | 'baseline' | 'footprint'): void
 ```
 
-Aliases: `'candles'` = `'candlestick'`, `'bars'` = `'ohlc'`, `'ha'` = `'heikin_ashi'`.
+Aliases: `'candles'` = `'candlestick'`, `'bars'` = `'ohlc'`, `'ha'` = `'heikin_ashi'`, `'fp'` / `'order_flow'` = `'footprint'`.
+
+### `set_footprint_options(json)`
+
+Supported semantic theming keys:
+
+- `palette`: `"blue_red"` (default) or `"green_red"`
+- `gradient_style`: `"soft_glow"` (default), `"strong_glow"`, or `"no_glow"`
+- `poc_color`: CSS color string or `[r, g, b, a]`
+- `display_mode`, `tick_size`, `imbalance_ratio`, `show_imbalances`, `show_poc`, `show_value_area`, `value_area_pct`, `show_delta_bar`, `show_volume_text`, `show_unfinished_auction`, `show_cumulative_delta`, `font_size`, `min_cell_height`, `zoom_price_with_time`
 
 ---
 

@@ -296,9 +296,12 @@ pub struct RenderContext<'a> {
     pub bottom_drawings: &'a [DrawingGeometry],
     /// Footprint data for order-flow visualization (only used when main_chart_type is Footprint).
     pub footprint_data: &'a crate::core::footprint::FootprintData,
-    /// Pre-computed footprint rects from geometry generator.
-    /// Populated by ChartEngine::render() so both Canvas2D and WebGPU get identical geometry.
-    pub footprint_rects: &'a [super::draw_list::ColoredRect],
+    /// Pre-computed footprint flat geometry rendered below gradient-filled cells.
+    pub footprint_base_rects: &'a [super::draw_list::ColoredRect],
+    /// Pre-computed footprint smooth gradient fills.
+    pub footprint_gradient_rects: &'a [super::draw_list::HorizontalGradientRect],
+    /// Pre-computed footprint flat geometry rendered above gradient-filled cells.
+    pub footprint_overlay_rects: &'a [super::draw_list::ColoredRect],
     /// Pre-computed footprint text labels.
     /// Also stored on ChartEngine::footprint_texts for overlay rendering on WebGPU.
     pub footprint_texts: &'a [super::draw_list::DrawText],

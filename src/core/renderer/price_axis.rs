@@ -10,6 +10,7 @@
 
 use crate::core::chart_type::MainChartType;
 use crate::core::formatters::format_countdown;
+use crate::core::footprint::{FootprintData, FootprintOptions};
 use crate::core::price_line::PriceLineManager;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
@@ -130,9 +131,12 @@ impl PriceAxisRenderer {
         series: &SeriesCollection,
         bars: &crate::core::data::BarArray,
         main_chart_type: MainChartType,
+        footprint_data: &FootprintData,
+        footprint_opts: &FootprintOptions,
         price_lines: &PriceLineManager,
         vp: &Viewport,
         pane_ph: f64,
+        v_pixel_ratio: f64,
     ) -> f64 {
         let font = style.axis_font(self.dpr);
         self.base_ctx.set_font(&font);
@@ -153,8 +157,18 @@ impl PriceAxisRenderer {
 
         // Last-value labels (same source as pane last-price lines).
         if style.last_price_line.label_visible {
-            let mut items: Vec<_> =
-                collect_last_values(series, bars, main_chart_type, vp, style, pane_ph, self.dpr);
+            let mut items: Vec<_> = collect_last_values(
+                series,
+                bars,
+                main_chart_type,
+                footprint_data,
+                footprint_opts,
+                vp,
+                style,
+                pane_ph,
+                v_pixel_ratio,
+                self.dpr,
+            );
             append_countdown_to_labels(&mut items, bars);
             for item in &items {
                 let w = self.text_cache.measure(&self.base_ctx, &item.label, &font);
@@ -355,9 +369,12 @@ impl PriceAxisRenderer {
         series: &SeriesCollection,
         bars: &crate::core::data::BarArray,
         main_chart_type: MainChartType,
+        footprint_data: &FootprintData,
+        footprint_opts: &FootprintOptions,
         vp: &Viewport,
         style: &ChartStyle,
         pane_ph: f64,
+        v_pixel_ratio: f64,
     ) {
         if !style.last_price_line.label_visible {
             return;
@@ -365,8 +382,18 @@ impl PriceAxisRenderer {
 
         let w = self.pw as f64;
 
-        let mut labels =
-            collect_last_values(series, bars, main_chart_type, vp, style, pane_ph, self.dpr);
+        let mut labels = collect_last_values(
+            series,
+            bars,
+            main_chart_type,
+            footprint_data,
+            footprint_opts,
+            vp,
+            style,
+            pane_ph,
+            v_pixel_ratio,
+            self.dpr,
+        );
         if labels.is_empty() {
             return;
         }

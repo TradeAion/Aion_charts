@@ -10,7 +10,8 @@
 
 use crate::core::chart_type::{MainChartOptions, MainChartType};
 use crate::core::constants::{
-    DEFAULT_BAR_SPACING_CSS, DEFAULT_INITIAL_VISIBLE_BARS, DEGENERATE_PRICE_RANGE_FALLBACK,
+    DEFAULT_BAR_SPACING_CSS, DEFAULT_INITIAL_VISIBLE_BARS, DEFAULT_SCALE_MARGIN_BOTTOM,
+    DEFAULT_SCALE_MARGIN_TOP, DEFAULT_VOLUME_HEIGHT_RATIO, DEGENERATE_PRICE_RANGE_FALLBACK,
     MIN_FOOTPRINT_BAR_CSS, MIN_VISIBLE_BARS,
 };
 use crate::core::data::{Bar, BarArray};
@@ -114,17 +115,25 @@ pub struct ChartEngine {
     /// Populated during draw_candles so the overlay Canvas2D layer can render them
     /// (WebGPU cannot render text natively).
     pub footprint_texts: Vec<DrawText>,
-    /// Saved volume_height_ratio from before entering Footprint mode.
-    /// Footprint sets the ratio to 0 so the candle area fills the full pane,
-    /// and ALL coordinate projections (candle, live line, price label, asset
-    /// chip) go through the standard `candle_area_height_ph()` path with no
-    /// special-casing.  Restored when leaving Footprint mode.
-    saved_volume_height_ratio: Option<f32>,
+    /// User-facing volume visibility preference.
+    /// Footprint mode may force the effective viewport ratio to zero, but this
+    /// flag preserves whether volume should come back when leaving footprint.
+    user_volume_visible: bool,
+    /// User-preferred main-pane volume height ratio when volume is visible.
+    user_volume_height_ratio: f32,
+    /// True when current price-scale margins were explicitly customized away
+    /// from the library defaults.
+    price_scale_margins_customized: bool,
+    /// True when hidden-volume default margin tightening is currently active.
+    hidden_volume_default_margins_applied: bool,
     /// Event bus — collects events for the platform layer to drain and forward.
     pub event_bus: EventBus,
 }
 
 impl ChartEngine {
+    const HIDDEN_VOLUME_DEFAULT_BOTTOM_MARGIN: f64 = 0.04;
+    const DEFAULT_MARGIN_EPSILON: f64 = 1e-9;
+
     fn series_type_name(series_type: SeriesType) -> &'static str {
         match series_type {
             SeriesType::Candlestick => "candlestick",
@@ -250,7 +259,10 @@ impl ChartEngine {
             main_chart_options: MainChartOptions::default(),
             footprint_data: FootprintData::new(),
             footprint_texts: Vec::new(),
-            saved_volume_height_ratio: None,
+            user_volume_visible: true,
+            user_volume_height_ratio: DEFAULT_VOLUME_HEIGHT_RATIO as f32,
+            price_scale_margins_customized: false,
+            hidden_volume_default_margins_applied: false,
             event_bus: EventBus::new(),
         }
     }
@@ -258,6 +270,69 @@ impl ChartEngine {
     /// Which renderer backend is active.
     pub fn renderer_name(&self) -> &str {
         self.renderer.name()
+    }
+
+    #[inline]
+    fn margins_match_defaults(top: f64, bottom: f64) -> bool {
+        (top - DEFAULT_SCALE_MARGIN_TOP).abs() <= Self::DEFAULT_MARGIN_EPSILON
+            && (bottom - DEFAULT_SCALE_MARGIN_BOTTOM).abs() <= Self::DEFAULT_MARGIN_EPSILON
+    }
+
+    fn refresh_price_scale_margin_mode(&mut self) {
+        self.price_scale_margins_customized = !Self::margins_match_defaults(
+            self.viewport.scale_margin_top,
+            self.viewport.scale_margin_bottom,
+        );
+    }
+
+    fn sync_hidden_volume_default_margins(&mut self) {
+        if !self.user_volume_visible {
+            if !self.price_scale_margins_customized && !self.hidden_volume_default_margins_applied {
+                self.viewport.scale_margin_top = DEFAULT_SCALE_MARGIN_TOP;
+                self.viewport.scale_margin_bottom = Self::HIDDEN_VOLUME_DEFAULT_BOTTOM_MARGIN;
+                self.hidden_volume_default_margins_applied = true;
+            }
+            return;
+        }
+
+        if self.hidden_volume_default_margins_applied {
+            self.viewport.scale_margin_top = DEFAULT_SCALE_MARGIN_TOP;
+            self.viewport.scale_margin_bottom = DEFAULT_SCALE_MARGIN_BOTTOM;
+            self.hidden_volume_default_margins_applied = false;
+        }
+    }
+
+    fn sync_effective_volume_pane_state(&mut self) {
+        self.viewport.volume_height_ratio =
+            if self.main_chart_type == MainChartType::Footprint || !self.user_volume_visible {
+                0.0
+            } else {
+                self.user_volume_height_ratio.max(0.0)
+            };
+        self.sync_hidden_volume_default_margins();
+    }
+
+    pub fn set_user_volume_visible(&mut self, visible: bool) {
+        self.user_volume_visible = visible;
+        self.sync_effective_volume_pane_state();
+        if !self.viewport.price_locked {
+            self.auto_fit_price_for_current_chart();
+        } else {
+            self.viewport.price_invalidated = true;
+        }
+    }
+
+    pub fn user_volume_visible(&self) -> bool {
+        self.user_volume_visible
+    }
+
+    pub fn set_price_scale_margins(&mut self, top: f64, bottom: f64) {
+        self.viewport.scale_margin_top = top.clamp(0.0, 0.5);
+        self.viewport.scale_margin_bottom = bottom.clamp(0.0, 0.5);
+        self.hidden_volume_default_margins_applied = false;
+        self.refresh_price_scale_margin_mode();
+        self.sync_hidden_volume_default_margins();
+        self.viewport.price_invalidated = true;
     }
 
     /// Get the current main chart type.
@@ -397,23 +472,7 @@ impl ChartEngine {
         let prev_chart_type = self.main_chart_type;
         self.main_chart_type = chart_type;
         self.main_chart_options.chart_type = chart_type;
-
-        // ── Volume height ratio management ──
-        // Footprint integrates volume into the ladder cells and needs the full
-        // pane height for candles.  Instead of special-casing every Y-projection
-        // call site, we set volume_height_ratio = 0 so the standard
-        // `candle_area_height_ph()` path returns `pane_h` naturally.
-        // The original ratio is saved and restored when leaving Footprint mode.
-        if chart_type == MainChartType::Footprint && prev_chart_type != MainChartType::Footprint {
-            self.saved_volume_height_ratio = Some(self.viewport.volume_height_ratio);
-            self.viewport.volume_height_ratio = 0.0;
-        } else if chart_type != MainChartType::Footprint
-            && prev_chart_type == MainChartType::Footprint
-        {
-            if let Some(saved) = self.saved_volume_height_ratio.take() {
-                self.viewport.volume_height_ratio = saved;
-            }
-        }
+        self.sync_effective_volume_pane_state();
 
         if prev_chart_type != chart_type && !self.bars.is_empty() {
             if chart_type == MainChartType::Footprint && prev_chart_type != MainChartType::Footprint
@@ -844,18 +903,16 @@ impl ChartEngine {
     /// Set footprint data for a specific bar index.
     /// Levels should be sorted by price ascending.
     pub fn set_footprint_bar(&mut self, bar_idx: usize, bar: FootprintBar) {
+        let was_empty = self.footprint_data.is_empty();
         self.footprint_data.set_bar(bar_idx, bar);
-        if self.main_chart_type == MainChartType::Footprint && !self.viewport.price_locked {
-            self.auto_fit_price_for_current_chart();
-        }
+        self.finalize_footprint_data_attach(was_empty);
     }
 
     /// Set footprint data for multiple bars at once (bulk load).
     pub fn set_footprint_bars(&mut self, bars: Vec<(usize, FootprintBar)>) {
+        let was_empty = self.footprint_data.is_empty();
         self.footprint_data.set_bars(bars);
-        if self.main_chart_type == MainChartType::Footprint && !self.viewport.price_locked {
-            self.auto_fit_price_for_current_chart();
-        }
+        self.finalize_footprint_data_attach(was_empty);
     }
 
     /// Clear all footprint data.
@@ -887,6 +944,17 @@ impl ChartEngine {
     /// Returns whether footprint pane wheel/pinch uses coupled time+price zoom.
     pub fn footprint_zoom_price_with_time(&self) -> bool {
         self.main_chart_options.footprint.zoom_price_with_time
+    }
+
+    fn finalize_footprint_data_attach(&mut self, was_empty: bool) {
+        if self.main_chart_type != MainChartType::Footprint || self.viewport.price_locked {
+            return;
+        }
+        if was_empty && !self.footprint_data.is_empty() && !self.bars.is_empty() {
+            self.reset_main_viewport(MainViewportPreset::DefaultRecent);
+        } else {
+            self.auto_fit_price_for_current_chart();
+        }
     }
 
     // ── Study management ────────────────────────────────────────────────
@@ -1347,7 +1415,8 @@ impl ChartEngine {
 
         // Pre-generate footprint geometry so both backends get identical output
         // and text labels are available for the overlay Canvas2D layer.
-        let footprint_rects = if self.main_chart_type == MainChartType::Footprint
+        let (footprint_base_rects, footprint_gradient_rects, footprint_overlay_rects) =
+            if self.main_chart_type == MainChartType::Footprint
             && !self.footprint_data.is_empty()
         {
             let pane_w = self.viewport.width as f64;
@@ -1364,10 +1433,10 @@ impl ChartEngine {
                 self.v_pixel_ratio,
             );
             self.footprint_texts = geom.texts;
-            geom.rects
+            (geom.base_rects, geom.gradient_rects, geom.overlay_rects)
         } else {
             self.footprint_texts.clear();
-            Vec::new()
+            (Vec::new(), Vec::new(), Vec::new())
         };
 
         let indicator_draw_instructions = self.indicators.collect_sorted_draw_instructions();
@@ -1387,7 +1456,9 @@ impl ChartEngine {
             main_chart_options: &self.main_chart_options,
             bottom_drawings,
             footprint_data: &self.footprint_data,
-            footprint_rects: &footprint_rects,
+            footprint_base_rects: &footprint_base_rects,
+            footprint_gradient_rects: &footprint_gradient_rects,
+            footprint_overlay_rects: &footprint_overlay_rects,
             footprint_texts: &self.footprint_texts,
         };
 
@@ -1402,6 +1473,9 @@ mod tests {
         ChartEngine, MainViewportPreset, UpsertAction,
     };
     use crate::core::chart_type::MainChartType;
+    use crate::core::constants::{
+        DEFAULT_SCALE_MARGIN_BOTTOM, DEFAULT_SCALE_MARGIN_TOP, DEFAULT_VOLUME_HEIGHT_RATIO,
+    };
     use crate::core::data::Bar;
     use crate::core::footprint::{FootprintBar, FootprintData, FootprintLevel};
     use crate::core::renderer::traits::RendererBackend;
@@ -1668,6 +1742,48 @@ mod tests {
     }
 
     #[test]
+    fn legacy_split_footprint_load_matches_atomic_ready_state() {
+        let (bars, fp) =
+            crate::core::demo_data::generate_footprint_sample_data(240, 1_000, 60_000, 0.0);
+
+        let mut atomic = ChartEngine::new(RendererBackend::Noop, 1000, 520, 1.0);
+        atomic.set_main_chart_type(MainChartType::Footprint);
+        atomic
+            .set_data_with_footprint(bars.clone(), fp.clone())
+            .unwrap();
+
+        let mut legacy = ChartEngine::new(RendererBackend::Noop, 1000, 520, 1.0);
+        legacy.set_main_chart_type(MainChartType::Footprint);
+        legacy.set_data(bars).unwrap();
+
+        let split_bars: Vec<_> = (0..240usize)
+            .filter_map(|i| fp.get_bar(i).cloned().map(|bar| (i, bar)))
+            .collect();
+        legacy.set_footprint_bars(split_bars);
+
+        assert_close(
+            legacy.viewport.start_bar,
+            atomic.viewport.start_bar,
+            "legacy split load should match atomic start range",
+        );
+        assert_close(
+            legacy.viewport.end_bar,
+            atomic.viewport.end_bar,
+            "legacy split load should match atomic end range",
+        );
+        assert_close(
+            legacy.viewport.price_min,
+            atomic.viewport.price_min,
+            "legacy split load should match atomic price min",
+        );
+        assert_close(
+            legacy.viewport.price_max,
+            atomic.viewport.price_max,
+            "legacy split load should match atomic price max",
+        );
+    }
+
+    #[test]
     fn set_data_resets_to_default_recent_viewport_with_right_gap() {
         let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
         let bars: Vec<Bar> = (0..120)
@@ -1693,6 +1809,62 @@ mod tests {
         assert!(
             !engine.viewport.price_locked,
             "set_data should unlock stale price locks during viewport reset"
+        );
+    }
+
+    #[test]
+    fn hiding_volume_collapses_ratio_and_tightens_default_bottom_margin() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+
+        engine.set_user_volume_visible(false);
+
+        assert!(!engine.user_volume_visible());
+        assert_eq!(engine.viewport.volume_height_ratio, 0.0);
+        assert!((engine.viewport.scale_margin_top - DEFAULT_SCALE_MARGIN_TOP).abs() < 1e-9);
+        assert!(
+            (engine.viewport.scale_margin_bottom
+                - ChartEngine::HIDDEN_VOLUME_DEFAULT_BOTTOM_MARGIN)
+                .abs()
+                < 1e-9
+        );
+
+        engine.set_user_volume_visible(true);
+        assert_eq!(
+            engine.viewport.volume_height_ratio,
+            DEFAULT_VOLUME_HEIGHT_RATIO as f32
+        );
+        assert!((engine.viewport.scale_margin_bottom - DEFAULT_SCALE_MARGIN_BOTTOM).abs() < 1e-9);
+    }
+
+    #[test]
+    fn hiding_volume_preserves_custom_price_scale_margins() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        engine.set_price_scale_margins(0.15, 0.08);
+
+        engine.set_user_volume_visible(false);
+
+        assert_eq!(engine.viewport.volume_height_ratio, 0.0);
+        assert!((engine.viewport.scale_margin_top - 0.15).abs() < 1e-9);
+        assert!((engine.viewport.scale_margin_bottom - 0.08).abs() < 1e-9);
+    }
+
+    #[test]
+    fn footprint_switch_preserves_user_volume_visibility_preference() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+
+        engine.set_main_chart_type(MainChartType::Footprint);
+        assert!(engine.user_volume_visible());
+        assert_eq!(engine.viewport.volume_height_ratio, 0.0);
+
+        engine.set_user_volume_visible(false);
+        engine.set_main_chart_type(MainChartType::Candlestick);
+        assert!(!engine.user_volume_visible());
+        assert_eq!(engine.viewport.volume_height_ratio, 0.0);
+
+        engine.set_user_volume_visible(true);
+        assert_eq!(
+            engine.viewport.volume_height_ratio,
+            DEFAULT_VOLUME_HEIGHT_RATIO as f32
         );
     }
 

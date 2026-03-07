@@ -10,6 +10,7 @@
 
 use crate::core::chart_type::MainChartType;
 use crate::core::data::BarArray;
+use crate::core::footprint::{FootprintBar, FootprintData, FootprintOptions};
 use crate::core::formatters::{format_indexed, format_percent, format_price};
 use crate::core::renderer::traits::ChartStyle;
 use crate::core::renderer::transforms::price_to_y;
@@ -151,9 +152,12 @@ pub fn collect_last_values(
     series: &SeriesCollection,
     bars: &BarArray,
     main_chart_type: MainChartType,
+    footprint_data: &FootprintData,
+    footprint_opts: &FootprintOptions,
     vp: &Viewport,
     style: &ChartStyle,
     pane_ph: f64,
+    v_pixel_ratio: f64,
     dpr: f64,
 ) -> Vec<ProjectedLastValue> {
     let mut out = Vec::new();
@@ -161,7 +165,6 @@ pub fn collect_last_values(
     if candle_h <= 0.0 {
         return out;
     }
-
     let step = y_tick_step_internal(vp, pane_ph, dpr, style);
 
     // Main candlestick last value (pending-aware read via BarArray::get).
@@ -171,17 +174,18 @@ pub fn collect_last_values(
     // rendering side clamps the label to the top/bottom edge of the axis
     // (via `compute_right_axis_label_geometry`), keeping it visible even
     // when the user has scaled the price axis so the last price is off-screen.
-    if let Some((last_price, color)) =
-        main_series_last_price_and_color(bars, main_chart_type, style)
-    {
-        let y_phys = price_to_y(last_price, vp, candle_h);
-        out.push(ProjectedLastValue {
-            price: last_price,
-            y_phys,
-            color,
-            label: format_scale_value(vp, last_price, step),
-            countdown: None,
-        });
+    if let Some(projected) = project_main_last_value(
+        bars,
+        main_chart_type,
+        footprint_data,
+        footprint_opts,
+        vp,
+        style,
+        pane_ph,
+        v_pixel_ratio,
+        dpr,
+    ) {
+        out.push(projected);
     }
 
     // Overlay series last values.
@@ -204,6 +208,78 @@ pub fn collect_last_values(
     }
 
     out
+}
+
+/// Resolve the rendered main-series last price + color for the active chart type.
+///
+/// This differs from `main_series_last_price_and_color()` for footprint mode:
+/// the price is snapped to the rendered footprint close edge so all live-price
+/// consumers stay attached to the same painted candle body.
+pub fn main_series_rendered_last_price_and_color(
+    bars: &BarArray,
+    main_chart_type: MainChartType,
+    footprint_data: &FootprintData,
+    footprint_opts: &FootprintOptions,
+    vp: &Viewport,
+    style: &ChartStyle,
+    pane_ph: f64,
+    v_pixel_ratio: f64,
+) -> Option<(f64, [f32; 4])> {
+    let (base_price, color) = main_series_last_price_and_color(bars, main_chart_type, style)?;
+    if main_chart_type != MainChartType::Footprint {
+        return Some((base_price, color));
+    }
+
+    let last_idx = bars.len().checked_sub(1)?;
+    let bar = bars.get(last_idx)?;
+    let fp_bar = footprint_data.get_bar(last_idx)?;
+    let snapped = snapped_footprint_close_price(
+        bar.open as f64,
+        bar.close as f64,
+        fp_bar,
+        footprint_opts,
+        vp,
+        pane_ph,
+        v_pixel_ratio,
+    )
+    .unwrap_or(base_price);
+    Some((snapped, color))
+}
+
+/// Project the main-series last value using the exact chart-type-aware rendered price.
+pub fn project_main_last_value(
+    bars: &BarArray,
+    main_chart_type: MainChartType,
+    footprint_data: &FootprintData,
+    footprint_opts: &FootprintOptions,
+    vp: &Viewport,
+    style: &ChartStyle,
+    pane_ph: f64,
+    v_pixel_ratio: f64,
+    dpr: f64,
+) -> Option<ProjectedLastValue> {
+    let candle_h = candle_area_height_ph(vp, pane_ph);
+    if candle_h <= 0.0 {
+        return None;
+    }
+    let step = y_tick_step_internal(vp, pane_ph, dpr, style);
+    let (price, color) = main_series_rendered_last_price_and_color(
+        bars,
+        main_chart_type,
+        footprint_data,
+        footprint_opts,
+        vp,
+        style,
+        pane_ph,
+        v_pixel_ratio,
+    )?;
+    Some(ProjectedLastValue {
+        price,
+        y_phys: price_to_y(price, vp, candle_h),
+        color,
+        label: format_scale_value(vp, price, step),
+        countdown: None,
+    })
 }
 
 /// Resolve the main-series last price + color for the active chart type.
@@ -240,6 +316,57 @@ pub fn main_series_last_price_and_color(
             Some((last.close as f64, color))
         }
     }
+}
+
+/// Compute the rendered close-edge price for a footprint candle.
+///
+/// Footprint candles are snapped to an effective tick (base tick x aggregation
+/// factor), so raw close may lie inside the body. This returns the snapped close
+/// edge used by rendering, ensuring the live line, label, and chip align to the
+/// same footprint body boundary.
+pub fn snapped_footprint_close_price(
+    open: f64,
+    close: f64,
+    fp_bar: &FootprintBar,
+    fp_opts: &FootprintOptions,
+    viewport: &Viewport,
+    pane_ph: f64,
+    v_ratio: f64,
+) -> Option<f64> {
+    if fp_bar.levels.is_empty() {
+        return None;
+    }
+    let base_tick = if fp_opts.tick_size > 0.0 {
+        fp_opts.tick_size as f64
+    } else {
+        fp_bar.inferred_tick_size() as f64
+    };
+    if !base_tick.is_finite() || base_tick <= 0.0 {
+        return None;
+    }
+
+    let first_price = fp_bar.levels[0].price as f64;
+    let y0 = price_to_pane_y_phys(first_price, viewport, pane_ph);
+    let y1 = price_to_pane_y_phys(first_price + base_tick, viewport, pane_ph);
+    let natural_cell_h = (y0 - y1).abs();
+    let min_cell_px = fp_opts.aggregation_min_cell_height_css() * v_ratio.max(1.0);
+    let agg_factor = if min_cell_px > 0.0 && natural_cell_h > 0.0 && natural_cell_h < min_cell_px {
+        (min_cell_px / natural_cell_h).ceil().max(1.0)
+    } else {
+        1.0
+    };
+    let effective_tick = base_tick * agg_factor;
+    if !effective_tick.is_finite() || effective_tick <= 0.0 {
+        return None;
+    }
+
+    let is_bull = close >= open;
+    let snapped_close = if is_bull {
+        (close / effective_tick).ceil() * effective_tick
+    } else {
+        (close / effective_tick).floor() * effective_tick
+    };
+    Some(snapped_close)
 }
 
 fn heikin_ashi_last_open_close(bars: &BarArray) -> Option<(f64, f64)> {
@@ -334,10 +461,12 @@ pub fn timestamp_to_bar_index_in_bars(ts: u64, bars: &BarArray) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::main_series_last_price_and_color;
+    use super::{main_series_last_price_and_color, main_series_rendered_last_price_and_color};
     use crate::core::chart_type::MainChartType;
     use crate::core::data::{Bar, BarArray};
+    use crate::core::footprint::{FootprintBar, FootprintData, FootprintLevel, FootprintOptions};
     use crate::core::renderer::traits::ChartStyle;
+    use crate::core::viewport::Viewport;
 
     fn sample_bars() -> BarArray {
         let mut bars = BarArray::new();
@@ -387,6 +516,63 @@ mod tests {
         // bar0: ha_open=10.5, ha_close=10.5
         // bar1: ha_open=(10.5+10.5)/2=10.5, ha_close=(11+13+10+12)/4=11.5
         assert!((price - 11.5).abs() < 1e-9);
+        assert_eq!(color, style.bullish_color);
+    }
+
+    #[test]
+    fn rendered_footprint_last_price_uses_snapped_close() {
+        let mut bars = BarArray::new();
+        bars.set(vec![Bar {
+            timestamp: 1,
+            open: 100.0,
+            high: 100.5,
+            low: 99.75,
+            close: 100.1,
+            volume: 100.0,
+            _pad: 0.0,
+        }]);
+
+        let mut footprint = FootprintData::new();
+        footprint.set_bar(
+            0,
+            FootprintBar {
+                levels: vec![
+                    FootprintLevel {
+                        price: 99.75,
+                        bid_volume: 10.0,
+                        ask_volume: 12.0,
+                    },
+                    FootprintLevel {
+                        price: 100.0,
+                        bid_volume: 8.0,
+                        ask_volume: 15.0,
+                    },
+                ],
+            },
+        );
+
+        let mut vp = Viewport::new(800, 400);
+        vp.volume_height_ratio = 0.0;
+        vp.price_min = 99.0;
+        vp.price_max = 101.0;
+
+        let style = ChartStyle::default();
+        let mut opts = FootprintOptions::default();
+        opts.tick_size = 0.25;
+
+        let (price, color) = main_series_rendered_last_price_and_color(
+            &bars,
+            MainChartType::Footprint,
+            &footprint,
+            &opts,
+            &vp,
+            &style,
+            400.0,
+            1.0,
+        )
+        .expect("rendered main last value");
+
+        assert!((price - 100.25).abs() < 1e-9);
         assert_eq!(color, style.bullish_color);
     }
 }

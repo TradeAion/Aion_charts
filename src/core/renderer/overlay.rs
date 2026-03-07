@@ -11,7 +11,7 @@ use crate::core::chart_type::MainChartType;
 use crate::core::data::BarArray;
 use crate::core::drawings::types::DrawingGeometry;
 use crate::core::formatters::{format_price, format_volume};
-use crate::core::footprint::{FootprintBar, FootprintData, FootprintOptions};
+use crate::core::footprint::{FootprintData, FootprintOptions};
 use crate::core::indicators::render::types::DrawInstruction;
 use crate::core::markers::{MarkerManager, MarkerPosition, MarkerShape};
 use crate::core::price_line::PriceLineManager;
@@ -24,7 +24,7 @@ use crate::core::renderer::traits::{ChartStyle, CrosshairState};
 use crate::core::renderer::transforms::bar_to_x;
 use crate::core::renderer::series::CandleSizing;
 use crate::core::renderer::value_projection::{
-    main_series_last_price_and_color, price_to_pane_y_phys, timestamp_to_bar_index_in_bars,
+    price_to_pane_y_phys, project_main_last_value, timestamp_to_bar_index_in_bars,
 };
 use crate::core::series::{LineStyle, SeriesCollection, SeriesType};
 use crate::core::viewport::Viewport;
@@ -465,9 +465,17 @@ impl OverlayRenderer {
         // compute the candle center explicitly — same as footprint_generator
         // does — so the line passes through the candle body.
         if bars.len() > 0 {
-            if let Some((last_price, color)) =
-                main_series_last_price_and_color(bars, main_chart_type, style)
-            {
+            if let Some(projected) = project_main_last_value(
+                bars,
+                main_chart_type,
+                footprint_data,
+                footprint_opts,
+                viewport,
+                style,
+                pane_ph,
+                v_ratio,
+                dpr,
+            ) {
                 let last_idx = bars.len() - 1;
                 let slot_center = bar_to_x(last_idx as f64 + 0.5, viewport, pane_pw);
                 let x_anchor = if main_chart_type == MainChartType::Footprint {
@@ -483,34 +491,11 @@ impl OverlayRenderer {
                 } else {
                     slot_center
                 };
-                // In footprint mode, the rendered candle body is snapped to the
-                // effective tick grid (including dynamic aggregation). Anchor the
-                // live line to that rendered close edge so it stays attached.
-                let projected_price =
-                    if main_chart_type == MainChartType::Footprint {
-                        let last_bar = bars.get(last_idx);
-                        let fp_bar = footprint_data.get_bar(last_idx);
-                        match (last_bar, fp_bar) {
-                            (Some(bar), Some(fp_bar)) => snapped_footprint_close_price(
-                                bar.open as f64,
-                                bar.close as f64,
-                                fp_bar,
-                                footprint_opts,
-                                viewport,
-                                pane_ph,
-                                v_ratio,
-                            )
-                            .unwrap_or(last_price),
-                            _ => last_price,
-                        }
-                    } else {
-                        last_price
-                    };
-                let y_phys = price_to_pane_y_phys(projected_price, viewport, pane_ph);
+                let y_phys = projected.y_phys;
                 // Clip to full pane height (LWC: y < 0 || y > bitmapSize.height)
                 if x_anchor >= 0.0 && x_anchor < pane_pw && y_phys >= 0.0 && y_phys <= pane_ph {
                     let y = y_phys.round() + correction;
-                    self.ctx.set_stroke_style_str(&rgba(&color));
+                    self.ctx.set_stroke_style_str(&rgba(&projected.color));
                     self.ctx.begin_path();
                     self.ctx.move_to(x_anchor.max(0.0), y);
                     self.ctx.line_to(pane_pw + line_w + 1.0, y);
@@ -599,10 +584,13 @@ impl OverlayRenderer {
         symbol: &str,
         bars: &BarArray,
         main_chart_type: MainChartType,
+        footprint_data: &FootprintData,
+        footprint_opts: &FootprintOptions,
         viewport: &Viewport,
         style: &ChartStyle,
         pane_css_w: f64,
         pane_css_h: f64,
+        v_pixel_ratio: f64,
     ) {
         if symbol.is_empty() || !style.last_price_line.label_visible {
             return;
@@ -612,15 +600,22 @@ impl OverlayRenderer {
         let pane_ph = pane_css_h * dpr;
 
         // Get the last price and its color (same source as the price-axis label).
-        let (last_price, color) =
-            match main_series_last_price_and_color(bars, main_chart_type, style) {
-                Some(v) => v,
-                None => return,
-            };
-
-        // Standard candle-area projection — works for all chart types.
-        // Footprint has volume_height_ratio = 0 so this equals full pane.
-        let y_phys = price_to_pane_y_phys(last_price, viewport, pane_ph);
+        let projected = match project_main_last_value(
+            bars,
+            main_chart_type,
+            footprint_data,
+            footprint_opts,
+            viewport,
+            style,
+            pane_ph,
+            v_pixel_ratio,
+            dpr,
+        ) {
+            Some(v) => v,
+            None => return,
+        };
+        let color = projected.color;
+        let y_phys = projected.y_phys;
         // Clip: if Y is outside pane bounds, skip.
         if y_phys < 0.0 || y_phys > pane_ph {
             return;
@@ -1200,52 +1195,3 @@ impl OverlayRenderer {
     }
 }
 
-/// Compute the rendered close-edge price for a footprint candle.
-///
-/// Footprint candles are snapped to an effective tick (base tick × aggregation
-/// factor), so raw close may lie inside the body. This returns the snapped close
-/// edge used by rendering, ensuring the live line aligns to the body boundary.
-fn snapped_footprint_close_price(
-    open: f64,
-    close: f64,
-    fp_bar: &FootprintBar,
-    fp_opts: &FootprintOptions,
-    viewport: &Viewport,
-    pane_ph: f64,
-    v_ratio: f64,
-) -> Option<f64> {
-    if fp_bar.levels.is_empty() {
-        return None;
-    }
-    let base_tick = if fp_opts.tick_size > 0.0 {
-        fp_opts.tick_size as f64
-    } else {
-        fp_bar.inferred_tick_size() as f64
-    };
-    if !base_tick.is_finite() || base_tick <= 0.0 {
-        return None;
-    }
-
-    let first_price = fp_bar.levels[0].price as f64;
-    let y0 = price_to_pane_y_phys(first_price, viewport, pane_ph);
-    let y1 = price_to_pane_y_phys(first_price + base_tick, viewport, pane_ph);
-    let natural_cell_h = (y0 - y1).abs();
-    let min_cell_px = fp_opts.aggregation_min_cell_height_css() * v_ratio.max(1.0);
-    let agg_factor = if min_cell_px > 0.0 && natural_cell_h > 0.0 && natural_cell_h < min_cell_px {
-        (min_cell_px / natural_cell_h).ceil().max(1.0)
-    } else {
-        1.0
-    };
-    let effective_tick = base_tick * agg_factor;
-    if !effective_tick.is_finite() || effective_tick <= 0.0 {
-        return None;
-    }
-
-    let is_bull = close >= open;
-    let snapped_close = if is_bull {
-        (close / effective_tick).ceil() * effective_tick
-    } else {
-        (close / effective_tick).floor() * effective_tick
-    };
-    Some(snapped_close)
-}

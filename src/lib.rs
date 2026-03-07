@@ -83,8 +83,9 @@ pub use crate::core::chart_type::{MainChartOptions, MainChartType};
 
 /// Footprint (order-flow) chart data types and options.
 pub use crate::core::footprint::{
-    DiagonalImbalanceType, FootprintBar, FootprintData, FootprintDisplayMode, FootprintLevel,
-    FootprintOptions, ImbalanceType, VolumeColorIntensity,
+    DiagonalImbalanceType, FootprintBar, FootprintData, FootprintDisplayMode,
+    FootprintGradientStyle, FootprintLevel, FootprintOptions, FootprintPalette, ImbalanceType,
+    VolumeColorIntensity,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
