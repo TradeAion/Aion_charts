@@ -67,8 +67,11 @@ pub fn generate_footprint_geometry(
 ) -> FootprintGeometry {
     let sizing = CandleSizing::compute_from_pane(pane_w, viewport, h_ratio, v_ratio);
 
-    // Footprint doesn't use volume sub-pane — it integrates volume directly
-    let candle_h = pane_h;
+    // Standard candle area height — same formula as every other chart type.
+    // In Footprint mode the engine sets volume_height_ratio = 0, so this
+    // evaluates to pane_h (full pane).  No special-casing needed.
+    let vol_h = pane_h * viewport.volume_height_ratio as f64;
+    let candle_h = pane_h - vol_h;
 
     let start = (viewport.start_bar.floor() as usize)
         .saturating_sub(1)
@@ -88,7 +91,9 @@ pub fn generate_footprint_geometry(
     let mut texts = Vec::with_capacity(visible_bars * 10);
 
     let font_size = fp_opts.font_size * v_ratio as f32;
-    let min_cell_px = fp_opts.min_cell_height as f64 * v_ratio;
+    // Dynamic aggregation threshold:
+    // keep rows readable when text is shown, otherwise honor raw min_cell_height.
+    let min_cell_px = fp_opts.aggregation_min_cell_height_css() * v_ratio;
 
     for i in start..end {
         let bar = bars.get_unchecked(i);
@@ -116,7 +121,9 @@ pub fn generate_footprint_geometry(
         let slot_left = (center_x - half_bar).round();
         let slot_width = sizing.bar_width;
 
-        // Candle takes ~15% of slot, gap ~2%, ladder gets the rest
+        // Candle takes ~15% of slot, gap ~2%, ladder gets the rest (~83%).
+        // Matches ATAS/Sierra Chart proportions — the ladder is the dominant
+        // visual element, the candle provides OHLC context on the side.
         let candle_frac = 0.15_f64;
         let gap_frac = 0.02_f64;
         let candle_w = (slot_width * candle_frac).round().max(3.0);
@@ -151,10 +158,12 @@ pub fn generate_footprint_geometry(
         let effective_tick = base_tick * agg_factor as f32;
 
         // ── Render candlestick on the left side ──
-        // Snap the candle body to the tick grid so it aligns perfectly with
-        // the ladder cells.  The body edges land on the same pixel rows as
-        // the cell boundaries, preventing any visual gap between candle and
-        // ladder.
+        // The candle body is snapped to the tick grid so it aligns perfectly
+        // with the ladder cell boundaries.  The live price line (at raw close)
+        // sits INSIDE the snapped body because ceil/floor expand the body to
+        // encompass the raw OHLC range.  Both use the same Y coordinate space
+        // (volume_height_ratio = 0 → candle_area == full pane) so they are
+        // properly connected.
         {
             let bull = bar.close >= bar.open;
             let (cr, cg, cb, ca) = if bull {

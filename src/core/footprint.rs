@@ -596,7 +596,7 @@ pub struct FootprintOptions {
     pub cum_delta_negative_color: [f32; 4],
 
     // ── Layout ──
-    /// Minimum cell height in CSS pixels (default 2).
+    /// Minimum cell height in CSS pixels (default 1).
     pub min_cell_height: f32,
     /// Cell padding in CSS pixels.
     pub cell_padding: f32,
@@ -616,6 +616,23 @@ pub struct FootprintOptions {
     pub volume_color_intensity: VolumeColorIntensity,
     /// Whether pane wheel/pinch zoom should scale both time and price axes.
     pub zoom_price_with_time: bool,
+}
+
+impl FootprintOptions {
+    /// Effective minimum row height (CSS px) used for dynamic aggregation.
+    ///
+    /// When volume text is visible, require enough height for readable text so
+    /// rows are merged before labels become tiny/illegible.
+    pub fn aggregation_min_cell_height_css(&self) -> f64 {
+        let base = self.min_cell_height.max(0.0) as f64;
+        if !self.show_volume_text {
+            return base.max(1.0);
+        }
+        // Keep the merge threshold compact by default; text renderer already
+        // adapts font size down to 4px when space is tight.
+        let text_target = (self.font_size.max(0.0) as f64 * 0.45 + 0.5).clamp(5.0, 7.0);
+        base.max(text_target)
+    }
 }
 
 /// How volume magnitude affects cell color intensity.
@@ -676,7 +693,7 @@ impl Default for FootprintOptions {
             cum_delta_negative_color: [ch(0xFB), ch(0x37), ch(0x48), 0.7],
 
             // Layout
-            min_cell_height: 2.0,
+            min_cell_height: 1.0,
             cell_padding: 1.0,
             font_size: 10.0,
             show_volume_text: true,

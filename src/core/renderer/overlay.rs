@@ -11,6 +11,7 @@ use crate::core::chart_type::MainChartType;
 use crate::core::data::BarArray;
 use crate::core::drawings::types::DrawingGeometry;
 use crate::core::formatters::{format_price, format_volume};
+use crate::core::footprint::{FootprintBar, FootprintData, FootprintOptions};
 use crate::core::indicators::render::types::DrawInstruction;
 use crate::core::markers::{MarkerManager, MarkerPosition, MarkerShape};
 use crate::core::price_line::PriceLineManager;
@@ -19,8 +20,9 @@ use crate::core::renderer::line_generator;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
 use crate::core::renderer::traits::{ChartStyle, CrosshairState};
+
+use crate::core::renderer::transforms::bar_to_x;
 use crate::core::renderer::series::CandleSizing;
-use crate::core::renderer::transforms::{bar_to_x, price_to_y};
 use crate::core::renderer::value_projection::{
     main_series_last_price_and_color, price_to_pane_y_phys, timestamp_to_bar_index_in_bars,
 };
@@ -415,10 +417,14 @@ impl OverlayRenderer {
         series: &SeriesCollection,
         bars: &crate::core::data::BarArray,
         main_chart_type: MainChartType,
+        footprint_data: &FootprintData,
+        footprint_opts: &FootprintOptions,
         viewport: &Viewport,
         style: &ChartStyle,
         pane_css_w: f64,
         pane_css_h: f64,
+        h_pixel_ratio: f64,
+        v_pixel_ratio: f64,
         _time_ms: f64,
     ) {
         if !style.last_price_line.visible {
@@ -426,8 +432,18 @@ impl OverlayRenderer {
         }
 
         let dpr = self.dpr;
-        let pane_pw = pane_css_w * dpr;
-        let pane_ph = pane_css_h * dpr;
+        let h_ratio = if h_pixel_ratio > 0.0 {
+            h_pixel_ratio
+        } else {
+            dpr
+        };
+        let v_ratio = if v_pixel_ratio > 0.0 {
+            v_pixel_ratio
+        } else {
+            dpr
+        };
+        let pane_pw = pane_css_w * h_ratio;
+        let pane_ph = pane_css_h * v_ratio;
 
         let line_w = (style.last_price_line.width * dpr).floor().max(1.0);
         let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
@@ -436,41 +452,61 @@ impl OverlayRenderer {
         self.ctx.set_line_cap("butt");
         set_canvas_line_dash(&self.ctx, style.last_price_line.style, line_w);
 
-        // Main series (candles / line / area / bars / baseline)
+        // Main series (candles / line / area / bars / baseline / footprint)
         // LWC clips against pane bounds, not candle area — the line stays
         // visible as long as it's within the pane, even if the price scale
         // has scrolled the last value near or into the volume region.
-        // Draw the last-price horizontal line for all chart types including
-        // Footprint.  With the candle overlay on the footprint ladder the line
-        // anchors to the close of the last bar, matching professional platforms.
-        // In Footprint mode the candle sits on the left side of the bar slot,
-        // so the line starts from the candle center (not the slot center).
+        //
+        // All chart types use the same Y path: price_to_pane_y_phys().
+        // Footprint has volume_height_ratio = 0, so candle_area == full pane.
+        //
+        // X anchor: in normal mode slot_center IS the candle center.
+        // In footprint mode the candle is the left 15% of the slot, so we
+        // compute the candle center explicitly — same as footprint_generator
+        // does — so the line passes through the candle body.
         if bars.len() > 0 {
             if let Some((last_price, color)) =
                 main_series_last_price_and_color(bars, main_chart_type, style)
             {
-                let slot_center = bar_to_x((bars.len() - 1) as f64 + 0.5, viewport, pane_pw);
+                let last_idx = bars.len() - 1;
+                let slot_center = bar_to_x(last_idx as f64 + 0.5, viewport, pane_pw);
                 let x_anchor = if main_chart_type == MainChartType::Footprint {
-                    // Mirror the layout in footprint_generator: candle = 15% of slot on left
-                    let sizing = CandleSizing::compute_from_pane(
-                        pane_pw, viewport, dpr, dpr,
-                    );
+                    // Mirror footprint_generator layout: candle = 15% of slot on left
+                    let sizing = CandleSizing::compute_from_pane(pane_pw, viewport, h_ratio, v_ratio);
                     let half_bar = (sizing.bar_width * 0.5).floor();
                     let slot_left = (slot_center - half_bar).round();
                     let candle_w = (sizing.bar_width * 0.15).round().max(3.0);
-                    slot_left + candle_w * 0.5
+                    // Anchor from candle body's right edge so the horizontal line
+                    // visually "leaves" the footprint candle the same way as
+                    // regular candlestick mode.
+                    slot_left + candle_w
                 } else {
                     slot_center
                 };
-                // Footprint renders against the full pane height (no volume
-                // sub-pane), so project against pane_ph directly instead of
-                // candle_area_height which would shrink the range by
-                // volume_height_ratio and make the line float away.
-                let y_phys = if main_chart_type == MainChartType::Footprint {
-                    price_to_y(last_price, viewport, pane_ph)
-                } else {
-                    price_to_pane_y_phys(last_price, viewport, pane_ph)
-                };
+                // In footprint mode, the rendered candle body is snapped to the
+                // effective tick grid (including dynamic aggregation). Anchor the
+                // live line to that rendered close edge so it stays attached.
+                let projected_price =
+                    if main_chart_type == MainChartType::Footprint {
+                        let last_bar = bars.get(last_idx);
+                        let fp_bar = footprint_data.get_bar(last_idx);
+                        match (last_bar, fp_bar) {
+                            (Some(bar), Some(fp_bar)) => snapped_footprint_close_price(
+                                bar.open as f64,
+                                bar.close as f64,
+                                fp_bar,
+                                footprint_opts,
+                                viewport,
+                                pane_ph,
+                                v_ratio,
+                            )
+                            .unwrap_or(last_price),
+                            _ => last_price,
+                        }
+                    } else {
+                        last_price
+                    };
+                let y_phys = price_to_pane_y_phys(projected_price, viewport, pane_ph);
                 // Clip to full pane height (LWC: y < 0 || y > bitmapSize.height)
                 if x_anchor >= 0.0 && x_anchor < pane_pw && y_phys >= 0.0 && y_phys <= pane_ph {
                     let y = y_phys.round() + correction;
@@ -550,6 +586,8 @@ impl OverlayRenderer {
         clear_canvas_line_dash(&self.ctx);
     }
 
+    // ... rest of impl unchanged ...
+
     /// Render the asset-name chip (e.g. "BTCUSD") on the pane overlay, anchored
     /// to the right edge at the last price Y.
     ///
@@ -580,13 +618,9 @@ impl OverlayRenderer {
                 None => return,
             };
 
-        // Footprint uses full pane height (no volume sub-pane), so project
-        // against pane_ph directly to stay aligned with the candle/ladder.
-        let y_phys = if main_chart_type == MainChartType::Footprint {
-            price_to_y(last_price, viewport, pane_ph)
-        } else {
-            price_to_pane_y_phys(last_price, viewport, pane_ph)
-        };
+        // Standard candle-area projection — works for all chart types.
+        // Footprint has volume_height_ratio = 0 so this equals full pane.
+        let y_phys = price_to_pane_y_phys(last_price, viewport, pane_ph);
         // Clip: if Y is outside pane bounds, skip.
         if y_phys < 0.0 || y_phys > pane_ph {
             return;
@@ -1164,4 +1198,54 @@ impl OverlayRenderer {
             let _ = self.ctx.fill_text(&t.text, t.x as f64, t.y as f64);
         }
     }
+}
+
+/// Compute the rendered close-edge price for a footprint candle.
+///
+/// Footprint candles are snapped to an effective tick (base tick × aggregation
+/// factor), so raw close may lie inside the body. This returns the snapped close
+/// edge used by rendering, ensuring the live line aligns to the body boundary.
+fn snapped_footprint_close_price(
+    open: f64,
+    close: f64,
+    fp_bar: &FootprintBar,
+    fp_opts: &FootprintOptions,
+    viewport: &Viewport,
+    pane_ph: f64,
+    v_ratio: f64,
+) -> Option<f64> {
+    if fp_bar.levels.is_empty() {
+        return None;
+    }
+    let base_tick = if fp_opts.tick_size > 0.0 {
+        fp_opts.tick_size as f64
+    } else {
+        fp_bar.inferred_tick_size() as f64
+    };
+    if !base_tick.is_finite() || base_tick <= 0.0 {
+        return None;
+    }
+
+    let first_price = fp_bar.levels[0].price as f64;
+    let y0 = price_to_pane_y_phys(first_price, viewport, pane_ph);
+    let y1 = price_to_pane_y_phys(first_price + base_tick, viewport, pane_ph);
+    let natural_cell_h = (y0 - y1).abs();
+    let min_cell_px = fp_opts.aggregation_min_cell_height_css() * v_ratio.max(1.0);
+    let agg_factor = if min_cell_px > 0.0 && natural_cell_h > 0.0 && natural_cell_h < min_cell_px {
+        (min_cell_px / natural_cell_h).ceil().max(1.0)
+    } else {
+        1.0
+    };
+    let effective_tick = base_tick * agg_factor;
+    if !effective_tick.is_finite() || effective_tick <= 0.0 {
+        return None;
+    }
+
+    let is_bull = close >= open;
+    let snapped_close = if is_bull {
+        (close / effective_tick).ceil() * effective_tick
+    } else {
+        (close / effective_tick).floor() * effective_tick
+    };
+    Some(snapped_close)
 }

@@ -728,6 +728,18 @@ export declare class RayCore {
   zoom_to_range(start: bigint, end: bigint): void;
 
   /**
+   * Reset the main chart viewport.
+   *
+   * Modes:
+   * - `"default"`: restore the recent-bars default view with a small right gap
+   * - `"fit_all"`: show the full dataset with a small right gap
+   *
+   * Omitted or unknown modes fall back to `"default"`.
+   * Fires `visibleRangeChange`.
+   */
+  reset_viewport(mode?: string): void;
+
+  /**
    * Data timestamp range `[from_ts, to_ts]` in milliseconds.
    * Returns empty array if no bars are loaded.
    */

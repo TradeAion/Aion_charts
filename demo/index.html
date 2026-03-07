@@ -394,6 +394,7 @@
       <button class="btn" id="stream-toggle">▶ Live</button>
       <button class="btn active" id="volume-toggle">Volume</button>
       <button class="btn active" id="autoscroll-toggle">Auto</button>
+      <button class="btn" id="reset-viewport-btn">Reset View</button>
       <button class="btn active" id="footprint-xy-zoom-toggle">XY Zoom</button>
     </div>
 
@@ -412,7 +413,7 @@
         <span class="shortcut-key">Ctrl</span> OHLC snap<br>
         <span class="shortcut-key">Esc</span> Cancel / Deselect<br>
         <span class="shortcut-key">Del</span> Delete selected<br>
-        <span class="shortcut-key">←→</span> Scroll · <span class="shortcut-key">+−</span> Zoom
+        <span class="shortcut-key">←→</span> Scroll · <span class="shortcut-key">+−</span> Zoom · <span class="shortcut-key">0</span> Fit All
       </div>
     </div>
 
@@ -1500,6 +1501,12 @@
       const enabled = !btn.classList.contains('active');
       btn.classList.toggle('active', enabled);
       if (core) core.set_auto_scroll(enabled);
+    };
+
+    $('reset-viewport-btn').onclick = () => {
+      if (core && typeof core.reset_viewport === 'function') {
+        core.reset_viewport('default');
+      }
     };
 
     $('footprint-xy-zoom-toggle').onclick = () => {

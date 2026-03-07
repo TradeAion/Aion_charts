@@ -147,6 +147,15 @@ Zoom to a specific timestamp range (millisecond unix timestamps).
 
 Get or set the currently visible timestamp range.
 
+### `reset_viewport(mode?)`
+
+Reset the main chart viewport using one of two presets:
+
+- `default`: restore the recent-bars default view with a small right-side gap
+- `fit_all`: show the full dataset with a small right-side gap
+
+Unknown or omitted modes fall back to `default`.
+
 ### `data_range()`
 
 Returns the full data timestamp range `[start, end]`.

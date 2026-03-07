@@ -22,10 +22,10 @@ use raycore::{
     BaselineSeriesOptions, Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup,
     ChartPaneId, ChartStyle, CrosshairMagnetMode, CrosshairSnapshot, DataRange, GpuContext,
     HistogramPoint, HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint,
-    LineSeriesOptions, LineStyle, MainChartType, MarkerPosition, MarkerShape, MtfMode, MtfRequest,
-    MtfResolvedSample, OhlcPoint, OverlayRenderer, PriceAxisRenderer, PriceLineOptions,
-    RendererBackend, ResourceLimits, RuntimeEvent, SeriesId, SeriesMarker, SnapshotMtfResolver,
-    TimeAxisRenderer, TimeRange, Viewport, WgpuRenderer,
+    LineSeriesOptions, LineStyle, MainChartType, MainViewportPreset, MarkerPosition,
+    MarkerShape, MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint, OverlayRenderer,
+    PriceAxisRenderer, PriceLineOptions, RendererBackend, ResourceLimits, RuntimeEvent, SeriesId,
+    SeriesMarker, SnapshotMtfResolver, TimeAxisRenderer, TimeRange, Viewport, WgpuRenderer,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -83,6 +83,27 @@ fn has_exact_widget_sizes(s: &ChartInner) -> bool {
         && es.price_axis_ph > 0
         && es.time_axis_pw > 0
         && es.time_axis_ph > 0
+}
+
+fn parse_main_viewport_preset(mode: Option<&str>) -> MainViewportPreset {
+    match mode.unwrap_or("default") {
+        "fit_all" | "fit-all" | "fitAll" => MainViewportPreset::FitAll,
+        _ => MainViewportPreset::DefaultRecent,
+    }
+}
+
+fn emit_visible_range_change(engine: &mut ChartEngine) {
+    let start_bar = engine.viewport.start_bar;
+    let end_bar = engine.viewport.end_bar;
+    engine
+        .event_bus
+        .emit(raycore::ChartEvent::VisibleRangeChange { start_bar, end_bar });
+}
+
+fn reset_main_viewport_and_emit(engine: &mut ChartEngine, mode: Option<&str>) {
+    let preset = parse_main_viewport_preset(mode);
+    engine.reset_main_viewport(preset);
+    emit_visible_range_change(engine);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3456,30 +3477,36 @@ impl RayCore {
 
     pub fn zoom_to_range(&mut self, start: u64, end: u64) {
         self.inner.borrow_mut().engine.zoom_to_range(start, end);
+        self.mark_dirty();
     }
 
     /// Set visible bar range using fractional bar indices.
     pub fn set_visible_range(&mut self, start: f64, end: f64) {
         let mut s = self.inner.borrow_mut();
-        let should_fit = !s.engine.viewport.price_locked;
         s.engine.viewport.set_range(start, end);
-        if should_fit {
-            let raycore::ChartEngine { viewport, bars, .. } = &mut s.engine;
-            viewport.auto_fit_price(bars);
-        }
-        let sb = s.engine.viewport.start_bar;
-        let eb = s.engine.viewport.end_bar;
-        s.engine
-            .event_bus
-            .emit(raycore::ChartEvent::VisibleRangeChange {
-                start_bar: sb,
-                end_bar: eb,
-            });
+        s.engine.auto_fit_price_if_unlocked();
+        emit_visible_range_change(&mut s.engine);
+        drop(s);
+        self.mark_dirty();
     }
 
     pub fn visible_range(&self) -> Vec<f64> {
         let s = self.inner.borrow();
         vec![s.engine.viewport.start_bar, s.engine.viewport.end_bar]
+    }
+
+    /// Reset the main chart viewport.
+    ///
+    /// Supported modes:
+    /// - `"default"`: restore the recent-bars default view with a small right gap
+    /// - `"fit_all"`: show the full dataset with a small right gap
+    ///
+    /// Unknown or omitted modes fall back to `"default"`.
+    pub fn reset_viewport(&mut self, mode: Option<String>) {
+        let mut s = self.inner.borrow_mut();
+        reset_main_viewport_and_emit(&mut s.engine, mode.as_deref());
+        drop(s);
+        self.mark_dirty();
     }
 
     /// Set crosshair mode: "normal" or "magnet_ohlc".
@@ -3793,11 +3820,7 @@ impl RayCore {
 
             // Reset zoom to fit all data
             "0" => {
-                s.engine.viewport.start_bar = 0.0;
-                s.engine.viewport.end_bar = bar_count - 1.0 + bar_count * 0.05; // 5% right margin
-                s.engine.viewport.price_min = f64::MAX;
-                s.engine.viewport.price_max = f64::MIN;
-                // Let auto-fit recalculate price range on next render
+                reset_main_viewport_and_emit(&mut s.engine, Some("fit_all"));
                 true
             }
 
@@ -7692,8 +7715,25 @@ fn ids_to_js_array(ids: Vec<ChartPaneId>) -> js_sys::Array {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_synced_crosshair_state;
-    use raycore::Viewport;
+    use super::{
+        parse_main_viewport_preset, reset_main_viewport_and_emit, resolve_synced_crosshair_state,
+    };
+    use raycore::core::events::ChartEvent;
+    use raycore::{Bar, ChartEngine, MainViewportPreset, RendererBackend, Viewport};
+
+    fn sample_bars(count: usize, start_ts: u64) -> Vec<Bar> {
+        (0..count)
+            .map(|i| Bar {
+                timestamp: start_ts + i as u64,
+                open: 100.0 + i as f32 * 0.1,
+                high: 101.0 + i as f32 * 0.1,
+                low: 99.0 + i as f32 * 0.1,
+                close: 100.5 + i as f32 * 0.1,
+                volume: 1.0,
+                _pad: 0.0,
+            })
+            .collect()
+    }
 
     #[test]
     fn synced_crosshair_uses_bar_and_price_projection() {
@@ -7737,5 +7777,60 @@ mod tests {
         assert_eq!(y, fallback_y);
         assert!(bar_index.is_some());
         assert!(price.is_finite());
+    }
+
+    #[test]
+    fn parse_main_viewport_preset_defaults_to_default_recent() {
+        assert_eq!(parse_main_viewport_preset(None), MainViewportPreset::DefaultRecent);
+        assert_eq!(
+            parse_main_viewport_preset(Some("default")),
+            MainViewportPreset::DefaultRecent
+        );
+        assert_eq!(
+            parse_main_viewport_preset(Some("fit_all")),
+            MainViewportPreset::FitAll
+        );
+    }
+
+    #[test]
+    fn reset_main_viewport_and_emit_updates_range_and_emits_visible_range_change() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        engine.set_data(sample_bars(120, 1_000)).unwrap();
+        engine.event_bus.clear();
+
+        reset_main_viewport_and_emit(&mut engine, Some("default"));
+
+        let events: Vec<_> = engine.event_bus.drain().collect();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ChartEvent::VisibleRangeChange { start_bar, end_bar } => {
+                assert!(*end_bar > engine.bars.len() as f64);
+                assert!(*end_bar > *start_bar);
+            }
+            other => panic!("expected VisibleRangeChange, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reset_main_viewport_and_emit_fit_all_matches_engine_fit_all_range() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        engine.set_data(sample_bars(120, 2_000)).unwrap();
+        engine.event_bus.clear();
+
+        reset_main_viewport_and_emit(&mut engine, Some("fit_all"));
+
+        let expected_end = engine.bars.len() as f64 + (engine.bars.len() as f64 * 0.05).max(2.0);
+        assert!((engine.viewport.start_bar - 0.0).abs() < 1e-9);
+        assert!((engine.viewport.end_bar - expected_end).abs() < 1e-9);
+
+        let events: Vec<_> = engine.event_bus.drain().collect();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ChartEvent::VisibleRangeChange { start_bar, end_bar } => {
+                assert!((*start_bar - 0.0).abs() < 1e-9);
+                assert!((*end_bar - expected_end).abs() < 1e-9);
+            }
+            other => panic!("expected VisibleRangeChange, got {other:?}"),
+        }
     }
 }

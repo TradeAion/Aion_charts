@@ -277,10 +277,14 @@ pub(crate) fn do_render_frame(
             &engine.series,
             &engine.bars,
             engine.main_chart_options.chart_type,
+            &engine.footprint_data,
+            &engine.main_chart_options.footprint,
             &engine.viewport,
             &engine.style,
             pane_css_w,
             pane_css_h,
+            engine.h_pixel_ratio,
+            engine.v_pixel_ratio,
             anim_time,
         );
         overlay.render_asset_name_chip(

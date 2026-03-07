@@ -75,8 +75,8 @@ pub use crate::core::data::{Bar, BarArray};
 /// Viewport state and coordinate transformations.
 pub use crate::core::viewport::{PriceScaleMode, Viewport};
 
-/// Central chart engine.
-pub use crate::core::engine::ChartEngine;
+/// Central chart engine and viewport reset presets.
+pub use crate::core::engine::{ChartEngine, MainViewportPreset};
 
 /// Main chart type (candlestick, OHLC bars, line, area, footprint, etc.).
 pub use crate::core::chart_type::{MainChartOptions, MainChartType};

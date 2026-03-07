@@ -11,7 +11,7 @@
 use crate::core::chart_type::{MainChartOptions, MainChartType};
 use crate::core::constants::{
     DEFAULT_BAR_SPACING_CSS, DEFAULT_INITIAL_VISIBLE_BARS, DEGENERATE_PRICE_RANGE_FALLBACK,
-    MIN_VISIBLE_BARS,
+    MIN_FOOTPRINT_BAR_CSS, MIN_VISIBLE_BARS,
 };
 use crate::core::data::{Bar, BarArray};
 use crate::core::drawings::types::DrawingGeometry;
@@ -70,6 +70,21 @@ enum UpsertAction {
     UpdateLast,
 }
 
+/// Preset strategies for restoring the main chart viewport.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MainViewportPreset {
+    /// Restore the default recent-bars window with a small right-side gap.
+    DefaultRecent,
+    /// Fit the full dataset with a small right-side gap.
+    FitAll,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FootprintTimeRangeAnchor {
+    LatestWithGap,
+    CenterPreserving,
+}
+
 /// The main chart engine. Owns everything needed to render the pane.
 pub struct ChartEngine {
     pub renderer: RendererBackend,
@@ -99,6 +114,12 @@ pub struct ChartEngine {
     /// Populated during draw_candles so the overlay Canvas2D layer can render them
     /// (WebGPU cannot render text natively).
     pub footprint_texts: Vec<DrawText>,
+    /// Saved volume_height_ratio from before entering Footprint mode.
+    /// Footprint sets the ratio to 0 so the candle area fills the full pane,
+    /// and ALL coordinate projections (candle, live line, price label, asset
+    /// chip) go through the standard `candle_area_height_ph()` path with no
+    /// special-casing.  Restored when leaving Footprint mode.
+    saved_volume_height_ratio: Option<f32>,
     /// Event bus — collects events for the platform layer to drain and forward.
     pub event_bus: EventBus,
 }
@@ -229,6 +250,7 @@ impl ChartEngine {
             main_chart_options: MainChartOptions::default(),
             footprint_data: FootprintData::new(),
             footprint_texts: Vec::new(),
+            saved_volume_height_ratio: None,
             event_bus: EventBus::new(),
         }
     }
@@ -243,30 +265,186 @@ impl ChartEngine {
         self.main_chart_type
     }
 
+    fn default_recent_visible_span(&self) -> f64 {
+        let data_len = self.bars.len() as f64;
+        if data_len <= 0.0 {
+            return DEFAULT_INITIAL_VISIBLE_BARS.max(MIN_VISIBLE_BARS);
+        }
+        let by_spacing = if self.viewport.width > 0 && self.h_pixel_ratio > 0.0 {
+            self.viewport.width as f64 / (DEFAULT_BAR_SPACING_CSS * self.h_pixel_ratio)
+        } else {
+            DEFAULT_INITIAL_VISIBLE_BARS
+        };
+        data_len.min(by_spacing.max(MIN_VISIBLE_BARS))
+    }
+
+    fn footprint_max_visible_bars(&self) -> Option<f64> {
+        let pane_css_w = self.viewport.width as f64 / self.h_pixel_ratio.max(1.0);
+        if !pane_css_w.is_finite() || pane_css_w <= 0.0 {
+            return None;
+        }
+        let max_bars = (pane_css_w / MIN_FOOTPRINT_BAR_CSS).floor().max(1.0);
+        if max_bars.is_finite() && max_bars > 0.0 {
+            Some(max_bars)
+        } else {
+            None
+        }
+    }
+
+    fn clamp_footprint_visible_span(&self, requested_span: f64) -> f64 {
+        let span = if requested_span.is_finite() && requested_span > 0.0 {
+            requested_span.max(1.0)
+        } else {
+            1.0
+        };
+        self.footprint_max_visible_bars()
+            .map_or(span, |max_bars| span.min(max_bars))
+    }
+
+    fn default_recent_right_gap(span: f64) -> f64 {
+        if !span.is_finite() || span <= 1.0 {
+            return 0.0;
+        }
+        (span * 0.03).clamp(2.0, 6.0).min((span - 1.0).max(0.0))
+    }
+
+    fn current_time_range_overlaps_loaded_data(&self) -> bool {
+        if self.bars.is_empty() {
+            return false;
+        }
+        let data_len = self.bars.len() as f64;
+        self.viewport.end_bar > 0.0 && self.viewport.start_bar < data_len
+    }
+
+    fn footprint_time_range_anchor(&self) -> FootprintTimeRangeAnchor {
+        if !self.current_time_range_overlaps_loaded_data() {
+            return FootprintTimeRangeAnchor::LatestWithGap;
+        }
+        let data_len = self.bars.len() as f64;
+        if self.viewport.end_bar >= data_len - 1.0 && self.viewport.start_bar > 0.0 {
+            FootprintTimeRangeAnchor::LatestWithGap
+        } else {
+            FootprintTimeRangeAnchor::CenterPreserving
+        }
+    }
+
+    fn apply_footprint_time_range(
+        &mut self,
+        requested_span: f64,
+        anchor: FootprintTimeRangeAnchor,
+    ) {
+        let data_len = self.bars.len() as f64;
+        if data_len <= 0.0 {
+            self.viewport.price_invalidated = true;
+            return;
+        }
+
+        let span = self.clamp_footprint_visible_span(requested_span);
+        match anchor {
+            FootprintTimeRangeAnchor::LatestWithGap => {
+                let gap = Self::default_recent_right_gap(span);
+                let end = data_len + gap;
+                self.viewport.set_range(end - span, end);
+            }
+            FootprintTimeRangeAnchor::CenterPreserving => {
+                let mid = (self.viewport.start_bar + self.viewport.end_bar) * 0.5;
+                let half = span * 0.5;
+                self.viewport.set_range(mid - half, mid + half);
+            }
+        }
+    }
+
+    fn normalize_footprint_time_range(&mut self, anchor: FootprintTimeRangeAnchor) {
+        self.apply_footprint_time_range(self.viewport.visible_bar_count(), anchor);
+    }
+
+    /// Reset the main chart viewport to a preset time range and auto-scaled price view.
+    pub fn reset_main_viewport(&mut self, preset: MainViewportPreset) {
+        let data_len = self.bars.len() as f64;
+        self.viewport.price_locked = false;
+
+        if data_len <= 0.0 {
+            self.viewport.price_invalidated = true;
+            return;
+        }
+
+        match preset {
+            MainViewportPreset::DefaultRecent => {
+                let span = self.default_recent_visible_span();
+                if self.main_chart_type == MainChartType::Footprint {
+                    self.apply_footprint_time_range(
+                        span,
+                        FootprintTimeRangeAnchor::LatestWithGap,
+                    );
+                } else {
+                    let gap = Self::default_recent_right_gap(span);
+                    let visible_data = (span - gap).max(1.0).min(data_len);
+                    let start = data_len - visible_data;
+                    self.viewport.set_range(start, start + span);
+                }
+            }
+            MainViewportPreset::FitAll => {
+                let gap = (data_len * 0.05).max(2.0);
+                self.viewport.set_range(0.0, data_len + gap);
+            }
+        }
+
+        self.auto_fit_price_for_reset();
+    }
+
     /// Set the main chart type (candlestick, OHLC bars, line, area, footprint, etc.).
     pub fn set_main_chart_type(&mut self, chart_type: MainChartType) {
         let prev_chart_type = self.main_chart_type;
         self.main_chart_type = chart_type;
         self.main_chart_options.chart_type = chart_type;
 
-        if prev_chart_type != chart_type && chart_type == MainChartType::Footprint {
-            // Footprint mode should initialize from a sane, readable viewport.
-            // If current time range is completely outside available bars (e.g. user
-            // panned far into future space), re-anchor to recent data.
-            if !self.bars.is_empty() {
-                let data_len = self.bars.len() as f64;
-                let has_time_overlap =
-                    self.viewport.end_bar > 0.0 && self.viewport.start_bar < data_len;
-                if !has_time_overlap {
-                    let span =
-                        (self.viewport.end_bar - self.viewport.start_bar).max(MIN_VISIBLE_BARS);
-                    let visible = span.min(data_len.max(MIN_VISIBLE_BARS));
-                    self.viewport.set_range(data_len - visible, data_len);
-                }
+        // ── Volume height ratio management ──
+        // Footprint integrates volume into the ladder cells and needs the full
+        // pane height for candles.  Instead of special-casing every Y-projection
+        // call site, we set volume_height_ratio = 0 so the standard
+        // `candle_area_height_ph()` path returns `pane_h` naturally.
+        // The original ratio is saved and restored when leaving Footprint mode.
+        if chart_type == MainChartType::Footprint && prev_chart_type != MainChartType::Footprint {
+            self.saved_volume_height_ratio = Some(self.viewport.volume_height_ratio);
+            self.viewport.volume_height_ratio = 0.0;
+        } else if chart_type != MainChartType::Footprint
+            && prev_chart_type == MainChartType::Footprint
+        {
+            if let Some(saved) = self.saved_volume_height_ratio.take() {
+                self.viewport.volume_height_ratio = saved;
             }
-            // Don't inherit stale locked price scale from non-footprint mode.
-            self.viewport.price_locked = false;
-            self.auto_fit_price_for_current_chart();
+        }
+
+        if prev_chart_type != chart_type && !self.bars.is_empty() {
+            if chart_type == MainChartType::Footprint && prev_chart_type != MainChartType::Footprint
+            {
+                if !self.current_time_range_overlaps_loaded_data() {
+                    self.reset_main_viewport(MainViewportPreset::DefaultRecent);
+                } else {
+                    let anchor = self.footprint_time_range_anchor();
+                    let current_span = self.viewport.visible_bar_count();
+                    let needs_clamp = self
+                        .footprint_max_visible_bars()
+                        .is_some_and(|max_bars| current_span > max_bars + 1e-9);
+                    if anchor == FootprintTimeRangeAnchor::LatestWithGap {
+                        self.normalize_footprint_time_range(anchor);
+                    } else if needs_clamp {
+                        self.normalize_footprint_time_range(anchor);
+                    }
+
+                    if !self.viewport.price_locked {
+                        self.auto_fit_price_for_current_chart();
+                    } else {
+                        self.viewport.price_invalidated = true;
+                    }
+                }
+            } else if !self.current_time_range_overlaps_loaded_data() {
+                self.reset_main_viewport(MainViewportPreset::DefaultRecent);
+            } else if !self.viewport.price_locked {
+                self.auto_fit_price_for_current_chart();
+            } else {
+                self.viewport.price_invalidated = true;
+            }
         } else {
             self.viewport.price_invalidated = true;
         }
@@ -289,10 +467,8 @@ impl ChartEngine {
         self.drawings.stamp_timestamps(&self.bars);
     }
 
-    /// Replace all bar data.
-    pub fn set_data(&mut self, bars: Vec<Bar>) -> Result<(), String> {
+    fn replace_main_bars(&mut self, bars: Vec<Bar>) -> Result<(), String> {
         ensure_strictly_increasing_bar_timestamps(&bars)?;
-        let len = bars.len();
 
         // Stamp timestamps on existing drawings from the OLD bar data so they
         // can be remapped after the data swap.
@@ -306,25 +482,17 @@ impl ChartEngine {
         // Update studies with new data
         self.studies.update_studies(&self.bars);
         self.indicators.on_set_data(&self.bars);
+        Ok(())
+    }
+
+    /// Replace all bar data.
+    pub fn set_data(&mut self, bars: Vec<Bar>) -> Result<(), String> {
+        self.replace_main_bars(bars)?;
 
         // Clear stale footprint data when main OHLCV data is replaced.
         self.footprint_data.clear();
 
-        // LWC-like initial zoom: derive visible bars from default bar spacing (6 CSS px).
-        // Fallback to legacy constant if dimensions are not ready yet.
-        let visible = {
-            let by_spacing = if self.viewport.width > 0 && self.h_pixel_ratio > 0.0 {
-                self.viewport.width as f64 / (DEFAULT_BAR_SPACING_CSS * self.h_pixel_ratio)
-            } else {
-                DEFAULT_INITIAL_VISIBLE_BARS
-            };
-            (len as f64).min(by_spacing.max(MIN_VISIBLE_BARS))
-        };
-        self.viewport.set_range((len as f64) - visible, len as f64);
-
-        if !self.viewport.price_locked {
-            self.auto_fit_price_for_current_chart();
-        }
+        self.reset_main_viewport(MainViewportPreset::DefaultRecent);
         Ok(())
     }
 
@@ -336,11 +504,9 @@ impl ChartEngine {
         bars: Vec<Bar>,
         footprint: FootprintData,
     ) -> Result<(), String> {
-        self.set_data(bars)?;
+        self.replace_main_bars(bars)?;
         self.footprint_data = footprint;
-        if !self.viewport.price_locked {
-            self.auto_fit_price_for_current_chart();
-        }
+        self.reset_main_viewport(MainViewportPreset::DefaultRecent);
         Ok(())
     }
 
@@ -750,9 +916,25 @@ impl ChartEngine {
         self.studies.update_studies(&self.bars);
     }
 
+    fn auto_fit_price_for_reset(&mut self) {
+        self.auto_fit_price_for_current_chart_impl(true);
+    }
+
     fn auto_fit_price_for_current_chart(&mut self) {
-        self.viewport.auto_fit_price(&self.bars);
-        self.expand_price_range_for_visible_footprint_bounds();
+        self.auto_fit_price_for_current_chart_impl(false);
+    }
+
+    fn auto_fit_price_for_current_chart_impl(&mut self, apply_soft_default_compactness: bool) {
+        let fitted_footprint = if self.main_chart_type == MainChartType::Footprint
+            && !self.footprint_data.is_empty()
+        {
+            self.fit_price_to_visible_footprint_bounds(apply_soft_default_compactness)
+        } else {
+            false
+        };
+        if !fitted_footprint {
+            self.viewport.auto_fit_price(&self.bars);
+        }
         self.enforce_footprint_min_cell_height();
     }
 
@@ -820,31 +1002,41 @@ impl ChartEngine {
         })
     }
 
-    fn expand_price_range_for_visible_footprint_bounds(&mut self) {
+    fn fit_price_to_visible_footprint_bounds(
+        &mut self,
+        apply_soft_default_compactness: bool,
+    ) -> bool {
+        // Prime scale-mode conversion state (first visible value/log formula)
+        // before projecting footprint prices into internal coordinates.
+        self.viewport.auto_fit_price(&self.bars);
         let (data_min, data_max) = match self.visible_footprint_internal_bounds() {
             Some(v) => v,
-            None => return,
+            None => return false,
         };
         let internal_frac =
             1.0 - self.viewport.scale_margin_top - self.viewport.scale_margin_bottom;
         if internal_frac <= 0.0 {
-            return;
+            return false;
         }
         let raw_range = data_max - data_min;
-        let full_range = if raw_range > 0.0 {
+        let raw_full_range = if raw_range > 0.0 {
             raw_range / internal_frac
         } else {
             DEGENERATE_PRICE_RANGE_FALLBACK / internal_frac
         };
+        let full_range = if apply_soft_default_compactness {
+            self.footprint_soft_default_full_range(raw_full_range)
+        } else {
+            raw_full_range
+        };
         let required_min = data_min - full_range * self.viewport.scale_margin_bottom;
         let required_max = required_min + full_range;
         if !required_min.is_finite() || !required_max.is_finite() || required_max <= required_min {
-            return;
+            return false;
         }
-        if required_min < self.viewport.price_min || required_max > self.viewport.price_max {
-            self.viewport.price_min = self.viewport.price_min.min(required_min);
-            self.viewport.price_max = self.viewport.price_max.max(required_max);
-        }
+        self.viewport.price_min = required_min;
+        self.viewport.price_max = required_max;
+        true
     }
 
     fn representative_visible_footprint_tick_size(&self) -> Option<f64> {
@@ -880,6 +1072,70 @@ impl ChartEngine {
         } else {
             ticks[mid]
         })
+    }
+
+    fn representative_visible_footprint_tick_internal(&self) -> Option<f64> {
+        let tick_size = self.representative_visible_footprint_tick_size()?;
+        let (data_min, data_max) = self.visible_footprint_internal_bounds()?;
+        let mid_internal = (data_min + data_max) * 0.5;
+        if !mid_internal.is_finite() {
+            return None;
+        }
+        let mid_price = self.viewport.internal_to_price(mid_internal);
+        let up_price = mid_price + tick_size;
+        if !mid_price.is_finite() || !up_price.is_finite() {
+            return None;
+        }
+        let tick_internal = (self.viewport.price_to_internal(up_price)
+            - self.viewport.price_to_internal(mid_price))
+        .abs();
+        if tick_internal.is_finite() && tick_internal > 0.0 {
+            Some(tick_internal)
+        } else {
+            None
+        }
+    }
+
+    /// Target full-range that keeps default footprint rows below a max cell height.
+    fn footprint_target_full_range_for_max_cell_height(
+        &self,
+        target_cell_css: f64,
+    ) -> Option<f64> {
+        let pane_h = self.viewport.height as f64;
+        if pane_h <= 1.0 {
+            return None;
+        }
+        let tick_internal = self.representative_visible_footprint_tick_internal()?;
+        let target_cell_ph = target_cell_css * self.v_pixel_ratio.max(1.0);
+        if !target_cell_ph.is_finite() || target_cell_ph <= 0.0 {
+            return None;
+        }
+        let range = tick_internal * pane_h / target_cell_ph;
+        if range.is_finite() && range > 0.0 {
+            Some(range)
+        } else {
+            None
+        }
+    }
+
+    fn footprint_soft_default_full_range(&self, raw_full_range: f64) -> f64 {
+        const TARGET_MAX_DEFAULT_CELL_CSS: f64 = 12.0;
+        const MAX_DEFAULT_RANGE_EXPANSION: f64 = 1.5;
+
+        if !raw_full_range.is_finite() || raw_full_range <= 0.0 {
+            return raw_full_range;
+        }
+
+        let Some(compact_target_range) =
+            self.footprint_target_full_range_for_max_cell_height(TARGET_MAX_DEFAULT_CELL_CSS)
+        else {
+            return raw_full_range;
+        };
+        if !compact_target_range.is_finite() || compact_target_range <= raw_full_range {
+            return raw_full_range;
+        }
+
+        compact_target_range.min(raw_full_range * MAX_DEFAULT_RANGE_EXPANSION)
     }
 
     /// Enforce a minimum cell height for footprint mode.
@@ -944,30 +1200,23 @@ impl ChartEngine {
     /// Enforce a minimum bar width for footprint mode.
     ///
     /// Prevents zooming out so far that bars become too narrow for footprint
-    /// cells to be useful.  Clamps the visible bar range so each bar gets at
-    /// least `MIN_FOOTPRINT_BAR_CSS` CSS pixels of width.
+    /// cells to be useful. This is only a safety fallback; reset/switch paths
+    /// should already normalize the footprint time range before render.
     fn enforce_footprint_min_bar_width(&mut self) {
-        use crate::core::constants::MIN_FOOTPRINT_BAR_CSS;
         if self.main_chart_type != MainChartType::Footprint {
-            return;
-        }
-        let pane_css_w = self.viewport.width as f64 / self.h_pixel_ratio.max(1.0);
-        if pane_css_w <= 0.0 {
             return;
         }
         let visible_bars = self.viewport.end_bar - self.viewport.start_bar;
         if visible_bars <= 0.0 {
             return;
         }
-        let bar_spacing_css = pane_css_w / visible_bars;
-        if bar_spacing_css >= MIN_FOOTPRINT_BAR_CSS {
+        let Some(max_bars) = self.footprint_max_visible_bars() else {
+            return;
+        };
+        if visible_bars <= max_bars + 1e-9 {
             return;
         }
-        // Clamp: reduce visible bar count so each bar gets MIN width
-        let max_bars = (pane_css_w / MIN_FOOTPRINT_BAR_CSS).floor().max(1.0);
-        let mid = (self.viewport.start_bar + self.viewport.end_bar) * 0.5;
-        self.viewport.start_bar = mid - max_bars * 0.5;
-        self.viewport.end_bar = mid + max_bars * 0.5;
+        self.normalize_footprint_time_range(self.footprint_time_range_anchor());
     }
 
     /// Auto-fit price axis to visible data if not locked.
@@ -1150,7 +1399,7 @@ impl ChartEngine {
 mod tests {
     use super::{
         ensure_strictly_increasing_bar_timestamps, ensure_strictly_increasing_timestamps,
-        ChartEngine, UpsertAction,
+        ChartEngine, MainViewportPreset, UpsertAction,
     };
     use crate::core::chart_type::MainChartType;
     use crate::core::data::Bar;
@@ -1168,6 +1417,63 @@ mod tests {
             volume: 1.0,
             _pad: 0.0,
         }
+    }
+
+    fn assert_close(actual: f64, expected: f64, label: &str) {
+        assert!(
+            (actual - expected).abs() < 1e-6,
+            "{label}: actual={actual}, expected={expected}"
+        );
+    }
+
+    fn assert_default_recent_range(engine: &ChartEngine) {
+        let data_len = engine.bars.len() as f64;
+        let span = engine.default_recent_visible_span();
+        let gap = ChartEngine::default_recent_right_gap(span);
+        let visible_data = (span - gap).max(1.0).min(data_len);
+        let expected_start = data_len - visible_data;
+        let expected_end = expected_start + span;
+
+        assert_close(engine.viewport.start_bar, expected_start, "default recent start");
+        assert_close(engine.viewport.end_bar, expected_end, "default recent end");
+    }
+
+    fn assert_footprint_latest_range(engine: &ChartEngine, requested_span: f64) {
+        let span = engine.clamp_footprint_visible_span(requested_span);
+        let gap = ChartEngine::default_recent_right_gap(span);
+        let expected_end = engine.bars.len() as f64 + gap;
+        let expected_start = expected_end - span;
+
+        assert_close(engine.viewport.start_bar, expected_start, "footprint latest start");
+        assert_close(engine.viewport.end_bar, expected_end, "footprint latest end");
+    }
+
+    fn assert_footprint_span_is_readable(engine: &ChartEngine) {
+        if let Some(max_bars) = engine.footprint_max_visible_bars() {
+            assert!(
+                engine.viewport.visible_bar_count() <= max_bars + 1e-9,
+                "footprint visible span {} should be <= {}",
+                engine.viewport.visible_bar_count(),
+                max_bars
+            );
+        }
+    }
+
+    fn assert_fit_all_range(engine: &ChartEngine) {
+        let data_len = engine.bars.len() as f64;
+        let expected_end = data_len + (data_len * 0.05).max(2.0);
+        assert_close(engine.viewport.start_bar, 0.0, "fit all start");
+        assert_close(engine.viewport.end_bar, expected_end, "fit all end");
+    }
+
+    fn visible_footprint_pixel_height(engine: &ChartEngine) -> Option<f64> {
+        let (data_min, data_max) = engine.visible_footprint_internal_bounds()?;
+        let pane_h = engine.viewport.height as f64;
+        let top_price = engine.viewport.internal_to_price(data_max);
+        let bottom_price = engine.viewport.internal_to_price(data_min);
+        let y_top = price_to_y(top_price, &engine.viewport, pane_h);
+        let y_bottom = price_to_y(bottom_price, &engine.viewport, pane_h);
+        Some((y_bottom - y_top).abs())
     }
 
     #[test]
@@ -1269,7 +1575,100 @@ mod tests {
     }
 
     #[test]
-    fn switch_to_footprint_reanchors_out_of_data_time_range_and_unlocks_price() {
+    fn footprint_init_fits_visible_ladder_bounds_instead_of_ohlc_extremes() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        engine.main_chart_options.footprint.tick_size = 0.25;
+        engine.set_main_chart_type(MainChartType::Footprint);
+
+        let bars: Vec<Bar> = (0..60)
+            .map(|i| Bar {
+                timestamp: 10_000 + i,
+                open: 100.0,
+                high: 110.0,
+                low: 90.0,
+                close: 100.0,
+                volume: 1.0,
+                _pad: 0.0,
+            })
+            .collect();
+
+        let mut fp = FootprintData::new();
+        for i in 0..60usize {
+            let levels = (0..8usize)
+                .map(|j| FootprintLevel {
+                    price: 99.0 + (j as f32) * 0.25,
+                    bid_volume: 10.0,
+                    ask_volume: 12.0,
+                })
+                .collect();
+            fp.set_bar(i, FootprintBar { levels });
+        }
+
+        engine.set_data_with_footprint(bars, fp).unwrap();
+
+        let raw_required = engine.footprint_required_range_with_margins().unwrap();
+        let actual_range = engine.viewport.price_max - engine.viewport.price_min;
+        let ohlc_full_range =
+            (110.0_f64 - 90.0_f64) / (1.0 - engine.viewport.scale_margin_top - engine.viewport.scale_margin_bottom);
+
+        assert!(
+            actual_range <= raw_required * 1.5 + 1e-6,
+            "footprint init range {actual_range} should stay within soft compactness cap over raw {raw_required}"
+        );
+        assert!(
+            actual_range < ohlc_full_range * 0.5,
+            "footprint init should fit ladder bounds, not OHLC extremes (actual={actual_range}, ohlc={ohlc_full_range})"
+        );
+
+        let occupied = visible_footprint_pixel_height(&engine).unwrap();
+        assert!(
+            occupied >= engine.viewport.height as f64 * 0.45,
+            "footprint ladder should occupy a meaningful portion of the pane (occupied={occupied})"
+        );
+    }
+
+    #[test]
+    fn footprint_demo_like_init_stays_within_soft_compactness_cap() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 1200, 700, 1.0);
+        engine.set_main_chart_type(MainChartType::Footprint);
+
+        let (bars, fp) =
+            crate::core::demo_data::generate_footprint_sample_data(600, 1_000, 60_000, 0.0);
+        engine.set_data_with_footprint(bars, fp).unwrap();
+
+        let raw_required = engine.footprint_required_range_with_margins().unwrap();
+        let actual_range = engine.viewport.price_max - engine.viewport.price_min;
+        assert!(
+            actual_range <= raw_required * 1.5 + 1e-6,
+            "demo-like footprint init range {actual_range} should stay within soft compactness cap over raw {raw_required}"
+        );
+
+        let occupied = visible_footprint_pixel_height(&engine).unwrap();
+        assert!(
+            occupied >= engine.viewport.height as f64 * 0.45,
+            "demo-like footprint init should not compress the ladder into the bottom band (occupied={occupied})"
+        );
+
+        assert_footprint_latest_range(&engine, engine.default_recent_visible_span());
+        assert_footprint_span_is_readable(&engine);
+
+        let before_start = engine.viewport.start_bar;
+        let before_end = engine.viewport.end_bar;
+        engine.render(&[], &[], &[]).unwrap();
+        assert_close(
+            engine.viewport.start_bar,
+            before_start,
+            "footprint init start should remain stable after render",
+        );
+        assert_close(
+            engine.viewport.end_bar,
+            before_end,
+            "footprint init end should remain stable after render",
+        );
+    }
+
+    #[test]
+    fn set_data_resets_to_default_recent_viewport_with_right_gap() {
         let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
         let bars: Vec<Bar> = (0..120)
             .map(|i| Bar {
@@ -1282,27 +1681,187 @@ mod tests {
                 _pad: 0.0,
             })
             .collect();
+        engine.viewport.price_locked = true;
         engine.set_data(bars).unwrap();
 
-        // Simulate user panned far into future space and locked price on another chart type.
+        assert_default_recent_range(&engine);
+        let data_len = engine.bars.len() as f64;
+        assert!(
+            engine.viewport.end_bar > data_len,
+            "default recent init should leave a right gap past the latest bar"
+        );
+        assert!(
+            !engine.viewport.price_locked,
+            "set_data should unlock stale price locks during viewport reset"
+        );
+    }
+
+    #[test]
+    fn reset_main_viewport_default_recent_reanchors_far_left_range() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        let bars: Vec<Bar> = (0..120)
+            .map(|i| Bar {
+                timestamp: 2_000 + i,
+                open: 200.0 + i as f32 * 0.1,
+                high: 201.0 + i as f32 * 0.1,
+                low: 199.0 + i as f32 * 0.1,
+                close: 200.5 + i as f32 * 0.1,
+                volume: 1.0,
+                _pad: 0.0,
+            })
+            .collect();
+        engine.set_data(bars).unwrap();
+
+        engine.viewport.set_range(-240.0, -120.0);
+        engine.viewport.price_locked = true;
+
+        engine.reset_main_viewport(MainViewportPreset::DefaultRecent);
+
+        assert_default_recent_range(&engine);
+        assert!(
+            !engine.viewport.price_locked,
+            "default recent reset should unlock stale price locks"
+        );
+    }
+
+    #[test]
+    fn reset_main_viewport_default_recent_reanchors_far_right_range() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        let bars: Vec<Bar> = (0..120)
+            .map(|i| Bar {
+                timestamp: 3_000 + i,
+                open: 300.0 + i as f32 * 0.1,
+                high: 301.0 + i as f32 * 0.1,
+                low: 299.0 + i as f32 * 0.1,
+                close: 300.5 + i as f32 * 0.1,
+                volume: 1.0,
+                _pad: 0.0,
+            })
+            .collect();
+        engine.set_data(bars).unwrap();
+
+        engine.viewport.set_range(10_000.0, 10_120.0);
+        engine.viewport.price_locked = true;
+
+        engine.reset_main_viewport(MainViewportPreset::DefaultRecent);
+
+        assert_default_recent_range(&engine);
+        assert!(
+            !engine.viewport.price_locked,
+            "default recent reset should unlock stale price locks"
+        );
+    }
+
+    #[test]
+    fn footprint_reset_main_viewport_default_recent_clamps_to_latest_readable_range() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        engine.set_main_chart_type(MainChartType::Footprint);
+
+        let (bars, fp) =
+            crate::core::demo_data::generate_footprint_sample_data(500, 1_000, 60_000, 0.0);
+        engine.set_data_with_footprint(bars, fp).unwrap();
+
+        engine.viewport.set_range(0.0, 240.0);
+        engine.reset_main_viewport(MainViewportPreset::DefaultRecent);
+
+        assert_footprint_latest_range(&engine, engine.default_recent_visible_span());
+        assert_footprint_span_is_readable(&engine);
+    }
+
+    #[test]
+    fn reset_main_viewport_fit_all_shows_full_dataset_plus_gap() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        let bars: Vec<Bar> = (0..120)
+            .map(|i| Bar {
+                timestamp: 4_000 + i,
+                open: 400.0 + i as f32 * 0.1,
+                high: 401.0 + i as f32 * 0.1,
+                low: 399.0 + i as f32 * 0.1,
+                close: 400.5 + i as f32 * 0.1,
+                volume: 1.0,
+                _pad: 0.0,
+            })
+            .collect();
+        engine.set_data(bars).unwrap();
+
+        engine.viewport.set_range(10_000.0, 10_120.0);
+        engine.viewport.price_locked = true;
+
+        engine.reset_main_viewport(MainViewportPreset::FitAll);
+
+        assert_fit_all_range(&engine);
+        assert!(
+            !engine.viewport.price_locked,
+            "fit-all reset should unlock stale price locks"
+        );
+    }
+
+    #[test]
+    fn switch_chart_type_reanchors_detached_range_to_default_recent() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        let bars: Vec<Bar> = (0..120)
+            .map(|i| Bar {
+                timestamp: 5_000 + i,
+                open: 500.0 + i as f32 * 0.1,
+                high: 501.0 + i as f32 * 0.1,
+                low: 499.0 + i as f32 * 0.1,
+                close: 500.5 + i as f32 * 0.1,
+                volume: 1.0,
+                _pad: 0.0,
+            })
+            .collect();
+        engine.set_data(bars).unwrap();
+
         engine.viewport.set_range(10_000.0, 10_120.0);
         engine.viewport.price_locked = true;
 
         engine.set_main_chart_type(MainChartType::Footprint);
 
-        let data_len = engine.bars.len() as f64;
-        assert!(
-            engine.viewport.end_bar > 0.0 && engine.viewport.start_bar < data_len,
-            "footprint init should bring time range back onto data"
-        );
+        assert_footprint_latest_range(&engine, engine.default_recent_visible_span());
+        assert_footprint_span_is_readable(&engine);
         assert!(
             !engine.viewport.price_locked,
-            "footprint init should unlock inherited stale price lock"
+            "chart-type switch reset should unlock stale price locks"
         );
     }
 
     #[test]
-    fn switch_to_footprint_preserves_time_range_when_already_overlapping_data() {
+    fn switch_chart_type_reanchors_latest_view_to_readable_footprint_latest_range() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        let (bars, _fp) =
+            crate::core::demo_data::generate_footprint_sample_data(500, 1_000, 60_000, 0.0);
+        engine.set_data(bars).unwrap();
+
+        let before_span = engine.viewport.visible_bar_count();
+        assert!(
+            engine
+                .footprint_max_visible_bars()
+                .is_some_and(|max_bars| before_span > max_bars),
+            "test setup requires a candlestick latest view wider than footprint allows"
+        );
+
+        engine.set_main_chart_type(MainChartType::Footprint);
+
+        assert_footprint_latest_range(&engine, before_span);
+        assert_footprint_span_is_readable(&engine);
+
+        let before_start = engine.viewport.start_bar;
+        let before_end = engine.viewport.end_bar;
+        engine.render(&[], &[], &[]).unwrap();
+        assert_close(
+            engine.viewport.start_bar,
+            before_start,
+            "latest footprint start should remain stable after render",
+        );
+        assert_close(
+            engine.viewport.end_bar,
+            before_end,
+            "latest footprint end should remain stable after render",
+        );
+    }
+
+    #[test]
+    fn switch_chart_type_preserves_mid_history_time_range_when_already_readable() {
         let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
         let bars: Vec<Bar> = (0..200)
             .map(|i| Bar {
@@ -1317,9 +1876,10 @@ mod tests {
             .collect();
         engine.set_data(bars).unwrap();
 
-        engine.viewport.set_range(40.0, 140.0);
+        engine.viewport.set_range(40.0, 60.0);
         let before_start = engine.viewport.start_bar;
         let before_end = engine.viewport.end_bar;
+        engine.viewport.price_locked = true;
 
         engine.set_main_chart_type(MainChartType::Footprint);
 
@@ -1330,6 +1890,93 @@ mod tests {
         assert!(
             (engine.viewport.end_bar - before_end).abs() < 1e-9,
             "should keep overlapping time range end"
+        );
+        assert!(
+            engine.viewport.price_locked,
+            "overlapping user range should preserve explicit price locks"
+        );
+    }
+
+    #[test]
+    fn switch_chart_type_shrinks_overwide_mid_history_range_around_same_midpoint() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        let bars: Vec<Bar> = (0..200)
+            .map(|i| Bar {
+                timestamp: 6_000 + i,
+                open: 100.0,
+                high: 102.0,
+                low: 99.0,
+                close: 101.0,
+                volume: 1.0,
+                _pad: 0.0,
+            })
+            .collect();
+        engine.set_data(bars).unwrap();
+
+        engine.viewport.set_range(40.0, 140.0);
+        let before_mid = (engine.viewport.start_bar + engine.viewport.end_bar) * 0.5;
+        engine.viewport.price_locked = true;
+
+        engine.set_main_chart_type(MainChartType::Footprint);
+
+        let after_mid = (engine.viewport.start_bar + engine.viewport.end_bar) * 0.5;
+        assert_close(after_mid, before_mid, "mid-history midpoint should be preserved");
+        assert_footprint_span_is_readable(&engine);
+        assert!(
+            engine.viewport.end_bar < engine.bars.len() as f64 - 1.0,
+            "over-wide mid-history switch should not snap to latest bars"
+        );
+        assert!(
+            engine.viewport.price_locked,
+            "mid-history readability clamp should preserve explicit price locks"
+        );
+    }
+
+    #[test]
+    fn switch_back_to_footprint_with_existing_data_uses_footprint_price_fit() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        engine.main_chart_options.footprint.tick_size = 0.25;
+        engine.set_main_chart_type(MainChartType::Footprint);
+
+        let bars: Vec<Bar> = (0..80)
+            .map(|i| Bar {
+                timestamp: 20_000 + i,
+                open: 100.0,
+                high: 110.0,
+                low: 90.0,
+                close: 100.0,
+                volume: 1.0,
+                _pad: 0.0,
+            })
+            .collect();
+        let mut fp = FootprintData::new();
+        for i in 0..80usize {
+            let levels = (0..8usize)
+                .map(|j| FootprintLevel {
+                    price: 99.0 + (j as f32) * 0.25,
+                    bid_volume: 8.0,
+                    ask_volume: 11.0,
+                })
+                .collect();
+            fp.set_bar(i, FootprintBar { levels });
+        }
+
+        engine.set_data_with_footprint(bars, fp).unwrap();
+        let raw_required = engine.footprint_required_range_with_margins().unwrap();
+
+        engine.set_main_chart_type(MainChartType::Candlestick);
+        engine.set_main_chart_type(MainChartType::Footprint);
+
+        let actual_range = engine.viewport.price_max - engine.viewport.price_min;
+        assert!(
+            actual_range <= raw_required * 1.5 + 1e-6,
+            "switching back to footprint should use ladder bounds for price fit (actual={actual_range}, raw={raw_required})"
+        );
+
+        let occupied = visible_footprint_pixel_height(&engine).unwrap();
+        assert!(
+            occupied >= engine.viewport.height as f64 * 0.45,
+            "switching back to footprint should restore a full-height ladder view (occupied={occupied})"
         );
     }
 
