@@ -753,7 +753,7 @@ impl ChartEngine {
     fn auto_fit_price_for_current_chart(&mut self) {
         self.viewport.auto_fit_price(&self.bars);
         self.expand_price_range_for_visible_footprint_bounds();
-        self.enforce_footprint_min_cell_height_unlocked();
+        self.enforce_footprint_min_cell_height();
     }
 
     fn visible_footprint_internal_bounds(&self) -> Option<(f64, f64)> {
@@ -882,8 +882,14 @@ impl ChartEngine {
         })
     }
 
-    fn enforce_footprint_min_cell_height_unlocked(&mut self) {
-        if self.main_chart_type != MainChartType::Footprint || self.viewport.price_locked {
+    /// Enforce a minimum cell height for footprint mode.
+    ///
+    /// Clamps the viewport's price range so each footprint row occupies at
+    /// least `min_cell_height` CSS pixels.  This runs **every frame** —
+    /// regardless of whether the price axis is locked — so the user can
+    /// never zoom out past the point where cells become unreadable.
+    fn enforce_footprint_min_cell_height(&mut self) {
+        if self.main_chart_type != MainChartType::Footprint {
             return;
         }
         let min_cell_css = self.main_chart_options.footprint.min_cell_height as f64;
@@ -934,6 +940,35 @@ impl ChartEngine {
             self.viewport.price_min = mid_internal - half;
             self.viewport.price_max = mid_internal + half;
         }
+    }
+
+    /// Enforce a minimum bar width for footprint mode.
+    ///
+    /// Prevents zooming out so far that bars become too narrow for footprint
+    /// cells to be useful.  Clamps the visible bar range so each bar gets at
+    /// least `MIN_FOOTPRINT_BAR_CSS` CSS pixels of width.
+    fn enforce_footprint_min_bar_width(&mut self) {
+        use crate::core::constants::MIN_FOOTPRINT_BAR_CSS;
+        if self.main_chart_type != MainChartType::Footprint {
+            return;
+        }
+        let pane_css_w = self.viewport.width as f64 / self.h_pixel_ratio.max(1.0);
+        if pane_css_w <= 0.0 {
+            return;
+        }
+        let visible_bars = self.viewport.end_bar - self.viewport.start_bar;
+        if visible_bars <= 0.0 {
+            return;
+        }
+        let bar_spacing_css = pane_css_w / visible_bars;
+        if bar_spacing_css >= MIN_FOOTPRINT_BAR_CSS {
+            return;
+        }
+        // Clamp: reduce visible bar count so each bar gets MIN width
+        let max_bars = (pane_css_w / MIN_FOOTPRINT_BAR_CSS).floor().max(1.0);
+        let mid = (self.viewport.start_bar + self.viewport.end_bar) * 0.5;
+        self.viewport.start_bar = mid - max_bars * 0.5;
+        self.viewport.end_bar = mid + max_bars * 0.5;
     }
 
     /// Auto-fit price axis to visible data if not locked.
@@ -1059,7 +1094,8 @@ impl ChartEngine {
             self.auto_fit_price_for_current_chart();
             self.viewport.price_invalidated = false;
         }
-        self.enforce_footprint_min_cell_height_unlocked();
+        self.enforce_footprint_min_cell_height();
+        self.enforce_footprint_min_bar_width();
 
         // Pre-generate footprint geometry so both backends get identical output
         // and text labels are available for the overlay Canvas2D layer.

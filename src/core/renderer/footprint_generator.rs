@@ -434,7 +434,7 @@ fn render_bid_ask_cell(
 
     // Volume text — adaptive font size to fit cell
     let effective_font = adaptive_font_size(font_size, cell_h);
-    let avail_half_w = half_w - padding * 2.0 - 4.0; // usable text width per side
+    let avail_half_w = half_w - padding * 2.0 - 2.0; // usable text width per side
     if opts.show_volume_text && effective_font > 0.0 {
         let text_y = cell_y + cell_h * 0.5;
 
@@ -841,22 +841,24 @@ fn generate_fallback_candle(
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Estimate whether text fits within the available width.
-/// Uses a rough 0.6 * font_size per character approximation for monospace-like fonts.
+/// Uses a 0.55 * font_size per character approximation — slightly tighter
+/// than the old 0.6 which was overly conservative and killed text too early.
 #[inline]
 fn text_fits(text: &str, font_size: f32, available_width: f64) -> bool {
-    let char_w = font_size as f64 * 0.6;
+    let char_w = font_size as f64 * 0.55;
     let text_w = text.len() as f64 * char_w;
     text_w <= available_width
 }
 
 /// Compute adaptive font size that fits within a cell.
-/// Returns the font size in physical pixels, or 0.0 if the cell is too small for any text.
-/// Minimum readable text is ~5px physical; below that we skip text entirely.
+/// Returns the font size in physical pixels, or 0.0 if the cell is too small
+/// for any text.  The minimum readable threshold is 4px physical; below that
+/// we skip text entirely.
 #[inline]
 fn adaptive_font_size(max_font: f32, cell_h: f64) -> f32 {
-    let min_font: f32 = 5.0;
-    // Leave 2px padding (1px top + 1px bottom)
-    let available = (cell_h - 2.0) as f32;
+    let min_font: f32 = 4.0;
+    // Leave 1px padding (top + bottom combined)
+    let available = (cell_h - 1.0) as f32;
     if available < min_font {
         return 0.0;
     }
@@ -916,10 +918,8 @@ fn intensity_blend(
 fn format_volume(vol: f32) -> String {
     if vol >= 1_000_000.0 {
         format!("{:.1}M", vol / 1_000_000.0)
-    } else if vol >= 10_000.0 {
-        format!("{:.1}K", vol / 1_000.0)
     } else if vol >= 1_000.0 {
-        format!("{:.0}", vol)
+        format!("{:.1}K", vol / 1_000.0)
     } else if vol >= 1.0 {
         format!("{:.0}", vol)
     } else if vol > 0.0 {
@@ -935,7 +935,7 @@ fn format_delta(delta: f32) -> String {
     let sign = if delta >= 0.0 { "+" } else { "-" };
     if abs >= 1_000_000.0 {
         format!("{}{:.1}M", sign, abs / 1_000_000.0)
-    } else if abs >= 10_000.0 {
+    } else if abs >= 1_000.0 {
         format!("{}{:.1}K", sign, abs / 1_000.0)
     } else if abs >= 1.0 {
         format!("{}{:.0}", sign, abs)
@@ -959,7 +959,7 @@ mod tests {
         assert_eq!(format_volume(0.0), "");
         assert_eq!(format_volume(0.5), "0.50");
         assert_eq!(format_volume(42.0), "42");
-        assert_eq!(format_volume(1234.0), "1234");
+        assert_eq!(format_volume(1234.0), "1.2K");
         assert_eq!(format_volume(15000.0), "15.0K");
         assert_eq!(format_volume(2_500_000.0), "2.5M");
     }
@@ -969,6 +969,7 @@ mod tests {
         assert_eq!(format_delta(0.0), "0");
         assert_eq!(format_delta(50.0), "+50");
         assert_eq!(format_delta(-30.0), "-30");
+        assert_eq!(format_delta(1234.0), "+1.2K");
         assert_eq!(format_delta(15000.0), "+15.0K");
         assert_eq!(format_delta(-2_500_000.0), "-2.5M");
     }

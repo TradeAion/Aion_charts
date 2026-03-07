@@ -16,6 +16,9 @@ pub const DEFAULT_BAR_SPACING_CSS: f64 = 6.0;
 /// Minimum number of bars that can be visible (maximum zoom in).
 pub const MIN_VISIBLE_BARS: f64 = 5.0;
 
+/// Minimum CSS pixels per bar in footprint mode (prevents zooming out too far).
+pub const MIN_FOOTPRINT_BAR_CSS: f64 = 30.0;
+
 /// Default maximum price value when no data is loaded.
 pub const DEFAULT_PRICE_MAX: f64 = 100.0;
 
