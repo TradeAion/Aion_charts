@@ -354,7 +354,6 @@ pub fn generate_footprint_geometry(
             }
 
             let cell_y = y_top;
-            let (cell_frame_y, cell_frame_h) = compact_cell_visual_rect(cell_y, cell_h);
 
             // Check if this level contains the POC price (works across aggregation)
             let is_poc = poc
@@ -376,7 +375,7 @@ pub fn generate_footprint_geometry(
             // Top border
             overlay_rects.push(ColoredRect {
                 x: bar_left as f32,
-                y: cell_frame_y as f32,
+                y: cell_y as f32,
                 w: bar_width as f32,
                 h: 1.0,
                 r: dr,
@@ -387,9 +386,9 @@ pub fn generate_footprint_geometry(
             // Left border
             overlay_rects.push(ColoredRect {
                 x: bar_left as f32,
-                y: cell_frame_y as f32,
+                y: cell_y as f32,
                 w: 1.0,
-                h: cell_frame_h as f32,
+                h: cell_h as f32,
                 r: dr,
                 g: dg,
                 b: db,
@@ -398,9 +397,9 @@ pub fn generate_footprint_geometry(
             // Right border
             overlay_rects.push(ColoredRect {
                 x: (bar_left + bar_width - 1.0).max(bar_left) as f32,
-                y: cell_frame_y as f32,
+                y: cell_y as f32,
                 w: 1.0,
-                h: cell_frame_h as f32,
+                h: cell_h as f32,
                 r: dr,
                 g: dg,
                 b: db,
@@ -410,7 +409,7 @@ pub fn generate_footprint_geometry(
             if level_idx == 0 {
                 overlay_rects.push(ColoredRect {
                     x: bar_left as f32,
-                    y: (cell_frame_y + cell_frame_h - 1.0).max(cell_frame_y) as f32,
+                    y: (cell_y + cell_h - 1.0).max(cell_y) as f32,
                     w: bar_width as f32,
                     h: 1.0,
                     r: dr,
@@ -429,9 +428,9 @@ pub fn generate_footprint_geometry(
                         fp_opts,
                         level,
                         bar_left,
-                        cell_frame_y,
+                        cell_y,
                         bar_width,
-                        cell_frame_h,
+                        cell_h,
                         max_side_vol,
                         font_size,
                         imbalance,
@@ -444,9 +443,9 @@ pub fn generate_footprint_geometry(
                         fp_opts,
                         level,
                         bar_left,
-                        cell_frame_y,
+                        cell_y,
                         bar_width,
-                        cell_frame_h,
+                        cell_h,
                         max_delta_abs,
                         font_size,
                     );
@@ -458,9 +457,9 @@ pub fn generate_footprint_geometry(
                         fp_opts,
                         level,
                         bar_left,
-                        cell_frame_y,
+                        cell_y,
                         bar_width,
-                        cell_frame_h,
+                        cell_h,
                         max_total_vol,
                         font_size,
                     );
@@ -471,9 +470,9 @@ pub fn generate_footprint_geometry(
                         fp_opts,
                         level,
                         bar_left,
-                        cell_frame_y,
+                        cell_y,
                         bar_width,
-                        cell_frame_h,
+                        cell_h,
                         max_delta_abs,
                     );
                 }
@@ -483,9 +482,9 @@ pub fn generate_footprint_geometry(
                         fp_opts,
                         level,
                         bar_left,
-                        cell_frame_y,
+                        cell_y,
                         bar_width,
-                        cell_frame_h,
+                        cell_h,
                         max_total_vol,
                     );
                 }
@@ -498,9 +497,9 @@ pub fn generate_footprint_geometry(
                 // Left POC marker
                 overlay_rects.push(ColoredRect {
                     x: bar_left as f32,
-                    y: cell_frame_y as f32,
+                    y: cell_y as f32,
                     w: poc_w as f32,
-                    h: cell_frame_h as f32,
+                    h: cell_h as f32,
                     r: pr,
                     g: pg,
                     b: pb,
@@ -509,9 +508,9 @@ pub fn generate_footprint_geometry(
                 // Right POC marker
                 overlay_rects.push(ColoredRect {
                     x: (bar_left + bar_width - poc_w) as f32,
-                    y: cell_frame_y as f32,
+                    y: cell_y as f32,
                     w: poc_w as f32,
-                    h: cell_frame_h as f32,
+                    h: cell_h as f32,
                     r: pr,
                     g: pg,
                     b: pb,
@@ -524,7 +523,7 @@ pub fn generate_footprint_geometry(
                 let (ur, ug, ub, ua) = color4(&fp_opts.unfinished_auction_color);
                 overlay_rects.push(ColoredRect {
                     x: bar_left as f32,
-                    y: (cell_frame_y + cell_frame_h - 2.0).max(cell_frame_y) as f32,
+                    y: (cell_y + cell_h - 2.0).max(cell_y) as f32,
                     w: bar_width as f32,
                     h: 2.0,
                     r: ur,
@@ -537,7 +536,7 @@ pub fn generate_footprint_geometry(
                 let (ur, ug, ub, ua) = color4(&fp_opts.unfinished_auction_color);
                 overlay_rects.push(ColoredRect {
                     x: bar_left as f32,
-                    y: cell_frame_y as f32,
+                    y: cell_y as f32,
                     w: bar_width as f32,
                     h: 2.0,
                     r: ur,
@@ -1208,25 +1207,6 @@ fn push_horizontal_gradient_rects(
     });
 }
 
-fn compact_cell_visual_rect(cell_y: f64, cell_h: f64) -> (f64, f64) {
-    if cell_h <= 6.0 {
-        return (cell_y, cell_h.max(1.0));
-    }
-
-    let compact_ratio = if cell_h >= 36.0 {
-        0.60
-    } else if cell_h >= 24.0 {
-        0.66
-    } else if cell_h >= 14.0 {
-        0.74
-    } else {
-        0.84
-    };
-    let visual_h = (cell_h * compact_ratio).round().clamp(1.0, cell_h);
-    let inset = ((cell_h - visual_h) * 0.5).floor();
-    (cell_y + inset, visual_h)
-}
-
 /// Format volume for display (compact notation).
 fn format_volume(vol: f32) -> String {
     if vol >= 1_000_000.0 {
@@ -1518,47 +1498,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn zoomed_in_rows_are_visually_compacted_inside_tick_band() {
-        let bars = sample_bars();
-        let mut fp_data = FootprintData::new();
-        fp_data.set_bar(
-            0,
-            FootprintBar {
-                levels: vec![FootprintLevel {
-                    price: 100.0,
-                    bid_volume: 21.0,
-                    ask_volume: 34.0,
-                }],
-            },
-        );
-        let viewport = sample_viewport();
-        let style = ChartStyle::default();
-        let mut opts = FootprintOptions::default();
-        opts.show_poc = false;
-        opts.show_delta_bar = false;
-        opts.show_unfinished_auction = false;
-        opts.show_volume_text = false;
-
-        let geom = generate_footprint_geometry(
-            &bars, &viewport, &style, &fp_data, &opts, 400.0, 300.0, 1.0, 1.0,
-        );
-
-        let ladder = geom
-            .base_rects
-            .iter()
-            .max_by(|a, b| a.w.partial_cmp(&b.w).unwrap_or(std::cmp::Ordering::Equal))
-            .expect("ladder background should exist");
-        let left_border = geom
-            .overlay_rects
-            .iter()
-            .find(|rect| (rect.x - ladder.x).abs() < 0.1 && rect.w <= 1.0 && rect.h > 1.0)
-            .expect("left border should exist");
-
-        let raw_cell_h = 100.0_f64;
-        assert!(
-            (left_border.h as f64) < raw_cell_h * 0.85,
-            "zoomed-in rows should be visually compacted instead of filling the full tick band"
-        );
-    }
 }
