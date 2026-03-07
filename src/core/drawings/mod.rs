@@ -499,6 +499,15 @@ impl DrawingManager {
                     Vec::new()
                 };
 
+                let label_align = if drawing.tool() == DrawingTool::Fibonacci {
+                    drawing
+                        .as_any()
+                        .downcast_ref::<fibonacci::FibonacciDrawing>()
+                        .map(|fib| fib.label_align().as_key().to_string())
+                } else {
+                    None
+                };
+
                 SerializedDrawing {
                     id: drawing.id(),
                     tool: drawing_tool_to_key(drawing.tool()).to_string(),
@@ -509,6 +518,7 @@ impl DrawingManager {
                         .map(SerializedAnchorPoint::from)
                         .collect(),
                     points,
+                    label_align,
                 }
             })
             .collect();
@@ -711,6 +721,20 @@ impl DrawingManager {
                 .ok_or_else(|| "Brush type mismatch during restore".to_string())?;
             let points = item.points.into_iter().map(Into::into).collect();
             brush.set_points(points);
+        }
+
+        if tool == DrawingTool::Fibonacci {
+            if let Some(ref key) = item.label_align {
+                if let Some(align) =
+                    crate::core::renderer::draw_list::TextAlign::from_key(key)
+                {
+                    let fib = drawing
+                        .as_any_mut()
+                        .downcast_mut::<fibonacci::FibonacciDrawing>()
+                        .ok_or_else(|| "Fibonacci type mismatch during restore".to_string())?;
+                    fib.set_label_align(align);
+                }
+            }
         }
 
         if item.id > 0 {

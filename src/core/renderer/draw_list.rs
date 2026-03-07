@@ -112,6 +112,25 @@ impl TextAlign {
             Self::Right => "right",
         }
     }
+
+    /// Serialize to a short key string for persistence.
+    pub fn as_key(&self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Center => "center",
+            Self::Right => "right",
+        }
+    }
+
+    /// Deserialize from a key string. Returns `None` for unrecognised values.
+    pub fn from_key(s: &str) -> Option<Self> {
+        match s {
+            "left" => Some(Self::Left),
+            "center" => Some(Self::Center),
+            "right" => Some(Self::Right),
+            _ => None,
+        }
+    }
 }
 
 /// Text element in physical pixel coordinates (for future overlay on main canvas).

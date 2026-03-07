@@ -231,7 +231,7 @@ impl Canvas2DRenderer {
             );
             self.ctx.set_font(&font);
             self.ctx.set_fill_style_str(&rgba(&[t.r, t.g, t.b, t.a]));
-            self.ctx.set_text_align("center");
+            self.ctx.set_text_align(t.align.as_canvas_str());
             self.ctx.set_text_baseline("middle");
             let _ = self.ctx.fill_text(&t.text, t.x as f64, t.y as f64);
         }

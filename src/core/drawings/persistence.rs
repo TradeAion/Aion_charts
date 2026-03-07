@@ -27,6 +27,9 @@ pub struct SerializedDrawing {
     /// Brush intermediate points (excluding first/last anchors).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub points: Vec<SerializedDrawingPoint>,
+    /// Fibonacci label alignment ("left", "center", "right"). Omitted for other tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_align: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

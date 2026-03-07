@@ -1131,7 +1131,7 @@ impl SubPane {
             );
             ctx.set_font(&font);
             ctx.set_fill_style_str(&rgba(&[t.r, t.g, t.b, t.a]));
-            ctx.set_text_align("center");
+            ctx.set_text_align(t.align.as_canvas_str());
             ctx.set_text_baseline("middle");
             let _ = ctx.fill_text(&t.text, t.x as f64, t.y as f64);
         }

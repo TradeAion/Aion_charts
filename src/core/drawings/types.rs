@@ -241,7 +241,7 @@ impl DrawingStyle {
         Self {
             color: theme.drawing_defaults.fibonacci_color,
             line_width: 1.0,
-            fill_color: Some(theme.drawing_defaults.fibonacci_fill),
+            fill_color: None,
             dash: None,
             font_size: theme.drawing_defaults.fibonacci_font_size,
         }
