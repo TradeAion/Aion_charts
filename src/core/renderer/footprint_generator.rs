@@ -125,7 +125,36 @@ pub fn generate_footprint_geometry(
         let bar_left = ladder_left;
         let bar_width = (slot_width - candle_w - gap_w).max(1.0);
 
+        // ── Compute tick size BEFORE candle rendering so the body can snap ──
+        let base_tick = if fp_opts.tick_size > 0.0 {
+            fp_opts.tick_size
+        } else {
+            auto_tick_size(fp_bar)
+        };
+
+        // ── Dynamic aggregation ──
+        let natural_cell_h = {
+            let y0 = price_to_y(fp_bar.levels[0].price as f64, viewport, candle_h);
+            let y1 = price_to_y(
+                fp_bar.levels[0].price as f64 + base_tick as f64,
+                viewport,
+                candle_h,
+            );
+            (y0 - y1).abs()
+        };
+        let agg_factor = if min_cell_px > 0.0 && natural_cell_h > 0.0 && natural_cell_h < min_cell_px
+        {
+            ((min_cell_px / natural_cell_h).ceil() as usize).max(1)
+        } else {
+            1
+        };
+        let effective_tick = base_tick * agg_factor as f32;
+
         // ── Render candlestick on the left side ──
+        // Snap the candle body to the tick grid so it aligns perfectly with
+        // the ladder cells.  The body edges land on the same pixel rows as
+        // the cell boundaries, preventing any visual gap between candle and
+        // ladder.
         {
             let bull = bar.close >= bar.open;
             let (cr, cg, cb, ca) = if bull {
@@ -140,9 +169,17 @@ pub fn generate_footprint_geometry(
             };
 
             let candle_center = slot_left + candle_w * 0.5;
-            let body_top = price_to_y(bar.open.max(bar.close) as f64, viewport, candle_h).round();
-            let body_bottom =
-                price_to_y(bar.open.min(bar.close) as f64, viewport, candle_h).round();
+
+            // Snap open/close to tick grid boundaries so the candle body
+            // aligns exactly with the ladder cell edges.
+            let et = effective_tick as f64;
+            let body_high_price = bar.open.max(bar.close) as f64;
+            let body_low_price = bar.open.min(bar.close) as f64;
+            let snapped_high = (body_high_price / et).ceil() * et;
+            let snapped_low = (body_low_price / et).floor() * et;
+
+            let body_top = price_to_y(snapped_high, viewport, candle_h).round();
+            let body_bottom = price_to_y(snapped_low, viewport, candle_h).round();
             let high_y = price_to_y(bar.high as f64, viewport, candle_h).round();
             let low_y = price_to_y(bar.low as f64, viewport, candle_h).round();
 
@@ -192,34 +229,7 @@ pub fn generate_footprint_geometry(
             });
         }
 
-        // ── Compute price-level geometry ──
-        let base_tick = if fp_opts.tick_size > 0.0 {
-            fp_opts.tick_size
-        } else {
-            auto_tick_size(fp_bar)
-        };
-
-        // ── Dynamic aggregation ──
-        // Compute the natural pixel height of one tick row.  If it falls
-        // below min_cell_height, aggregate N adjacent rows so the combined
-        // row meets the threshold.  This lets the Y-axis squeeze freely
-        // while keeping cells readable.
-        let natural_cell_h = {
-            let y0 = price_to_y(fp_bar.levels[0].price as f64, viewport, candle_h);
-            let y1 = price_to_y(
-                fp_bar.levels[0].price as f64 + base_tick as f64,
-                viewport,
-                candle_h,
-            );
-            (y0 - y1).abs()
-        };
-        let agg_factor = if min_cell_px > 0.0 && natural_cell_h > 0.0 && natural_cell_h < min_cell_px
-        {
-            ((min_cell_px / natural_cell_h).ceil() as usize).max(1)
-        } else {
-            1
-        };
-        let effective_tick = base_tick * agg_factor as f32;
+        // ── Aggregate levels using the already-computed factor ──
         let levels = fp_bar.aggregate_levels(agg_factor);
 
         // Precompute analytics (on original bar for correctness)

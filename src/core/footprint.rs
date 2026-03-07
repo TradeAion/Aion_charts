@@ -596,7 +596,7 @@ pub struct FootprintOptions {
     pub cum_delta_negative_color: [f32; 4],
 
     // ── Layout ──
-    /// Minimum cell height in CSS pixels (default 14).
+    /// Minimum cell height in CSS pixels (default 2).
     pub min_cell_height: f32,
     /// Cell padding in CSS pixels.
     pub cell_padding: f32,
@@ -676,7 +676,7 @@ impl Default for FootprintOptions {
             cum_delta_negative_color: [ch(0xFB), ch(0x37), ch(0x48), 0.7],
 
             // Layout
-            min_cell_height: 6.0,
+            min_cell_height: 2.0,
             cell_padding: 1.0,
             font_size: 10.0,
             show_volume_text: true,

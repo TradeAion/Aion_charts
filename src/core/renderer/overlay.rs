@@ -20,7 +20,7 @@ use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
 use crate::core::renderer::traits::{ChartStyle, CrosshairState};
 use crate::core::renderer::series::CandleSizing;
-use crate::core::renderer::transforms::bar_to_x;
+use crate::core::renderer::transforms::{bar_to_x, price_to_y};
 use crate::core::renderer::value_projection::{
     main_series_last_price_and_color, price_to_pane_y_phys, timestamp_to_bar_index_in_bars,
 };
@@ -462,7 +462,15 @@ impl OverlayRenderer {
                 } else {
                     slot_center
                 };
-                let y_phys = price_to_pane_y_phys(last_price, viewport, pane_ph);
+                // Footprint renders against the full pane height (no volume
+                // sub-pane), so project against pane_ph directly instead of
+                // candle_area_height which would shrink the range by
+                // volume_height_ratio and make the line float away.
+                let y_phys = if main_chart_type == MainChartType::Footprint {
+                    price_to_y(last_price, viewport, pane_ph)
+                } else {
+                    price_to_pane_y_phys(last_price, viewport, pane_ph)
+                };
                 // Clip to full pane height (LWC: y < 0 || y > bitmapSize.height)
                 if x_anchor >= 0.0 && x_anchor < pane_pw && y_phys >= 0.0 && y_phys <= pane_ph {
                     let y = y_phys.round() + correction;
@@ -572,7 +580,13 @@ impl OverlayRenderer {
                 None => return,
             };
 
-        let y_phys = price_to_pane_y_phys(last_price, viewport, pane_ph);
+        // Footprint uses full pane height (no volume sub-pane), so project
+        // against pane_ph directly to stay aligned with the candle/ladder.
+        let y_phys = if main_chart_type == MainChartType::Footprint {
+            price_to_y(last_price, viewport, pane_ph)
+        } else {
+            price_to_pane_y_phys(last_price, viewport, pane_ph)
+        };
         // Clip: if Y is outside pane bounds, skip.
         if y_phys < 0.0 || y_phys > pane_ph {
             return;
