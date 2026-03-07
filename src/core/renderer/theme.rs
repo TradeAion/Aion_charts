@@ -50,17 +50,17 @@ pub const fn ch(v: u8) -> f32 {
 
 /// Main chart & axis background.
 pub const BG: [f32; 4] = [ch(0x17), ch(0x17), ch(0x17), 1.0];
-/// Bullish candle body (#3559E9).
+/// Bullish candle body (#5b9cf6).
 pub const BULLISH: [f32; 4] = [ch(0x35), ch(0x59), ch(0xE9), 1.0];
-/// Bearish candle body (#FB3748).
+/// Bearish candle body (#f7525f).
 pub const BEARISH: [f32; 4] = [ch(0xFB), ch(0x37), ch(0x48), 1.0];
 /// Bullish volume (same hue, lower alpha).
 pub const BULLISH_VOLUME: [f32; 4] = [ch(0x35), ch(0x59), ch(0xE9), 0.35];
 /// Bearish volume.
 pub const BEARISH_VOLUME: [f32; 4] = [ch(0xFB), ch(0x37), ch(0x48), 0.35];
-/// Bullish wick (#3559E9).
+/// Bullish wick (#5b9cf6).
 pub const WICK_BULLISH: [f32; 4] = [ch(0x35), ch(0x59), ch(0xE9), 1.0];
-/// Bearish wick (#FB3748).
+/// Bearish wick (#f7525f).
 pub const WICK_BEARISH: [f32; 4] = [ch(0xFB), ch(0x37), ch(0x48), 1.0];
 /// Bullish candle border (#2547D0).
 pub const BORDER_BULLISH: [f32; 4] = [ch(0x25), ch(0x47), ch(0xD0), 1.0];
