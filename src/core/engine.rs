@@ -892,16 +892,8 @@ impl ChartEngine {
         if self.main_chart_type != MainChartType::Footprint {
             return;
         }
-        let min_cell_css = self.main_chart_options.footprint.min_cell_height as f64;
-        if !min_cell_css.is_finite() || min_cell_css <= 0.0 {
-            return;
-        }
         let pane_h = self.viewport.height as f64;
         if pane_h <= 1.0 {
-            return;
-        }
-        let min_cell_px = min_cell_css * self.v_pixel_ratio.max(1.0);
-        if !min_cell_px.is_finite() || min_cell_px <= 0.0 {
             return;
         }
         let tick_size = match self.representative_visible_footprint_tick_size() {
@@ -929,12 +921,19 @@ impl ChartEngine {
             return;
         }
 
-        let max_range_for_min_cell = tick_internal * pane_h / min_cell_px;
-        if !max_range_for_min_cell.is_finite() || max_range_for_min_cell <= 0.0 {
+        // With dynamic aggregation the renderer will merge N adjacent price
+        // levels to keep cells readable.  We only hard-clamp when even extreme
+        // aggregation (MAX_AGG_FACTOR ticks merged) would produce sub-pixel
+        // cells — at that point the footprint is truly unusable.
+        const MAX_AGG_FACTOR: f64 = 50.0;
+        let hard_min_cell_px = 2.0 * self.v_pixel_ratio.max(1.0);
+        let max_range_for_hard_clamp =
+            tick_internal * MAX_AGG_FACTOR * pane_h / hard_min_cell_px;
+        if !max_range_for_hard_clamp.is_finite() || max_range_for_hard_clamp <= 0.0 {
             return;
         }
         let min_safe_range = self.footprint_required_range_with_margins().unwrap_or(0.0);
-        let target_range = max_range_for_min_cell.max(min_safe_range);
+        let target_range = max_range_for_hard_clamp.max(min_safe_range);
         if current_range > target_range {
             let half = target_range * 0.5;
             self.viewport.price_min = mid_internal - half;
@@ -1255,11 +1254,17 @@ mod tests {
 
         engine.set_data_with_footprint(bars, fp).unwrap();
 
+        // With dynamic aggregation the hard clamp now allows up to
+        // MAX_AGG_FACTOR (50) ticks merged, only clamping when even that
+        // would produce sub-pixel cells (2px hard min).  Verify the range
+        // stays within that outer bound.
         let range = engine.viewport.price_max - engine.viewport.price_min;
-        let max_allowed_range = 0.25 * (engine.viewport.height as f64) / 20.0;
+        let max_agg_factor = 50.0;
+        let hard_min_cell_px = 2.0; // matches engine constant
+        let max_allowed_range = 0.25 * max_agg_factor * (engine.viewport.height as f64) / hard_min_cell_px;
         assert!(
             range <= max_allowed_range + 1e-6,
-            "range {range} should be <= {max_allowed_range} to respect min cell height"
+            "range {range} should be <= {max_allowed_range} (hard outer bound with aggregation)"
         );
     }
 

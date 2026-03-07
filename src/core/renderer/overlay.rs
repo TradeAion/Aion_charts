@@ -19,6 +19,7 @@ use crate::core::renderer::line_generator;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
 use crate::core::renderer::traits::{ChartStyle, CrosshairState};
+use crate::core::renderer::series::CandleSizing;
 use crate::core::renderer::transforms::bar_to_x;
 use crate::core::renderer::value_projection::{
     main_series_last_price_and_color, price_to_pane_y_phys, timestamp_to_bar_index_in_bars,
@@ -439,13 +440,28 @@ impl OverlayRenderer {
         // LWC clips against pane bounds, not candle area — the line stays
         // visible as long as it's within the pane, even if the price scale
         // has scrolled the last value near or into the volume region.
-        // Skip the horizontal line in Footprint mode — the dense price-level
-        // ladder makes it visually noisy.  Labels on the price axis still render.
-        if bars.len() > 0 && main_chart_type != MainChartType::Footprint {
+        // Draw the last-price horizontal line for all chart types including
+        // Footprint.  With the candle overlay on the footprint ladder the line
+        // anchors to the close of the last bar, matching professional platforms.
+        // In Footprint mode the candle sits on the left side of the bar slot,
+        // so the line starts from the candle center (not the slot center).
+        if bars.len() > 0 {
             if let Some((last_price, color)) =
                 main_series_last_price_and_color(bars, main_chart_type, style)
             {
-                let x_anchor = bar_to_x((bars.len() - 1) as f64 + 0.5, viewport, pane_pw);
+                let slot_center = bar_to_x((bars.len() - 1) as f64 + 0.5, viewport, pane_pw);
+                let x_anchor = if main_chart_type == MainChartType::Footprint {
+                    // Mirror the layout in footprint_generator: candle = 15% of slot on left
+                    let sizing = CandleSizing::compute_from_pane(
+                        pane_pw, viewport, dpr, dpr,
+                    );
+                    let half_bar = (sizing.bar_width * 0.5).floor();
+                    let slot_left = (slot_center - half_bar).round();
+                    let candle_w = (sizing.bar_width * 0.15).round().max(3.0);
+                    slot_left + candle_w * 0.5
+                } else {
+                    slot_center
+                };
                 let y_phys = price_to_pane_y_phys(last_price, viewport, pane_ph);
                 // Clip to full pane height (LWC: y < 0 || y > bitmapSize.height)
                 if x_anchor >= 0.0 && x_anchor < pane_pw && y_phys >= 0.0 && y_phys <= pane_ph {

@@ -415,6 +415,33 @@ impl FootprintBar {
             .map(|l| l.bid_volume.max(l.ask_volume))
             .fold(0.0f32, f32::max)
     }
+
+    /// Merge every `factor` adjacent levels into one, summing volumes.
+    ///
+    /// The resulting levels use the lowest price in each group as the level
+    /// price and have an effective tick size of `original_tick * factor`.
+    /// This is the core of dynamic aggregation: when the Y-axis is squeezed
+    /// so individual tick-rows become too small, the caller passes a factor >1
+    /// to combine rows into readable cells.
+    ///
+    /// `factor == 1` returns a clone of the original levels unchanged.
+    pub fn aggregate_levels(&self, factor: usize) -> Vec<FootprintLevel> {
+        if factor <= 1 || self.levels.is_empty() {
+            return self.levels.clone();
+        }
+        let mut out = Vec::with_capacity(self.levels.len() / factor + 1);
+        for chunk in self.levels.chunks(factor) {
+            let price = chunk[0].price; // lowest price in group (levels sorted asc)
+            let bid: f32 = chunk.iter().map(|l| l.bid_volume).sum();
+            let ask: f32 = chunk.iter().map(|l| l.ask_volume).sum();
+            out.push(FootprintLevel {
+                price,
+                bid_volume: bid,
+                ask_volume: ask,
+            });
+        }
+        out
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -649,8 +676,8 @@ impl Default for FootprintOptions {
             cum_delta_negative_color: [ch(0xFB), ch(0x37), ch(0x48), 0.7],
 
             // Layout
-            min_cell_height: 14.0,
-            cell_padding: 2.0,
+            min_cell_height: 6.0,
+            cell_padding: 1.0,
             font_size: 10.0,
             show_volume_text: true,
             show_cumulative_delta: false,
@@ -889,5 +916,50 @@ mod tests {
             let parsed = FootprintDisplayMode::from_str(s);
             assert_eq!(*mode, parsed);
         }
+    }
+
+    #[test]
+    fn test_aggregate_levels_factor_1_returns_clone() {
+        let bar = sample_bar();
+        let agg = bar.aggregate_levels(1);
+        assert_eq!(agg.len(), bar.levels.len());
+        for (a, b) in agg.iter().zip(bar.levels.iter()) {
+            assert_eq!(a.price, b.price);
+            assert_eq!(a.bid_volume, b.bid_volume);
+            assert_eq!(a.ask_volume, b.ask_volume);
+        }
+    }
+
+    #[test]
+    fn test_aggregate_levels_factor_2() {
+        let bar = sample_bar(); // 5 levels
+        let agg = bar.aggregate_levels(2);
+        // 5 levels / 2 = 2 full chunks + 1 remainder = 3 aggregated levels
+        assert_eq!(agg.len(), 3);
+        // First chunk: levels 0+1
+        assert_eq!(agg[0].price, 100.0); // lowest price in chunk
+        assert_eq!(agg[0].bid_volume, 500.0 + 200.0);
+        assert_eq!(agg[0].ask_volume, 100.0 + 800.0);
+        // Second chunk: levels 2+3
+        assert_eq!(agg[1].price, 101.0);
+        assert_eq!(agg[1].bid_volume, 300.0 + 100.0);
+        assert_eq!(agg[1].ask_volume, 300.0 + 600.0);
+        // Third chunk: level 4 (remainder)
+        assert_eq!(agg[2].price, 102.0);
+        assert_eq!(agg[2].bid_volume, 50.0);
+        assert_eq!(agg[2].ask_volume, 400.0);
+    }
+
+    #[test]
+    fn test_aggregate_levels_factor_larger_than_levels() {
+        let bar = sample_bar(); // 5 levels
+        let agg = bar.aggregate_levels(10);
+        // All levels merge into one
+        assert_eq!(agg.len(), 1);
+        assert_eq!(agg[0].price, 100.0);
+        let total_bid: f32 = bar.levels.iter().map(|l| l.bid_volume).sum();
+        let total_ask: f32 = bar.levels.iter().map(|l| l.ask_volume).sum();
+        assert_eq!(agg[0].bid_volume, total_bid);
+        assert_eq!(agg[0].ask_volume, total_ask);
     }
 }

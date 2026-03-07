@@ -88,6 +88,7 @@ pub fn generate_footprint_geometry(
     let mut texts = Vec::with_capacity(visible_bars * 10);
 
     let font_size = fp_opts.font_size * v_ratio as f32;
+    let min_cell_px = fp_opts.min_cell_height as f64 * v_ratio;
 
     for i in start..end {
         let bar = bars.get_unchecked(i);
@@ -108,20 +109,120 @@ pub fn generate_footprint_geometry(
         }
 
         // ── Compute bar geometry ──
+        // Layout: [candle | gap | ladder]
+        // The candle occupies the left portion, the ladder the right.
         let center_x = bar_to_x(i as f64 + 0.5, viewport, pane_w);
         let half_bar = (sizing.bar_width * 0.5).floor();
-        let bar_left = (center_x - half_bar).round();
-        let bar_width = sizing.bar_width;
+        let slot_left = (center_x - half_bar).round();
+        let slot_width = sizing.bar_width;
+
+        // Candle takes ~15% of slot, gap ~2%, ladder gets the rest
+        let candle_frac = 0.15_f64;
+        let gap_frac = 0.02_f64;
+        let candle_w = (slot_width * candle_frac).round().max(3.0);
+        let gap_w = (slot_width * gap_frac).round().max(1.0);
+        let ladder_left = slot_left + candle_w + gap_w;
+        let bar_left = ladder_left;
+        let bar_width = (slot_width - candle_w - gap_w).max(1.0);
+
+        // ── Render candlestick on the left side ──
+        {
+            let bull = bar.close >= bar.open;
+            let (cr, cg, cb, ca) = if bull {
+                color4(&style.bullish_color)
+            } else {
+                color4(&style.bearish_color)
+            };
+            let (wr, wg, wb, wa) = if bull {
+                color4(&style.wick_bullish_color)
+            } else {
+                color4(&style.wick_bearish_color)
+            };
+
+            let candle_center = slot_left + candle_w * 0.5;
+            let body_top = price_to_y(bar.open.max(bar.close) as f64, viewport, candle_h).round();
+            let body_bottom =
+                price_to_y(bar.open.min(bar.close) as f64, viewport, candle_h).round();
+            let high_y = price_to_y(bar.high as f64, viewport, candle_h).round();
+            let low_y = price_to_y(bar.low as f64, viewport, candle_h).round();
+
+            // Wick (1px wide, centered in candle area)
+            let wick_w = 1.0_f64.max(sizing.wick_width.min(candle_w * 0.4));
+            let wick_x = (candle_center - wick_w * 0.5).round();
+
+            // Upper wick
+            if body_top > high_y {
+                rects.push(ColoredRect {
+                    x: wick_x as f32,
+                    y: high_y as f32,
+                    w: wick_w as f32,
+                    h: (body_top - high_y) as f32,
+                    r: wr,
+                    g: wg,
+                    b: wb,
+                    a: wa,
+                });
+            }
+            // Lower wick
+            if low_y > body_bottom {
+                rects.push(ColoredRect {
+                    x: wick_x as f32,
+                    y: (body_bottom + 1.0) as f32,
+                    w: wick_w as f32,
+                    h: (low_y - body_bottom) as f32,
+                    r: wr,
+                    g: wg,
+                    b: wb,
+                    a: wa,
+                });
+            }
+
+            // Body
+            let body_w = candle_w.max(1.0);
+            let body_h = (body_bottom - body_top + 1.0).max(1.0);
+            rects.push(ColoredRect {
+                x: slot_left as f32,
+                y: body_top as f32,
+                w: body_w as f32,
+                h: body_h as f32,
+                r: cr,
+                g: cg,
+                b: cb,
+                a: ca,
+            });
+        }
 
         // ── Compute price-level geometry ──
-        let tick_size = if fp_opts.tick_size > 0.0 {
+        let base_tick = if fp_opts.tick_size > 0.0 {
             fp_opts.tick_size
         } else {
-            // Auto-detect tick size from levels
             auto_tick_size(fp_bar)
         };
 
-        // Precompute analytics
+        // ── Dynamic aggregation ──
+        // Compute the natural pixel height of one tick row.  If it falls
+        // below min_cell_height, aggregate N adjacent rows so the combined
+        // row meets the threshold.  This lets the Y-axis squeeze freely
+        // while keeping cells readable.
+        let natural_cell_h = {
+            let y0 = price_to_y(fp_bar.levels[0].price as f64, viewport, candle_h);
+            let y1 = price_to_y(
+                fp_bar.levels[0].price as f64 + base_tick as f64,
+                viewport,
+                candle_h,
+            );
+            (y0 - y1).abs()
+        };
+        let agg_factor = if min_cell_px > 0.0 && natural_cell_h > 0.0 && natural_cell_h < min_cell_px
+        {
+            ((min_cell_px / natural_cell_h).ceil() as usize).max(1)
+        } else {
+            1
+        };
+        let effective_tick = base_tick * agg_factor as f32;
+        let levels = fp_bar.aggregate_levels(agg_factor);
+
+        // Precompute analytics (on original bar for correctness)
         let poc = fp_bar.poc();
         let _value_area = if fp_opts.show_value_area {
             fp_bar.value_area(fp_opts.value_area_pct)
@@ -138,17 +239,31 @@ pub fn generate_footprint_geometry(
         } else {
             (false, false)
         };
-        let max_side_vol = fp_bar.max_side_volume().max(1.0);
-        let max_total_vol = fp_bar.max_level_volume().max(1.0);
-        let max_delta_abs = fp_bar.max_level_delta_abs().max(1.0);
+
+        // Max volumes are recomputed from aggregated levels so color
+        // intensity scales correctly at the merged granularity.
+        let max_side_vol = levels
+            .iter()
+            .map(|l| l.bid_volume.max(l.ask_volume))
+            .fold(0.0f32, f32::max)
+            .max(1.0);
+        let max_total_vol = levels
+            .iter()
+            .map(|l| l.bid_volume + l.ask_volume)
+            .fold(0.0f32, f32::max)
+            .max(1.0);
+        let max_delta_abs = levels
+            .iter()
+            .map(|l| (l.ask_volume - l.bid_volume).abs())
+            .fold(0.0f32, f32::max)
+            .max(1.0);
 
         // ── Single background rect for the entire ladder ──
-        // Spans from the highest price level top to the lowest price level bottom.
         {
-            let first_level = &fp_bar.levels[0];
-            let last_level = &fp_bar.levels[fp_bar.levels.len() - 1];
+            let first_level = &levels[0];
+            let last_level = &levels[levels.len() - 1];
             let ladder_top = price_to_y(
-                last_level.price as f64 + tick_size as f64,
+                last_level.price as f64 + effective_tick as f64,
                 viewport,
                 candle_h,
             )
@@ -169,9 +284,9 @@ pub fn generate_footprint_geometry(
             });
         }
 
-        // ── Render each price level ──
-        for (level_idx, level) in fp_bar.levels.iter().enumerate() {
-            let price_top = level.price as f64 + tick_size as f64;
+        // ── Render each (possibly aggregated) price level ──
+        for (level_idx, level) in levels.iter().enumerate() {
+            let price_top = level.price as f64 + effective_tick as f64;
             let price_bottom = level.price as f64;
 
             let y_top = price_to_y(price_top, viewport, candle_h).round();
@@ -185,8 +300,13 @@ pub fn generate_footprint_geometry(
 
             let cell_y = y_top;
 
-            // Check if this level is the POC
-            let is_poc = poc.map(|(idx, _)| idx == level_idx).unwrap_or(false);
+            // Check if this level contains the POC price (works across aggregation)
+            let is_poc = poc
+                .map(|(_, poc_lvl)| {
+                    let poc_p = poc_lvl.price;
+                    poc_p >= level.price && (poc_p as f64) < price_top
+                })
+                .unwrap_or(false);
 
             // Check for imbalances (used by BidAsk cell renderer for color)
             let imbalance = if fp_opts.show_imbalances {
@@ -334,7 +454,7 @@ pub fn generate_footprint_geometry(
                     a: ua,
                 });
             }
-            if unfinished_high && level_idx == fp_bar.levels.len() - 1 {
+            if unfinished_high && level_idx == levels.len() - 1 {
                 let (ur, ug, ub, ua) = color4(&fp_opts.unfinished_auction_color);
                 rects.push(ColoredRect {
                     x: bar_left as f32,
