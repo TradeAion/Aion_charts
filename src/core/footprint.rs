@@ -549,20 +549,21 @@ impl FootprintPalette {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum FootprintGradientStyle {
     /// Subtle production-safe glow and opacity ramp.
-    #[default]
     SoftGlow,
     /// Stronger emphasis with brighter highlights.
     StrongGlow,
     /// Flat fills with no extra glow emphasis.
+    #[default]
     NoGlow,
 }
 
 impl FootprintGradientStyle {
     pub fn from_str(s: &str) -> Self {
         match s.trim().to_ascii_lowercase().as_str() {
+            "soft_glow" | "soft-glow" | "softglow" => Self::SoftGlow,
             "strong_glow" | "strong-glow" | "strongglow" => Self::StrongGlow,
             "no_glow" | "no-glow" | "noglow" | "none" | "flat" => Self::NoGlow,
-            _ => Self::SoftGlow,
+            _ => Self::NoGlow,
         }
     }
 
@@ -793,7 +794,7 @@ impl Default for FootprintOptions {
         let mut opts = Self {
             display_mode: FootprintDisplayMode::BidAsk,
             palette: FootprintPalette::BlueRed,
-            gradient_style: FootprintGradientStyle::SoftGlow,
+            gradient_style: FootprintGradientStyle::NoGlow,
             tick_size: 0.0, // auto
 
             // Imbalance settings
@@ -1095,13 +1096,18 @@ mod tests {
             let parsed = FootprintGradientStyle::from_str(style.as_str());
             assert_eq!(*style, parsed);
         }
+        assert_eq!(FootprintGradientStyle::default(), FootprintGradientStyle::NoGlow);
+        assert_eq!(
+            FootprintGradientStyle::from_str("unknown"),
+            FootprintGradientStyle::NoGlow
+        );
     }
 
     #[test]
     fn default_palette_is_blue_red_without_extra_green_or_orange_states() {
         let opts = FootprintOptions::default();
         assert_eq!(opts.palette, FootprintPalette::BlueRed);
-        assert_eq!(opts.gradient_style, FootprintGradientStyle::SoftGlow);
+        assert_eq!(opts.gradient_style, FootprintGradientStyle::NoGlow);
 
         assert!(
             opts.buy_color[2] > opts.buy_color[1] && opts.buy_color[2] > opts.buy_color[0],

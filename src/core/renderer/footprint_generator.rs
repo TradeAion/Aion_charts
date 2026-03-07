@@ -641,7 +641,14 @@ fn render_bid_ask_cell(
     // Volume text — adaptive font size to fit cell
     let effective_font = adaptive_font_size(font_size, cell_h);
     let avail_half_w = half_w - padding * 2.0 - 2.0; // usable text width per side
-    if opts.show_volume_text && effective_font > 0.0 {
+    let show_half_text = opts.show_volume_text
+        && footprint_text_slot_allows_text(
+            effective_font,
+            cell_h,
+            avail_half_w,
+            FootprintTextSlot::HalfVolume,
+        );
+    if show_half_text {
         let text_y = cell_y + cell_h * 0.5;
         let bid_text_x = bar_left + half_w * 0.5;
         let ask_text_x = bar_left + half_w * 1.5;
@@ -649,37 +656,33 @@ fn render_bid_ask_cell(
         // Bid text centered within the left half-cell.
         if level.bid_volume > 0.0 {
             let txt = format_volume(level.bid_volume);
-            if text_fits(&txt, effective_font, avail_half_w) {
-                texts.push(DrawText {
-                    text: txt,
-                    x: bid_text_x as f32,
-                    y: text_y as f32,
-                    font_size: effective_font,
-                    r: opts.text_color[0],
-                    g: opts.text_color[1],
-                    b: opts.text_color[2],
-                    a: opts.text_color[3],
-                    align: TextAlign::Center,
-                });
-            }
+            texts.push(DrawText {
+                text: txt,
+                x: bid_text_x as f32,
+                y: text_y as f32,
+                font_size: effective_font,
+                r: opts.text_color[0],
+                g: opts.text_color[1],
+                b: opts.text_color[2],
+                a: opts.text_color[3],
+                align: TextAlign::Center,
+            });
         }
 
         // Ask text centered within the right half-cell.
         if level.ask_volume > 0.0 {
             let txt = format_volume(level.ask_volume);
-            if text_fits(&txt, effective_font, avail_half_w) {
-                texts.push(DrawText {
-                    text: txt,
-                    x: ask_text_x as f32,
-                    y: text_y as f32,
-                    font_size: effective_font,
-                    r: opts.text_color[0],
-                    g: opts.text_color[1],
-                    b: opts.text_color[2],
-                    a: opts.text_color[3],
-                    align: TextAlign::Center,
-                });
-            }
+            texts.push(DrawText {
+                text: txt,
+                x: ask_text_x as f32,
+                y: text_y as f32,
+                font_size: effective_font,
+                r: opts.text_color[0],
+                g: opts.text_color[1],
+                b: opts.text_color[2],
+                a: opts.text_color[3],
+                align: TextAlign::Center,
+            });
         }
     }
 }
@@ -737,26 +740,31 @@ fn render_delta_cell(
     // Delta text
     let effective_font = adaptive_font_size(font_size, cell_h);
     let avail_w = bar_width - opts.cell_padding as f64 * 2.0;
-    if opts.show_volume_text && effective_font > 0.0 {
+    if opts.show_volume_text
+        && footprint_text_slot_allows_text(
+            effective_font,
+            cell_h,
+            avail_w,
+            FootprintTextSlot::Delta,
+        )
+    {
         let txt = format_delta(delta);
-        if text_fits(&txt, effective_font, avail_w) {
-            let text_color = if delta >= 0.0 {
-                opts.positive_delta_color
-            } else {
-                opts.negative_delta_color
-            };
-            texts.push(DrawText {
-                text: txt,
-                x: (bar_left + bar_width * 0.5) as f32,
-                y: (cell_y + cell_h * 0.5) as f32,
-                font_size: effective_font,
-                r: text_color[0],
-                g: text_color[1],
-                b: text_color[2],
-                a: text_color[3],
-                align: TextAlign::Center,
-            });
-        }
+        let text_color = if delta >= 0.0 {
+            opts.positive_delta_color
+        } else {
+            opts.negative_delta_color
+        };
+        texts.push(DrawText {
+            text: txt,
+            x: (bar_left + bar_width * 0.5) as f32,
+            y: (cell_y + cell_h * 0.5) as f32,
+            font_size: effective_font,
+            r: text_color[0],
+            g: text_color[1],
+            b: text_color[2],
+            a: text_color[3],
+            align: TextAlign::Center,
+        });
     }
 }
 
@@ -808,21 +816,26 @@ fn render_volume_cell(
     // Volume text
     let effective_font = adaptive_font_size(font_size, cell_h);
     let avail_w = bar_width - opts.cell_padding as f64 * 2.0;
-    if opts.show_volume_text && effective_font > 0.0 {
+    if opts.show_volume_text
+        && footprint_text_slot_allows_text(
+            effective_font,
+            cell_h,
+            avail_w,
+            FootprintTextSlot::FullVolume,
+        )
+    {
         let txt = format_volume(vol);
-        if text_fits(&txt, effective_font, avail_w) {
-            texts.push(DrawText {
-                text: txt,
-                x: (bar_left + bar_width * 0.5) as f32,
-                y: (cell_y + cell_h * 0.5) as f32,
-                font_size: effective_font,
-                r: opts.text_color[0],
-                g: opts.text_color[1],
-                b: opts.text_color[2],
-                a: opts.text_color[3],
-                align: TextAlign::Center,
-            });
-        }
+        texts.push(DrawText {
+            text: txt,
+            x: (bar_left + bar_width * 0.5) as f32,
+            y: (cell_y + cell_h * 0.5) as f32,
+            font_size: effective_font,
+            r: opts.text_color[0],
+            g: opts.text_color[1],
+            b: opts.text_color[2],
+            a: opts.text_color[3],
+            align: TextAlign::Center,
+        });
     }
 }
 
@@ -956,22 +969,23 @@ fn render_delta_bar(
     });
 
     // Delta text
-    if opts.show_volume_text {
+    let fs = font_size * 0.9;
+    let avail_w = (bar_width - opts.cell_padding as f64 * 2.0).max(0.0);
+    if opts.show_volume_text
+        && footprint_text_slot_allows_text(fs, bar_h, avail_w, FootprintTextSlot::Delta)
+    {
         let txt = format_delta(delta);
-        let fs = font_size * 0.9;
-        if text_fits(&txt, fs, bar_width) {
-            texts.push(DrawText {
-                text: txt,
-                x: (bar_left + bar_width * 0.5) as f32,
-                y: (y + bar_h * 0.5) as f32,
-                font_size: fs,
-                r: color[0],
-                g: color[1],
-                b: color[2],
-                a: 1.0,
-                align: TextAlign::Center,
-            });
-        }
+        texts.push(DrawText {
+            text: txt,
+            x: (bar_left + bar_width * 0.5) as f32,
+            y: (y + bar_h * 0.5) as f32,
+            font_size: fs,
+            r: color[0],
+            g: color[1],
+            b: color[2],
+            a: 1.0,
+            align: TextAlign::Center,
+        });
     }
 }
 
@@ -1059,14 +1073,34 @@ fn generate_fallback_candle(
 // Helpers
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Estimate whether text fits within the available width.
-/// Uses a 0.55 * font_size per character approximation — slightly tighter
-/// than the old 0.6 which was overly conservative and killed text too early.
+#[derive(Clone, Copy)]
+enum FootprintTextSlot {
+    HalfVolume,
+    FullVolume,
+    Delta,
+}
+
+/// Use a slot-based threshold so labels flip on/off together at a given zoom
+/// instead of varying by formatted string length.
 #[inline]
-fn text_fits(text: &str, font_size: f32, available_width: f64) -> bool {
+fn footprint_text_slot_allows_text(
+    font_size: f32,
+    cell_h: f64,
+    available_width: f64,
+    slot: FootprintTextSlot,
+) -> bool {
+    if font_size <= 0.0 || available_width <= 0.0 || cell_h <= 0.0 {
+        return false;
+    }
+    let required_chars = match slot {
+        FootprintTextSlot::HalfVolume => 6.0,
+        FootprintTextSlot::FullVolume => 6.0,
+        FootprintTextSlot::Delta => 7.0,
+    };
     let char_w = font_size as f64 * 0.55;
-    let text_w = text.len() as f64 * char_w;
-    text_w <= available_width
+    let required_width = char_w * required_chars;
+    let required_height = font_size as f64 + 1.0;
+    available_width >= required_width && cell_h >= required_height
 }
 
 /// Compute adaptive font size that fits within a cell.
@@ -1564,6 +1598,93 @@ mod tests {
             (right_text.x - right_center).abs() < 0.1,
             "ask text should be centered in right half-cell"
         );
+    }
+
+    #[test]
+    fn bid_ask_text_visibility_uses_slot_threshold_not_label_length() {
+        let opts = FootprintOptions::default();
+        let short = FootprintLevel {
+            price: 100.0,
+            bid_volume: 5.0,
+            ask_volume: 8.0,
+        };
+        let long = FootprintLevel {
+            price: 100.0,
+            bid_volume: 100_000.0,
+            ask_volume: 250_000.0,
+        };
+
+        let mut short_texts = Vec::new();
+        let mut short_gradients = Vec::new();
+        render_bid_ask_cell(
+            &mut short_gradients,
+            &mut short_texts,
+            &opts,
+            &short,
+            0.0,
+            0.0,
+            42.0,
+            20.0,
+            250_000.0,
+            10.0,
+            ImbalanceType::None,
+        );
+
+        let mut long_texts = Vec::new();
+        let mut long_gradients = Vec::new();
+        render_bid_ask_cell(
+            &mut long_gradients,
+            &mut long_texts,
+            &opts,
+            &long,
+            0.0,
+            0.0,
+            42.0,
+            20.0,
+            250_000.0,
+            10.0,
+            ImbalanceType::None,
+        );
+
+        assert!(
+            short_texts.is_empty() && long_texts.is_empty(),
+            "narrow slots should hide all bid/ask text regardless of label length"
+        );
+
+        short_texts.clear();
+        short_gradients.clear();
+        render_bid_ask_cell(
+            &mut short_gradients,
+            &mut short_texts,
+            &opts,
+            &short,
+            0.0,
+            0.0,
+            74.0,
+            20.0,
+            250_000.0,
+            10.0,
+            ImbalanceType::None,
+        );
+
+        long_texts.clear();
+        long_gradients.clear();
+        render_bid_ask_cell(
+            &mut long_gradients,
+            &mut long_texts,
+            &opts,
+            &long,
+            0.0,
+            0.0,
+            74.0,
+            20.0,
+            250_000.0,
+            10.0,
+            ImbalanceType::None,
+        );
+
+        assert_eq!(short_texts.len(), 2, "wide slots should show short labels");
+        assert_eq!(long_texts.len(), 2, "wide slots should show long labels too");
     }
 
 }

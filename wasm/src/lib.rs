@@ -3782,7 +3782,7 @@ impl RayCore {
     /// - `display_mode`: string ("bid_ask", "delta", "volume", etc.)
     /// - `tick_size`: number
     /// - `palette`: string (`"blue_red"` default, `"green_red"`)
-    /// - `gradient_style`: string (`"soft_glow"` default, `"strong_glow"`, `"no_glow"`)
+    /// - `gradient_style`: string (`"no_glow"` default, `"soft_glow"`, `"strong_glow"`)
     /// - `poc_color`: CSS color string or `[r, g, b, a]`
     /// - `imbalance_ratio`: number (default 3.0)
     /// - `show_imbalances`: boolean
