@@ -1125,7 +1125,7 @@ impl OverlayRenderer {
     /// Execution marks are rendered based on their resolved bar indices:
     /// - A primary vertical arrow near the candle communicates the execution side
     /// - Hovering a mark shows only the exact execution-price chevron
-    /// - Clicking a mark shows the connection line plus the exact-price chevrons
+    /// - Clicking a mark shows exact execution-price chevrons for the selected trade
     /// - Different roles (entry, scale_in, scale_out, exit) have visual distinction
     /// - Optional label rendering for custom text
     ///
@@ -1292,9 +1292,9 @@ impl OverlayRenderer {
                 &color_str,
             );
 
-            // Hover should reveal only the precise execution location, without
-            // the selected-trade connection line. Once a mark is selected, the
-            // connection overlay owns the chevron rendering.
+            // Hover should reveal only the precise execution location. Once a
+            // mark is selected, the selected-trade locator pass owns the
+            // chevron rendering for that trade group.
             if m.hovered && selected_execution_mark_id.is_none() {
                 self.draw_execution_price_chevron(
                     m.x_phys,
@@ -1354,13 +1354,11 @@ impl OverlayRenderer {
         hit_areas
     }
 
-    /// Render the connection line between entry and exit marks when selected
-    pub fn render_execution_connection(
+    /// Render exact execution-price chevrons for the selected trade group.
+    pub fn render_selected_execution_locators(
         &self,
         execution_marks: &crate::core::execution_marks::ExecutionMarkManager,
         selected_mark_id: Option<&str>,
-        show_connection_line: bool,
-        _bars: &BarArray,
         viewport: &Viewport,
         _style: &ChartStyle,
         pane_css_w: f64,
@@ -1428,28 +1426,6 @@ impl OverlayRenderer {
         let chevron_size = 13.0 * dpr;
 
         self.ctx.save();
-
-        if show_connection_line {
-            // ═══════════════════════════════════════════════════════════════════
-            // Draw dotted connection line
-            // ═══════════════════════════════════════════════════════════════════
-            self.ctx.set_stroke_style_str("rgba(100, 100, 100, 0.55)");
-            self.ctx.set_line_width((0.9 * dpr).max(0.8));
-
-            // Set dash pattern
-            let dash_array = js_sys::Array::new();
-            dash_array.push(&wasm_bindgen::JsValue::from(4.0 * dpr));
-            dash_array.push(&wasm_bindgen::JsValue::from(3.0 * dpr));
-            let _ = self.ctx.set_line_dash(&dash_array);
-
-            self.ctx.begin_path();
-            self.ctx.move_to(entry_x, entry_y);
-            self.ctx.line_to(exit_x, exit_y);
-            self.ctx.stroke();
-        }
-
-        // Clear dash for solid execution markers
-        let _ = self.ctx.set_line_dash(&js_sys::Array::new());
 
         // ═══════════════════════════════════════════════════════════════════
         // Draw entry marker at the exact execution price.

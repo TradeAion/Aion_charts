@@ -346,11 +346,9 @@ pub(crate) fn do_render_frame(
             pane_css_h,
         );
         if let Some(ref selected_id) = selected_execution_mark_id {
-            overlay.render_execution_connection(
+            overlay.render_selected_execution_locators(
                 &engine.execution_marks,
                 Some(selected_id.as_str()),
-                engine.execution_mark_connection_line_visible(),
-                &engine.bars,
                 &engine.viewport,
                 &engine.style,
                 pane_css_w,

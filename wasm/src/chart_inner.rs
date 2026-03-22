@@ -205,7 +205,7 @@ pub struct ChartInner {
     pub execution_mark_hit_areas: Vec<ExecutionMarkHitArea>,
     /// Last hovered execution mark ID so hover enter/leave only emits on change.
     pub hovered_execution_mark_id: Option<String>,
-    /// Currently selected/clicked execution mark ID (for showing connection line).
+    /// Currently selected/clicked execution mark ID (for showing selected locators).
     pub selected_execution_mark_id: Option<String>,
 }
 

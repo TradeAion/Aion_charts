@@ -396,7 +396,6 @@
     <div class="toolbar-section">
       <button class="btn" id="execution-marks-toggle" title="Toggle demo execution marks">Exec</button>
       <button class="btn active" id="execution-text-toggle" title="Toggle execution mark text labels">Text</button>
-      <button class="btn active" id="execution-line-toggle" title="Toggle selected execution connection line">Line</button>
       <button class="btn" id="stream-toggle">▶ Live</button>
       <button class="btn active" id="volume-toggle">Volume</button>
       <button class="btn active" id="autoscroll-toggle">Auto</button>
@@ -726,7 +725,6 @@
     let volumeVisible = true;
     let executionMarksVisible = false;
     let executionTextVisible = true;
-    let executionConnectionLineVisible = true;
     let footprintXyZoomEnabled = true;
     let hudBaseStatus = '';
     let requestedRenderer = 'webgpu';
@@ -951,26 +949,16 @@
       if (typeof core.set_execution_mark_text_visible === 'function') {
         core.set_execution_mark_text_visible(executionTextVisible);
       }
-      if (typeof core.set_execution_mark_connection_line_visible === 'function') {
-        core.set_execution_mark_connection_line_visible(executionConnectionLineVisible);
-      }
     }
 
     function syncExecutionMarkDisplayToggles() {
       const textBtn = $('execution-text-toggle');
-      const lineBtn = $('execution-line-toggle');
       const available = !!core;
       if (textBtn) {
         textBtn.disabled = !available;
         textBtn.classList.toggle('active', executionTextVisible && available);
         textBtn.textContent = executionTextVisible ? 'Text' : 'Text Off';
         textBtn.title = 'Toggle execution mark text labels';
-      }
-      if (lineBtn) {
-        lineBtn.disabled = !available;
-        lineBtn.classList.toggle('active', executionConnectionLineVisible && available);
-        lineBtn.textContent = executionConnectionLineVisible ? 'Line' : 'Line Off';
-        lineBtn.title = 'Toggle selected execution connection line';
       }
     }
 
@@ -1623,11 +1611,6 @@
       applyExecutionMarkDisplayOptions();
     };
 
-    $('execution-line-toggle').onclick = () => {
-      executionConnectionLineVisible = !executionConnectionLineVisible;
-      syncExecutionMarkDisplayToggles();
-      applyExecutionMarkDisplayOptions();
-    };
     syncExecutionMarkDisplayToggles();
 
     function syncVolumeToggle() {

@@ -1363,15 +1363,6 @@ export declare class RayCore {
   get_execution_mark_text_visible(): boolean;
 
   /**
-   * Show or hide the selected execution connection line.
-   * Chevron locators remain available when a mark is selected.
-   */
-  set_execution_mark_connection_line_visible(visible: boolean): void;
-
-  /** Whether the selected execution connection line is currently rendered. */
-  get_execution_mark_connection_line_visible(): boolean;
-
-  /**
    * Set multiple execution marks at once (replaces existing).
    *
    * @param ids       — Array of unique IDs (must match length of mark_data / 5)

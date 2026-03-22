@@ -5485,23 +5485,6 @@ impl RayCore {
         self.inner.borrow().engine.execution_mark_text_visible()
     }
 
-    /// Show/hide the selected execution connection line.
-    /// Chevron locators remain available when a mark is selected.
-    pub fn set_execution_mark_connection_line_visible(&mut self, visible: bool) {
-        self.inner
-            .borrow_mut()
-            .engine
-            .set_execution_mark_connection_line_visible(visible);
-    }
-
-    /// Whether the selected execution connection line is currently rendered.
-    pub fn get_execution_mark_connection_line_visible(&self) -> bool {
-        self.inner
-            .borrow()
-            .engine
-            .execution_mark_connection_line_visible()
-    }
-
     /// Serialize all execution marks to JSON.
     pub fn get_execution_marks_json(&self) -> String {
         let marks: Vec<_> = self
@@ -5700,7 +5683,7 @@ impl RayCore {
         self.inner.borrow().engine.execution_marks.len()
     }
 
-    /// Set the selected execution mark ID (shows connection line to related marks).
+    /// Set the selected execution mark ID (shows selected-trade execution locators).
     /// Pass empty string or null to deselect.
     pub fn set_selected_execution_mark(&mut self, mark_id: Option<String>) {
         let mut s = self.inner.borrow_mut();

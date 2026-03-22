@@ -132,8 +132,6 @@ pub struct ChartEngine {
     pub event_bus: EventBus,
     /// Whether execution mark text labels are rendered.
     execution_mark_text_visible: bool,
-    /// Whether the selected execution connection line is rendered.
-    execution_mark_connection_line_visible: bool,
 }
 
 impl ChartEngine {
@@ -273,7 +271,6 @@ impl ChartEngine {
             hidden_volume_default_margins_applied: false,
             event_bus: EventBus::new(),
             execution_mark_text_visible: true,
-            execution_mark_connection_line_visible: true,
         }
     }
 
@@ -342,14 +339,6 @@ impl ChartEngine {
 
     pub fn execution_mark_text_visible(&self) -> bool {
         self.execution_mark_text_visible
-    }
-
-    pub fn set_execution_mark_connection_line_visible(&mut self, visible: bool) {
-        self.execution_mark_connection_line_visible = visible;
-    }
-
-    pub fn execution_mark_connection_line_visible(&self) -> bool {
-        self.execution_mark_connection_line_visible
     }
 
     pub fn set_price_scale_margins(&mut self, top: f64, bottom: f64) {

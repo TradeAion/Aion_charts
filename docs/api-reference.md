@@ -515,16 +515,6 @@ set_execution_mark_text_visible(visible: boolean): void
 get_execution_mark_text_visible(): boolean
 ```
 
-### `set_execution_mark_connection_line_visible(visible)`
-
-Show or hide the selected execution connection line. When disabled, selected marks
-can still render their execution chevrons without the connecting dashed line.
-
-```ts
-set_execution_mark_connection_line_visible(visible: boolean): void
-get_execution_mark_connection_line_visible(): boolean
-```
-
 ### `remove_execution_mark(id)`
 
 Remove a single execution mark by ID.
@@ -549,9 +539,8 @@ Execution marks are rendered with visual distinction:
 
 - **Buy vs Sell**: Different arrow directions and default colors
 - **Hover**: Shows the exact execution-price chevron
-- **Selection**: Shows execution chevrons and, optionally, the connection line
+- **Selection**: Shows execution chevrons for the selected trade group
 - **Text labels**: Can be toggled on or off dynamically
-- **Connection line**: Can be toggled on or off dynamically
 
 Custom colors override default styling when provided.
 
