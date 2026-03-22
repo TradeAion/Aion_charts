@@ -294,6 +294,110 @@ pub fn chart_event_to_js(event: &raycore::ChartEvent) -> JsValue {
                 &JsValue::from_str(message),
             );
         }
+        raycore::ChartEvent::ExecutionMarkClick {
+            id,
+            timestamp_ms,
+            price,
+            side,
+            role,
+            quantity,
+            group_id,
+        } => {
+            let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("id"), &JsValue::from_str(id));
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("timestampMs"),
+                &JsValue::from_f64(*timestamp_ms as f64),
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("price"),
+                &JsValue::from_f64(*price),
+            );
+            let _ =
+                js_sys::Reflect::set(&obj, &JsValue::from_str("side"), &JsValue::from_str(side));
+            let _ =
+                js_sys::Reflect::set(&obj, &JsValue::from_str("role"), &JsValue::from_str(role));
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("quantity"),
+                &JsValue::from_f64(*quantity),
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("groupId"),
+                &match group_id {
+                    Some(gid) => JsValue::from_str(gid),
+                    None => JsValue::NULL,
+                },
+            );
+        }
+        raycore::ChartEvent::ExecutionMarkHover {
+            id,
+            timestamp_ms,
+            price,
+            side,
+            role,
+            quantity,
+            group_id,
+        } => {
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("id"),
+                &match id {
+                    Some(id_str) => JsValue::from_str(id_str),
+                    None => JsValue::NULL,
+                },
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("timestampMs"),
+                &match timestamp_ms {
+                    Some(ts) => JsValue::from_f64(*ts as f64),
+                    None => JsValue::NULL,
+                },
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("price"),
+                &match price {
+                    Some(p) => JsValue::from_f64(*p),
+                    None => JsValue::NULL,
+                },
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("side"),
+                &match side {
+                    Some(s) => JsValue::from_str(s),
+                    None => JsValue::NULL,
+                },
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("role"),
+                &match role {
+                    Some(r) => JsValue::from_str(r),
+                    None => JsValue::NULL,
+                },
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("quantity"),
+                &match quantity {
+                    Some(q) => JsValue::from_f64(*q),
+                    None => JsValue::NULL,
+                },
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("groupId"),
+                &match group_id {
+                    Some(gid) => JsValue::from_str(gid),
+                    None => JsValue::NULL,
+                },
+            );
+        }
     }
 
     obj.into()

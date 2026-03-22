@@ -77,10 +77,10 @@ impl RectangleDrawing {
     pub(crate) fn opposite_reference_for_anchor(&self, index: usize) -> Option<(f64, f64)> {
         let (left, right, top, bottom) = self.normalized_bounds();
         match index {
-            0 => Some((right, bottom)), // TL -> BR
-            1 => Some((left, bottom)),  // TR -> BL
-            2 => Some((left, top)),     // BR -> TL
-            3 => Some((right, top)),    // BL -> TR
+            0 => Some((right, bottom)),    // TL -> BR
+            1 => Some((left, bottom)),     // TR -> BL
+            2 => Some((left, top)),        // BR -> TL
+            3 => Some((right, top)),       // BL -> TR
             4 => Some((f64::NAN, bottom)), // TM -> fix bottom
             5 => Some((left, f64::NAN)),   // RM -> fix left
             6 => Some((f64::NAN, top)),    // BM -> fix top
@@ -142,7 +142,14 @@ impl RectangleDrawing {
     }
 
     #[inline]
-    fn nearest_edge_anchor(cx: f64, cy: f64, left: f64, right: f64, top: f64, bottom: f64) -> usize {
+    fn nearest_edge_anchor(
+        cx: f64,
+        cy: f64,
+        left: f64,
+        right: f64,
+        top: f64,
+        bottom: f64,
+    ) -> usize {
         let d_top = (cy - top).abs();
         let d_right = (right - cx).abs();
         let d_bottom = (cy - bottom).abs();

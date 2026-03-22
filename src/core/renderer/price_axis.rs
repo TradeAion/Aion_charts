@@ -9,8 +9,8 @@
 #![cfg(target_arch = "wasm32")]
 
 use crate::core::chart_type::MainChartType;
-use crate::core::formatters::format_countdown;
 use crate::core::footprint::{FootprintData, FootprintOptions};
+use crate::core::formatters::format_countdown;
 use crate::core::price_line::PriceLineManager;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
@@ -22,8 +22,8 @@ use crate::core::renderer::value_projection::{
 };
 use crate::core::series::SeriesCollection;
 use crate::core::viewport::Viewport;
-use wasm_bindgen::prelude::*;
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
+use wasm_bindgen::JsCast;
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, HtmlElement};
 
 pub struct PriceAxisRenderer {
     base_canvas: HtmlCanvasElement,
@@ -93,10 +93,14 @@ impl PriceAxisRenderer {
         self.resize(pw, ph, dpr);
         let w_str = format!("{}px", css_w);
         let h_str = format!("{}px", css_h);
-        let _ = self.base_canvas.style().set_property("width", &w_str);
-        let _ = self.base_canvas.style().set_property("height", &h_str);
-        let _ = self.top_canvas.style().set_property("width", &w_str);
-        let _ = self.top_canvas.style().set_property("height", &h_str);
+        if let Some(elem) = self.base_canvas.dyn_ref::<HtmlElement>() {
+            let _ = elem.style().set_property("width", &w_str);
+            let _ = elem.style().set_property("height", &h_str);
+        }
+        if let Some(elem) = self.top_canvas.dyn_ref::<HtmlElement>() {
+            let _ = elem.style().set_property("width", &w_str);
+            let _ = elem.style().set_property("height", &h_str);
+        }
     }
 
     /// Measure the maximum width of tick labels only (used by subpanes

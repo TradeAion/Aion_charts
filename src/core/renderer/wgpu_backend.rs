@@ -145,8 +145,8 @@ impl WgpuRenderer {
 
         let gradient_rect_instance_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gradient_rect_instances"),
-            size: (INITIAL_GRADIENT_RECT_CAPACITY
-                * std::mem::size_of::<HorizontalGradientRect>()) as u64,
+            size: (INITIAL_GRADIENT_RECT_CAPACITY * std::mem::size_of::<HorizontalGradientRect>())
+                as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -222,7 +222,8 @@ impl WgpuRenderer {
                 self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("gradient_rect_instances"),
                     size: (self.gradient_rect_capacity
-                        * std::mem::size_of::<HorizontalGradientRect>()) as u64,
+                        * std::mem::size_of::<HorizontalGradientRect>())
+                        as u64,
                     usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });

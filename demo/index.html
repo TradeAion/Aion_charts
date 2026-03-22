@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="icon" href="data:,">
   <title>RayCore Demo</title>
   <style>
     /* ═══════════════════════════════════════════════════════════════════════
@@ -175,6 +176,8 @@
     }
     #hud-price { font-size: 14px; font-weight: 600; color: #22C55E; }
     #hud-status { margin-top: 2px; font-size: 10px; }
+    #hud-execution { margin-top: 4px; font-size: 10px; color: #a8b3cf; }
+    body.light #hud-execution { color: #4b5563; }
     #hud-shortcuts {
       margin-top: 8px;
       padding: 6px 8px;
@@ -391,6 +394,9 @@
     <div class="toolbar-divider"></div>
 
     <div class="toolbar-section">
+      <button class="btn" id="execution-marks-toggle" title="Toggle demo execution marks">Exec</button>
+      <button class="btn active" id="execution-text-toggle" title="Toggle execution mark text labels">Text</button>
+      <button class="btn active" id="execution-line-toggle" title="Toggle selected execution connection line">Line</button>
       <button class="btn" id="stream-toggle">▶ Live</button>
       <button class="btn active" id="volume-toggle">Volume</button>
       <button class="btn active" id="autoscroll-toggle">Auto</button>
@@ -407,6 +413,7 @@
     <div id="hud">
       <div id="hud-price"></div>
       <div id="hud-status"></div>
+      <div id="hud-execution"></div>
       <div id="hud-shortcuts">
         <b>Shortcuts:</b><br>
         <span class="shortcut-key">Shift</span> Angle snap (45°)<br>
@@ -462,7 +469,7 @@
         <div class="setting-row">
           <span class="setting-label">Down Volume</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-volume-down" value="f7525f">
+            <input type="color" class="setting-input" id="cfg-volume-down" value="#f7525f">
           </div>
         </div>
       </div>
@@ -705,6 +712,7 @@
     const badge = $('renderer-badge');
     const hudPrice = $('hud-price');
     const hudStatus = $('hud-status');
+    const hudExecution = $('hud-execution');
     const rendererGroup = $('renderer-group');
     const settingsPanel = $('settings-panel');
 
@@ -716,6 +724,9 @@
     let activeDrawTool = 'none';
     let streamInterval = null;
     let volumeVisible = true;
+    let executionMarksVisible = false;
+    let executionTextVisible = true;
+    let executionConnectionLineVisible = true;
     let footprintXyZoomEnabled = true;
     let hudBaseStatus = '';
     let requestedRenderer = 'webgpu';
@@ -890,6 +901,103 @@
     }
     const demoData = createDemoData();
 
+    function demoBarIndex(fraction) {
+      const lastIndex = Math.max(0, demoData.close.length - 1);
+      return Math.max(0, Math.min(lastIndex, Math.round(lastIndex * fraction)));
+    }
+
+    function buildExecutionLabel(side) {
+      return String(side || '').toUpperCase();
+    }
+
+    function createDemoExecutionMarks() {
+      const points = [
+        { id: 'trade-1-entry', bar: demoBarIndex(0.16), side: 'buy', role: 'entry', quantity: 1.0, priceKey: 'close', group_id: 'trade-1' },
+        { id: 'trade-1-add', bar: demoBarIndex(0.23), side: 'buy', role: 'scale_in', quantity: 0.5, priceKey: 'low', group_id: 'trade-1' },
+        { id: 'trade-1-trim', bar: demoBarIndex(0.31), side: 'sell', role: 'scale_out', quantity: 0.5, priceKey: 'high', group_id: 'trade-1' },
+        { id: 'trade-1-exit', bar: demoBarIndex(0.39), side: 'sell', role: 'exit', quantity: 1.0, priceKey: 'close', group_id: 'trade-1', realized_pnl: 182.25 },
+        { id: 'trade-2-entry', bar: demoBarIndex(0.58), side: 'sell', role: 'entry', quantity: 1.0, priceKey: 'close', group_id: 'trade-2' },
+        { id: 'trade-2-trim', bar: demoBarIndex(0.67), side: 'buy', role: 'scale_out', quantity: 0.5, priceKey: 'low', group_id: 'trade-2' },
+        { id: 'trade-2-exit', bar: demoBarIndex(0.75), side: 'buy', role: 'exit', quantity: 1.0, priceKey: 'close', group_id: 'trade-2', realized_pnl: 96.5 },
+      ];
+
+      return points.map(point => ({
+        id: point.id,
+        timestamp_ms: Number(demoData.timestamps[point.bar]),
+        price: Number(demoData[point.priceKey][point.bar]),
+        quantity: point.quantity,
+        side: point.side,
+        role: point.role,
+        label: buildExecutionLabel(point.side),
+        group_id: point.group_id,
+        realized_pnl: point.realized_pnl,
+      }));
+    }
+
+    function syncExecutionMarksToggle() {
+      const btn = $('execution-marks-toggle');
+      if (!btn) return;
+      const available = !!core && activeChartType !== 'footprint';
+      btn.classList.toggle('active', executionMarksVisible && available);
+      btn.disabled = !core;
+      btn.textContent = available ? 'Exec' : 'Exec N/A';
+      btn.title = available
+        ? 'Toggle demo execution marks on the current chart'
+        : 'Execution mark demo is available on the time-based demo data';
+    }
+
+    function applyExecutionMarkDisplayOptions() {
+      if (!core) return;
+      if (typeof core.set_execution_mark_text_visible === 'function') {
+        core.set_execution_mark_text_visible(executionTextVisible);
+      }
+      if (typeof core.set_execution_mark_connection_line_visible === 'function') {
+        core.set_execution_mark_connection_line_visible(executionConnectionLineVisible);
+      }
+    }
+
+    function syncExecutionMarkDisplayToggles() {
+      const textBtn = $('execution-text-toggle');
+      const lineBtn = $('execution-line-toggle');
+      const available = !!core;
+      if (textBtn) {
+        textBtn.disabled = !available;
+        textBtn.classList.toggle('active', executionTextVisible && available);
+        textBtn.textContent = executionTextVisible ? 'Text' : 'Text Off';
+        textBtn.title = 'Toggle execution mark text labels';
+      }
+      if (lineBtn) {
+        lineBtn.disabled = !available;
+        lineBtn.classList.toggle('active', executionConnectionLineVisible && available);
+        lineBtn.textContent = executionConnectionLineVisible ? 'Line' : 'Line Off';
+        lineBtn.title = 'Toggle selected execution connection line';
+      }
+    }
+
+    function applyDemoExecutionMarks() {
+      if (!core || typeof core.clear_execution_marks !== 'function') return;
+
+      if (!executionMarksVisible) {
+        core.clear_execution_marks();
+        hudExecution.textContent = '';
+        syncExecutionMarksToggle();
+        return;
+      }
+
+      if (activeChartType === 'footprint' || typeof core.set_execution_marks_json !== 'function') {
+        core.clear_execution_marks();
+        hudExecution.textContent = 'Execution demo is available on the time-based chart modes.';
+        syncExecutionMarksToggle();
+        return;
+      }
+
+      core.set_execution_marks_json(JSON.stringify(createDemoExecutionMarks()));
+      applyExecutionMarkDisplayOptions();
+      hudExecution.textContent = 'Execution marks enabled. Hover or click a marker to inspect it.';
+      syncExecutionMarksToggle();
+      syncExecutionMarkDisplayToggles();
+    }
+
     function loadDemoDataForChartType(type) {
       if (!core) return;
       if (type === 'footprint' && typeof core.demo_mode_footprint === 'function') {
@@ -905,6 +1013,8 @@
         );
       }
       core.set_chart_type(type);
+      applyDemoExecutionMarks();
+      syncExecutionMarksToggle();
     }
 
     function applyFootprintXyZoomSetting() {
@@ -973,15 +1083,34 @@
         core.on('visibleRangeChange', e => {
           updateHudStatus(`${currentRenderer} · ${Math.round(e.endBar - e.startBar)} bars`);
         });
+        core.on('executionMarkHover', e => {
+          if (!e.id) {
+            hudExecution.textContent = executionMarksVisible && activeChartType === 'footprint'
+              ? 'Execution demo is available on the time-based chart modes.'
+              : executionMarksVisible
+                ? 'Execution marks enabled. Hover or click a marker to inspect it.'
+                : '';
+            return;
+          }
+          hudExecution.textContent = `${buildExecutionLabel(e.side)} · ${e.price?.toFixed(2)} · qty ${e.quantity}`;
+        });
+        core.on('executionMarkClick', e => {
+          hudExecution.textContent = `Clicked ${e.id} · ${buildExecutionLabel(e.side)} · ${e.price.toFixed(2)} · qty ${e.quantity}`;
+          console.log('[raycore demo] executionMarkClick', e);
+        });
         core.on('error', e => showError(e.message));
 
         loading.style.display = 'none';
         updateHudStatus(`${currentRenderer} · ${demoData.open.length} bars`);
+        syncExecutionMarksToggle();
+        applyExecutionMarkDisplayOptions();
+        syncExecutionMarkDisplayToggles();
 
         // Apply initial settings
         applyAllSettings();
         applyReplaySessionOptions();
         syncReplayControls();
+        applyDemoExecutionMarks();
 
       } catch (e) {
         console.error(e);
@@ -1483,6 +1612,24 @@
       }
     };
 
+    $('execution-marks-toggle').onclick = () => {
+      executionMarksVisible = !executionMarksVisible;
+      applyDemoExecutionMarks();
+    };
+
+    $('execution-text-toggle').onclick = () => {
+      executionTextVisible = !executionTextVisible;
+      syncExecutionMarkDisplayToggles();
+      applyExecutionMarkDisplayOptions();
+    };
+
+    $('execution-line-toggle').onclick = () => {
+      executionConnectionLineVisible = !executionConnectionLineVisible;
+      syncExecutionMarkDisplayToggles();
+      applyExecutionMarkDisplayOptions();
+    };
+    syncExecutionMarkDisplayToggles();
+
     function syncVolumeToggle() {
       const btn = $('volume-toggle');
       btn.classList.toggle('active', volumeVisible);
@@ -1521,7 +1668,7 @@
     // ═══════════════════════════════════════════════════════════════════════
     async function boot() {
       try {
-        await init(wasmBinaryUrl);
+        await init({ module_or_path: wasmBinaryUrl });
         renderRendererControls();
         renderChartTypeButtons();
         updateBadge(null);

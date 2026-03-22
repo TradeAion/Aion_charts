@@ -130,6 +130,42 @@ pub enum ChartEvent {
         /// Human-readable error message.
         message: String,
     },
+
+    /// User clicked on an execution mark.
+    ExecutionMarkClick {
+        /// Unique ID of the execution mark.
+        id: String,
+        /// Unix timestamp (ms) of the execution.
+        timestamp_ms: u64,
+        /// Execution price.
+        price: f64,
+        /// Side: "buy" or "sell".
+        side: String,
+        /// Role: "entry", "scale_in", "scale_out", or "exit".
+        role: String,
+        /// Execution quantity.
+        quantity: f64,
+        /// Optional group ID.
+        group_id: Option<String>,
+    },
+
+    /// User hovered over an execution mark.
+    ExecutionMarkHover {
+        /// Unique ID of the execution mark, or None when leaving.
+        id: Option<String>,
+        /// Unix timestamp (ms) of the execution, if hovering.
+        timestamp_ms: Option<u64>,
+        /// Execution price, if hovering.
+        price: Option<f64>,
+        /// Side: "buy" or "sell", if hovering.
+        side: Option<String>,
+        /// Role: "entry", "scale_in", "scale_out", or "exit", if hovering.
+        role: Option<String>,
+        /// Execution quantity, if hovering.
+        quantity: Option<f64>,
+        /// Optional group ID, if hovering.
+        group_id: Option<String>,
+    },
 }
 
 impl ChartEvent {
@@ -150,6 +186,8 @@ impl ChartEvent {
             Self::Resize { .. } => "resize",
             Self::RendererFallback { .. } => "rendererFallback",
             Self::Error { .. } => "error",
+            Self::ExecutionMarkClick { .. } => "executionMarkClick",
+            Self::ExecutionMarkHover { .. } => "executionMarkHover",
         }
     }
 
@@ -167,6 +205,8 @@ impl ChartEvent {
         "resize",
         "rendererFallback",
         "error",
+        "executionMarkClick",
+        "executionMarkHover",
     ];
 }
 
@@ -334,10 +374,12 @@ mod tests {
 
     #[test]
     fn all_event_names_are_valid() {
-        assert_eq!(ChartEvent::ALL_EVENT_NAMES.len(), 12);
+        assert_eq!(ChartEvent::ALL_EVENT_NAMES.len(), 14);
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"crosshairMove"));
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"error"));
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"rendererFallback"));
+        assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"executionMarkClick"));
+        assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"executionMarkHover"));
     }
 
     #[test]

@@ -26,9 +26,7 @@ use crate::core::footprint::{
     FootprintBar, FootprintData, FootprintDisplayMode, FootprintGradientStyle, FootprintOptions,
     ImbalanceType, VolumeColorIntensity,
 };
-use crate::core::renderer::draw_list::{
-    ColoredRect, DrawText, HorizontalGradientRect, TextAlign,
-};
+use crate::core::renderer::draw_list::{ColoredRect, DrawText, HorizontalGradientRect, TextAlign};
 use crate::core::renderer::series::CandleSizing;
 use crate::core::renderer::traits::ChartStyle;
 use crate::core::renderer::transforms::{bar_to_x, color4, price_to_y};
@@ -181,12 +179,12 @@ pub fn generate_footprint_geometry(
             );
             (y0 - y1).abs()
         };
-        let agg_factor = if min_cell_px > 0.0 && natural_cell_h > 0.0 && natural_cell_h < min_cell_px
-        {
-            ((min_cell_px / natural_cell_h).ceil() as usize).max(1)
-        } else {
-            1
-        };
+        let agg_factor =
+            if min_cell_px > 0.0 && natural_cell_h > 0.0 && natural_cell_h < min_cell_px {
+                ((min_cell_px / natural_cell_h).ceil() as usize).max(1)
+            } else {
+                1
+            };
         let effective_tick = base_tick * agg_factor as f32;
 
         // ── Render candlestick on the left side ──
@@ -1358,7 +1356,11 @@ mod tests {
             HorizontalGradientDirection::LeftToRight,
         );
 
-        assert_eq!(rects.len(), 1, "soft glow should emit a single smooth gradient rect");
+        assert_eq!(
+            rects.len(),
+            1,
+            "soft glow should emit a single smooth gradient rect"
+        );
         let rect = rects.first().unwrap();
         assert!(rect.left_r < rect.right_r);
         assert!(rect.left_a < rect.right_a);
@@ -1452,7 +1454,9 @@ mod tests {
             .fold(f32::INFINITY, f32::min);
         assert!(ladder_left.is_finite(), "ladder background should exist");
         assert!(
-            geom.overlay_rects.iter().any(|rect| rect.x + rect.w <= ladder_left),
+            geom.overlay_rects
+                .iter()
+                .any(|rect| rect.x + rect.w <= ladder_left),
             "candle geometry should render in the later overlay layer left of the ladder"
         );
     }
@@ -1475,7 +1479,9 @@ mod tests {
             "bars with no footprint levels should not emit ladder gradients"
         );
         assert!(
-            geom.overlay_rects.iter().any(|rect| rect.w >= 1.0 && rect.h >= 1.0),
+            geom.overlay_rects
+                .iter()
+                .any(|rect| rect.w >= 1.0 && rect.h >= 1.0),
             "bars with empty footprint levels should still show a fallback candle"
         );
     }
@@ -1527,7 +1533,8 @@ mod tests {
             "row should include a right border"
         );
         assert!(
-            !geom.overlay_rects
+            !geom
+                .overlay_rects
                 .iter()
                 .any(|rect| (rect.x - mid_x).abs() < 0.1 && rect.w <= 1.0 && rect.h >= 1.0),
             "row should not emit an internal bid/ask divider"
@@ -1684,7 +1691,10 @@ mod tests {
         );
 
         assert_eq!(short_texts.len(), 2, "wide slots should show short labels");
-        assert_eq!(long_texts.len(), 2, "wide slots should show long labels too");
+        assert_eq!(
+            long_texts.len(),
+            2,
+            "wide slots should show long labels too"
+        );
     }
-
 }

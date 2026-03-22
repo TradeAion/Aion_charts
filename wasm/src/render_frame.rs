@@ -234,7 +234,10 @@ pub(crate) fn do_render_frame(
             ref mut overlay,
             ref engine,
             ref active_subpane_id,
+            ref mut execution_mark_hit_areas,
+            ref hovered_execution_mark_id,
             ref symbol,
+            ref selected_execution_mark_id,
             ..
         } = *s;
         let dashed_on_overlay = engine.renderer_name() == "webgpu";
@@ -328,6 +331,32 @@ pub(crate) fn do_render_frame(
             pane_css_w,
             pane_css_h,
         );
+        // Render execution marks after the crosshair so hover/click locators
+        // stay visible at the exact execution point instead of being masked by
+        // the dashed crosshair overlay.
+        *execution_mark_hit_areas = overlay.render_execution_marks(
+            &engine.execution_marks,
+            &engine.bars,
+            &engine.viewport,
+            &engine.style,
+            engine.execution_mark_text_visible(),
+            hovered_execution_mark_id.as_deref(),
+            selected_execution_mark_id.as_deref(),
+            pane_css_w,
+            pane_css_h,
+        );
+        if let Some(ref selected_id) = selected_execution_mark_id {
+            overlay.render_execution_connection(
+                &engine.execution_marks,
+                Some(selected_id.as_str()),
+                engine.execution_mark_connection_line_visible(),
+                &engine.bars,
+                &engine.viewport,
+                &engine.style,
+                pane_css_w,
+                pane_css_h,
+            );
+        }
     }
 
     // 7. Price axis — base (ticks + labels) + last price labels + price line labels + top (crosshair label)

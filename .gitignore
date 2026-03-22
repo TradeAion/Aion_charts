@@ -11,6 +11,9 @@
 # Debug/log files
 debug.log
 *.log
+/.playwright-cli/
+/output/
+chrome_*.png
 
 # IDE
 .idea/

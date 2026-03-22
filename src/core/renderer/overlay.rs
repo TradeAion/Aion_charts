@@ -10,8 +10,8 @@
 use crate::core::chart_type::MainChartType;
 use crate::core::data::BarArray;
 use crate::core::drawings::types::DrawingGeometry;
-use crate::core::formatters::{format_price, format_volume};
 use crate::core::footprint::{FootprintData, FootprintOptions};
+use crate::core::formatters::{format_price, format_qty, format_volume};
 use crate::core::indicators::render::types::DrawInstruction;
 use crate::core::markers::{MarkerManager, MarkerPosition, MarkerShape};
 use crate::core::price_line::PriceLineManager;
@@ -21,8 +21,8 @@ use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
 use crate::core::renderer::traits::{ChartStyle, CrosshairState};
 
-use crate::core::renderer::transforms::bar_to_x;
 use crate::core::renderer::series::CandleSizing;
+use crate::core::renderer::transforms::bar_to_x;
 use crate::core::renderer::value_projection::{
     price_to_pane_y_phys, project_main_last_value, timestamp_to_bar_index_in_bars,
 };
@@ -42,6 +42,27 @@ pub struct OverlayRenderer {
     dpr: f64,
     /// Shared text width cache for legend measurements.
     text_cache: TextWidthCache,
+}
+
+/// Screen-space hit area for a rendered execution mark.
+///
+/// The WASM host stores these after each frame so pointer handlers can emit
+/// execution mark hover/click events without re-projecting every mark on move.
+#[derive(Debug, Clone)]
+pub struct ExecutionMarkHitArea {
+    pub id: String,
+    pub x_css: f64,
+    pub y_css: f64,
+    pub radius_css: f64,
+}
+
+impl ExecutionMarkHitArea {
+    pub fn contains(&self, x_css: f64, y_css: f64) -> bool {
+        let dx = x_css - self.x_css;
+        let dy = y_css - self.y_css;
+        let radius = self.radius_css.max(1.0);
+        (dx * dx) + (dy * dy) <= radius * radius
+    }
 }
 
 impl OverlayRenderer {
@@ -480,7 +501,8 @@ impl OverlayRenderer {
                 let slot_center = bar_to_x(last_idx as f64 + 0.5, viewport, pane_pw);
                 let x_anchor = if main_chart_type == MainChartType::Footprint {
                     // Mirror footprint_generator layout: candle = 15% of slot on left
-                    let sizing = CandleSizing::compute_from_pane(pane_pw, viewport, h_ratio, v_ratio);
+                    let sizing =
+                        CandleSizing::compute_from_pane(pane_pw, viewport, h_ratio, v_ratio);
                     let half_bar = (sizing.bar_width * 0.5).floor();
                     let slot_left = (slot_center - half_bar).round();
                     let candle_w = (sizing.bar_width * 0.15).round().max(3.0);
@@ -1098,6 +1120,470 @@ impl OverlayRenderer {
         }
     }
 
+    /// Render execution marks (trade executions) on the price chart.
+    ///
+    /// Execution marks are rendered based on their resolved bar indices:
+    /// - A primary vertical arrow near the candle communicates the execution side
+    /// - Hovering a mark shows only the exact execution-price chevron
+    /// - Clicking a mark shows the connection line plus the exact-price chevrons
+    /// - Different roles (entry, scale_in, scale_out, exit) have visual distinction
+    /// - Optional label rendering for custom text
+    ///
+    /// Returns the positions of rendered marks for hit-testing.
+    pub fn render_execution_marks(
+        &self,
+        execution_marks: &crate::core::execution_marks::ExecutionMarkManager,
+        bars: &BarArray,
+        viewport: &Viewport,
+        style: &ChartStyle,
+        show_text: bool,
+        hovered_execution_mark_id: Option<&str>,
+        selected_execution_mark_id: Option<&str>,
+        pane_css_w: f64,
+        pane_css_h: f64,
+    ) -> Vec<ExecutionMarkHitArea> {
+        use crate::core::execution_marks::ExecutionSide;
+
+        let dpr = self.dpr;
+        let pane_pw = pane_css_w * dpr;
+        let pane_ph = pane_css_h * dpr;
+
+        if bars.is_empty() || execution_marks.is_empty() {
+            return Vec::new();
+        }
+
+        let bar_count = bars.len();
+        let start_idx = (viewport.start_bar.floor() as usize).min(bar_count.saturating_sub(1));
+        let end_idx = (viewport.end_bar.ceil() as usize).min(bar_count.saturating_sub(1));
+
+        // Get visible execution marks
+        let visible_marks = execution_marks.in_bar_range(start_idx, end_idx);
+        if visible_marks.is_empty() {
+            return Vec::new();
+        }
+
+        // Calculate bar spacing
+        let visible_bars = (viewport.end_bar - viewport.start_bar).max(1.0);
+        let bar_spacing_css = pane_css_w / visible_bars;
+
+        // Primary execution arrows follow the approved trading markup palette.
+        let buy_color: [f32; 4] = [41.0 / 255.0, 98.0 / 255.0, 1.0, 1.0]; // #2962FF
+        let sell_color: [f32; 4] = [1.0, 74.0 / 255.0, 104.0 / 255.0, 1.0]; // #FF4A68
+
+        struct ExecutionMarkDraw<'a> {
+            mark: &'a crate::core::execution_marks::ExecutionMark,
+            x_phys: f64,
+            arrow_y_phys: f64, // Primary arrow position near candle high/low
+            price_y_phys: f64, // Exact execution price for hover locator
+            color: [f32; 4],
+            size: f64,
+            hovered: bool,
+        }
+
+        let mut to_draw: Vec<ExecutionMarkDraw> = Vec::new();
+        let mut hit_areas: Vec<ExecutionMarkHitArea> = Vec::new();
+
+        // Arrow size
+        let arrow_size = 9.0 * dpr;
+        let arrow_gap_css = 8.0;
+
+        for mark in visible_marks {
+            let Some(bar_idx) = mark.resolved_bar_index else {
+                continue;
+            };
+
+            if bar_idx >= bar_count {
+                continue;
+            }
+
+            // Calculate X position (center of bar)
+            let bar_offset = bar_idx as f64 - viewport.start_bar;
+            let x_css = bar_offset * bar_spacing_css + bar_spacing_css * 0.5;
+            let x_phys = x_css * dpr;
+
+            if x_phys < 0.0 || x_phys > pane_pw {
+                continue;
+            }
+
+            // Get candle high/low for this bar
+            let candle_high = bars.high(bar_idx) as f64;
+            let candle_low = bars.low(bar_idx) as f64;
+
+            // Position arrow at candle high/low (not at execution price)
+            let arrow_y_css = match mark.side {
+                ExecutionSide::Buy => {
+                    // Buy arrow below the candle low
+                    let low_y = viewport.price_to_css_y(candle_low, pane_css_h);
+                    low_y + arrow_gap_css
+                }
+                ExecutionSide::Sell => {
+                    // Sell arrow above the candle high
+                    let high_y = viewport.price_to_css_y(candle_high, pane_css_h);
+                    high_y - arrow_gap_css
+                }
+            };
+
+            let arrow_y_phys = arrow_y_css * dpr;
+            let price_y_phys = viewport.price_to_css_y(mark.price, pane_css_h) * dpr;
+
+            if arrow_y_phys < 0.0 || arrow_y_phys > pane_ph {
+                continue;
+            }
+
+            // Execution visuals should track actual trade side, not role metadata.
+            let color = mark.color.unwrap_or_else(|| match mark.side {
+                ExecutionSide::Buy => buy_color,
+                ExecutionSide::Sell => sell_color,
+            });
+
+            // Record hit area for interaction
+            hit_areas.push(ExecutionMarkHitArea {
+                id: mark.id.clone(),
+                x_css,
+                y_css: arrow_y_css,
+                radius_css: arrow_size / dpr + 5.0,
+            });
+
+            to_draw.push(ExecutionMarkDraw {
+                mark,
+                x_phys,
+                arrow_y_phys,
+                price_y_phys,
+                color,
+                size: arrow_size,
+                hovered: hovered_execution_mark_id == Some(mark.id.as_str()),
+            });
+        }
+
+        // Calculate price step for formatting
+        let price_range = (viewport.price_max - viewport.price_min).abs();
+        let price_step = if price_range > 0.0 {
+            let base_step = price_range / 100.0;
+            let log_step = base_step.log10().floor();
+            10.0_f64.powf(log_step)
+        } else {
+            0.01
+        };
+
+        // Font setup
+        let font_size = (style.font_size as f64 * 0.8) * dpr;
+        let font = format!("{}px {}", font_size, style.font_family);
+        let background_luminance = 0.2126 * style.bg_color[0] as f64
+            + 0.7152 * style.bg_color[1] as f64
+            + 0.0722 * style.bg_color[2] as f64;
+        let execution_text_color = if background_luminance < 0.5 {
+            "#F7F7F7".to_string()
+        } else {
+            rgba(&style.axis_text_color)
+        };
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Draw each execution mark
+        // ═══════════════════════════════════════════════════════════════════
+        for m in &to_draw {
+            let color_str = rgba(&m.color);
+
+            // Primary execution marker: true arrow near the candle.
+            self.draw_execution_arrow(
+                m.x_phys,
+                m.arrow_y_phys,
+                m.size,
+                matches!(m.mark.side, ExecutionSide::Buy),
+                &color_str,
+            );
+
+            // Hover should reveal only the precise execution location, without
+            // the selected-trade connection line. Once a mark is selected, the
+            // connection overlay owns the chevron rendering.
+            if m.hovered && selected_execution_mark_id.is_none() {
+                self.draw_execution_price_chevron(
+                    m.x_phys,
+                    m.price_y_phys,
+                    15.0 * dpr,
+                    matches!(m.mark.side, ExecutionSide::Buy),
+                    &color_str,
+                );
+            }
+
+            if show_text {
+                // Keep the rendered label side-only so the chart stays visually
+                // unambiguous even when richer execution-role metadata exists.
+                let display_label = match m.mark.side {
+                    ExecutionSide::Buy => "BUY",
+                    ExecutionSide::Sell => "SELL",
+                };
+
+                // Format: "Label\nQty @ Price"
+                let price_text = format_price(m.mark.price, price_step);
+                let qty_text = if m.mark.quantity > 0.0 {
+                    format!("{} @ {}", format_qty(m.mark.quantity), price_text)
+                } else {
+                    format!("@ {}", price_text)
+                };
+
+                // Draw text labels (no background, just text like in reference)
+                self.ctx.set_font(&font);
+                self.ctx.set_fill_style_str(&execution_text_color);
+                self.ctx.set_text_align("center");
+
+                let line_height = font_size * 1.2;
+
+                match m.mark.side {
+                    ExecutionSide::Buy => {
+                        // Text below the arrow
+                        self.ctx.set_text_baseline("top");
+                        let text_y = m.arrow_y_phys + (m.size * 2.35) + 3.0 * dpr;
+                        let _ = self.ctx.fill_text(display_label, m.x_phys, text_y);
+                        let _ = self
+                            .ctx
+                            .fill_text(&qty_text, m.x_phys, text_y + line_height);
+                    }
+                    ExecutionSide::Sell => {
+                        // Text above the arrow
+                        self.ctx.set_text_baseline("bottom");
+                        let text_y = m.arrow_y_phys - (m.size * 2.35) - 3.0 * dpr;
+                        let _ = self.ctx.fill_text(&qty_text, m.x_phys, text_y);
+                        let _ = self
+                            .ctx
+                            .fill_text(display_label, m.x_phys, text_y - line_height);
+                    }
+                }
+            }
+        }
+
+        hit_areas
+    }
+
+    /// Render the connection line between entry and exit marks when selected
+    pub fn render_execution_connection(
+        &self,
+        execution_marks: &crate::core::execution_marks::ExecutionMarkManager,
+        selected_mark_id: Option<&str>,
+        show_connection_line: bool,
+        _bars: &BarArray,
+        viewport: &Viewport,
+        _style: &ChartStyle,
+        pane_css_w: f64,
+        pane_css_h: f64,
+    ) {
+        use crate::core::execution_marks::ExecutionRole;
+
+        let Some(selected_id) = selected_mark_id else {
+            return;
+        };
+
+        let Some(selected_mark) = execution_marks.get(selected_id) else {
+            return;
+        };
+
+        // Get all marks in the same group
+        let Some(ref group_id) = selected_mark.group_id else {
+            return;
+        };
+
+        let group_marks = execution_marks.by_group(group_id);
+        if group_marks.len() < 2 {
+            return;
+        }
+
+        // Find entry and exit marks
+        let entry_mark = group_marks.iter().find(|m| m.role == ExecutionRole::Entry);
+        let exit_mark = group_marks.iter().find(|m| m.role == ExecutionRole::Exit);
+
+        let (entry, exit) = match (entry_mark, exit_mark) {
+            (Some(e), Some(x)) => (e, x),
+            _ => return,
+        };
+
+        // Both marks need resolved bar indices
+        let (Some(entry_bar), Some(exit_bar)) = (entry.resolved_bar_index, exit.resolved_bar_index)
+        else {
+            return;
+        };
+
+        let dpr = self.dpr;
+        let visible_bars = (viewport.end_bar - viewport.start_bar).max(1.0);
+        let bar_spacing_css = pane_css_w / visible_bars;
+
+        // Calculate positions at the execution prices
+        let entry_x = (entry_bar as f64 - viewport.start_bar + 0.5) * bar_spacing_css * dpr;
+        let entry_y = viewport.price_to_css_y(entry.price, pane_css_h) * dpr;
+
+        let exit_x = (exit_bar as f64 - viewport.start_bar + 0.5) * bar_spacing_css * dpr;
+        let exit_y = viewport.price_to_css_y(exit.price, pane_css_h) * dpr;
+
+        // Colors for entry/exit markers match the execution palette unless overridden.
+        let buy_color = [41.0 / 255.0, 98.0 / 255.0, 1.0, 1.0];
+        let sell_color = [1.0, 74.0 / 255.0, 104.0 / 255.0, 1.0];
+        let entry_color = entry.color.unwrap_or(match entry.side {
+            crate::core::execution_marks::ExecutionSide::Buy => buy_color,
+            crate::core::execution_marks::ExecutionSide::Sell => sell_color,
+        });
+        let exit_color = exit.color.unwrap_or(match exit.side {
+            crate::core::execution_marks::ExecutionSide::Buy => buy_color,
+            crate::core::execution_marks::ExecutionSide::Sell => sell_color,
+        });
+
+        // Selected-trade line marker size
+        let chevron_size = 13.0 * dpr;
+
+        self.ctx.save();
+
+        if show_connection_line {
+            // ═══════════════════════════════════════════════════════════════════
+            // Draw dotted connection line
+            // ═══════════════════════════════════════════════════════════════════
+            self.ctx.set_stroke_style_str("rgba(100, 100, 100, 0.55)");
+            self.ctx.set_line_width((0.9 * dpr).max(0.8));
+
+            // Set dash pattern
+            let dash_array = js_sys::Array::new();
+            dash_array.push(&wasm_bindgen::JsValue::from(4.0 * dpr));
+            dash_array.push(&wasm_bindgen::JsValue::from(3.0 * dpr));
+            let _ = self.ctx.set_line_dash(&dash_array);
+
+            self.ctx.begin_path();
+            self.ctx.move_to(entry_x, entry_y);
+            self.ctx.line_to(exit_x, exit_y);
+            self.ctx.stroke();
+        }
+
+        // Clear dash for solid execution markers
+        let _ = self.ctx.set_line_dash(&js_sys::Array::new());
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Draw entry marker at the exact execution price.
+        // ═══════════════════════════════════════════════════════════════════
+        self.draw_execution_price_chevron(
+            entry_x,
+            entry_y,
+            chevron_size,
+            matches!(entry.side, crate::core::execution_marks::ExecutionSide::Buy),
+            &rgba(&entry_color),
+        );
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Draw exit marker at the exact execution price.
+        // ═══════════════════════════════════════════════════════════════════
+        self.draw_execution_price_chevron(
+            exit_x,
+            exit_y,
+            chevron_size,
+            matches!(exit.side, crate::core::execution_marks::ExecutionSide::Buy),
+            &rgba(&exit_color),
+        );
+
+        self.ctx.restore();
+    }
+
+    /// Draw the primary execution marker near the candle.
+    ///
+    /// This is intentionally a true vertical arrow instead of a chevron so
+    /// traders can distinguish the side/intent marker from the precise fill
+    /// locator drawn at the execution price itself.
+    fn draw_execution_arrow(
+        &self,
+        x: f64,
+        center_y: f64,
+        size: f64,
+        points_up: bool,
+        color: &str,
+    ) {
+        self.ctx.save();
+        self.ctx.set_line_join("miter");
+
+        let x = x.round();
+        let center_y = center_y.round();
+        let scale = size / 8.0;
+        let outline_width = (0.24 * self.dpr).clamp(0.22, 0.4);
+        let outline_color = "rgba(9, 12, 18, 0.42)";
+
+        let trace_arrow = || {
+            self.ctx.begin_path();
+            if points_up {
+                self.ctx.move_to(x, center_y);
+                self.ctx.line_to(x + 6.0 * scale, center_y + 8.0 * scale);
+                self.ctx.line_to(x + 2.0 * scale, center_y + 8.0 * scale);
+                self.ctx.line_to(x + 2.0 * scale, center_y + 18.0 * scale);
+                self.ctx.line_to(x - 2.0 * scale, center_y + 18.0 * scale);
+                self.ctx.line_to(x - 2.0 * scale, center_y + 8.0 * scale);
+                self.ctx.line_to(x - 6.0 * scale, center_y + 8.0 * scale);
+            } else {
+                self.ctx.move_to(x - 2.0 * scale, center_y - 18.0 * scale);
+                self.ctx.line_to(x + 2.0 * scale, center_y - 18.0 * scale);
+                self.ctx.line_to(x + 2.0 * scale, center_y - 8.0 * scale);
+                self.ctx.line_to(x + 6.0 * scale, center_y - 8.0 * scale);
+                self.ctx.line_to(x, center_y);
+                self.ctx.line_to(x - 6.0 * scale, center_y - 8.0 * scale);
+                self.ctx.line_to(x - 2.0 * scale, center_y - 8.0 * scale);
+            }
+            self.ctx.close_path();
+        };
+
+        trace_arrow();
+        self.ctx.set_fill_style_str(color);
+        self.ctx.fill();
+
+        trace_arrow();
+        self.ctx.set_line_width(outline_width);
+        self.ctx.set_stroke_style_str(outline_color);
+        self.ctx.stroke();
+
+        self.ctx.restore();
+    }
+
+    /// Draw the exact execution-price locator.
+    ///
+    /// This uses the exact SVG point geometry supplied for buy/sell chevrons.
+    /// The locator is only rendered on the selected connection-line overlay.
+    fn draw_execution_price_chevron(
+        &self,
+        tip_x: f64,
+        y: f64,
+        size: f64,
+        points_right: bool,
+        color: &str,
+    ) {
+        self.ctx.save();
+        self.ctx.set_line_join("miter");
+
+        let tip_x = tip_x.round();
+        let y = y.round();
+        let scale = size / 14.0;
+        let outline_width = (0.22 * self.dpr).clamp(0.2, 0.38);
+        let outline_color = "rgba(9, 12, 18, 0.42)";
+        let trace_chevron = || {
+            self.ctx.begin_path();
+            if points_right {
+                self.ctx.move_to(tip_x - 8.0 * scale, y - 8.0 * scale);
+                self.ctx.line_to(tip_x, y);
+                self.ctx.line_to(tip_x - 8.0 * scale, y + 8.0 * scale);
+                self.ctx.line_to(tip_x - 10.0 * scale, y + 6.0 * scale);
+                self.ctx.line_to(tip_x - 4.0 * scale, y);
+                self.ctx.line_to(tip_x - 10.0 * scale, y - 6.0 * scale);
+            } else {
+                self.ctx.move_to(tip_x + 8.0 * scale, y - 8.0 * scale);
+                self.ctx.line_to(tip_x + 10.0 * scale, y - 6.0 * scale);
+                self.ctx.line_to(tip_x + 4.0 * scale, y);
+                self.ctx.line_to(tip_x + 10.0 * scale, y + 6.0 * scale);
+                self.ctx.line_to(tip_x + 8.0 * scale, y + 8.0 * scale);
+                self.ctx.line_to(tip_x, y);
+            }
+            self.ctx.close_path();
+        };
+
+        trace_chevron();
+        self.ctx.set_fill_style_str(color);
+        self.ctx.fill();
+
+        trace_chevron();
+        self.ctx.set_line_width(outline_width);
+        self.ctx.set_stroke_style_str(outline_color);
+        self.ctx.stroke();
+
+        self.ctx.restore();
+    }
+
     /// Render persistent indicator labels emitted as `DrawInstruction::DrawLabel`.
     ///
     /// Labels are drawn on the overlay canvas in physical pixels.
@@ -1194,4 +1680,3 @@ impl OverlayRenderer {
         }
     }
 }
-

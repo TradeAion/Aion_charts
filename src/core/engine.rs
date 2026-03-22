@@ -18,6 +18,7 @@ use crate::core::data::{Bar, BarArray};
 use crate::core::drawings::types::DrawingGeometry;
 use crate::core::drawings::DrawingManager;
 use crate::core::events::EventBus;
+use crate::core::execution_marks::ExecutionMarkManager;
 use crate::core::footprint::{FootprintBar, FootprintData, FootprintDisplayMode, FootprintOptions};
 use crate::core::indicators::IndicatorManager;
 use crate::core::markers::MarkerManager;
@@ -98,6 +99,7 @@ pub struct ChartEngine {
     pub studies: StudyManager,
     pub price_lines: PriceLineManager,
     pub markers: MarkerManager,
+    pub execution_marks: ExecutionMarkManager,
     pub indicators: IndicatorManager,
     pub dpr: f64,
     /// Horizontal pixel ratio: exact `bitmapWidth / cssWidth`.
@@ -128,6 +130,10 @@ pub struct ChartEngine {
     hidden_volume_default_margins_applied: bool,
     /// Event bus — collects events for the platform layer to drain and forward.
     pub event_bus: EventBus,
+    /// Whether execution mark text labels are rendered.
+    execution_mark_text_visible: bool,
+    /// Whether the selected execution connection line is rendered.
+    execution_mark_connection_line_visible: bool,
 }
 
 impl ChartEngine {
@@ -235,6 +241,7 @@ impl ChartEngine {
         let mut studies = StudyManager::new();
         let price_lines = PriceLineManager::new();
         let markers = MarkerManager::new();
+        let execution_marks = ExecutionMarkManager::new();
         let indicators = IndicatorManager::default();
 
         // Register built-in study calculators
@@ -251,6 +258,7 @@ impl ChartEngine {
             studies,
             price_lines,
             markers,
+            execution_marks,
             indicators,
             dpr,
             h_pixel_ratio: dpr,
@@ -264,6 +272,8 @@ impl ChartEngine {
             price_scale_margins_customized: false,
             hidden_volume_default_margins_applied: false,
             event_bus: EventBus::new(),
+            execution_mark_text_visible: true,
+            execution_mark_connection_line_visible: true,
         }
     }
 
@@ -324,6 +334,22 @@ impl ChartEngine {
 
     pub fn user_volume_visible(&self) -> bool {
         self.user_volume_visible
+    }
+
+    pub fn set_execution_mark_text_visible(&mut self, visible: bool) {
+        self.execution_mark_text_visible = visible;
+    }
+
+    pub fn execution_mark_text_visible(&self) -> bool {
+        self.execution_mark_text_visible
+    }
+
+    pub fn set_execution_mark_connection_line_visible(&mut self, visible: bool) {
+        self.execution_mark_connection_line_visible = visible;
+    }
+
+    pub fn execution_mark_connection_line_visible(&self) -> bool {
+        self.execution_mark_connection_line_visible
     }
 
     pub fn set_price_scale_margins(&mut self, top: f64, bottom: f64) {
@@ -447,10 +473,7 @@ impl ChartEngine {
             MainViewportPreset::DefaultRecent => {
                 let span = self.default_recent_visible_span();
                 if self.main_chart_type == MainChartType::Footprint {
-                    self.apply_footprint_time_range(
-                        span,
-                        FootprintTimeRangeAnchor::LatestWithGap,
-                    );
+                    self.apply_footprint_time_range(span, FootprintTimeRangeAnchor::LatestWithGap);
                 } else {
                     let gap = Self::default_recent_right_gap(span);
                     let visible_data = (span - gap).max(1.0).min(data_len);
@@ -534,6 +557,7 @@ impl ChartEngine {
         self.drawings.stamp_timestamps(&self.bars);
 
         self.bars.set(bars);
+        self.execution_marks.resolve_bar_indices(&self.bars);
 
         // Remap drawing positions to the new bar data using stored timestamps.
         self.drawings.remap_to_new_data(&self.bars);
@@ -1165,10 +1189,7 @@ impl ChartEngine {
     }
 
     /// Target full-range that keeps default footprint rows below a max cell height.
-    fn footprint_target_full_range_for_max_cell_height(
-        &self,
-        target_cell_css: f64,
-    ) -> Option<f64> {
+    fn footprint_target_full_range_for_max_cell_height(&self, target_cell_css: f64) -> Option<f64> {
         let pane_h = self.viewport.height as f64;
         if pane_h <= 1.0 {
             return None;
@@ -1251,8 +1272,7 @@ impl ChartEngine {
         // cells — at that point the footprint is truly unusable.
         const MAX_AGG_FACTOR: f64 = 50.0;
         let hard_min_cell_px = 2.0 * self.v_pixel_ratio.max(1.0);
-        let max_range_for_hard_clamp =
-            tick_internal * MAX_AGG_FACTOR * pane_h / hard_min_cell_px;
+        let max_range_for_hard_clamp = tick_internal * MAX_AGG_FACTOR * pane_h / hard_min_cell_px;
         if !max_range_for_hard_clamp.is_finite() || max_range_for_hard_clamp <= 0.0 {
             return;
         }
@@ -1316,6 +1336,7 @@ impl ChartEngine {
     pub fn append_bar(&mut self, bar: Bar) -> Result<(), String> {
         Self::validate_append_timestamp("append_bar", self.last_main_timestamp(), bar.timestamp)?;
         self.bars.append(bar);
+        self.execution_marks.resolve_bar_indices(&self.bars);
 
         // Update studies with new data
         self.studies.update_studies(&self.bars);
@@ -1358,6 +1379,7 @@ impl ChartEngine {
         let len = self.bars.len();
 
         self.bars.update_last(bar);
+        self.execution_marks.resolve_bar_indices(&self.bars);
 
         // Recalculate studies for the last bar only
         // Reset last_calculated_index to len-1 so only the last bar is recalculated
@@ -1415,8 +1437,9 @@ impl ChartEngine {
 
         // Pre-generate footprint geometry so both backends get identical output
         // and text labels are available for the overlay Canvas2D layer.
-        let (footprint_base_rects, footprint_gradient_rects, footprint_overlay_rects) =
-            if self.main_chart_type == MainChartType::Footprint
+        let (footprint_base_rects, footprint_gradient_rects, footprint_overlay_rects) = if self
+            .main_chart_type
+            == MainChartType::Footprint
             && !self.footprint_data.is_empty()
         {
             let pane_w = self.viewport.width as f64;
@@ -1508,7 +1531,11 @@ mod tests {
         let expected_start = data_len - visible_data;
         let expected_end = expected_start + span;
 
-        assert_close(engine.viewport.start_bar, expected_start, "default recent start");
+        assert_close(
+            engine.viewport.start_bar,
+            expected_start,
+            "default recent start",
+        );
         assert_close(engine.viewport.end_bar, expected_end, "default recent end");
     }
 
@@ -1518,8 +1545,16 @@ mod tests {
         let expected_end = engine.bars.len() as f64 + gap;
         let expected_start = expected_end - span;
 
-        assert_close(engine.viewport.start_bar, expected_start, "footprint latest start");
-        assert_close(engine.viewport.end_bar, expected_end, "footprint latest end");
+        assert_close(
+            engine.viewport.start_bar,
+            expected_start,
+            "footprint latest start",
+        );
+        assert_close(
+            engine.viewport.end_bar,
+            expected_end,
+            "footprint latest end",
+        );
     }
 
     fn assert_footprint_span_is_readable(engine: &ChartEngine) {
@@ -1641,7 +1676,8 @@ mod tests {
         let range = engine.viewport.price_max - engine.viewport.price_min;
         let max_agg_factor = 50.0;
         let hard_min_cell_px = 2.0; // matches engine constant
-        let max_allowed_range = 0.25 * max_agg_factor * (engine.viewport.height as f64) / hard_min_cell_px;
+        let max_allowed_range =
+            0.25 * max_agg_factor * (engine.viewport.height as f64) / hard_min_cell_px;
         assert!(
             range <= max_allowed_range + 1e-6,
             "range {range} should be <= {max_allowed_range} (hard outer bound with aggregation)"
@@ -1682,8 +1718,8 @@ mod tests {
 
         let raw_required = engine.footprint_required_range_with_margins().unwrap();
         let actual_range = engine.viewport.price_max - engine.viewport.price_min;
-        let ohlc_full_range =
-            (110.0_f64 - 90.0_f64) / (1.0 - engine.viewport.scale_margin_top - engine.viewport.scale_margin_bottom);
+        let ohlc_full_range = (110.0_f64 - 90.0_f64)
+            / (1.0 - engine.viewport.scale_margin_top - engine.viewport.scale_margin_bottom);
 
         assert!(
             actual_range <= raw_required * 1.5 + 1e-6,
@@ -2092,7 +2128,11 @@ mod tests {
         engine.set_main_chart_type(MainChartType::Footprint);
 
         let after_mid = (engine.viewport.start_bar + engine.viewport.end_bar) * 0.5;
-        assert_close(after_mid, before_mid, "mid-history midpoint should be preserved");
+        assert_close(
+            after_mid,
+            before_mid,
+            "mid-history midpoint should be preserved",
+        );
         assert_footprint_span_is_readable(&engine);
         assert!(
             engine.viewport.end_bar < engine.bars.len() as f64 - 1.0,

@@ -12,8 +12,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use raycore::{
-    Bar, ChartEngine, HitZone, InteractionHandler, MainChartType, OverlayRenderer,
-    PriceAxisRenderer, TimeAxisRenderer,
+    Bar, ChartEngine, ExecutionMarkHitArea, HitZone, InteractionHandler, MainChartType,
+    OverlayRenderer, PriceAxisRenderer, TimeAxisRenderer,
 };
 
 use crate::canvas_manager::WidgetLayout;
@@ -201,6 +201,12 @@ pub struct ChartInner {
     pub replay_tick_accum_bars: f64,
     /// Symbol name (e.g. "BTCUSD") — used by the asset-name chip overlay.
     pub symbol: String,
+    /// Screen-space hit areas for the most recently rendered execution marks.
+    pub execution_mark_hit_areas: Vec<ExecutionMarkHitArea>,
+    /// Last hovered execution mark ID so hover enter/leave only emits on change.
+    pub hovered_execution_mark_id: Option<String>,
+    /// Currently selected/clicked execution mark ID (for showing connection line).
+    pub selected_execution_mark_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,6 +244,76 @@ impl ReplayEdgeBehavior {
 /// Helper methods that destructure `self` to satisfy the borrow checker.
 /// Each method borrows `interaction` and `engine` fields separately.
 impl ChartInner {
+    fn hovered_execution_mark_id_at(&self, x_css: f64, y_css: f64) -> Option<String> {
+        self.execution_mark_hit_areas
+            .iter()
+            .rev()
+            .find(|hit| hit.contains(x_css, y_css))
+            .map(|hit| hit.id.clone())
+    }
+
+    fn emit_execution_mark_hover_event(&mut self, mark_id: Option<&str>) {
+        if self.hovered_execution_mark_id.as_deref() == mark_id {
+            return;
+        }
+
+        self.hovered_execution_mark_id = mark_id.map(str::to_string);
+
+        let event = if let Some(id) = mark_id {
+            if let Some(mark) = self.engine.execution_marks.get(id) {
+                raycore::ChartEvent::ExecutionMarkHover {
+                    id: Some(mark.id.clone()),
+                    timestamp_ms: Some(mark.timestamp_ms),
+                    price: Some(mark.price),
+                    side: Some(mark.side.as_str().to_string()),
+                    role: Some(mark.role.as_str().to_string()),
+                    quantity: Some(mark.quantity),
+                    group_id: mark.group_id.clone(),
+                }
+            } else {
+                raycore::ChartEvent::ExecutionMarkHover {
+                    id: None,
+                    timestamp_ms: None,
+                    price: None,
+                    side: None,
+                    role: None,
+                    quantity: None,
+                    group_id: None,
+                }
+            }
+        } else {
+            raycore::ChartEvent::ExecutionMarkHover {
+                id: None,
+                timestamp_ms: None,
+                price: None,
+                side: None,
+                role: None,
+                quantity: None,
+                group_id: None,
+            }
+        };
+
+        self.engine.event_bus.emit(event);
+    }
+
+    fn emit_execution_mark_click_event(&mut self, mark_id: &str) {
+        let Some(mark) = self.engine.execution_marks.get(mark_id) else {
+            return;
+        };
+
+        self.engine
+            .event_bus
+            .emit(raycore::ChartEvent::ExecutionMarkClick {
+                id: mark.id.clone(),
+                timestamp_ms: mark.timestamp_ms,
+                price: mark.price,
+                side: mark.side.as_str().to_string(),
+                role: mark.role.as_str().to_string(),
+                quantity: mark.quantity,
+                group_id: mark.group_id.clone(),
+            });
+    }
+
     /// Resolve a Ctrl+OHLC snap target at the current pointer position.
     ///
     /// Uses the nearest valid bar index (clamped to data bounds) so snapping
@@ -649,15 +725,12 @@ impl ChartInner {
     }
 
     pub fn on_pointer_leave(&mut self, zone: HitZone) {
-        let Self {
-            interaction,
-            engine,
-            ..
-        } = self;
-        interaction.pointer_leave(zone, &mut engine.crosshair);
+        self.interaction
+            .pointer_leave(zone, &mut self.engine.crosshair);
         if zone == HitZone::Chart {
-            engine.drawings.clear_hovered();
-            interaction.set_drawing_cursor(None);
+            self.emit_execution_mark_hover_event(None);
+            self.engine.drawings.clear_hovered();
+            self.interaction.set_drawing_cursor(None);
         }
     }
 
@@ -793,6 +866,20 @@ impl ChartInner {
             } else {
                 drawings.clear_hovered();
             }
+        }
+
+        let can_hover_execution_marks = !is_drawing_drag
+            && !self.engine.drawings.is_creating()
+            && self.engine.drawings.active_tool == raycore::DrawingTool::None
+            && !(self.replay_active && self.replay_trim_edit_mode);
+        let hovered_execution_mark_id = if can_hover_execution_marks {
+            self.hovered_execution_mark_id_at(x, y)
+        } else {
+            None
+        };
+        self.emit_execution_mark_hover_event(hovered_execution_mark_id.as_deref());
+        if hover_cursor.is_none() && hovered_execution_mark_id.is_some() {
+            hover_cursor = Some("pointer");
         }
 
         // Update hover cursor only when not in a drawing drag
@@ -1043,6 +1130,19 @@ impl ChartInner {
                 bar_index,
                 price,
             });
+
+            if let Some(mark_id) = self.hovered_execution_mark_id_at(click_x, click_y) {
+                self.emit_execution_mark_click_event(&mark_id);
+                // Toggle selection - if clicking the same mark, deselect it
+                if self.selected_execution_mark_id.as_deref() == Some(&mark_id) {
+                    self.selected_execution_mark_id = None;
+                } else {
+                    self.selected_execution_mark_id = Some(mark_id);
+                }
+            } else {
+                // Clicked elsewhere, deselect any selected execution mark
+                self.selected_execution_mark_id = None;
+            }
         }
     }
 

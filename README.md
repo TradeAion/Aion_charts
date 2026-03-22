@@ -36,9 +36,10 @@ chart.set_data_arrays(opens, highs, lows, closes, volumes, timestamps);
 - **8 built-in studies**: SMA, EMA, RSI, MACD, Bollinger Bands, Stochastic, ATR, VWAP
 - **Overlay series**: Line, Area, Histogram, Bar, Baseline
 - **Series markers**: Arrows, circles, squares at bar indices
+- **Execution marks**: Trade visualization (entry/exit/scale-in/scale-out) with timestamp-based placement
 - **Price lines**: Horizontal price level annotations
 - **Multi-pane**: Indicator sub-panes, synchronized chart groups, split workspaces
-- **Typed event system**: crosshairMove, click, visibleRangeChange, drawing events
+- **Typed event system**: crosshairMove, click, visibleRangeChange, drawing events, execution mark events
 - **Theme system**: Dark/light presets, CSS variable integration
 - **Framework-agnostic**: Works with React, Vue, Svelte, vanilla JS
 
@@ -75,6 +76,8 @@ wasm-pack build --target web --out-dir pkg wasm
 python serve.py
 # Open http://localhost:8080/demo/
 ```
+
+Use the `Exec` button in the demo toolbar to toggle sample execution marks on the time-based chart modes.
 
 ---
 

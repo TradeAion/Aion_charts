@@ -197,6 +197,16 @@ pub use crate::core::markers::{
     MarkerManager, MarkerPosition, MarkerShape, SeriesMarker, SeriesMarkers,
 };
 
+/// Execution marks (trade executions).
+pub use crate::core::execution_marks::{
+    bar_index_to_timestamp, timestamp_to_bar_index, ExecutionMark, ExecutionMarkManager,
+    ExecutionRole, ExecutionSide,
+};
+
+/// Screen-space hit areas for execution mark interaction.
+#[cfg(target_arch = "wasm32")]
+pub use crate::core::renderer::overlay::ExecutionMarkHitArea;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Re-exports: Event System
 // ═══════════════════════════════════════════════════════════════════════════════

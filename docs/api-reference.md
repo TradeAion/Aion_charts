@@ -430,6 +430,222 @@ Add a marker (arrow, circle, square) at a specific bar.
 
 ---
 
+## Execution Marks
+
+First-class trade execution visualization with timestamp-based placement. Unlike series markers, execution marks are placed by timestamp (not bar index) and the engine resolves them to bars internally.
+
+### `set_execution_marks(ids, mark_data)`
+
+Bulk set/replace all execution marks from flat arrays.
+
+```ts
+set_execution_marks(ids: string[], mark_data: Float64Array | number[]): void
+```
+
+Each mark uses a 5-value stride:
+
+- `timestamp_ms`
+- `price`
+- `quantity`
+- `side_idx` (`0 = buy`, `1 = sell`)
+- `role_idx` (`0 = entry`, `1 = scale_in`, `2 = scale_out`, `3 = exit`)
+
+### `set_execution_marks_json(json)`
+
+Bulk set/replace all execution marks from JSON.
+
+```ts
+set_execution_marks_json(json: string): void
+```
+
+**JSON format:**
+
+```json
+[
+  {
+    "id": "trade-001",
+    "timestamp_ms": 1710000000000,
+    "price": 42150.50,
+    "quantity": 0.5,
+    "side": "buy",
+    "role": "entry",
+    "order_type": "market",
+    "realized_pnl": null,
+    "label": "Long Entry",
+    "color": [0, 255, 128, 255],
+    "group_id": "position-001"
+  },
+  {
+    "id": "trade-002",
+    "timestamp_ms": 1710003600000,
+    "price": 42500.00,
+    "quantity": 0.25,
+    "side": "sell",
+    "role": "scale_out",
+    "realized_pnl": 174.75
+  }
+]
+```
+
+**Required fields:**
+- `id` — Unique string identifier
+- `timestamp_ms` — Unix timestamp in milliseconds
+- `price` — Execution price
+- `quantity` — Trade quantity
+- `side` — `"buy"` or `"sell"`
+- `role` — `"entry"`, `"scale_in"`, `"scale_out"`, or `"exit"`
+
+**Optional fields:**
+- `order_type` — `"market"`, `"limit"`, `"stop"`, `"stop_limit"`
+- `realized_pnl` — Realized P&L for closing trades
+- `label` — Custom tooltip label
+- `color` — `[r, g, b, a]` array (0-255 each)
+- `group_id` — Group identifier for related trades (e.g., same position)
+
+### `clear_execution_marks()`
+
+Remove all execution marks from the chart.
+
+### `set_execution_mark_text_visible(visible)`
+
+Show or hide execution mark text labels without changing the marks themselves.
+
+```ts
+set_execution_mark_text_visible(visible: boolean): void
+get_execution_mark_text_visible(): boolean
+```
+
+### `set_execution_mark_connection_line_visible(visible)`
+
+Show or hide the selected execution connection line. When disabled, selected marks
+can still render their execution chevrons without the connecting dashed line.
+
+```ts
+set_execution_mark_connection_line_visible(visible: boolean): void
+get_execution_mark_connection_line_visible(): boolean
+```
+
+### `remove_execution_mark(id)`
+
+Remove a single execution mark by ID.
+
+```ts
+remove_execution_mark(id: string): boolean
+```
+
+Returns `true` if the mark was found and removed.
+
+### `get_execution_marks_json()`
+
+Get all execution marks as JSON string.
+
+```ts
+get_execution_marks_json(): string
+```
+
+### Visual Rendering
+
+Execution marks are rendered with visual distinction:
+
+- **Buy vs Sell**: Different arrow directions and default colors
+- **Hover**: Shows the exact execution-price chevron
+- **Selection**: Shows execution chevrons and, optionally, the connection line
+- **Text labels**: Can be toggled on or off dynamically
+- **Connection line**: Can be toggled on or off dynamically
+
+Custom colors override default styling when provided.
+
+### Example
+
+```ts
+// Set execution marks for a trade
+chart.set_execution_marks(JSON.stringify([
+  {
+    id: 'entry-1',
+    timestamp_ms: 1710000000000,
+    price: 42150.50,
+    quantity: 1.0,
+    side: 'buy',
+    role: 'entry',
+    group_id: 'position-1'
+  },
+  {
+    id: 'scale-out-1',
+    timestamp_ms: 1710007200000,
+    price: 42400.00,
+    quantity: 0.5,
+    side: 'sell',
+    role: 'scale_out',
+    realized_pnl: 124.75,
+    group_id: 'position-1'
+  },
+  {
+    id: 'exit-1',
+    timestamp_ms: 1710010800000,
+    price: 42300.00,
+    quantity: 0.5,
+    side: 'sell',
+    role: 'exit',
+    realized_pnl: 74.75,
+    group_id: 'position-1'
+  }
+]));
+
+// Listen for execution mark interactions
+chart.on('executionMarkClick', (event) => {
+  console.log('Clicked:', event.id, event.side, event.role);
+});
+
+chart.on('executionMarkHover', (event) => {
+  if (event.id) {
+    showTooltip(event);
+  } else {
+    hideTooltip();
+  }
+});
+
+// Clear all marks
+chart.clear_execution_marks();
+```
+
+---
+
+## Coordinate Helpers
+
+### `project_point(timestamp_ms, price)`
+
+Project a timestamp/price coordinate to canvas pixel coordinates.
+
+```ts
+project_point(timestamp_ms: number, price: number): { x: number; y: number; visible: boolean }
+```
+
+Returns:
+- `x`, `y` — Canvas pixel coordinates
+- `visible` — Whether the point is within the visible viewport
+
+### `timestamp_to_bar_index(timestamp_ms)`
+
+Convert a timestamp to a bar index.
+
+```ts
+timestamp_to_bar_index(timestamp_ms: number): number | null
+```
+
+Returns `null` if no bar matches the timestamp.
+
+### `bar_index_to_timestamp(bar_index)`
+
+Convert a bar index to a timestamp.
+
+```ts
+bar_index_to_timestamp(bar_index: number): number | null
+```
+
+Returns `null` if the bar index is out of range.
+
+---
+
 ## Events
 
 ### `on(event, callback)` / `off(event, callback)` / `once(event, callback)`
@@ -448,6 +664,8 @@ Subscribe to chart events:
 | `resize` | `{ width, height }` |
 | `drawingCreated` | `{ id, tool }` |
 | `drawingSelected` | `{ id }` |
+| `executionMarkClick` | `{ id, timestampMs, price, side, role, quantity, groupId }` |
+| `executionMarkHover` | `{ id, timestampMs, price, side, role, quantity, groupId }` (all fields nullable when unhovered) |
 | `rendererFallback` | `{ requested, active, reason }` |
 | `error` | `{ message }` |
 

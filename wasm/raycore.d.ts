@@ -259,20 +259,58 @@ export interface ErrorEvent extends BaseChartEvent {
   message: string;
 }
 
+export interface ExecutionMarkClickEvent extends BaseChartEvent {
+  type: 'executionMarkClick';
+  /** Unique ID of the execution mark. */
+  id: string;
+  /** Unix timestamp (ms) of the execution. */
+  timestampMs: number;
+  /** Execution price. */
+  price: number;
+  /** Side: "buy" or "sell". */
+  side: 'buy' | 'sell';
+  /** Role: "entry", "scale_in", "scale_out", or "exit". */
+  role: 'entry' | 'scale_in' | 'scale_out' | 'exit';
+  /** Execution quantity. */
+  quantity: number;
+  /** Optional group ID for related fills. */
+  groupId: string | null;
+}
+
+export interface ExecutionMarkHoverEvent extends BaseChartEvent {
+  type: 'executionMarkHover';
+  /** Unique ID of the execution mark, or null when leaving. */
+  id: string | null;
+  /** Unix timestamp (ms) of the execution, if hovering. */
+  timestampMs: number | null;
+  /** Execution price, if hovering. */
+  price: number | null;
+  /** Side: "buy" or "sell", if hovering. */
+  side: 'buy' | 'sell' | null;
+  /** Role: "entry", "scale_in", "scale_out", or "exit", if hovering. */
+  role: 'entry' | 'scale_in' | 'scale_out' | 'exit' | null;
+  /** Execution quantity, if hovering. */
+  quantity: number | null;
+  /** Optional group ID, if hovering. */
+  groupId: string | null;
+}
+
 /** Map of event name → typed payload, used to type `on<K>()` overloads */
 export interface ChartEventMap {
-  crosshairMove:       CrosshairMoveEvent;
-  click:               ClickEvent;
-  visibleRangeChange:  VisibleRangeChangeEvent;
-  symbolChange:        SymbolChangeEvent;
-  intervalChange:      IntervalChangeEvent;
-  chartTypeChange:     ChartTypeChangeEvent;
-  priceScaleChange:    PriceScaleChangeEvent;
-  resize:              ResizeEvent;
-  rendererFallback:    RendererFallbackEvent;
-  drawingCreated:      DrawingCreatedEvent;
-  drawingSelected:     DrawingSelectedEvent;
-  error:               ErrorEvent;
+  crosshairMove:        CrosshairMoveEvent;
+  click:                ClickEvent;
+  visibleRangeChange:   VisibleRangeChangeEvent;
+  symbolChange:         SymbolChangeEvent;
+  intervalChange:       IntervalChangeEvent;
+  chartTypeChange:      ChartTypeChangeEvent;
+  priceScaleChange:     PriceScaleChangeEvent;
+  resize:               ResizeEvent;
+  rendererFallback:     RendererFallbackEvent;
+  drawingCreated:       DrawingCreatedEvent;
+  drawingSelected:      DrawingSelectedEvent;
+  error:                ErrorEvent;
+  executionMarkClick:   ExecutionMarkClickEvent;
+  executionMarkHover:   ExecutionMarkHoverEvent;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1239,6 +1277,176 @@ export declare class RayCore {
 
   /** Clear all markers for all series. */
   clear_all_markers(): void;
+
+  // ── Execution Marks ──────────────────────────────────────────────────────
+  //
+  // First-class execution mark support for trade visualization.
+  // Unlike generic markers, execution marks are timestamp-based (not bar-index-based)
+  // and designed specifically for trading workflows.
+
+  /**
+   * Add a single execution mark to the chart.
+   *
+   * @param id           — Unique identifier for this execution
+   * @param timestamp_ms — Unix timestamp in milliseconds when the execution occurred
+   * @param price        — Execution price
+   * @param quantity     — Execution quantity (positive)
+   * @param side         — `"buy"` or `"sell"`
+   * @param role         — `"entry"` | `"scale_in"` | `"scale_out"` | `"exit"`
+   *
+   * @example
+   * ```ts
+   * chart.add_execution_mark(
+   *   'exec-1',
+   *   1700000000000,
+   *   45000.50,
+   *   0.5,
+   *   'buy',
+   *   'entry'
+   * );
+   * ```
+   */
+  add_execution_mark(
+    id:           string,
+    timestamp_ms: bigint | number,
+    price:        number,
+    quantity:     number,
+    side:         'buy' | 'sell' | string,
+    role:         'entry' | 'scale_in' | 'scale_out' | 'exit' | string,
+  ): void;
+
+  /**
+   * Add an execution mark with all optional fields.
+   *
+   * @param id           — Unique identifier
+   * @param timestamp_ms — Unix timestamp in milliseconds
+   * @param price        — Execution price
+   * @param quantity     — Execution quantity
+   * @param side         — `"buy"` or `"sell"`
+   * @param role         — `"entry"` | `"scale_in"` | `"scale_out"` | `"exit"`
+   * @param order_type   — e.g., `"market"`, `"limit"`, `"stop"` (empty string for none)
+   * @param label        — Custom label text (empty string for default)
+   * @param group_id     — Group ID for related fills (empty string for none)
+   * @param color_*      — Custom color override RGBA (pass all zeros to use default)
+   * @param realized_pnl — Realized P&L (pass NaN for none)
+   */
+  add_execution_mark_full(
+    id:           string,
+    timestamp_ms: bigint | number,
+    price:        number,
+    quantity:     number,
+    side:         string,
+    role:         string,
+    order_type:   string,
+    label:        string,
+    group_id:     string,
+    color_r:      number,
+    color_g:      number,
+    color_b:      number,
+    color_a:      number,
+    realized_pnl: number,
+  ): void;
+
+  /**
+   * Remove an execution mark by ID.
+   * @returns `true` if found and removed.
+   */
+  remove_execution_mark(id: string): boolean;
+
+  /** Clear all execution marks. */
+  clear_execution_marks(): void;
+
+  /** Show or hide execution mark text labels. */
+  set_execution_mark_text_visible(visible: boolean): void;
+
+  /** Whether execution mark text labels are currently rendered. */
+  get_execution_mark_text_visible(): boolean;
+
+  /**
+   * Show or hide the selected execution connection line.
+   * Chevron locators remain available when a mark is selected.
+   */
+  set_execution_mark_connection_line_visible(visible: boolean): void;
+
+  /** Whether the selected execution connection line is currently rendered. */
+  get_execution_mark_connection_line_visible(): boolean;
+
+  /**
+   * Set multiple execution marks at once (replaces existing).
+   *
+   * @param ids       — Array of unique IDs (must match length of mark_data / 5)
+   * @param mark_data — Flat array with stride 5: `[timestamp_ms, price, quantity, side_idx, role_idx, ...]`
+   *                    where side_idx: 0=buy, 1=sell
+   *                    and role_idx: 0=entry, 1=scale_in, 2=scale_out, 3=exit
+   *
+   * @example
+   * ```ts
+   * chart.set_execution_marks(
+   *   ['exec-1', 'exec-2'],
+   *   new Float64Array([
+   *     1700000000000, 45000.50, 0.5, 0, 0,  // buy entry
+   *     1700001000000, 46000.00, 0.5, 1, 3,  // sell exit
+   *   ])
+   * );
+   * ```
+   */
+  set_execution_marks(ids: string[], mark_data: Float64Array | number[]): void;
+
+  /**
+   * Set execution marks from a JSON string.
+   *
+   * Expected format:
+   * ```json
+   * [
+   *   {
+   *     "id": "exec-1",
+   *     "timestamp_ms": 1234567890000,
+   *     "price": 100.5,
+   *     "quantity": 1.0,
+   *     "side": "buy",
+   *     "role": "entry",
+   *     "order_type": "market",
+   *     "label": "Entry Long",
+   *     "group_id": "trade-1",
+   *     "color": [0.2, 0.8, 0.4, 1.0],
+   *     "realized_pnl": 0.0
+   *   }
+   * ]
+   * ```
+   *
+   * @example
+   * ```ts
+   * chart.set_execution_marks_json(JSON.stringify([
+   *   { id: 'e1', timestamp_ms: Date.now(), price: 45000, quantity: 0.1, side: 'buy', role: 'entry' },
+   *   { id: 'e2', timestamp_ms: Date.now() + 60000, price: 46000, quantity: 0.1, side: 'sell', role: 'exit' },
+   * ]));
+   * ```
+   */
+  set_execution_marks_json(json: string): void;
+
+  /** Number of execution marks. */
+  execution_mark_count(): number;
+
+  /** Serialize all execution marks to JSON. */
+  get_execution_marks_json(): string;
+
+  /**
+   * Convert a timestamp (milliseconds) to a bar index.
+   * @returns The bar index, or -1 if the timestamp is before all bars.
+   */
+  timestamp_to_bar_index(timestamp_ms: bigint | number): number;
+
+  /**
+   * Convert a bar index to a timestamp (milliseconds).
+   * @returns The timestamp, or 0 if the bar index is out of bounds.
+   */
+  bar_index_to_timestamp(bar_index: number): bigint;
+
+  /**
+   * Project a timestamp/price coordinate into the current pane CSS coordinate space.
+   * Returns `visible: false` with `NaN` coordinates when the timestamp is before loaded data.
+   */
+  project_point(timestamp_ms: bigint | number, price: number): { x: number; y: number; visible: boolean };
 
   // ── Studies ────────────────────────────────────────────────────────────────
 

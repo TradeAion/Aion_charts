@@ -22,10 +22,10 @@ use raycore::{
     BaselineSeriesOptions, Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup,
     ChartPaneId, ChartStyle, CrosshairMagnetMode, CrosshairSnapshot, DataRange, GpuContext,
     HistogramPoint, HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint,
-    LineSeriesOptions, LineStyle, MainChartType, MainViewportPreset, MarkerPosition,
-    MarkerShape, MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint, OverlayRenderer,
-    PriceAxisRenderer, PriceLineOptions, RendererBackend, ResourceLimits, RuntimeEvent, SeriesId,
-    SeriesMarker, SnapshotMtfResolver, TimeAxisRenderer, TimeRange, Viewport, WgpuRenderer,
+    LineSeriesOptions, LineStyle, MainChartType, MainViewportPreset, MarkerPosition, MarkerShape,
+    MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint, OverlayRenderer, PriceAxisRenderer,
+    PriceLineOptions, RendererBackend, ResourceLimits, RuntimeEvent, SeriesId, SeriesMarker,
+    SnapshotMtfResolver, TimeAxisRenderer, TimeRange, Viewport, WgpuRenderer,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -137,9 +137,18 @@ fn read_resize_signature(s: &ChartInner, dpr: f64) -> ResizeSignature {
             let (acw, ach) = s.layout.price_axis_css_size();
             let (tcw, tch) = s.layout.time_axis_css_size();
             (
-                (((pcw * dpr).round() as u32).max(1), ((pch * dpr).round() as u32).max(1)),
-                (((acw * dpr).round() as u32).max(1), ((ach * dpr).round() as u32).max(1)),
-                (((tcw * dpr).round() as u32).max(1), ((tch * dpr).round() as u32).max(1)),
+                (
+                    ((pcw * dpr).round() as u32).max(1),
+                    ((pch * dpr).round() as u32).max(1),
+                ),
+                (
+                    ((acw * dpr).round() as u32).max(1),
+                    ((ach * dpr).round() as u32).max(1),
+                ),
+                (
+                    ((tcw * dpr).round() as u32).max(1),
+                    ((tch * dpr).round() as u32).max(1),
+                ),
             )
         };
 
@@ -1111,8 +1120,14 @@ fn build_historical_footprint_dataset_from_arrays(
 ) -> Result<(Vec<Bar>, raycore::FootprintData), JsValue> {
     let bars = build_main_bars_from_arrays(ctx, open, high, low, close, volume, timestamps)?;
     ensure_ohlcv_sanity_for_footprint(ctx, &bars)?;
-    let footprint =
-        build_footprint_data_from_aligned_arrays(ctx, &bars, level_offsets, prices, bid_volumes, ask_volumes)?;
+    let footprint = build_footprint_data_from_aligned_arrays(
+        ctx,
+        &bars,
+        level_offsets,
+        prices,
+        bid_volumes,
+        ask_volumes,
+    )?;
     Ok((bars, footprint))
 }
 
@@ -1148,7 +1163,9 @@ fn parse_historical_footprint_json_dataset(
             .get("bars")
             .and_then(|v| v.as_array())
             .cloned()
-            .ok_or_else(|| js_err("set_data_with_footprint_json: expected array or object with bars array"))?,
+            .ok_or_else(|| {
+                js_err("set_data_with_footprint_json: expected array or object with bars array")
+            })?,
         _ => {
             return Err(js_err(
                 "set_data_with_footprint_json: expected array or object with bars array",
@@ -1171,31 +1188,36 @@ fn parse_historical_footprint_json_dataset(
                     bar_index
                 ))
             })?;
-        let open = item
-            .get("open")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| js_err(format!("set_data_with_footprint_json: bar {} missing open", bar_index)))?
-            as f32;
-        let high = item
-            .get("high")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| js_err(format!("set_data_with_footprint_json: bar {} missing high", bar_index)))?
-            as f32;
-        let low = item
-            .get("low")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| js_err(format!("set_data_with_footprint_json: bar {} missing low", bar_index)))?
-            as f32;
-        let close = item
-            .get("close")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| js_err(format!("set_data_with_footprint_json: bar {} missing close", bar_index)))?
-            as f32;
-        let volume = item
-            .get("volume")
-            .and_then(|v| v.as_f64())
-            .ok_or_else(|| js_err(format!("set_data_with_footprint_json: bar {} missing volume", bar_index)))?
-            as f32;
+        let open = item.get("open").and_then(|v| v.as_f64()).ok_or_else(|| {
+            js_err(format!(
+                "set_data_with_footprint_json: bar {} missing open",
+                bar_index
+            ))
+        })? as f32;
+        let high = item.get("high").and_then(|v| v.as_f64()).ok_or_else(|| {
+            js_err(format!(
+                "set_data_with_footprint_json: bar {} missing high",
+                bar_index
+            ))
+        })? as f32;
+        let low = item.get("low").and_then(|v| v.as_f64()).ok_or_else(|| {
+            js_err(format!(
+                "set_data_with_footprint_json: bar {} missing low",
+                bar_index
+            ))
+        })? as f32;
+        let close = item.get("close").and_then(|v| v.as_f64()).ok_or_else(|| {
+            js_err(format!(
+                "set_data_with_footprint_json: bar {} missing close",
+                bar_index
+            ))
+        })? as f32;
+        let volume = item.get("volume").and_then(|v| v.as_f64()).ok_or_else(|| {
+            js_err(format!(
+                "set_data_with_footprint_json: bar {} missing volume",
+                bar_index
+            ))
+        })? as f32;
 
         ensure_finite_fields(
             "set_data_with_footprint_json",
@@ -1232,15 +1254,12 @@ fn parse_historical_footprint_json_dataset(
         let mut bids = Vec::with_capacity(levels_arr.len());
         let mut asks = Vec::with_capacity(levels_arr.len());
         for (level_index, level) in levels_arr.iter().enumerate() {
-            let price = level
-                .get("price")
-                .and_then(|v| v.as_f64())
-                .ok_or_else(|| {
-                    js_err(format!(
-                        "set_data_with_footprint_json: bar {} level {} missing price",
-                        bar_index, level_index
-                    ))
-                })? as f32;
+            let price = level.get("price").and_then(|v| v.as_f64()).ok_or_else(|| {
+                js_err(format!(
+                    "set_data_with_footprint_json: bar {} level {} missing price",
+                    bar_index, level_index
+                ))
+            })? as f32;
             let bid = level
                 .get("bid")
                 .or_else(|| level.get("bid_volume"))
@@ -1547,6 +1566,9 @@ impl RayCore {
             replay_last_tick_ms: 0.0,
             replay_tick_accum_bars: 0.0,
             symbol: "DEMO".to_string(),
+            execution_mark_hit_areas: Vec::new(),
+            hovered_execution_mark_id: None,
+            selected_execution_mark_id: None,
         }));
 
         let mut closures: Vec<Closure<dyn FnMut(web_sys::Event)>> = Vec::new();
@@ -2364,7 +2386,8 @@ impl RayCore {
                     for i in 0..entries.length() {
                         let entry: web_sys::ResizeObserverEntry = entries.get(i).unchecked_into();
                         let target = entry.target();
-                        if let Some((exact_w, exact_h)) = extract_device_pixel_content_box_size(&entry)
+                        if let Some((exact_w, exact_h)) =
+                            extract_device_pixel_content_box_size(&entry)
                         {
                             if target == pane_ref {
                                 pending.pane_pw = exact_w;
@@ -2441,13 +2464,11 @@ impl RayCore {
 
                     let raf_request = if let Some(window) = web_sys::window() {
                         let borrowed = raf_slot.borrow();
-                        borrowed
-                            .as_ref()
-                            .and_then(|cb| {
-                                window
-                                    .request_animation_frame(cb.as_ref().unchecked_ref())
-                                    .ok()
-                            })
+                        borrowed.as_ref().and_then(|cb| {
+                            window
+                                .request_animation_frame(cb.as_ref().unchecked_ref())
+                                .ok()
+                        })
                     } else {
                         None
                     };
@@ -3447,8 +3468,15 @@ impl RayCore {
         volume: &[f32],
         timestamps: &[u64],
     ) -> Result<(), JsValue> {
-        let bars =
-            build_main_bars_from_arrays("set_data_arrays", open, high, low, close, volume, timestamps)?;
+        let bars = build_main_bars_from_arrays(
+            "set_data_arrays",
+            open,
+            high,
+            low,
+            close,
+            volume,
+            timestamps,
+        )?;
         let count = bars.len();
         {
             let mut inner = self.inner.borrow_mut();
@@ -3770,10 +3798,7 @@ impl RayCore {
 
     /// Return whether footprint pane two-axis zoom (X+Y) is enabled.
     pub fn get_footprint_xy_zoom_enabled(&self) -> bool {
-        self.inner
-            .borrow()
-            .engine
-            .footprint_zoom_price_with_time()
+        self.inner.borrow().engine.footprint_zoom_price_with_time()
     }
 
     /// Configure footprint options from a JSON object.
@@ -4909,7 +4934,10 @@ impl RayCore {
 
     /// Show/hide volume bars in the main pane.
     pub fn set_volume_visible(&mut self, visible: bool) {
-        self.inner.borrow_mut().engine.set_user_volume_visible(visible);
+        self.inner
+            .borrow_mut()
+            .engine
+            .set_user_volume_visible(visible);
     }
 
     /// Whether volume bars are currently visible in the main pane.
@@ -5326,6 +5354,421 @@ impl RayCore {
             series_id,
             marker_data.len() / STRIDE
         );
+    }
+
+    // ── Execution Marks API ────────────────────────────────────────────────────
+    //
+    // First-class execution mark support for trade visualization.
+    // Unlike generic markers, execution marks are timestamp-based (not bar-index-based)
+    // and designed specifically for trading workflows.
+
+    /// Add a single execution mark to the chart.
+    ///
+    /// `side`: "buy" or "sell"
+    /// `role`: "entry", "scale_in", "scale_out", or "exit"
+    ///
+    /// Returns the execution mark ID.
+    pub fn add_execution_mark(
+        &mut self,
+        id: &str,
+        timestamp_ms: u64,
+        price: f64,
+        quantity: f64,
+        side: &str,
+        role: &str,
+    ) {
+        use raycore::{ExecutionMark, ExecutionRole, ExecutionSide};
+
+        let mark = ExecutionMark::new(
+            id,
+            timestamp_ms,
+            price,
+            quantity,
+            ExecutionSide::from_str(side),
+            ExecutionRole::from_str(role),
+        );
+
+        let mut s = self.inner.borrow_mut();
+        let engine = &mut s.engine;
+        engine.execution_marks.add(mark);
+        engine.execution_marks.resolve_bar_indices(&engine.bars);
+
+        log::info!(
+            "add_execution_mark: id={}, ts={}, price={}, side={}, role={}",
+            id,
+            timestamp_ms,
+            price,
+            side,
+            role
+        );
+    }
+
+    /// Add an execution mark with all optional fields.
+    ///
+    /// `side`: "buy" or "sell"
+    /// `role`: "entry", "scale_in", "scale_out", or "exit"
+    /// `order_type`: e.g., "market", "limit", "stop" (empty string for none)
+    /// `label`: custom label text (empty string for default)
+    /// `group_id`: group ID for related fills (empty string for none)
+    /// `color_*`: custom color override (pass all zeros to use default)
+    /// `realized_pnl`: realized P&L (pass NaN for none)
+    pub fn add_execution_mark_full(
+        &mut self,
+        id: &str,
+        timestamp_ms: u64,
+        price: f64,
+        quantity: f64,
+        side: &str,
+        role: &str,
+        order_type: &str,
+        label: &str,
+        group_id: &str,
+        color_r: f32,
+        color_g: f32,
+        color_b: f32,
+        color_a: f32,
+        realized_pnl: f64,
+    ) {
+        use raycore::{ExecutionMark, ExecutionRole, ExecutionSide};
+
+        let mut mark = ExecutionMark::new(
+            id,
+            timestamp_ms,
+            price,
+            quantity,
+            ExecutionSide::from_str(side),
+            ExecutionRole::from_str(role),
+        );
+
+        if !order_type.is_empty() {
+            mark = mark.with_order_type(order_type);
+        }
+        if !label.is_empty() {
+            mark = mark.with_label(label);
+        }
+        if !group_id.is_empty() {
+            mark = mark.with_group_id(group_id);
+        }
+        if color_a > 0.0 {
+            mark = mark.with_color([color_r, color_g, color_b, color_a]);
+        }
+        if realized_pnl.is_finite() {
+            mark = mark.with_realized_pnl(realized_pnl);
+        }
+
+        let mut s = self.inner.borrow_mut();
+        let engine = &mut s.engine;
+        engine.execution_marks.add(mark);
+        engine.execution_marks.resolve_bar_indices(&engine.bars);
+    }
+
+    /// Remove an execution mark by ID.
+    pub fn remove_execution_mark(&mut self, id: &str) -> bool {
+        self.inner.borrow_mut().engine.execution_marks.remove(id)
+    }
+
+    /// Clear all execution marks.
+    pub fn clear_execution_marks(&mut self) {
+        self.inner.borrow_mut().engine.execution_marks.clear();
+    }
+
+    /// Show/hide execution mark text labels.
+    pub fn set_execution_mark_text_visible(&mut self, visible: bool) {
+        self.inner
+            .borrow_mut()
+            .engine
+            .set_execution_mark_text_visible(visible);
+    }
+
+    /// Whether execution mark text labels are currently rendered.
+    pub fn get_execution_mark_text_visible(&self) -> bool {
+        self.inner.borrow().engine.execution_mark_text_visible()
+    }
+
+    /// Show/hide the selected execution connection line.
+    /// Chevron locators remain available when a mark is selected.
+    pub fn set_execution_mark_connection_line_visible(&mut self, visible: bool) {
+        self.inner
+            .borrow_mut()
+            .engine
+            .set_execution_mark_connection_line_visible(visible);
+    }
+
+    /// Whether the selected execution connection line is currently rendered.
+    pub fn get_execution_mark_connection_line_visible(&self) -> bool {
+        self.inner
+            .borrow()
+            .engine
+            .execution_mark_connection_line_visible()
+    }
+
+    /// Serialize all execution marks to JSON.
+    pub fn get_execution_marks_json(&self) -> String {
+        let marks: Vec<_> = self
+            .inner
+            .borrow()
+            .engine
+            .execution_marks
+            .iter()
+            .map(|mark| {
+                serde_json::json!({
+                    "id": mark.id,
+                    "timestamp_ms": mark.timestamp_ms,
+                    "price": mark.price,
+                    "quantity": mark.quantity,
+                    "side": mark.side.as_str(),
+                    "role": mark.role.as_str(),
+                    "order_type": mark.order_type,
+                    "realized_pnl": mark.realized_pnl,
+                    "label": mark.label,
+                    "color": mark.color,
+                    "group_id": mark.group_id,
+                })
+            })
+            .collect();
+
+        serde_json::to_string(&marks).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Set multiple execution marks at once (replaces existing).
+    ///
+    /// `mark_data` is a flat array of execution mark data with stride 6:
+    /// [timestamp_ms, price, quantity, side_idx, role_idx, ...]
+    /// where side_idx: 0=buy, 1=sell
+    /// and role_idx: 0=entry, 1=scale_in, 2=scale_out, 3=exit
+    ///
+    /// `ids` is an array of string IDs (must match mark_data length / 5).
+    pub fn set_execution_marks(&mut self, ids: Vec<String>, mark_data: &[f64]) {
+        use raycore::{ExecutionMark, ExecutionRole, ExecutionSide};
+
+        const STRIDE: usize = 5; // timestamp_ms, price, quantity, side_idx, role_idx
+        let expected_count = mark_data.len() / STRIDE;
+
+        if ids.len() != expected_count {
+            log::warn!(
+                "set_execution_marks: ids.len()={} but expected {} from mark_data",
+                ids.len(),
+                expected_count
+            );
+            return;
+        }
+
+        let mut marks = Vec::with_capacity(expected_count);
+        for (i, chunk) in mark_data.chunks_exact(STRIDE).enumerate() {
+            let timestamp_ms = chunk[0] as u64;
+            let price = chunk[1];
+            let quantity = chunk[2];
+            let side = match chunk[3] as u32 {
+                0 => ExecutionSide::Buy,
+                _ => ExecutionSide::Sell,
+            };
+            let role = match chunk[4] as u32 {
+                0 => ExecutionRole::Entry,
+                1 => ExecutionRole::ScaleIn,
+                2 => ExecutionRole::ScaleOut,
+                _ => ExecutionRole::Exit,
+            };
+
+            marks.push(ExecutionMark::new(
+                ids[i].clone(),
+                timestamp_ms,
+                price,
+                quantity,
+                side,
+                role,
+            ));
+        }
+
+        let mut s = self.inner.borrow_mut();
+        let engine = &mut s.engine;
+        engine.execution_marks.set(marks);
+        engine.execution_marks.resolve_bar_indices(&engine.bars);
+
+        log::info!("set_execution_marks: count={}", expected_count);
+    }
+
+    /// Set execution marks from a JSON string.
+    ///
+    /// Expected format:
+    /// ```json
+    /// [
+    ///   {
+    ///     "id": "exec-1",
+    ///     "timestamp_ms": 1234567890000,
+    ///     "price": 100.5,
+    ///     "quantity": 1.0,
+    ///     "side": "buy",
+    ///     "role": "entry",
+    ///     "order_type": "market",
+    ///     "label": "Entry Long",
+    ///     "group_id": "trade-1",
+    ///     "color": [0.2, 0.8, 0.4, 1.0],
+    ///     "realized_pnl": 0.0
+    ///   },
+    ///   ...
+    /// ]
+    /// ```
+    pub fn set_execution_marks_json(&mut self, json: &str) -> Result<(), JsValue> {
+        use raycore::{ExecutionMark, ExecutionRole, ExecutionSide};
+
+        let items: Vec<serde_json::Value> = serde_json::from_str(json)
+            .map_err(|e| js_err(format!("Invalid execution marks JSON: {}", e)))?;
+
+        let mut marks = Vec::with_capacity(items.len());
+        for (i, item) in items.iter().enumerate() {
+            let id = item
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| js_err(format!("execution mark {} missing id", i)))?;
+            let timestamp_ms = item
+                .get("timestamp_ms")
+                .or_else(|| item.get("timestampMs"))
+                .or_else(|| item.get("timestamp"))
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| js_err(format!("execution mark {} missing timestamp_ms", i)))?;
+            let price = item
+                .get("price")
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| js_err(format!("execution mark {} missing price", i)))?;
+            let quantity = item
+                .get("quantity")
+                .or_else(|| item.get("qty"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(1.0);
+            let side = item
+                .get("side")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| js_err(format!("execution mark {} missing side", i)))?;
+            let role = item
+                .get("role")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| js_err(format!("execution mark {} missing role", i)))?;
+
+            let mut mark = ExecutionMark::new(
+                id,
+                timestamp_ms,
+                price,
+                quantity,
+                ExecutionSide::from_str(side),
+                ExecutionRole::from_str(role),
+            );
+
+            if let Some(order_type) = item
+                .get("order_type")
+                .or_else(|| item.get("orderType"))
+                .and_then(|v| v.as_str())
+            {
+                mark = mark.with_order_type(order_type);
+            }
+            if let Some(label) = item.get("label").and_then(|v| v.as_str()) {
+                mark = mark.with_label(label);
+            }
+            if let Some(group_id) = item
+                .get("group_id")
+                .or_else(|| item.get("groupId"))
+                .and_then(|v| v.as_str())
+            {
+                mark = mark.with_group_id(group_id);
+            }
+            if let Some(color) =
+                parse_color_json_value(item.get("color").unwrap_or(&serde_json::Value::Null))
+            {
+                mark = mark.with_color(color);
+            }
+            if let Some(pnl) = item
+                .get("realized_pnl")
+                .or_else(|| item.get("realizedPnl"))
+                .and_then(|v| v.as_f64())
+            {
+                mark = mark.with_realized_pnl(pnl);
+            }
+
+            marks.push(mark);
+        }
+
+        let mut s = self.inner.borrow_mut();
+        let engine = &mut s.engine;
+        engine.execution_marks.set(marks);
+        engine.execution_marks.resolve_bar_indices(&engine.bars);
+
+        log::info!("set_execution_marks_json: count={}", items.len());
+        Ok(())
+    }
+
+    /// Get the number of execution marks.
+    pub fn execution_mark_count(&self) -> usize {
+        self.inner.borrow().engine.execution_marks.len()
+    }
+
+    /// Set the selected execution mark ID (shows connection line to related marks).
+    /// Pass empty string or null to deselect.
+    pub fn set_selected_execution_mark(&mut self, mark_id: Option<String>) {
+        let mut s = self.inner.borrow_mut();
+        s.selected_execution_mark_id = mark_id.filter(|id| !id.is_empty());
+    }
+
+    /// Get the currently selected execution mark ID, or null if none.
+    pub fn get_selected_execution_mark(&self) -> Option<String> {
+        self.inner.borrow().selected_execution_mark_id.clone()
+    }
+
+    /// Clear the selected execution mark.
+    pub fn clear_selected_execution_mark(&mut self) {
+        self.inner.borrow_mut().selected_execution_mark_id = None;
+    }
+
+    /// Convert a timestamp (in milliseconds) to a bar index.
+    /// Returns -1 if the timestamp is before all bars.
+    pub fn timestamp_to_bar_index(&self, timestamp_ms: u64) -> i64 {
+        let s = self.inner.borrow();
+        raycore::timestamp_to_bar_index(timestamp_ms, &s.engine.bars)
+            .map(|idx| idx as i64)
+            .unwrap_or(-1)
+    }
+
+    /// Convert a bar index to a timestamp (in milliseconds).
+    /// Returns 0 if the bar index is out of bounds.
+    pub fn bar_index_to_timestamp(&self, bar_index: u32) -> u64 {
+        let s = self.inner.borrow();
+        raycore::bar_index_to_timestamp(bar_index as usize, &s.engine.bars).unwrap_or(0)
+    }
+
+    /// Project a timestamp/price coordinate into current pane CSS coordinates.
+    pub fn project_point(&self, timestamp_ms: u64, price: f64) -> JsValue {
+        let s = self.inner.borrow();
+        let obj = js_sys::Object::new();
+        let (pane_css_w, pane_css_h) = s.layout.pane_css_size();
+
+        let Some(bar_index) = raycore::timestamp_to_bar_index(timestamp_ms, &s.engine.bars) else {
+            let _ =
+                js_sys::Reflect::set(&obj, &JsValue::from_str("x"), &JsValue::from_f64(f64::NAN));
+            let _ =
+                js_sys::Reflect::set(&obj, &JsValue::from_str("y"), &JsValue::from_f64(f64::NAN));
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("visible"),
+                &JsValue::from_bool(false),
+            );
+            return obj.into();
+        };
+
+        let x = s.engine.viewport.bar_center_css(bar_index, pane_css_w);
+        let y = s.engine.viewport.price_to_css_y(price, pane_css_h);
+        let visible = x.is_finite()
+            && y.is_finite()
+            && x >= 0.0
+            && x <= pane_css_w
+            && y >= 0.0
+            && y <= pane_css_h;
+
+        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("x"), &JsValue::from_f64(x));
+        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("y"), &JsValue::from_f64(y));
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("visible"),
+            &JsValue::from_bool(visible),
+        );
+        obj.into()
     }
 
     // ── Series overlay API ────────────────────────────────────────────────────
@@ -8219,7 +8662,10 @@ mod tests {
 
     #[test]
     fn parse_main_viewport_preset_defaults_to_default_recent() {
-        assert_eq!(parse_main_viewport_preset(None), MainViewportPreset::DefaultRecent);
+        assert_eq!(
+            parse_main_viewport_preset(None),
+            MainViewportPreset::DefaultRecent
+        );
         assert_eq!(
             parse_main_viewport_preset(Some("default")),
             MainViewportPreset::DefaultRecent

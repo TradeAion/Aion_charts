@@ -749,8 +749,7 @@ impl FootprintOptions {
         self.buy_color = with_alpha(buy_base, base_alpha);
         self.sell_color = with_alpha(sell_base, base_alpha);
         self.buy_imbalance_color = mix_rgb(buy_base, [1.0, 1.0, 1.0, 1.0], 0.10, emphasis_alpha);
-        self.sell_imbalance_color =
-            mix_rgb(sell_base, [1.0, 1.0, 1.0, 1.0], 0.08, emphasis_alpha);
+        self.sell_imbalance_color = mix_rgb(sell_base, [1.0, 1.0, 1.0, 1.0], 0.08, emphasis_alpha);
         self.stacked_buy_imbalance_color =
             mix_rgb(buy_base, [1.0, 1.0, 1.0, 1.0], 0.16, stacked_alpha);
         self.stacked_sell_imbalance_color =
@@ -770,8 +769,12 @@ impl FootprintOptions {
         self.cum_delta_positive_color = with_alpha(buy_base, base_alpha * 0.82);
         self.cum_delta_negative_color = with_alpha(sell_base, base_alpha * 0.82);
         self.value_area_color = with_alpha(neutral_va, va_alpha);
-        self.unfinished_auction_color =
-            mix_rgb(self.poc_color, [0.92, 0.94, 1.0, 1.0], 0.08, emphasis_alpha * 0.9);
+        self.unfinished_auction_color = mix_rgb(
+            self.poc_color,
+            [0.92, 0.94, 1.0, 1.0],
+            0.08,
+            emphasis_alpha * 0.9,
+        );
     }
 }
 
@@ -1096,7 +1099,10 @@ mod tests {
             let parsed = FootprintGradientStyle::from_str(style.as_str());
             assert_eq!(*style, parsed);
         }
-        assert_eq!(FootprintGradientStyle::default(), FootprintGradientStyle::NoGlow);
+        assert_eq!(
+            FootprintGradientStyle::default(),
+            FootprintGradientStyle::NoGlow
+        );
         assert_eq!(
             FootprintGradientStyle::from_str("unknown"),
             FootprintGradientStyle::NoGlow

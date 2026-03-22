@@ -825,6 +825,9 @@ mod tests {
             !light.axis_border_visible,
             "light theme default should ship with axis borders hidden"
         );
-        assert!(legacy.axis_ticks_visible, "tick marks should stay enabled by default");
+        assert!(
+            legacy.axis_ticks_visible,
+            "tick marks should stay enabled by default"
+        );
     }
 }

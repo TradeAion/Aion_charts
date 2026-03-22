@@ -8,6 +8,7 @@ pub mod demo_data;
 pub mod drawings;
 pub mod engine;
 pub mod events;
+pub mod execution_marks;
 pub mod footprint;
 pub mod formatters;
 pub mod indicators;

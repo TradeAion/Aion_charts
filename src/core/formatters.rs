@@ -135,6 +135,32 @@ fn trim_trailing_zeros(s: &str) -> String {
     }
 }
 
+/// Format a quantity value (e.g., trade size) with smart precision.
+/// For small values (<1), shows up to 4 decimals.
+/// For medium values, shows up to 2 decimals.
+/// For large values, uses K/M suffixes.
+pub fn format_qty(qty: f64) -> String {
+    let (sign, v) = if qty < 0.0 { ("-", -qty) } else { ("", qty) };
+
+    if v < 0.0001 {
+        format!("{}{:.6}", sign, v)
+    } else if v < 1.0 {
+        // Show up to 4 decimals, trim trailing zeros
+        let s = format!("{}{:.4}", sign, v);
+        trim_trailing_zeros(&s)
+    } else if v < 1000.0 {
+        // Show up to 2 decimals, trim trailing zeros
+        let s = format!("{}{:.2}", sign, v);
+        trim_trailing_zeros(&s)
+    } else if v < 1_000_000.0 {
+        format!("{}{}K", sign, format_vol_number(v / 1000.0, 1))
+    } else if v < 1_000_000_000.0 {
+        format!("{}{}M", sign, format_vol_number(v / 1_000_000.0, 1))
+    } else {
+        format!("{}{}B", sign, format_vol_number(v / 1_000_000_000.0, 1))
+    }
+}
+
 // ── Time formatting (LWC defaultTickMarkFormatter) ───────────────────────────
 
 /// Format a Unix epoch millisecond timestamp into an axis-appropriate label.

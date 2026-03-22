@@ -606,8 +606,7 @@ impl DrawingManager {
         for drawing in &mut self.drawings {
             for anchor in drawing.anchors_mut().iter_mut() {
                 if anchor.point.timestamp.is_none() {
-                    anchor.point.timestamp =
-                        Self::resolve_timestamp(anchor.point.bar_index, bars);
+                    anchor.point.timestamp = Self::resolve_timestamp(anchor.point.bar_index, bars);
                 }
             }
             if drawing.tool() == DrawingTool::Brush {
@@ -725,9 +724,7 @@ impl DrawingManager {
 
         if tool == DrawingTool::Fibonacci {
             if let Some(ref key) = item.label_align {
-                if let Some(align) =
-                    crate::core::renderer::draw_list::TextAlign::from_key(key)
-                {
+                if let Some(align) = crate::core::renderer::draw_list::TextAlign::from_key(key) {
                     let fib = drawing
                         .as_any_mut()
                         .downcast_mut::<fibonacci::FibonacciDrawing>()
