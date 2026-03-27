@@ -50,22 +50,22 @@ pub const fn ch(v: u8) -> f32 {
 
 /// Main chart & axis background.
 pub const BG: [f32; 4] = [ch(0x13), ch(0x13), ch(0x15), 1.0];
-/// Bullish candle body (#5b9cf6).
-pub const BULLISH: [f32; 4] = [ch(0x35), ch(0x59), ch(0xE9), 1.0];
-/// Bearish candle body (#f7525f).
-pub const BEARISH: [f32; 4] = [ch(0xFB), ch(0x37), ch(0x48), 1.0];
+/// Bullish candle body (#1F8FFF).
+pub const BULLISH: [f32; 4] = [ch(0x1F), ch(0x8F), ch(0xFF), 1.0];
+/// Bearish candle body (#FF4B62).
+pub const BEARISH: [f32; 4] = [ch(0xFF), ch(0x4B), ch(0x62), 1.0];
 /// Bullish volume (same hue, lower alpha).
-pub const BULLISH_VOLUME: [f32; 4] = [ch(0x35), ch(0x59), ch(0xE9), 0.35];
+pub const BULLISH_VOLUME: [f32; 4] = [ch(0x1F), ch(0x8F), ch(0xFF), 0.35];
 /// Bearish volume.
-pub const BEARISH_VOLUME: [f32; 4] = [ch(0xFB), ch(0x37), ch(0x48), 0.35];
-/// Bullish wick (#5b9cf6).
-pub const WICK_BULLISH: [f32; 4] = [ch(0x35), ch(0x59), ch(0xE9), 1.0];
-/// Bearish wick (#f7525f).
-pub const WICK_BEARISH: [f32; 4] = [ch(0xFB), ch(0x37), ch(0x48), 1.0];
-/// Bullish candle border (#2547D0).
-pub const BORDER_BULLISH: [f32; 4] = [ch(0x25), ch(0x47), ch(0xD0), 1.0];
-/// Bearish candle border (#D02533).
-pub const BORDER_BEARISH: [f32; 4] = [ch(0xD0), ch(0x25), ch(0x33), 1.0];
+pub const BEARISH_VOLUME: [f32; 4] = [ch(0xFF), ch(0x4B), ch(0x62), 0.35];
+/// Bullish wick (#1F8FFF).
+pub const WICK_BULLISH: [f32; 4] = [ch(0x1F), ch(0x8F), ch(0xFF), 1.0];
+/// Bearish wick (#FF4B62).
+pub const WICK_BEARISH: [f32; 4] = [ch(0xFF), ch(0x4B), ch(0x62), 1.0];
+/// Bullish candle border (#1F8FFF).
+pub const BORDER_BULLISH: [f32; 4] = [ch(0x1F), ch(0x8F), ch(0xFF), 1.0];
+/// Bearish candle border (#FF4B62).
+pub const BORDER_BEARISH: [f32; 4] = [ch(0xFF), ch(0x4B), ch(0x62), 1.0];
 /// Grid line color.
 pub const GRID: [f32; 4] = [0.2, 0.2, 0.24, 0.4];
 /// Axis border / tick color.

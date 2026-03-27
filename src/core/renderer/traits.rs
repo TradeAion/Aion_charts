@@ -199,10 +199,11 @@ impl ChartStyle {
         2.0 / 12.0 * self.font_size as f64
     }
     /// Top inset for X-axis crosshair label box.
-    /// LWC: label starts at y=0 (covers the border area).
+    /// Keep the time-axis crosshair pill visually inside the axis, matching the
+    /// Y-axis label treatment instead of riding directly on the border line.
     #[inline]
     pub fn time_axis_crosshair_label_top_inset(&self) -> f64 {
-        0.0
+        self.axis_border_size as f64
     }
 
     /// Effective Y-axis row spacing for price ticks (CSS px).
