@@ -1348,7 +1348,7 @@
     // ═══════════════════════════════════════════════════════════════════════
     document.addEventListener('keydown', e => {
       if (!core) return;
-      const handled = core.on_key_down(e.key, e.ctrlKey, e.shiftKey, e.altKey);
+      const handled = core.on_key_down(e.key, e.ctrlKey || e.metaKey, e.shiftKey, e.altKey);
       if (e.key === 'Escape') {
         core.set_drawing_tool('none');
         activeDrawTool = 'none';

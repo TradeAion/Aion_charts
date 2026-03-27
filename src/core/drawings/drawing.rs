@@ -52,7 +52,7 @@ macro_rules! impl_drawing_accessors {
             $tool
         }
         fn state(&self) -> DrawingState {
-            self.state
+            self.state.clone()
         }
         fn set_state(&mut self, state: DrawingState) {
             self.state = state;
@@ -231,11 +231,16 @@ pub fn point_to_bitmap(
     pane_css_h: f64,
     h_pixel_ratio: f64,
     v_pixel_ratio: f64,
+    snap_to_pixel: bool,
 ) -> (f64, f64) {
     let (cx, cy) = point_to_css(pt, vp, pane_css_w, pane_css_h);
-    let bx = (cx * h_pixel_ratio).round();
-    let by = (cy * v_pixel_ratio).round();
-    (bx, by)
+    let bx = cx * h_pixel_ratio;
+    let by = cy * v_pixel_ratio;
+    if snap_to_pixel {
+        (bx.round(), by.round())
+    } else {
+        (bx, by)
+    }
 }
 
 /// Generate standard anchor circles for a drawing.
@@ -248,6 +253,7 @@ pub fn generate_anchor_circles(
     h_pixel_ratio: f64,
     v_pixel_ratio: f64,
     color: &[f32; 4],
+    snap_to_pixel: bool,
 ) -> Vec<AnchorCircle> {
     anchors
         .iter()
@@ -259,6 +265,7 @@ pub fn generate_anchor_circles(
                 pane_css_h,
                 h_pixel_ratio,
                 v_pixel_ratio,
+                snap_to_pixel,
             );
             // Use average ratio for radius so circles stay round
             let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;

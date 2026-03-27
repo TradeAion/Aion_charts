@@ -4383,8 +4383,9 @@ impl RayCore {
     pub fn on_key_down(&mut self, key: &str, ctrl: bool, shift: bool, _alt: bool) -> bool {
         let mut s = self.inner.borrow_mut();
         let bar_count = s.engine.bars.len() as f64;
+        let mut visible_range_changed = false;
 
-        match key {
+        let handled = match key {
             // Delete selected drawing
             "Delete" | "Backspace" => {
                 s.engine.drawings.remove_selected();
@@ -4407,13 +4408,18 @@ impl RayCore {
                 } else {
                     1.0
                 };
-                s.engine.viewport.start_bar -= amount;
-                s.engine.viewport.end_bar -= amount;
-                // Clamp to valid range
-                if s.engine.viewport.start_bar < 0.0 {
-                    let offset = -s.engine.viewport.start_bar;
-                    s.engine.viewport.start_bar = 0.0;
-                    s.engine.viewport.end_bar += offset;
+                if ctrl {
+                    let (pane_css_w, _) = s.layout.pane_css_size();
+                    let visible_bar_span = s.engine.viewport.end_bar - s.engine.viewport.start_bar;
+                    s.interaction.start_horizontal_glide_by_bars(
+                        -amount,
+                        pane_css_w,
+                        visible_bar_span,
+                    );
+                } else {
+                    let time_scale_len = s.engine.time_scale.len();
+                    s.engine.viewport.pan_clamped(-amount, time_scale_len);
+                    visible_range_changed = true;
                 }
                 true
             }
@@ -4425,14 +4431,18 @@ impl RayCore {
                 } else {
                     1.0
                 };
-                s.engine.viewport.start_bar += amount;
-                s.engine.viewport.end_bar += amount;
-                // Allow scrolling past end for right margin
-                let max_start = bar_count + 50.0; // Some margin
-                if s.engine.viewport.start_bar > max_start {
-                    let offset = s.engine.viewport.start_bar - max_start;
-                    s.engine.viewport.start_bar = max_start;
-                    s.engine.viewport.end_bar -= offset;
+                if ctrl {
+                    let (pane_css_w, _) = s.layout.pane_css_size();
+                    let visible_bar_span = s.engine.viewport.end_bar - s.engine.viewport.start_bar;
+                    s.interaction.start_horizontal_glide_by_bars(
+                        amount,
+                        pane_css_w,
+                        visible_bar_span,
+                    );
+                } else {
+                    let time_scale_len = s.engine.time_scale.len();
+                    s.engine.viewport.pan_clamped(amount, time_scale_len);
+                    visible_range_changed = true;
                 }
                 true
             }
@@ -4445,6 +4455,7 @@ impl RayCore {
                     (s.engine.viewport.price_max - s.engine.viewport.price_min) / 2.0 / factor;
                 s.engine.viewport.price_min = mid - half_range;
                 s.engine.viewport.price_max = mid + half_range;
+                s.engine.viewport.price_invalidated = true;
                 true
             }
             "ArrowDown" => {
@@ -4454,6 +4465,7 @@ impl RayCore {
                     (s.engine.viewport.price_max - s.engine.viewport.price_min) / 2.0 * factor;
                 s.engine.viewport.price_min = mid - half_range;
                 s.engine.viewport.price_max = mid + half_range;
+                s.engine.viewport.price_invalidated = true;
                 true
             }
 
@@ -4462,43 +4474,50 @@ impl RayCore {
                 let visible_bars = s.engine.viewport.end_bar - s.engine.viewport.start_bar;
                 s.engine.viewport.start_bar = 0.0;
                 s.engine.viewport.end_bar = visible_bars;
+                visible_range_changed = true;
                 true
             }
             "End" => {
                 let visible_bars = s.engine.viewport.end_bar - s.engine.viewport.start_bar;
                 s.engine.viewport.end_bar = bar_count - 1.0 + visible_bars * 0.1; // Small right margin
                 s.engine.viewport.start_bar = s.engine.viewport.end_bar - visible_bars;
+                visible_range_changed = true;
                 true
             }
 
             // Zoom time axis (only without Ctrl — let browser handle Ctrl+/- for page zoom)
             "+" | "=" if !ctrl => {
-                // Zoom in: reduce visible range
                 let mid = (s.engine.viewport.start_bar + s.engine.viewport.end_bar) / 2.0;
-                let half_range =
-                    (s.engine.viewport.end_bar - s.engine.viewport.start_bar) / 2.0 / 1.2;
-                s.engine.viewport.start_bar = mid - half_range;
-                s.engine.viewport.end_bar = mid + half_range;
+                s.engine.viewport.zoom(mid, 1.0 / 1.2);
+                visible_range_changed = true;
                 true
             }
             "-" | "_" if !ctrl => {
-                // Zoom out: increase visible range
                 let mid = (s.engine.viewport.start_bar + s.engine.viewport.end_bar) / 2.0;
-                let half_range =
-                    (s.engine.viewport.end_bar - s.engine.viewport.start_bar) / 2.0 * 1.2;
-                s.engine.viewport.start_bar = (mid - half_range).max(0.0);
-                s.engine.viewport.end_bar = mid + half_range;
+                s.engine.viewport.zoom(mid, 1.2);
+                visible_range_changed = true;
                 true
             }
 
             // Reset zoom to fit all data
             "0" => {
                 reset_main_viewport_and_emit(&mut s.engine, Some("fit_all"));
+                s.engine.viewport.price_invalidated = true;
                 true
             }
 
             _ => false, // Key not handled
+        };
+
+        if handled && visible_range_changed {
+            emit_visible_range_change(&mut s.engine);
         }
+        drop(s);
+
+        if handled {
+            self.mark_dirty();
+        }
+        handled
     }
 
     /// Remove all drawings.

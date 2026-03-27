@@ -76,8 +76,19 @@ impl Drawing for VerticalLineDrawing {
         let c = &self.style.color;
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let lw = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
+        let snap_to_pixel = !matches!(
+            self.state,
+            DrawingState::Dragging { .. } | DrawingState::Creating { .. }
+        );
         let frac = (self.anchors[0].point.bar_index - vp.start_bar) / (vp.end_bar - vp.start_bar);
-        let x = (frac * pw * h_pixel_ratio).round() as f32;
+        let x = {
+            let value = frac * pw * h_pixel_ratio;
+            if snap_to_pixel {
+                value.round()
+            } else {
+                value
+            }
+        } as f32;
         let pane_ph = (ph * v_pixel_ratio).round() as f32;
 
         let (dash, gap) = self.style.dash.map_or((0.0, 0.0), |d| {
@@ -99,8 +110,16 @@ impl Drawing for VerticalLineDrawing {
         });
 
         if show_anchors {
-            geom.anchors =
-                generate_anchor_circles(&self.anchors, vp, pw, ph, h_pixel_ratio, v_pixel_ratio, c);
+            geom.anchors = generate_anchor_circles(
+                &self.anchors,
+                vp,
+                pw,
+                ph,
+                h_pixel_ratio,
+                v_pixel_ratio,
+                c,
+                snap_to_pixel,
+            );
         }
         geom
     }

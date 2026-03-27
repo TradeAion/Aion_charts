@@ -116,6 +116,10 @@ impl Drawing for RayDrawing {
         let c = &self.style.color;
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let lw = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
+        let snap_to_pixel = !matches!(
+            self.state,
+            DrawingState::Dragging { .. } | DrawingState::Creating { .. }
+        );
 
         let (bx0, by0) = point_to_bitmap(
             &self.anchors[0].point,
@@ -124,6 +128,7 @@ impl Drawing for RayDrawing {
             ph,
             h_pixel_ratio,
             v_pixel_ratio,
+            snap_to_pixel,
         );
         let (bx1, by1) = point_to_bitmap(
             &self.anchors[1].point,
@@ -132,6 +137,7 @@ impl Drawing for RayDrawing {
             ph,
             h_pixel_ratio,
             v_pixel_ratio,
+            snap_to_pixel,
         );
 
         let pane_pw = pw * h_pixel_ratio;
@@ -153,8 +159,16 @@ impl Drawing for RayDrawing {
         });
 
         if show_anchors {
-            geom.anchors =
-                generate_anchor_circles(&self.anchors, vp, pw, ph, h_pixel_ratio, v_pixel_ratio, c);
+            geom.anchors = generate_anchor_circles(
+                &self.anchors,
+                vp,
+                pw,
+                ph,
+                h_pixel_ratio,
+                v_pixel_ratio,
+                c,
+                snap_to_pixel,
+            );
         }
         geom
     }

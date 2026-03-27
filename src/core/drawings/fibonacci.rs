@@ -137,6 +137,10 @@ impl Drawing for FibonacciDrawing {
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let lw = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
         let fs = (self.style.font_size * avg_ratio) as f32;
+        let snap_to_pixel = !matches!(
+            self.state,
+            DrawingState::Dragging { .. } | DrawingState::Creating { .. }
+        );
 
         // Compute bitmap X positions of the two anchors — lines are confined
         // to this horizontal span (NOT extended to full pane width).
@@ -147,6 +151,7 @@ impl Drawing for FibonacciDrawing {
             ph,
             h_pixel_ratio,
             v_pixel_ratio,
+            snap_to_pixel,
         );
         let (bx1, _) = point_to_bitmap(
             &self.anchors[1].point,
@@ -155,6 +160,7 @@ impl Drawing for FibonacciDrawing {
             ph,
             h_pixel_ratio,
             v_pixel_ratio,
+            snap_to_pixel,
         );
         let left_x = (bx0.min(bx1)) as f32;
         let right_x = (bx0.max(bx1)) as f32;
@@ -162,7 +168,14 @@ impl Drawing for FibonacciDrawing {
 
         for &(level, label_text) in FIB_LEVELS {
             let price = self.level_price(level);
-            let y = (vp.price_to_css_y(price, ph) * v_pixel_ratio).round() as f32;
+            let y = {
+                let value = vp.price_to_css_y(price, ph) * v_pixel_ratio;
+                if snap_to_pixel {
+                    value.round()
+                } else {
+                    value
+                }
+            } as f32;
 
             // Level line — confined between anchor X positions
             geom.lines.push(ColoredLine {
@@ -206,8 +219,16 @@ impl Drawing for FibonacciDrawing {
         }
 
         if show_anchors {
-            geom.anchors =
-                generate_anchor_circles(&self.anchors, vp, pw, ph, h_pixel_ratio, v_pixel_ratio, c);
+            geom.anchors = generate_anchor_circles(
+                &self.anchors,
+                vp,
+                pw,
+                ph,
+                h_pixel_ratio,
+                v_pixel_ratio,
+                c,
+                snap_to_pixel,
+            );
         }
 
         geom

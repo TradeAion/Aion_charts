@@ -881,6 +881,44 @@ impl InteractionHandler {
         self.velocity_y = 0.0;
     }
 
+    /// Start a touch-style horizontal glide from a requested logical bar delta.
+    pub fn start_horizontal_glide_by_bars(
+        &mut self,
+        delta_bars: f64,
+        pane_css_w: f64,
+        visible_bar_span: f64,
+    ) {
+        if !delta_bars.is_finite()
+            || !pane_css_w.is_finite()
+            || !visible_bar_span.is_finite()
+            || pane_css_w <= 0.0
+            || visible_bar_span <= 0.0
+        {
+            return;
+        }
+
+        let total_dx_px = -delta_bars * pane_css_w / visible_bar_span;
+        let decay = -KINETIC_FRICTION_COEFFICIENT.ln() / PHYSICS_FRAME_MS;
+        if !decay.is_finite() || decay <= 0.0 {
+            return;
+        }
+
+        let mut velocity_x = total_dx_px * decay;
+        let min_keyboard_velocity = MIN_KINETIC_VELOCITY * 1.5;
+        if velocity_x.abs() < min_keyboard_velocity {
+            velocity_x = min_keyboard_velocity.copysign(total_dx_px);
+        }
+
+        if self.is_gliding && self.velocity_x.signum() == velocity_x.signum() {
+            self.velocity_x += velocity_x;
+        } else {
+            self.velocity_x = velocity_x;
+        }
+        self.velocity_y = 0.0;
+        self.is_gliding = true;
+        self.last_move_time = now_ms();
+    }
+
     /// Enable/disable replay trim mode cursor policy.
     pub fn set_replay_chart_trim_mode(&mut self, enabled: bool) {
         self.replay_chart_trim_mode = enabled;
@@ -1034,6 +1072,7 @@ fn magnet_snap_ohlc_price(
 #[cfg(test)]
 mod tests {
     use super::InteractionHandler;
+    use crate::core::constants::PHYSICS_FRAME_MS;
     use crate::core::data::{Bar, BarArray};
     use crate::core::viewport::Viewport;
 
@@ -1215,5 +1254,24 @@ mod tests {
             !vp.price_locked,
             "non-footprint pinch should keep unlocked auto-fit behavior"
         );
+    }
+
+    #[test]
+    fn keyboard_glide_impulse_uses_continuous_pan_path() {
+        let mut ih = InteractionHandler::new();
+        let bars = mk_bars(240);
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(20.0, 120.0);
+        vp.auto_fit_price(&bars);
+
+        let start = vp.start_bar;
+        ih.start_horizontal_glide_by_bars(10.0, 800.0, vp.end_bar - vp.start_bar);
+        assert!(ih.is_gliding);
+        assert!(ih.velocity_x < 0.0);
+
+        ih.last_move_time -= PHYSICS_FRAME_MS;
+        let still_gliding = ih.update_gliding(800.0, 600.0, &mut vp, &bars, bars.len());
+        assert!(still_gliding);
+        assert!(vp.start_bar > start);
     }
 }

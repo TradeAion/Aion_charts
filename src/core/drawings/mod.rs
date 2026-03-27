@@ -359,26 +359,37 @@ impl DrawingManager {
     /// Start dragging a selected drawing (or one of its anchors).
     pub fn start_drag(&mut self, id: u64, anchor_index: Option<usize>, bar_index: f64, price: f64) {
         if let Some(d) = self.get_mut(id) {
-            // For rectangle corner drag, pin the opposite corner for the entire
-            // gesture so crossing over flips naturally instead of "pushing" sides.
-            let (start_bar, start_price) = if d.tool() == DrawingTool::Rectangle {
+            let (initial_bar, initial_price) = anchor_index
+                .and_then(|ai| d.anchors().get(ai))
+                .map(|anchor| (anchor.point.bar_index, anchor.point.price))
+                .unwrap_or((bar_index, price));
+
+            // For rectangle corner/edge drag, pin the opposite reference for the
+            // entire gesture so crossing over flips naturally instead of "pushing" sides.
+            let (fixed_bar, fixed_price) = if d.tool() == DrawingTool::Rectangle {
                 if let Some(ai) = anchor_index {
                     if let Some(rect) = d.as_any().downcast_ref::<rectangle::RectangleDrawing>() {
-                        rect.opposite_reference_for_anchor(ai)
-                            .unwrap_or((bar_index, price))
+                        match rect.opposite_reference_for_anchor(ai) {
+                            Some((fixed_bar, fixed_price)) => (Some(fixed_bar), Some(fixed_price)),
+                            None => (None, None),
+                        }
                     } else {
-                        (bar_index, price)
+                        (None, None)
                     }
                 } else {
-                    (bar_index, price)
+                    (None, None)
                 }
             } else {
-                (bar_index, price)
+                (None, None)
             };
             d.set_state(DrawingState::Dragging {
                 anchor_index,
-                start_bar,
-                start_price,
+                start_bar: bar_index,
+                start_price: price,
+                initial_bar,
+                initial_price,
+                fixed_bar,
+                fixed_price,
             });
         }
     }
@@ -391,8 +402,14 @@ impl DrawingManager {
                     anchor_index,
                     start_bar,
                     start_price,
+                    initial_bar,
+                    initial_price,
+                    fixed_bar,
+                    fixed_price,
                 } => {
                     if let Some(ai) = anchor_index {
+                        let target_bar = initial_bar + (bar_index - start_bar);
+                        let target_price = initial_price + (price - start_price);
                         // Move single anchor.
                         if d.tool() == DrawingTool::Rectangle {
                             if rectangle::RectangleDrawing::is_corner_anchor(ai)
@@ -403,19 +420,19 @@ impl DrawingManager {
                                 {
                                     rect.move_corner_with_fixed_opposite(
                                         ai,
-                                        bar_index,
-                                        price,
-                                        start_bar,
-                                        start_price,
+                                        target_bar,
+                                        target_price,
+                                        fixed_bar.unwrap_or(target_bar),
+                                        fixed_price.unwrap_or(target_price),
                                     );
                                 } else {
-                                    d.move_anchor(ai, bar_index, price);
+                                    d.move_anchor(ai, target_bar, target_price);
                                 }
                             } else {
-                                d.move_anchor(ai, bar_index, price);
+                                d.move_anchor(ai, target_bar, target_price);
                             }
                         } else {
-                            d.move_anchor(ai, bar_index, price);
+                            d.move_anchor(ai, target_bar, target_price);
                         }
                     } else {
                         // Move entire drawing
@@ -426,6 +443,10 @@ impl DrawingManager {
                             anchor_index: None,
                             start_bar: bar_index,
                             start_price: price,
+                            initial_bar: bar_index,
+                            initial_price: price,
+                            fixed_bar: None,
+                            fixed_price: None,
                         });
                     }
                 }
@@ -1108,5 +1129,20 @@ mod tests {
         // Original bottom (100) stays fixed while dragged top crosses below and flips.
         assert!(approx_eq(top, 100.0));
         assert!(approx_eq(bottom, 95.0));
+    }
+
+    #[test]
+    fn anchor_drag_preserves_initial_grab_offset() {
+        let mut manager = DrawingManager::new();
+        let id = complete_trend_line(&mut manager);
+
+        // Grab the first anchor with an intentional offset from its true position.
+        manager.start_drag(id, Some(0), 12.0, 102.0);
+        manager.update_drag(id, 14.0, 105.0);
+
+        let drawing = manager.get(id).expect("trend line drawing");
+        let first_anchor = drawing.anchors()[0].point;
+        assert!(approx_eq(first_anchor.bar_index, 12.0));
+        assert!(approx_eq(first_anchor.price, 103.0));
     }
 }

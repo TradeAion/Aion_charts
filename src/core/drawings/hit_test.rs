@@ -56,10 +56,10 @@ pub fn point_to_circle_distance(px: f64, py: f64, cx: f64, cy: f64) -> f64 {
 }
 
 /// Hit-test threshold in CSS pixels (how close cursor must be to "hit" a line/edge).
-pub const HIT_THRESHOLD_CSS: f64 = 5.0;
+pub const HIT_THRESHOLD_CSS: f64 = 4.0;
 
 /// Hit-test threshold for anchor points (slightly larger than the anchor radius).
-pub const ANCHOR_HIT_THRESHOLD_CSS: f64 = 8.0;
+pub const ANCHOR_HIT_THRESHOLD_CSS: f64 = 6.0;
 
 /// Distance from point (px, py) to a ray starting at (x0,y0) through (x1,y1).
 /// The ray extends infinitely past (x1,y1) but does NOT extend behind (x0,y0).

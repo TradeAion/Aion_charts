@@ -69,7 +69,7 @@ impl AnchorPoint {
 // ── Drawing state machine ───────────────────────────────────────────────────
 
 /// State machine for drawing interaction.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DrawingState {
     /// User is placing anchor points (step 0 = first point, 1 = second, etc.)
     Creating { step: u8 },
@@ -82,6 +82,10 @@ pub enum DrawingState {
         anchor_index: Option<usize>,
         start_bar: f64,
         start_price: f64,
+        initial_bar: f64,
+        initial_price: f64,
+        fixed_bar: Option<f64>,
+        fixed_price: Option<f64>,
     },
 }
 

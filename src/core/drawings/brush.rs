@@ -122,10 +122,22 @@ impl Drawing for BrushDrawing {
         let c = &self.style.color;
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let line_w = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
+        let snap_to_pixel = !matches!(
+            self.state,
+            DrawingState::Dragging { .. } | DrawingState::Creating { .. }
+        );
 
-        let mut prev = point_to_bitmap(&all[0], vp, pw, ph, h_pixel_ratio, v_pixel_ratio);
+        let mut prev = point_to_bitmap(
+            &all[0],
+            vp,
+            pw,
+            ph,
+            h_pixel_ratio,
+            v_pixel_ratio,
+            snap_to_pixel,
+        );
         for pt in &all[1..] {
-            let cur = point_to_bitmap(pt, vp, pw, ph, h_pixel_ratio, v_pixel_ratio);
+            let cur = point_to_bitmap(pt, vp, pw, ph, h_pixel_ratio, v_pixel_ratio, snap_to_pixel);
             geom.lines.push(ColoredLine {
                 x0: prev.0 as f32,
                 y0: prev.1 as f32,

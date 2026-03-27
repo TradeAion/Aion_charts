@@ -76,7 +76,18 @@ impl Drawing for HorizontalLineDrawing {
         let c = &self.style.color;
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let lw = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
-        let y = (vp.price_to_css_y(self.anchors[0].point.price, ph) * v_pixel_ratio).round() as f32;
+        let snap_to_pixel = !matches!(
+            self.state,
+            DrawingState::Dragging { .. } | DrawingState::Creating { .. }
+        );
+        let y = {
+            let value = vp.price_to_css_y(self.anchors[0].point.price, ph) * v_pixel_ratio;
+            if snap_to_pixel {
+                value.round()
+            } else {
+                value
+            }
+        } as f32;
         let pane_pw = (pw * h_pixel_ratio).round() as f32;
 
         let (dash, gap) = self.style.dash.map_or((0.0, 0.0), |d| {
@@ -98,8 +109,16 @@ impl Drawing for HorizontalLineDrawing {
         });
 
         if show_anchors {
-            geom.anchors =
-                generate_anchor_circles(&self.anchors, vp, pw, ph, h_pixel_ratio, v_pixel_ratio, c);
+            geom.anchors = generate_anchor_circles(
+                &self.anchors,
+                vp,
+                pw,
+                ph,
+                h_pixel_ratio,
+                v_pixel_ratio,
+                c,
+                snap_to_pixel,
+            );
         }
         geom
     }

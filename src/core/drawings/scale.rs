@@ -58,6 +58,10 @@ impl Drawing for ScaleDrawing {
         if self.anchors.len() < 2 {
             return geom;
         }
+        let snap_to_pixel = !matches!(
+            self.state,
+            DrawingState::Dragging { .. } | DrawingState::Creating { .. }
+        );
 
         let (bx0, by0) = point_to_bitmap(
             &self.anchors[0].point,
@@ -66,6 +70,7 @@ impl Drawing for ScaleDrawing {
             ph,
             h_pixel_ratio,
             v_pixel_ratio,
+            snap_to_pixel,
         );
         let (bx1, by1) = point_to_bitmap(
             &self.anchors[1].point,
@@ -74,6 +79,7 @@ impl Drawing for ScaleDrawing {
             ph,
             h_pixel_ratio,
             v_pixel_ratio,
+            snap_to_pixel,
         );
 
         let c = &self.style.color;

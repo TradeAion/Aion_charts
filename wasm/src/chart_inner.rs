@@ -940,8 +940,27 @@ impl ChartInner {
                 self.engine.crosshair.bar_index = Some(snap.bar_idx);
                 self.engine.crosshair.price = snap.price;
             } else {
-                // Existing behavior outside Ctrl-snap drag.
-                self.engine.crosshair.active = false;
+                // Keep a live reference crosshair during free drawing drag too.
+                let crosshair_x = x.clamp(0.0, pw);
+                let crosshair_y = self
+                    .engine
+                    .viewport
+                    .price_to_css_y(price, candle_css_h)
+                    .clamp(0.0, candle_css_h);
+                self.engine.crosshair.active = true;
+                self.engine.crosshair.x = crosshair_x;
+                self.engine.crosshair.y = crosshair_y;
+                self.engine.crosshair.bar_index = self
+                    .engine
+                    .viewport
+                    .bar_index_for_crosshair(crosshair_x, pw)
+                    .and_then(|slot| self.engine.time_scale.main_bar_index_at_slot(slot))
+                    .or_else(|| {
+                        self.engine
+                            .time_scale
+                            .nearest_main_bar_index_for_logical(bar)
+                    });
+                self.engine.crosshair.price = price;
             }
             return; // don't move chart while dragging drawing
         }
