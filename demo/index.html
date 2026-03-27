@@ -488,7 +488,7 @@
         <div class="setting-row">
           <span class="setting-label">Line Color</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-crosshair-color" value="#9598a1">
+            <input type="color" class="setting-input" id="cfg-crosshair-color" value="#ebebeb">
           </div>
         </div>
         <div class="setting-row">
@@ -511,13 +511,13 @@
         <div class="setting-row">
           <span class="setting-label">Label BG</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-crosshair-label-bg" value="#131722">
+            <input type="color" class="setting-input" id="cfg-crosshair-label-bg" value="#ebebeb">
           </div>
         </div>
         <div class="setting-row">
           <span class="setting-label">Label Text</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-crosshair-label-text" value="#e5e5e5">
+            <input type="color" class="setting-input" id="cfg-crosshair-label-text" value="#171717">
           </div>
         </div>
         <div class="setting-row">
@@ -733,10 +733,16 @@
       dark: {
         axisBorder: '#2a2a2a',
         axisText: '#f5f5f5',
+        crosshair: '#ebebeb',
+        crosshairLabelBg: '#ebebeb',
+        crosshairLabelText: '#171717',
       },
       light: {
         axisBorder: '#f5f5f5',
         axisText: '#171717',
+        crosshair: '#171717',
+        crosshairLabelBg: '#171717',
+        crosshairLabelText: '#f5f5f5',
       },
     };
     const replaySession = {
@@ -775,6 +781,9 @@
       const palette = isDark ? themeLinkedSettings.dark : themeLinkedSettings.light;
       $('cfg-axis-border-color').value = palette.axisBorder;
       $('cfg-axis-text-color').value = palette.axisText;
+      $('cfg-crosshair-color').value = palette.crosshair;
+      $('cfg-crosshair-label-bg').value = palette.crosshairLabelBg;
+      $('cfg-crosshair-label-text').value = palette.crosshairLabelText;
     }
 
     function replayStatusSuffix() {

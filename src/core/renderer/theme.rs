@@ -72,12 +72,12 @@ pub const GRID: [f32; 4] = [0.2, 0.2, 0.24, 0.4];
 pub const AXIS_BORDER: [f32; 4] = [ch(0x2A), ch(0x2A), ch(0x2A), 1.0];
 /// Axis label text color.
 pub const AXIS_TEXT: [f32; 4] = [ch(0xF5), ch(0xF5), ch(0xF5), 1.0];
-/// Crosshair line color (LWC: #9598A1).
-pub const CROSSHAIR: [f32; 4] = [ch(0x95), ch(0x98), ch(0xA1), 1.0];
-/// Crosshair label background (LWC: #131722).
-pub const CROSSHAIR_LABEL_BG: [f32; 4] = [ch(0x13), ch(0x17), ch(0x22), 1.0];
-/// Crosshair label text.
-pub const CROSSHAIR_LABEL_TEXT: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+/// Crosshair line color for the dark theme.
+pub const CROSSHAIR: [f32; 4] = [ch(0xEB), ch(0xEB), ch(0xEB), 1.0];
+/// Crosshair label background for the dark theme.
+pub const CROSSHAIR_LABEL_BG: [f32; 4] = [ch(0xEB), ch(0xEB), ch(0xEB), 1.0];
+/// Crosshair label text for the dark theme.
+pub const CROSSHAIR_LABEL_TEXT: [f32; 4] = [ch(0x17), ch(0x17), ch(0x17), 1.0];
 /// Font family (LWC default).
 pub const FONT_FAMILY: &str =
     "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
@@ -499,9 +499,9 @@ impl ThemeConfig {
                 axis_text: [ch(0x17), ch(0x17), ch(0x17), 1.0], // #171717
             },
             crosshair: ThemeCrosshair {
-                line_color: [ch(0x75), ch(0x86), ch(0x96), 1.0], // #758696
-                label_bg: [ch(0x4C), ch(0x52), ch(0x5E), 1.0],   // #4C525E
-                label_text: [1.0, 1.0, 1.0, 1.0],                // White on dark label
+                line_color: [ch(0x17), ch(0x17), ch(0x17), 1.0], // #171717
+                label_bg: [ch(0x17), ch(0x17), ch(0x17), 1.0],   // #171717
+                label_text: [ch(0xF5), ch(0xF5), ch(0xF5), 1.0], // #F5F5F5
                 line_width: 1.0,
                 line_style: LineStyle::LargeDashed,
                 vert_visible: true,
@@ -858,5 +858,26 @@ mod tests {
             [ch(0xF5), ch(0xF5), ch(0xF5), 1.0]
         );
         assert_eq!(light.colors.axis_text, [ch(0x17), ch(0x17), ch(0x17), 1.0]);
+        assert_eq!(
+            dark.crosshair.line_color,
+            [ch(0xEB), ch(0xEB), ch(0xEB), 1.0]
+        );
+        assert_eq!(dark.crosshair.label_bg, [ch(0xEB), ch(0xEB), ch(0xEB), 1.0]);
+        assert_eq!(
+            dark.crosshair.label_text,
+            [ch(0x17), ch(0x17), ch(0x17), 1.0]
+        );
+        assert_eq!(
+            light.crosshair.line_color,
+            [ch(0x17), ch(0x17), ch(0x17), 1.0]
+        );
+        assert_eq!(
+            light.crosshair.label_bg,
+            [ch(0x17), ch(0x17), ch(0x17), 1.0]
+        );
+        assert_eq!(
+            light.crosshair.label_text,
+            [ch(0xF5), ch(0xF5), ch(0xF5), 1.0]
+        );
     }
 }
