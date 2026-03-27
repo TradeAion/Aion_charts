@@ -26,6 +26,7 @@ use raycore::core::renderer::canvas_dash::{clear_canvas_line_dash, set_canvas_li
 use raycore::core::renderer::geometry_generator;
 use raycore::core::renderer::tick_marks::compute_y_ticks;
 use raycore::core::renderer::traits::{ChartStyle, CrosshairMode, CrosshairState, TickMark};
+use raycore::core::renderer::value_projection::TimeScaleIndex;
 use raycore::core::series::LineDataArray;
 use raycore::core::viewport::Viewport;
 use raycore::{DrawingManager, PaneId, PaneManager, PaneOptions, PriceAxisRenderer, ScrollState};
@@ -34,6 +35,14 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 const MIN_PANE_HEIGHT: f64 = 30.0;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ExactPixelSizes {
+    chart_pw: u32,
+    chart_ph: u32,
+    axis_pw: u32,
+    axis_ph: u32,
+}
 
 #[derive(Debug, Clone)]
 pub struct SubPaneSeparatorStyle {
@@ -341,6 +350,9 @@ pub struct SubPane {
     pub _interaction_closures: Vec<Closure<dyn FnMut(web_sys::Event)>>,
     pub _wheel_closures: Vec<Closure<dyn FnMut(web_sys::WheelEvent)>>,
     pub _touch_closures: Vec<Closure<dyn FnMut(web_sys::TouchEvent)>>,
+    _resize_closure: Option<Closure<dyn Fn(js_sys::Array)>>,
+    _resize_observer: Option<web_sys::ResizeObserver>,
+    exact_sizes: Rc<Cell<ExactPixelSizes>>,
 }
 
 impl SubPane {
@@ -553,6 +565,48 @@ impl SubPane {
         // Initialize scroll state for kinetic scrolling
         let scroll_state = Rc::new(RefCell::new(ScrollState::new()));
         let last_tap_time = Rc::new(Cell::new(0.0));
+        let exact_sizes = Rc::new(Cell::new(ExactPixelSizes::default()));
+
+        let chart_container_for_ro: web_sys::Element = chart_container.clone().unchecked_into();
+        let axis_container_for_ro: web_sys::Element = axis_container.clone().unchecked_into();
+        let (resize_closure, resize_observer) = {
+            let exact_sizes = Rc::clone(&exact_sizes);
+            let chart_ref = chart_container_for_ro.clone();
+            let axis_ref = axis_container_for_ro.clone();
+
+            let cb =
+                Closure::<dyn Fn(js_sys::Array)>::wrap(Box::new(move |entries: js_sys::Array| {
+                    let mut next = exact_sizes.get();
+                    for idx in 0..entries.length() {
+                        let entry: web_sys::ResizeObserverEntry = entries.get(idx).unchecked_into();
+                        let target = entry.target();
+                        if target == chart_ref {
+                            if let Some((pw, ph)) = extract_device_pixel_content_box_size(&entry) {
+                                next.chart_pw = pw;
+                                next.chart_ph = ph;
+                            }
+                        } else if target == axis_ref {
+                            if let Some((pw, ph)) = extract_device_pixel_content_box_size(&entry) {
+                                next.axis_pw = pw;
+                                next.axis_ph = ph;
+                            }
+                        }
+                    }
+                    exact_sizes.set(next);
+                }));
+            let observer = web_sys::ResizeObserver::new(cb.as_ref().unchecked_ref())?;
+
+            let observe_with_dpcb = js_sys::Function::new_with_args(
+                "observer,element",
+                "try { observer.observe(element, { box: 'device-pixel-content-box' }); return true; } catch(e) { observer.observe(element); return false; }",
+            );
+            let _ =
+                observe_with_dpcb.call2(&JsValue::NULL, observer.as_ref(), &chart_container_for_ro);
+            let _ =
+                observe_with_dpcb.call2(&JsValue::NULL, observer.as_ref(), &axis_container_for_ro);
+
+            (Some(cb), Some(observer))
+        };
 
         Ok(Self {
             id,
@@ -587,6 +641,9 @@ impl SubPane {
             _interaction_closures: Vec::new(),
             _wheel_closures: Vec::new(),
             _touch_closures: Vec::new(),
+            _resize_closure: resize_closure,
+            _resize_observer: resize_observer,
+            exact_sizes,
         })
     }
 
@@ -685,20 +742,40 @@ impl SubPane {
     pub fn resize(&mut self, dpr: f64) {
         self.dpr = dpr;
         // Read size from CONTAINER (not canvas) - the container is properly sized by CSS grid
-        let cw = self.chart_container.client_width() as f64;
-        let ch = self.chart_container.client_height() as f64;
+        let chart_rect = self.chart_container.get_bounding_client_rect();
+        let cw = chart_rect.width();
+        let ch = chart_rect.height();
         if cw > 0.0 && ch > 0.0 {
-            let pw = (cw * dpr).round() as u32;
-            let ph = (ch * dpr).round() as u32;
+            let exact = self.exact_sizes.get();
+            let pw = if exact.chart_pw > 0 {
+                exact.chart_pw
+            } else {
+                (cw * dpr).round() as u32
+            };
+            let ph = if exact.chart_ph > 0 {
+                exact.chart_ph
+            } else {
+                (ch * dpr).round() as u32
+            };
             resize_canvas_with_size(&self.chart_base, pw, ph, cw, ch);
             resize_canvas_with_size(&self.chart_top, pw, ph, cw, ch);
         }
         // Price axis canvases — must set CSS size for correct display
-        let aw = self.axis_container.client_width() as f64;
-        let ah = self.axis_container.client_height() as f64;
+        let axis_rect = self.axis_container.get_bounding_client_rect();
+        let aw = axis_rect.width();
+        let ah = axis_rect.height();
         if aw > 0.0 && ah > 0.0 {
-            let apw = (aw * dpr).round() as u32;
-            let aph = (ah * dpr).round() as u32;
+            let exact = self.exact_sizes.get();
+            let apw = if exact.axis_pw > 0 {
+                exact.axis_pw
+            } else {
+                (aw * dpr).round() as u32
+            };
+            let aph = if exact.axis_ph > 0 {
+                exact.axis_ph
+            } else {
+                (ah * dpr).round() as u32
+            };
             self.price_axis
                 .resize_with_css(apw.max(1), aph.max(1), dpr, aw, ah);
         }
@@ -769,6 +846,7 @@ impl SubPane {
     pub fn render(
         &mut self,
         main_viewport: &Viewport,
+        time_scale: &TimeScaleIndex,
         style: &ChartStyle,
         x_ticks: &[TickMark],
     ) -> Vec<DrawingGeometry> {
@@ -788,7 +866,14 @@ impl SubPane {
         let y_ticks = compute_y_ticks(&self.viewport, ph, ph, dpr, style);
         let (bottom_drawings, top_drawings) = self.generate_drawing_geometry(main_viewport);
 
-        self.render_chart(main_viewport, style, &y_ticks, x_ticks, &bottom_drawings);
+        self.render_chart(
+            main_viewport,
+            time_scale,
+            style,
+            &y_ticks,
+            x_ticks,
+            &bottom_drawings,
+        );
 
         self.price_axis.render_base(style, &y_ticks);
 
@@ -935,6 +1020,7 @@ impl SubPane {
     fn render_chart(
         &self,
         main_viewport: &Viewport,
+        time_scale: &TimeScaleIndex,
         style: &ChartStyle,
         y_ticks: &[TickMark],
         x_ticks: &[TickMark],
@@ -1007,7 +1093,7 @@ impl SubPane {
                 .get(i)
                 .copied()
                 .unwrap_or(raycore::ThemeConfig::default().indicator_palette.fallback);
-            self.draw_data_line(line, &color, main_viewport, css_w, css_h, dpr);
+            self.draw_data_line(line, &color, main_viewport, time_scale, css_w, css_h, dpr);
         }
     }
 
@@ -1016,6 +1102,7 @@ impl SubPane {
         line: &LineDataArray,
         color: &[f32; 4],
         main_viewport: &Viewport,
+        time_scale: &TimeScaleIndex,
         css_w: f64,
         css_h: f64,
         dpr: f64,
@@ -1034,7 +1121,11 @@ impl SubPane {
                 started = false;
                 continue;
             }
-            let x = main_viewport.bar_center_css(i, css_w) * dpr;
+            let Some(logical_slot) = time_scale.logical_index_for_main_bar(i) else {
+                started = false;
+                continue;
+            };
+            let x = main_viewport.bar_center_css(logical_slot as usize, css_w) * dpr;
             let y = self.viewport.price_to_css_y(value as f64, css_h) * dpr;
             if !started {
                 self.chart_base_ctx.move_to(x, y);
@@ -1178,6 +1269,12 @@ impl SubPane {
     /// allows the DOM to release its references to the JS functions,
     /// preventing memory leaks when the subpane is destroyed.
     pub fn dispose(&mut self) {
+        if let Some(observer) = &self._resize_observer {
+            observer.disconnect();
+        }
+        self._resize_observer = None;
+        self._resize_closure = None;
+
         // Clear closure vectors - this drops the closures
         // DOM listeners are not explicitly removed here since we're removing
         // the DOM elements entirely, which effectively removes all listeners
@@ -1208,6 +1305,30 @@ fn get_2d_ctx(canvas: &HtmlCanvasElement) -> Result<CanvasRenderingContext2d, Js
         .get_context("2d")?
         .ok_or_else(|| JsValue::from_str("no 2d ctx"))?
         .dyn_into::<CanvasRenderingContext2d>()?)
+}
+
+fn extract_device_pixel_content_box_size(
+    entry: &web_sys::ResizeObserverEntry,
+) -> Option<(u32, u32)> {
+    let raw = js_sys::Reflect::get(entry, &JsValue::from_str("devicePixelContentBoxSize")).ok()?;
+    if raw.is_undefined() || raw.is_null() {
+        return None;
+    }
+    let arr: &js_sys::Array = raw.unchecked_ref();
+    if arr.length() == 0 {
+        return None;
+    }
+    let item = arr.get(0);
+    let inline_size = js_sys::Reflect::get(&item, &JsValue::from_str("inlineSize"))
+        .ok()
+        .and_then(|value| value.as_f64())?;
+    let block_size = js_sys::Reflect::get(&item, &JsValue::from_str("blockSize"))
+        .ok()
+        .and_then(|value| value.as_f64())?;
+    if inline_size <= 0.0 || block_size <= 0.0 {
+        return None;
+    }
+    Some((inline_size as u32, block_size as u32))
 }
 
 fn resize_canvas(canvas: &HtmlCanvasElement, dpr: f64) {

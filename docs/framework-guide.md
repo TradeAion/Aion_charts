@@ -208,7 +208,7 @@ RayCore provides a typed event system:
 
 ```ts
 chart.on('crosshairMove', (e) => {
-  console.log(e.price, e.timestamp, e.bar_index);
+  console.log(e.price, e.timestamp, e.barIndex);
 });
 
 chart.on('click', (e) => { /* ... */ });

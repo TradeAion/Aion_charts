@@ -77,7 +77,7 @@ pub const CROSSHAIR: [f32; 4] = [ch(0x95), ch(0x98), ch(0xA1), 1.0];
 /// Crosshair label background (LWC: #131722).
 pub const CROSSHAIR_LABEL_BG: [f32; 4] = [ch(0x13), ch(0x17), ch(0x22), 1.0];
 /// Crosshair label text.
-pub const CROSSHAIR_LABEL_TEXT: [f32; 4] = [0.9, 0.9, 0.9, 1.0];
+pub const CROSSHAIR_LABEL_TEXT: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 /// Font family (LWC default).
 pub const FONT_FAMILY: &str =
     "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
@@ -89,6 +89,21 @@ pub const BAR_WIDTH_RATIO: f32 = 0.8;
 pub const AXIS_BORDER_SIZE: f32 = 1.0;
 /// Axis tick length in CSS px.
 pub const AXIS_TICK_LENGTH: f32 = 5.0;
+
+/// Match lightweight-charts contrast selection for solid label backgrounds.
+///
+/// LWC converts the background to grayscale and chooses black text for bright
+/// labels, otherwise white text. RayCore stores colors normalized to 0.0-1.0,
+/// so the grayscale threshold is normalized from 160/255.
+pub fn contrast_text_color(background: [f32; 4]) -> [f32; 4] {
+    let grayscale =
+        0.199 * background[0] as f64 + 0.687 * background[1] as f64 + 0.114 * background[2] as f64;
+    if grayscale > (160.0 / 255.0) {
+        [0.0, 0.0, 0.0, 1.0]
+    } else {
+        [1.0, 1.0, 1.0, 1.0]
+    }
+}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Legacy builder (unchanged — ChartStyle::default() delegates here)

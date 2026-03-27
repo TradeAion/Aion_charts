@@ -9,6 +9,7 @@
 use crate::core::data::BarArray;
 use crate::core::drawings::types::DrawingGeometry;
 use crate::core::indicators::render::types::DrawInstruction;
+use crate::core::renderer::value_projection::TimeScaleIndex;
 use crate::core::series::{LineStyle, SeriesCollection};
 use crate::core::viewport::Viewport;
 
@@ -270,6 +271,7 @@ pub struct CrosshairState {
 /// The renderer's canvas is sized to the pane (chart area) only.
 pub struct RenderContext<'a> {
     pub bars: &'a BarArray,
+    pub time_scale: &'a TimeScaleIndex,
     pub viewport: &'a Viewport,
     pub style: &'a ChartStyle,
     pub crosshair: &'a CrosshairState,

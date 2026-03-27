@@ -27,6 +27,7 @@ use crate::core::renderer::draw_list::DrawText;
 use crate::core::renderer::traits::{
     ChartStyle, CrosshairState, RenderContext, Renderer, RendererBackend,
 };
+use crate::core::renderer::value_projection::TimeScaleIndex;
 use crate::core::series::{
     AreaSeriesOptions, BarSeriesOptions, BaselineSeriesOptions, HistogramPoint,
     HistogramSeriesOptions, LinePoint, LineSeriesOptions, OhlcPoint, Series, SeriesCollection,
@@ -66,6 +67,95 @@ fn ensure_strictly_increasing_bar_timestamps(bars: &[Bar]) -> Result<(), String>
     Ok(())
 }
 
+#[inline]
+fn ensure_finite_bar_input(context: &str, bar: &Bar, index: usize) -> Result<(), String> {
+    for (field, value) in [
+        ("open", bar.open),
+        ("high", bar.high),
+        ("low", bar.low),
+        ("close", bar.close),
+        ("volume", bar.volume),
+    ] {
+        if !value.is_finite() {
+            return Err(format!(
+                "{context}: bars[{index}].{field} must be finite, got {value}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[inline]
+fn ensure_finite_line_point(context: &str, point: &LinePoint, index: usize) -> Result<(), String> {
+    if !point.value.is_finite() {
+        return Err(format!(
+            "{context}: points[{index}].value must be finite, got {}",
+            point.value
+        ));
+    }
+    Ok(())
+}
+
+#[inline]
+fn ensure_finite_histogram_point(
+    context: &str,
+    point: &HistogramPoint,
+    index: usize,
+) -> Result<(), String> {
+    if !point.value.is_finite() {
+        return Err(format!(
+            "{context}: points[{index}].value must be finite, got {}",
+            point.value
+        ));
+    }
+    for (channel, value) in [
+        ("color[0]", point.color[0]),
+        ("color[1]", point.color[1]),
+        ("color[2]", point.color[2]),
+        ("color[3]", point.color[3]),
+    ] {
+        if !value.is_finite() {
+            return Err(format!(
+                "{context}: points[{index}].{channel} must be finite, got {value}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[inline]
+fn ensure_finite_ohlc_point(context: &str, point: &OhlcPoint, index: usize) -> Result<(), String> {
+    for (field, value) in [
+        ("open", point.open),
+        ("high", point.high),
+        ("low", point.low),
+        ("close", point.close),
+    ] {
+        if !value.is_finite() {
+            return Err(format!(
+                "{context}: points[{index}].{field} must be finite, got {value}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[inline]
+fn merge_bounds(bounds: &mut Option<(f64, f64)>, a: f64, b: f64) {
+    if !a.is_finite() || !b.is_finite() {
+        return;
+    }
+    let lo = a.min(b);
+    let hi = a.max(b);
+    match bounds {
+        Some((current_lo, current_hi)) => {
+            *current_lo = current_lo.min(lo);
+            *current_hi = current_hi.max(hi);
+        }
+        None => *bounds = Some((lo, hi)),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UpsertAction {
     Append,
@@ -92,6 +182,7 @@ pub struct ChartEngine {
     pub renderer: RendererBackend,
     pub viewport: Viewport,
     pub bars: BarArray,
+    pub time_scale: TimeScaleIndex,
     pub style: ChartStyle,
     pub crosshair: CrosshairState,
     pub drawings: DrawingManager,
@@ -236,6 +327,7 @@ impl ChartEngine {
         let crosshair = CrosshairState::default();
         let drawings = DrawingManager::new();
         let series = SeriesCollection::new();
+        let time_scale = TimeScaleIndex::from_bars_and_series(&bars, &series);
         let mut studies = StudyManager::new();
         let price_lines = PriceLineManager::new();
         let markers = MarkerManager::new();
@@ -249,6 +341,7 @@ impl ChartEngine {
             renderer,
             viewport,
             bars,
+            time_scale,
             style,
             crosshair,
             drawings,
@@ -277,6 +370,18 @@ impl ChartEngine {
     /// Which renderer backend is active.
     pub fn renderer_name(&self) -> &str {
         self.renderer.name()
+    }
+
+    #[inline]
+    fn logical_data_len(&self) -> usize {
+        self.time_scale.len()
+    }
+
+    fn rebuild_time_scale(&mut self) {
+        self.time_scale = TimeScaleIndex::from_bars_and_series(&self.bars, &self.series);
+        self.execution_marks
+            .resolve_time_scale_indices(&self.time_scale);
+        self.drawings.remap_to_time_scale(&self.time_scale);
     }
 
     #[inline]
@@ -356,7 +461,7 @@ impl ChartEngine {
     }
 
     fn default_recent_visible_span(&self) -> f64 {
-        let data_len = self.bars.len() as f64;
+        let data_len = self.logical_data_len() as f64;
         if data_len <= 0.0 {
             return DEFAULT_INITIAL_VISIBLE_BARS.max(MIN_VISIBLE_BARS);
         }
@@ -399,10 +504,10 @@ impl ChartEngine {
     }
 
     fn current_time_range_overlaps_loaded_data(&self) -> bool {
-        if self.bars.is_empty() {
+        if self.time_scale.is_empty() {
             return false;
         }
-        let data_len = self.bars.len() as f64;
+        let data_len = self.logical_data_len() as f64;
         self.viewport.end_bar > 0.0 && self.viewport.start_bar < data_len
     }
 
@@ -410,7 +515,7 @@ impl ChartEngine {
         if !self.current_time_range_overlaps_loaded_data() {
             return FootprintTimeRangeAnchor::LatestWithGap;
         }
-        let data_len = self.bars.len() as f64;
+        let data_len = self.logical_data_len() as f64;
         if self.viewport.end_bar >= data_len - 1.0 && self.viewport.start_bar > 0.0 {
             FootprintTimeRangeAnchor::LatestWithGap
         } else {
@@ -423,7 +528,7 @@ impl ChartEngine {
         requested_span: f64,
         anchor: FootprintTimeRangeAnchor,
     ) {
-        let data_len = self.bars.len() as f64;
+        let data_len = self.logical_data_len() as f64;
         if data_len <= 0.0 {
             self.viewport.price_invalidated = true;
             return;
@@ -450,7 +555,7 @@ impl ChartEngine {
 
     /// Reset the main chart viewport to a preset time range and auto-scaled price view.
     pub fn reset_main_viewport(&mut self, preset: MainViewportPreset) {
-        let data_len = self.bars.len() as f64;
+        let data_len = self.logical_data_len() as f64;
         self.viewport.price_locked = false;
 
         if data_len <= 0.0 {
@@ -535,21 +640,23 @@ impl ChartEngine {
     /// Stamp timestamps on all drawing anchor points from the current bar data.
     /// Call after any drawing creation, modification, or drag ends.
     pub fn stamp_drawing_timestamps(&mut self) {
-        self.drawings.stamp_timestamps(&self.bars);
+        self.drawings
+            .stamp_timestamps_with_time_scale(&self.time_scale);
     }
 
     fn replace_main_bars(&mut self, bars: Vec<Bar>) -> Result<(), String> {
         ensure_strictly_increasing_bar_timestamps(&bars)?;
+        for (index, bar) in bars.iter().enumerate() {
+            ensure_finite_bar_input("replace_main_bars", bar, index)?;
+        }
 
-        // Stamp timestamps on existing drawings from the OLD bar data so they
-        // can be remapped after the data swap.
-        self.drawings.stamp_timestamps(&self.bars);
+        // Stamp timestamps on existing drawings from the OLD logical time scale
+        // so they can be remapped after the data swap.
+        self.drawings
+            .stamp_timestamps_with_time_scale(&self.time_scale);
 
-        self.bars.set(bars);
-        self.execution_marks.resolve_bar_indices(&self.bars);
-
-        // Remap drawing positions to the new bar data using stored timestamps.
-        self.drawings.remap_to_new_data(&self.bars);
+        self.bars.set(bars)?;
+        self.rebuild_time_scale();
 
         // Update studies with new data
         self.studies.update_studies(&self.bars);
@@ -650,11 +757,17 @@ impl ChartEngine {
                 ));
             }
         }
-        let s = self.get_series_mut_checked(
-            id,
-            &[SeriesType::Line, SeriesType::Area, SeriesType::Baseline],
-        )?;
-        s.line_data.set(data);
+        for (index, point) in data.iter().enumerate() {
+            ensure_finite_line_point("set_series_data", point, index)?;
+        }
+        {
+            let s = self.get_series_mut_checked(
+                id,
+                &[SeriesType::Line, SeriesType::Area, SeriesType::Baseline],
+            )?;
+            s.line_data.set(data)?;
+        }
+        self.on_overlay_series_changed();
         Ok(())
     }
 
@@ -674,8 +787,14 @@ impl ChartEngine {
                 ));
             }
         }
-        let s = self.get_series_mut_checked(id, &[SeriesType::Histogram])?;
-        s.histogram_data.set_data(data);
+        for (index, point) in data.iter().enumerate() {
+            ensure_finite_histogram_point("set_histogram_data", point, index)?;
+        }
+        {
+            let s = self.get_series_mut_checked(id, &[SeriesType::Histogram])?;
+            s.histogram_data.set_data(data)?;
+        }
+        self.on_overlay_series_changed();
         Ok(())
     }
 
@@ -694,8 +813,18 @@ impl ChartEngine {
             ));
         }
         ensure_strictly_increasing_timestamps("histogram", timestamps)?;
-        let s = self.get_series_mut_checked(id, &[SeriesType::Histogram])?;
-        s.histogram_data.set_from_arrays(timestamps, values)?;
+        for (index, value) in values.iter().enumerate() {
+            if !value.is_finite() {
+                return Err(format!(
+                    "set_histogram_data_arrays: values[{index}] must be finite, got {value}"
+                ));
+            }
+        }
+        {
+            let s = self.get_series_mut_checked(id, &[SeriesType::Histogram])?;
+            s.histogram_data.set_from_arrays(timestamps, values)?;
+        }
+        self.on_overlay_series_changed();
         Ok(())
     }
 
@@ -711,8 +840,14 @@ impl ChartEngine {
                 ));
             }
         }
-        let s = self.get_series_mut_checked(id, &[SeriesType::Bar])?;
-        s.bar_data.set_data(data);
+        for (index, point) in data.iter().enumerate() {
+            ensure_finite_ohlc_point("set_bar_data", point, index)?;
+        }
+        {
+            let s = self.get_series_mut_checked(id, &[SeriesType::Bar])?;
+            s.bar_data.set_data(data)?;
+        }
+        self.on_overlay_series_changed();
         Ok(())
     }
 
@@ -738,24 +873,45 @@ impl ChartEngine {
             ));
         }
         ensure_strictly_increasing_timestamps("bar", timestamps)?;
-        let s = self.get_series_mut_checked(id, &[SeriesType::Bar])?;
-        s.bar_data
-            .set_from_arrays(timestamps, open, high, low, close)?;
+        for (field, values) in [
+            ("open", open),
+            ("high", high),
+            ("low", low),
+            ("close", close),
+        ] {
+            for (index, value) in values.iter().enumerate() {
+                if !value.is_finite() {
+                    return Err(format!(
+                        "set_bar_data_arrays: {field}[{index}] must be finite, got {value}"
+                    ));
+                }
+            }
+        }
+        {
+            let s = self.get_series_mut_checked(id, &[SeriesType::Bar])?;
+            s.bar_data
+                .set_from_arrays(timestamps, open, high, low, close)?;
+        }
+        self.on_overlay_series_changed();
         Ok(())
     }
 
     /// Append a point to a line/area/baseline overlay series.
     pub fn append_series_point(&mut self, id: SeriesId, point: LinePoint) -> Result<(), String> {
-        let s = self.get_series_mut_checked(
-            id,
-            &[SeriesType::Line, SeriesType::Area, SeriesType::Baseline],
-        )?;
-        Self::validate_append_timestamp(
-            "append_series_point",
-            s.line_data.last_timestamp(),
-            point.timestamp,
-        )?;
-        s.line_data.push(point);
+        {
+            let s = self.get_series_mut_checked(
+                id,
+                &[SeriesType::Line, SeriesType::Area, SeriesType::Baseline],
+            )?;
+            Self::validate_append_timestamp(
+                "append_series_point",
+                s.line_data.last_timestamp(),
+                point.timestamp,
+            )?;
+            ensure_finite_line_point("append_series_point", &point, s.line_data.len())?;
+            s.line_data.push(point)?;
+        }
+        self.on_overlay_series_changed();
         Ok(())
     }
 
@@ -765,16 +921,21 @@ impl ChartEngine {
         id: SeriesId,
         point: LinePoint,
     ) -> Result<(), String> {
-        let s = self.get_series_mut_checked(
-            id,
-            &[SeriesType::Line, SeriesType::Area, SeriesType::Baseline],
-        )?;
-        Self::validate_update_timestamp(
-            "update_last_series_point",
-            s.line_data.last_timestamp(),
-            point.timestamp,
-        )?;
-        s.line_data.update_last(point);
+        {
+            let s = self.get_series_mut_checked(
+                id,
+                &[SeriesType::Line, SeriesType::Area, SeriesType::Baseline],
+            )?;
+            Self::validate_update_timestamp(
+                "update_last_series_point",
+                s.line_data.last_timestamp(),
+                point.timestamp,
+            )?;
+            let index = s.line_data.len().saturating_sub(1);
+            ensure_finite_line_point("update_last_series_point", &point, index)?;
+            s.line_data.update_last(point)?;
+        }
+        self.on_overlay_series_changed();
         Ok(())
     }
 
@@ -800,13 +961,21 @@ impl ChartEngine {
         id: SeriesId,
         point: HistogramPoint,
     ) -> Result<(), String> {
-        let s = self.get_series_mut_checked(id, &[SeriesType::Histogram])?;
-        Self::validate_append_timestamp(
-            "append_histogram_point",
-            s.histogram_data.last_timestamp(),
-            point.timestamp,
-        )?;
-        s.histogram_data.push(point);
+        {
+            let s = self.get_series_mut_checked(id, &[SeriesType::Histogram])?;
+            Self::validate_append_timestamp(
+                "append_histogram_point",
+                s.histogram_data.last_timestamp(),
+                point.timestamp,
+            )?;
+            ensure_finite_histogram_point(
+                "append_histogram_point",
+                &point,
+                s.histogram_data.len(),
+            )?;
+            s.histogram_data.push(point)?;
+        }
+        self.on_overlay_series_changed();
         Ok(())
     }
 
@@ -816,13 +985,18 @@ impl ChartEngine {
         id: SeriesId,
         point: HistogramPoint,
     ) -> Result<(), String> {
-        let s = self.get_series_mut_checked(id, &[SeriesType::Histogram])?;
-        Self::validate_update_timestamp(
-            "update_last_histogram_point",
-            s.histogram_data.last_timestamp(),
-            point.timestamp,
-        )?;
-        s.histogram_data.update_last(point);
+        {
+            let s = self.get_series_mut_checked(id, &[SeriesType::Histogram])?;
+            Self::validate_update_timestamp(
+                "update_last_histogram_point",
+                s.histogram_data.last_timestamp(),
+                point.timestamp,
+            )?;
+            let index = s.histogram_data.len().saturating_sub(1);
+            ensure_finite_histogram_point("update_last_histogram_point", &point, index)?;
+            s.histogram_data.update_last(point)?;
+        }
+        self.on_overlay_series_changed();
         Ok(())
     }
 
@@ -849,13 +1023,17 @@ impl ChartEngine {
         id: SeriesId,
         point: OhlcPoint,
     ) -> Result<(), String> {
-        let s = self.get_series_mut_checked(id, &[SeriesType::Bar])?;
-        Self::validate_append_timestamp(
-            "append_bar_series_point",
-            s.bar_data.last_timestamp(),
-            point.timestamp,
-        )?;
-        s.bar_data.push(point);
+        {
+            let s = self.get_series_mut_checked(id, &[SeriesType::Bar])?;
+            Self::validate_append_timestamp(
+                "append_bar_series_point",
+                s.bar_data.last_timestamp(),
+                point.timestamp,
+            )?;
+            ensure_finite_ohlc_point("append_bar_series_point", &point, s.bar_data.len())?;
+            s.bar_data.push(point)?;
+        }
+        self.on_overlay_series_changed();
         Ok(())
     }
 
@@ -865,13 +1043,18 @@ impl ChartEngine {
         id: SeriesId,
         point: OhlcPoint,
     ) -> Result<(), String> {
-        let s = self.get_series_mut_checked(id, &[SeriesType::Bar])?;
-        Self::validate_update_timestamp(
-            "update_last_bar_series_point",
-            s.bar_data.last_timestamp(),
-            point.timestamp,
-        )?;
-        s.bar_data.update_last(point);
+        {
+            let s = self.get_series_mut_checked(id, &[SeriesType::Bar])?;
+            Self::validate_update_timestamp(
+                "update_last_bar_series_point",
+                s.bar_data.last_timestamp(),
+                point.timestamp,
+            )?;
+            let index = s.bar_data.len().saturating_sub(1);
+            ensure_finite_ohlc_point("update_last_bar_series_point", &point, index)?;
+            s.bar_data.update_last(point)?;
+        }
+        self.on_overlay_series_changed();
         Ok(())
     }
 
@@ -894,20 +1077,43 @@ impl ChartEngine {
 
     /// Remove a series by ID.
     pub fn remove_series(&mut self, id: SeriesId) -> bool {
-        self.series.remove(id)
+        let removed = self.series.remove(id);
+        if removed {
+            self.on_overlay_series_changed();
+        }
+        removed
     }
 
     /// Set visibility of a series.
     pub fn set_series_visible(&mut self, id: SeriesId, visible: bool) {
+        let mut changed = false;
         if let Some(s) = self.series.get_mut(id) {
             match s.series_type() {
-                crate::core::series::SeriesType::Line => s.line_options.visible = visible,
-                crate::core::series::SeriesType::Area => s.area_options.visible = visible,
-                crate::core::series::SeriesType::Histogram => s.histogram_options.visible = visible,
-                crate::core::series::SeriesType::Bar => s.bar_options.visible = visible,
-                crate::core::series::SeriesType::Baseline => s.baseline_options.visible = visible,
+                crate::core::series::SeriesType::Line => {
+                    changed = s.line_options.visible != visible;
+                    s.line_options.visible = visible;
+                }
+                crate::core::series::SeriesType::Area => {
+                    changed = s.area_options.visible != visible;
+                    s.area_options.visible = visible;
+                }
+                crate::core::series::SeriesType::Histogram => {
+                    changed = s.histogram_options.visible != visible;
+                    s.histogram_options.visible = visible;
+                }
+                crate::core::series::SeriesType::Bar => {
+                    changed = s.bar_options.visible != visible;
+                    s.bar_options.visible = visible;
+                }
+                crate::core::series::SeriesType::Baseline => {
+                    changed = s.baseline_options.visible != visible;
+                    s.baseline_options.visible = visible;
+                }
                 _ => {}
             }
+        }
+        if changed {
+            self.on_overlay_series_changed();
         }
     }
 
@@ -997,15 +1203,169 @@ impl ChartEngine {
         self.studies.update_studies(&self.bars);
     }
 
+    fn visible_main_raw_bounds(&self) -> Option<(usize, f64, f64)> {
+        let (start, end) = self
+            .time_scale
+            .visible_main_bar_range(self.viewport.start_bar, self.viewport.end_bar)?;
+        let mut lo = f32::MAX;
+        let mut hi = f32::MIN;
+        for i in start..end {
+            let bar = self.bars.get_unchecked(i);
+            lo = lo.min(bar.low);
+            hi = hi.max(bar.high);
+        }
+        Some((start, lo as f64, hi as f64))
+    }
+
+    fn visible_overlay_internal_bounds(&self) -> Option<(f64, f64)> {
+        if self.time_scale.is_empty() {
+            return None;
+        }
+
+        let visible_start = self.viewport.start_bar - 1.0;
+        let visible_end = self.viewport.end_bar + 1.0;
+        let mut bounds = None;
+
+        for series in self.series.iter().filter(|series| series.is_visible()) {
+            let mut series_has_visible_points = false;
+
+            match series.series_type() {
+                SeriesType::Line | SeriesType::Area | SeriesType::Baseline => {
+                    for (&timestamp, &value) in series
+                        .line_data
+                        .timestamps
+                        .iter()
+                        .zip(&series.line_data.values)
+                    {
+                        let Some(bar_index) =
+                            self.time_scale.logical_index_for_timestamp(timestamp)
+                        else {
+                            continue;
+                        };
+                        if bar_index < visible_start || bar_index > visible_end {
+                            continue;
+                        }
+                        let internal = self.viewport.price_to_internal(value as f64);
+                        merge_bounds(&mut bounds, internal, internal);
+                        series_has_visible_points = true;
+                    }
+
+                    if series_has_visible_points {
+                        if let SeriesType::Area = series.series_type() {
+                            if let Some(base) = series.area_options.base_value {
+                                let internal = self.viewport.price_to_internal(base);
+                                merge_bounds(&mut bounds, internal, internal);
+                            }
+                        }
+                        if let SeriesType::Baseline = series.series_type() {
+                            let internal = self
+                                .viewport
+                                .price_to_internal(series.baseline_options.base_value);
+                            merge_bounds(&mut bounds, internal, internal);
+                        }
+                    }
+                }
+                SeriesType::Histogram => {
+                    for (&timestamp, &value) in series
+                        .histogram_data
+                        .timestamps
+                        .iter()
+                        .zip(&series.histogram_data.values)
+                    {
+                        let Some(bar_index) =
+                            self.time_scale.logical_index_for_timestamp(timestamp)
+                        else {
+                            continue;
+                        };
+                        if bar_index < visible_start || bar_index > visible_end {
+                            continue;
+                        }
+                        let value_internal = self.viewport.price_to_internal(value as f64);
+                        merge_bounds(&mut bounds, value_internal, value_internal);
+                        series_has_visible_points = true;
+                    }
+
+                    if series_has_visible_points {
+                        let base_internal = self
+                            .viewport
+                            .price_to_internal(series.histogram_options.base);
+                        merge_bounds(&mut bounds, base_internal, base_internal);
+                    }
+                }
+                SeriesType::Bar => {
+                    for ((&timestamp, &low), &high) in series
+                        .bar_data
+                        .timestamps
+                        .iter()
+                        .zip(&series.bar_data.low)
+                        .zip(&series.bar_data.high)
+                    {
+                        let Some(bar_index) =
+                            self.time_scale.logical_index_for_timestamp(timestamp)
+                        else {
+                            continue;
+                        };
+                        if bar_index < visible_start || bar_index > visible_end {
+                            continue;
+                        }
+                        let low_internal = self.viewport.price_to_internal(low as f64);
+                        let high_internal = self.viewport.price_to_internal(high as f64);
+                        merge_bounds(&mut bounds, low_internal, high_internal);
+                    }
+                }
+                SeriesType::Candlestick => {}
+            }
+        }
+
+        bounds
+    }
+
+    fn fit_price_to_visible_main_and_overlay_bounds(&mut self) -> bool {
+        let Some((start, main_lo, main_hi)) = self.visible_main_raw_bounds() else {
+            return false;
+        };
+
+        self.viewport
+            .prime_auto_fit_state(self.bars.close(start) as f64, main_lo, main_hi);
+
+        let mut bounds = Some((
+            self.viewport.price_to_internal(main_lo),
+            self.viewport.price_to_internal(main_hi),
+        ));
+        if let Some((overlay_lo, overlay_hi)) = self.visible_overlay_internal_bounds() {
+            merge_bounds(&mut bounds, overlay_lo, overlay_hi);
+        }
+        let Some((internal_lo, internal_hi)) = bounds else {
+            return false;
+        };
+        self.viewport.fit_internal_bounds(internal_lo, internal_hi)
+    }
+
+    fn on_overlay_series_changed(&mut self) {
+        self.rebuild_time_scale();
+        if self.viewport.price_locked {
+            self.viewport.price_invalidated = true;
+            return;
+        }
+        if self.auto_fit_price_for_current_chart_impl(false) {
+            self.viewport.price_invalidated = false;
+        } else {
+            self.viewport.price_invalidated = true;
+        }
+    }
+
     fn auto_fit_price_for_reset(&mut self) {
-        self.auto_fit_price_for_current_chart_impl(true);
+        let _ = self.auto_fit_price_for_current_chart_impl(true);
     }
 
     fn auto_fit_price_for_current_chart(&mut self) {
-        self.auto_fit_price_for_current_chart_impl(false);
+        let _ = self.auto_fit_price_for_current_chart_impl(false);
     }
 
-    fn auto_fit_price_for_current_chart_impl(&mut self, apply_soft_default_compactness: bool) {
+    fn auto_fit_price_for_current_chart_impl(
+        &mut self,
+        apply_soft_default_compactness: bool,
+    ) -> bool {
         let fitted_footprint = if self.main_chart_type == MainChartType::Footprint
             && !self.footprint_data.is_empty()
         {
@@ -1013,10 +1373,19 @@ impl ChartEngine {
         } else {
             false
         };
-        if !fitted_footprint {
+        let fitted = if fitted_footprint {
+            true
+        } else if self.fit_price_to_visible_main_and_overlay_bounds() {
+            true
+        } else {
             self.viewport.auto_fit_price(&self.bars);
+            !self.bars.is_empty()
+        };
+        if fitted {
+            self.viewport.price_invalidated = false;
         }
         self.enforce_footprint_min_cell_height();
+        fitted
     }
 
     fn visible_footprint_internal_bounds(&self) -> Option<(f64, f64)> {
@@ -1090,10 +1459,14 @@ impl ChartEngine {
         // Prime scale-mode conversion state (first visible value/log formula)
         // before projecting footprint prices into internal coordinates.
         self.viewport.auto_fit_price(&self.bars);
-        let (data_min, data_max) = match self.visible_footprint_internal_bounds() {
+        let (mut data_min, mut data_max) = match self.visible_footprint_internal_bounds() {
             Some(v) => v,
             None => return false,
         };
+        if let Some((overlay_min, overlay_max)) = self.visible_overlay_internal_bounds() {
+            data_min = data_min.min(overlay_min);
+            data_max = data_max.max(overlay_max);
+        }
         let internal_frac =
             1.0 - self.viewport.scale_margin_top - self.viewport.scale_margin_bottom;
         if internal_frac <= 0.0 {
@@ -1324,8 +1697,9 @@ impl ChartEngine {
     /// Updates studies incrementally and adjusts viewport to keep the latest bar visible.
     pub fn append_bar(&mut self, bar: Bar) -> Result<(), String> {
         Self::validate_append_timestamp("append_bar", self.last_main_timestamp(), bar.timestamp)?;
-        self.bars.append(bar);
-        self.execution_marks.resolve_bar_indices(&self.bars);
+        ensure_finite_bar_input("append_bar", &bar, self.bars.len())?;
+        self.bars.append(bar)?;
+        self.rebuild_time_scale();
 
         // Update studies with new data
         self.studies.update_studies(&self.bars);
@@ -1353,8 +1727,8 @@ impl ChartEngine {
         // the current viewport bounds.  Same pattern as update_bar — prevents
         // the price axis from jittering on every new-bar event.
         if !self.viewport.price_locked {
-            let h = bar.high as f64;
-            let l = bar.low as f64;
+            let h = self.viewport.price_to_internal(bar.high as f64);
+            let l = self.viewport.price_to_internal(bar.low as f64);
             if h > self.viewport.price_max || l < self.viewport.price_min {
                 self.auto_fit_price_for_current_chart();
             }
@@ -1365,10 +1739,11 @@ impl ChartEngine {
     /// Update the last bar in the data array (e.g., for real-time tick updates).
     pub fn update_bar(&mut self, bar: Bar) -> Result<(), String> {
         Self::validate_update_timestamp("update_bar", self.last_main_timestamp(), bar.timestamp)?;
+        let index = self.bars.len().saturating_sub(1);
+        ensure_finite_bar_input("update_bar", &bar, index)?;
         let len = self.bars.len();
 
-        self.bars.update_last(bar);
-        self.execution_marks.resolve_bar_indices(&self.bars);
+        self.bars.update_last(bar)?;
 
         // Recalculate studies for the last bar only
         // Reset last_calculated_index to len-1 so only the last bar is recalculated
@@ -1382,14 +1757,12 @@ impl ChartEngine {
 
         if !self.viewport.price_locked {
             // Only rescale when the live bar's price actually exits the current
-            // viewport bounds.  Calling auto_fit_price on every tick was causing
-            // the entire price scale to shift every 200 ms (Y-drift) because
-            // auto_fit_price scans all visible bars and adjusts price_min/price_max
-            // with scale margins.  Since price_max already includes the 20 % top
-            // margin and price_min the 10 % bottom margin, this guard fires only
-            // when the bar genuinely moves outside the displayed range.
-            let h = bar.high as f64;
-            let l = bar.low as f64;
+            // viewport bounds in internal scale space.  Calling auto_fit_price on
+            // every tick was causing the entire price scale to shift every 200 ms
+            // (Y-drift) because auto_fit_price scans all visible bars and adjusts
+            // price_min/price_max with scale margins.
+            let h = self.viewport.price_to_internal(bar.high as f64);
+            let l = self.viewport.price_to_internal(bar.low as f64);
             if h > self.viewport.price_max || l < self.viewport.price_min {
                 self.auto_fit_price_for_current_chart();
             }
@@ -1413,6 +1786,7 @@ impl ChartEngine {
     /// WASM pipeline passes empty slices to disable axis tick generation.
     pub fn render(
         &mut self,
+        time_scale: &TimeScaleIndex,
         y_ticks: &[crate::core::renderer::traits::TickMark],
         x_ticks: &[crate::core::renderer::traits::TickMark],
         bottom_drawings: &[DrawingGeometry],
@@ -1435,6 +1809,7 @@ impl ChartEngine {
             let pane_h = self.viewport.height as f64;
             let geom = crate::core::renderer::footprint_generator::generate_footprint_geometry(
                 &self.bars,
+                time_scale,
                 &self.viewport,
                 &self.style,
                 &self.footprint_data,
@@ -1454,6 +1829,7 @@ impl ChartEngine {
         let indicator_draw_instructions = self.indicators.collect_sorted_draw_instructions();
         let ctx = RenderContext {
             bars: &self.bars,
+            time_scale,
             viewport: &self.viewport,
             style: &self.style,
             crosshair: &self.crosshair,
@@ -1492,6 +1868,11 @@ mod tests {
     use crate::core::footprint::{FootprintBar, FootprintData, FootprintLevel};
     use crate::core::renderer::traits::RendererBackend;
     use crate::core::renderer::transforms::price_to_y;
+    use crate::core::series::{
+        AreaSeriesOptions, BarSeriesOptions, BaselineSeriesOptions, HistogramPoint,
+        HistogramSeriesOptions, LinePoint, LineSeriesOptions, OhlcPoint,
+    };
+    use crate::core::viewport::PriceScaleMode;
 
     fn mk_bar(ts: u64) -> Bar {
         Bar {
@@ -1617,6 +1998,360 @@ mod tests {
     fn upsert_action_for_newer_timestamp_is_append() {
         let action = ChartEngine::resolve_upsert_action("x", Some(1000), 1001).unwrap();
         assert_eq!(action, UpsertAction::Append);
+    }
+
+    #[test]
+    fn percentage_mode_append_keeps_price_range_when_bar_stays_inside_internal_bounds() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        engine
+            .viewport
+            .set_price_scale_mode(PriceScaleMode::Percentage);
+        engine.viewport.auto_scroll = false;
+
+        let bars = vec![
+            Bar {
+                timestamp: 1_000,
+                open: 100.0,
+                high: 100.0,
+                low: 100.0,
+                close: 100.0,
+                volume: 1.0,
+                _pad: 0.0,
+            },
+            Bar {
+                timestamp: 2_000,
+                open: 110.0,
+                high: 110.0,
+                low: 110.0,
+                close: 110.0,
+                volume: 1.0,
+                _pad: 0.0,
+            },
+            Bar {
+                timestamp: 3_000,
+                open: 120.0,
+                high: 120.0,
+                low: 120.0,
+                close: 120.0,
+                volume: 1.0,
+                _pad: 0.0,
+            },
+        ];
+        engine.set_data(bars).unwrap();
+
+        let price_min = engine.viewport.price_min;
+        let price_max = engine.viewport.price_max;
+
+        engine
+            .append_bar(Bar {
+                timestamp: 4_000,
+                open: 119.2,
+                high: 119.4,
+                low: 119.2,
+                close: 119.3,
+                volume: 1.0,
+                _pad: 0.0,
+            })
+            .unwrap();
+
+        assert!(
+            (engine.viewport.price_min - price_min).abs() < 1e-9,
+            "price_min changed unexpectedly: before={price_min}, after={}",
+            engine.viewport.price_min
+        );
+        assert!(
+            (engine.viewport.price_max - price_max).abs() < 1e-9,
+            "price_max changed unexpectedly: before={price_max}, after={}",
+            engine.viewport.price_max
+        );
+    }
+
+    #[test]
+    fn autoscale_includes_visible_overlay_series_and_bases() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        engine.viewport.auto_scroll = false;
+        engine
+            .set_data(vec![
+                Bar {
+                    timestamp: 1_000,
+                    open: 100.0,
+                    high: 105.0,
+                    low: 95.0,
+                    close: 100.0,
+                    volume: 1.0,
+                    _pad: 0.0,
+                },
+                Bar {
+                    timestamp: 2_000,
+                    open: 101.0,
+                    high: 106.0,
+                    low: 96.0,
+                    close: 102.0,
+                    volume: 1.0,
+                    _pad: 0.0,
+                },
+                Bar {
+                    timestamp: 3_000,
+                    open: 102.0,
+                    high: 107.0,
+                    low: 97.0,
+                    close: 103.0,
+                    volume: 1.0,
+                    _pad: 0.0,
+                },
+            ])
+            .unwrap();
+
+        let line = engine.add_line_series(LineSeriesOptions::default());
+        engine
+            .set_series_data(
+                line,
+                vec![
+                    LinePoint {
+                        timestamp: 1_000,
+                        value: 180.0,
+                    },
+                    LinePoint {
+                        timestamp: 2_000,
+                        value: 220.0,
+                    },
+                    LinePoint {
+                        timestamp: 3_000,
+                        value: 200.0,
+                    },
+                ],
+            )
+            .unwrap();
+
+        let histogram = engine.add_histogram_series(HistogramSeriesOptions {
+            base: -50.0,
+            ..HistogramSeriesOptions::default()
+        });
+        engine
+            .set_histogram_data(
+                histogram,
+                vec![
+                    HistogramPoint {
+                        timestamp: 1_000,
+                        value: 10.0,
+                        color: [0.0; 4],
+                    },
+                    HistogramPoint {
+                        timestamp: 2_000,
+                        value: 20.0,
+                        color: [0.0; 4],
+                    },
+                    HistogramPoint {
+                        timestamp: 3_000,
+                        value: 30.0,
+                        color: [0.0; 4],
+                    },
+                ],
+            )
+            .unwrap();
+
+        let bars = engine.add_bar_series(BarSeriesOptions::default());
+        engine
+            .set_bar_data(
+                bars,
+                vec![
+                    OhlcPoint {
+                        timestamp: 1_000,
+                        open: 240.0,
+                        high: 260.0,
+                        low: 235.0,
+                        close: 250.0,
+                    },
+                    OhlcPoint {
+                        timestamp: 2_000,
+                        open: 238.0,
+                        high: 255.0,
+                        low: 230.0,
+                        close: 245.0,
+                    },
+                    OhlcPoint {
+                        timestamp: 3_000,
+                        open: 236.0,
+                        high: 250.0,
+                        low: 228.0,
+                        close: 240.0,
+                    },
+                ],
+            )
+            .unwrap();
+
+        let baseline = engine.add_baseline_series(BaselineSeriesOptions {
+            base_value: -120.0,
+            ..BaselineSeriesOptions::default()
+        });
+        engine
+            .set_series_data(
+                baseline,
+                vec![
+                    LinePoint {
+                        timestamp: 1_000,
+                        value: 12.0,
+                    },
+                    LinePoint {
+                        timestamp: 2_000,
+                        value: 14.0,
+                    },
+                    LinePoint {
+                        timestamp: 3_000,
+                        value: 16.0,
+                    },
+                ],
+            )
+            .unwrap();
+
+        let area = engine.add_area_series(AreaSeriesOptions {
+            base_value: Some(300.0),
+            ..AreaSeriesOptions::default()
+        });
+        engine
+            .set_series_data(
+                area,
+                vec![
+                    LinePoint {
+                        timestamp: 1_000,
+                        value: 50.0,
+                    },
+                    LinePoint {
+                        timestamp: 2_000,
+                        value: 60.0,
+                    },
+                    LinePoint {
+                        timestamp: 3_000,
+                        value: 70.0,
+                    },
+                ],
+            )
+            .unwrap();
+
+        engine.auto_fit_price_if_unlocked();
+
+        assert!(
+            engine.viewport.price_to_frac(300.0) <= 1.0,
+            "area base value should be included in autoscale"
+        );
+        assert!(
+            engine.viewport.price_to_frac(260.0) <= 1.0,
+            "overlay OHLC highs should be included in autoscale"
+        );
+        assert!(
+            engine.viewport.price_to_frac(-120.0) >= 0.0,
+            "baseline base value should be included in autoscale"
+        );
+        assert!(
+            engine.viewport.price_to_frac(-50.0) >= 0.0,
+            "histogram base should be included in autoscale"
+        );
+    }
+
+    #[test]
+    fn overlay_visibility_changes_trigger_refit() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        engine.viewport.auto_scroll = false;
+        engine
+            .set_data(vec![mk_bar(1_000), mk_bar(2_000), mk_bar(3_000)])
+            .unwrap();
+
+        let series = engine.add_line_series(LineSeriesOptions::default());
+        engine
+            .set_series_data(
+                series,
+                vec![
+                    LinePoint {
+                        timestamp: 1_000,
+                        value: 400.0,
+                    },
+                    LinePoint {
+                        timestamp: 2_000,
+                        value: 420.0,
+                    },
+                    LinePoint {
+                        timestamp: 3_000,
+                        value: 410.0,
+                    },
+                ],
+            )
+            .unwrap();
+
+        assert!(
+            engine.viewport.price_to_frac(420.0) <= 1.0,
+            "visible overlay should be inside the fitted range"
+        );
+
+        engine.set_series_visible(series, false);
+        assert!(
+            engine.viewport.price_to_frac(420.0) > 1.0,
+            "hidden overlay should no longer expand the fitted range"
+        );
+    }
+
+    #[test]
+    fn set_data_rejects_non_finite_bar_values() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        let err = engine
+            .set_data(vec![Bar {
+                timestamp: 1_000,
+                open: f32::NAN,
+                high: 2.0,
+                low: 1.0,
+                close: 1.5,
+                volume: 1.0,
+                _pad: 0.0,
+            }])
+            .unwrap_err();
+        assert!(err.contains("must be finite"));
+    }
+
+    #[test]
+    fn overlay_setters_reject_non_finite_values() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        engine
+            .set_data(vec![mk_bar(1_000), mk_bar(2_000), mk_bar(3_000)])
+            .unwrap();
+
+        let line = engine.add_line_series(LineSeriesOptions::default());
+        let line_err = engine
+            .set_series_data(
+                line,
+                vec![LinePoint {
+                    timestamp: 1_000,
+                    value: f32::NAN,
+                }],
+            )
+            .unwrap_err();
+        assert!(line_err.contains("must be finite"));
+
+        let histogram = engine.add_histogram_series(HistogramSeriesOptions::default());
+        let histogram_err = engine
+            .set_histogram_data(
+                histogram,
+                vec![HistogramPoint {
+                    timestamp: 1_000,
+                    value: 1.0,
+                    color: [1.0, 0.0, f32::INFINITY, 1.0],
+                }],
+            )
+            .unwrap_err();
+        assert!(histogram_err.contains("must be finite"));
+
+        let bars = engine.add_bar_series(BarSeriesOptions::default());
+        let bar_err = engine
+            .set_bar_data(
+                bars,
+                vec![OhlcPoint {
+                    timestamp: 1_000,
+                    open: 1.0,
+                    high: f32::NAN,
+                    low: 0.5,
+                    close: 0.75,
+                }],
+            )
+            .unwrap_err();
+        assert!(bar_err.contains("must be finite"));
     }
 
     #[test]
@@ -1753,7 +2488,9 @@ mod tests {
 
         let before_start = engine.viewport.start_bar;
         let before_end = engine.viewport.end_bar;
-        engine.render(&[], &[], &[]).unwrap();
+        let time_scale =
+            crate::core::renderer::value_projection::TimeScaleIndex::from_bars(&engine.bars);
+        engine.render(&time_scale, &[], &[], &[]).unwrap();
         assert_close(
             engine.viewport.start_bar,
             before_start,
@@ -2044,7 +2781,9 @@ mod tests {
 
         let before_start = engine.viewport.start_bar;
         let before_end = engine.viewport.end_bar;
-        engine.render(&[], &[], &[]).unwrap();
+        let time_scale =
+            crate::core::renderer::value_projection::TimeScaleIndex::from_bars(&engine.bars);
+        engine.render(&time_scale, &[], &[], &[]).unwrap();
         assert_close(
             engine.viewport.start_bar,
             before_start,

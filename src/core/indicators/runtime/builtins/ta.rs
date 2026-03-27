@@ -1059,7 +1059,8 @@ mod tests {
                 volume: 1900.0,
                 _pad: 0.0,
             },
-        ]);
+        ])
+        .unwrap();
         bars
     }
 
@@ -1467,7 +1468,8 @@ mod tests {
                 volume: 100.0,
                 _pad: 0.0,
             },
-        ]);
+        ])
+        .unwrap();
 
         let ctx = TaContext {
             bars: &bars,

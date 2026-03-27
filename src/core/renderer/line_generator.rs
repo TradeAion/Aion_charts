@@ -11,6 +11,7 @@ use crate::core::indicators::render::types::{DrawInstruction, RenderOrderKey};
 use crate::core::renderer::baseline_utils::emit_split_segment_by_baseline;
 use crate::core::renderer::draw_list::{ColoredRect, LineSegment};
 use crate::core::renderer::transforms::{bar_to_x, price_to_y};
+use crate::core::renderer::value_projection::timestamp_to_bar_index_in_slice as timestamp_to_bar_index;
 use crate::core::series::{Series, SeriesType};
 use crate::core::viewport::Viewport;
 use std::collections::HashMap;
@@ -29,54 +30,6 @@ pub struct IndicatorGeometryCommand {
 }
 
 // ── Coordinate helpers imported from transforms.rs ───────────────────────────
-
-/// Map a timestamp to a fractional bar index by binary-searching the bar
-/// timestamps array. Returns None if the timestamp is outside the range.
-fn timestamp_to_bar_index(ts: u64, bar_timestamps: &[u64]) -> Option<f64> {
-    if bar_timestamps.is_empty() {
-        return None;
-    }
-    // Exact match via binary search
-    match bar_timestamps.binary_search(&ts) {
-        Ok(idx) => Some(idx as f64),
-        Err(idx) => {
-            // Interpolate between surrounding bars
-            if idx == 0 {
-                // Before first bar — extrapolate left
-                if bar_timestamps.len() >= 2 {
-                    let dt = bar_timestamps[1] as f64 - bar_timestamps[0] as f64;
-                    if dt > 0.0 {
-                        let offset = (bar_timestamps[0] as f64 - ts as f64) / dt;
-                        return Some(-offset);
-                    }
-                }
-                None
-            } else if idx >= bar_timestamps.len() {
-                // After last bar — extrapolate right
-                let n = bar_timestamps.len();
-                if n >= 2 {
-                    let dt = bar_timestamps[n - 1] as f64 - bar_timestamps[n - 2] as f64;
-                    if dt > 0.0 {
-                        let offset = (ts as f64 - bar_timestamps[n - 1] as f64) / dt;
-                        return Some((n - 1) as f64 + offset);
-                    }
-                }
-                None
-            } else {
-                // Between two bars — linear interpolation
-                let t0 = bar_timestamps[idx - 1] as f64;
-                let t1 = bar_timestamps[idx] as f64;
-                let dt = t1 - t0;
-                if dt > 0.0 {
-                    let frac = (ts as f64 - t0) / dt;
-                    Some((idx - 1) as f64 + frac)
-                } else {
-                    Some(idx as f64)
-                }
-            }
-        }
-    }
-}
 
 /// Generate pixel-space (x, y) points for a line series.
 ///

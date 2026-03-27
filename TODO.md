@@ -3,7 +3,7 @@
 > Started: 2026-02-26 | Status: **ALL PHASES COMPLETE + VERIFIED (final pass)**
 > Previous phases (P0-P3, Phase 5) were COMPLETE — see git history.
 > This document tracks the **API Modernization** effort.
-> Last updated: 2026-02-26 by final continuation agent.
+> Last updated: 2026-03-27 by docs alignment agent.
 
 ---
 
@@ -30,6 +30,25 @@ wasm-pack build wasm --target web --release                    # build WASM pack
 - All new API methods visible in generated JS: `create_chart`, `apply_options`, `on`, `off`, `once`, `start_auto_render`, `stop_auto_render`, `is_auto_render`, `get_css_variables`, `theme`
 - **Critical RAF loop bug fixed** (was only firing once, now loops correctly)
 - `wasm/raycore.d.ts` — hand-crafted TypeScript definitions with full types for events, options, theme
+
+---
+
+## Public Contract Alignment Sweep
+
+- [x] Fix selector-vs-ID semantics in `create_chart` examples and docs
+- [x] Align `ChartGroup` docs/example with runtime signatures
+- [x] Align price-line and marker docs with runtime signatures
+- [x] Normalize event payload field names in docs/examples
+- [ ] Re-audit the remaining docs for any stale snake_case field names
+
+## 2026-03-27 Interaction/Event Alignment
+
+- [x] Make mouse double-click reset distance-aware instead of zone-only
+- [x] Make touch double-tap reset distance-aware before triggering chart reset
+- [x] Keep click bar-index lookup aligned with hover/crosshair slot math
+- [x] Emit `visibleRangeChange` from chart drag, wheel, pinch, and double-click paths
+- [x] Wire draggable price-line interaction at the chart pointer layer
+- [ ] Follow through on the RAF-driven gliding path so momentum scrolls can emit `visibleRangeChange` too
 
 ---
 

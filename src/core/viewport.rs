@@ -46,36 +46,68 @@ impl PriceScaleMode {
 /// Used to handle negative values and values near zero gracefully.
 #[derive(Debug, Clone, Copy)]
 struct LogFormula {
-    /// Log base adjustment for values near zero.
-    log_base: f64,
-    /// Offset added before taking log.
-    log_offset: f64,
+    /// Offset applied in log space when the range is very small.
+    logical_offset: f64,
+    /// Small additive offset applied before log10 to avoid zero crossings.
+    coord_offset: f64,
 }
 
 impl LogFormula {
     /// Create a log formula adapted to the given price range.
-    fn for_range(min: f64, _max: f64) -> Self {
-        // LWC uses a complex adaptive formula. Simplified version:
-        // For prices that can go to zero or negative, we need an offset.
-        let _min_pos = min.max(1e-10);
-        let log_offset = if min <= 0.0 { 1.0 - min } else { 0.0 };
-        let log_base = 10.0_f64; // standard log10 scale
+    fn for_range(min: f64, max: f64) -> Self {
+        let diff = (max - min).abs();
+        if diff >= 1.0 || diff < 1e-15 {
+            return Self::default();
+        }
+
+        let digits = diff.log10().abs().ceil() as i32;
+        let logical_offset = 4.0 + digits as f64;
+        let coord_offset = 1.0 / 10.0_f64.powi(logical_offset as i32);
         Self {
-            log_base,
-            log_offset,
+            logical_offset,
+            coord_offset,
         }
     }
 
     /// Convert price to log space.
     #[inline]
     fn to_log(&self, price: f64) -> f64 {
-        (price + self.log_offset).max(1e-10).ln() / self.log_base.ln()
+        let magnitude = price.abs();
+        if magnitude < 1e-15 {
+            return 0.0;
+        }
+
+        let res = (magnitude + self.coord_offset).log10() + self.logical_offset;
+        if price < 0.0 {
+            -res
+        } else {
+            res
+        }
     }
 
     /// Convert log space back to price.
     #[inline]
     fn from_log(&self, log_val: f64) -> f64 {
-        self.log_base.powf(log_val) - self.log_offset
+        let magnitude = log_val.abs();
+        if magnitude < 1e-15 {
+            return 0.0;
+        }
+
+        let res = 10.0_f64.powf(magnitude - self.logical_offset) - self.coord_offset;
+        if log_val < 0.0 {
+            -res
+        } else {
+            res
+        }
+    }
+}
+
+impl Default for LogFormula {
+    fn default() -> Self {
+        Self {
+            logical_offset: 4.0,
+            coord_offset: 0.0001,
+        }
     }
 }
 
@@ -132,10 +164,7 @@ impl Viewport {
             price_invalidated: true,
             price_scale_mode: PriceScaleMode::Normal,
             first_value: 0.0,
-            log_formula: LogFormula {
-                log_base: 10.0,
-                log_offset: 0.0,
-            },
+            log_formula: LogFormula::default(),
         }
     }
 
@@ -157,6 +186,58 @@ impl Viewport {
         // Use the first visible bar's close as reference
         let start_idx = (self.start_bar.floor() as usize).min(bars.len().saturating_sub(1));
         self.first_value = bars.close(start_idx) as f64;
+    }
+
+    #[inline]
+    pub fn visible_bar_range(&self, len: usize) -> Option<(usize, usize)> {
+        if len == 0 {
+            return None;
+        }
+        let start = (self.start_bar.floor() as usize).min(len.saturating_sub(1));
+        let end = (self.end_bar.ceil() as usize).min(len);
+        (start < end).then_some((start, end))
+    }
+
+    #[inline]
+    pub fn prime_auto_fit_state(&mut self, first_value: f64, raw_lo: f64, raw_hi: f64) {
+        self.first_value = first_value;
+        if self.price_scale_mode == PriceScaleMode::Logarithmic {
+            self.log_formula = LogFormula::for_range(raw_lo, raw_hi);
+        }
+    }
+
+    pub fn fit_internal_bounds(&mut self, mut internal_lo: f64, mut internal_hi: f64) -> bool {
+        if !internal_lo.is_finite() || !internal_hi.is_finite() {
+            return false;
+        }
+        if internal_lo > internal_hi {
+            std::mem::swap(&mut internal_lo, &mut internal_hi);
+        }
+
+        let raw_range = internal_hi - internal_lo;
+        let internal_frac = 1.0 - self.scale_margin_top - self.scale_margin_bottom;
+        if internal_frac <= 0.0 {
+            return false;
+        }
+
+        let full_range = if raw_range > 0.0 {
+            raw_range / internal_frac
+        } else {
+            DEGENERATE_PRICE_RANGE_FALLBACK / internal_frac
+        };
+        self.price_min = internal_lo - full_range * self.scale_margin_bottom;
+        self.price_max = self.price_min + full_range;
+        true
+    }
+
+    pub fn fit_raw_price_bounds(&mut self, raw_lo: f64, raw_hi: f64, first_value: f64) -> bool {
+        if !raw_lo.is_finite() || !raw_hi.is_finite() {
+            return false;
+        }
+        self.prime_auto_fit_state(first_value, raw_lo, raw_hi);
+        let internal_lo = self.price_to_internal(raw_lo);
+        let internal_hi = self.price_to_internal(raw_hi);
+        self.fit_internal_bounds(internal_lo, internal_hi)
     }
 
     #[inline]
@@ -182,14 +263,9 @@ impl Viewport {
     /// meaning the data occupies the inner 70% of the chart height, with 20%
     /// padding above and 10% below.
     pub fn auto_fit_price(&mut self, bars: &crate::core::data::BarArray) {
-        if bars.is_empty() {
+        let Some((start, end)) = self.visible_bar_range(bars.len()) else {
             return;
-        }
-        let start = (self.start_bar.floor() as usize).min(bars.len().saturating_sub(1));
-        let end = (self.end_bar.ceil() as usize).min(bars.len());
-        if start >= end {
-            return;
-        }
+        };
 
         let mut lo = f32::MAX;
         let mut hi = f32::MIN;
@@ -199,57 +275,7 @@ impl Viewport {
             lo = lo.min(bar.low);
             hi = hi.max(bar.high);
         }
-
-        // Update first_value for percentage/indexed modes
-        // Flush to ensure Arrow arrays are up to date
-        self.first_value = bars.close(start) as f64;
-
-        // For log mode, update the formula
-        if self.price_scale_mode == PriceScaleMode::Logarithmic {
-            self.log_formula = LogFormula::for_range(lo as f64, hi as f64);
-        }
-
-        // Transform to internal coordinate space based on mode
-        let (internal_lo, internal_hi) = match self.price_scale_mode {
-            PriceScaleMode::Normal => (lo as f64, hi as f64),
-            PriceScaleMode::Logarithmic => (
-                self.log_formula.to_log(lo as f64),
-                self.log_formula.to_log(hi as f64),
-            ),
-            PriceScaleMode::Percentage => {
-                if self.first_value.abs() < 1e-10 {
-                    (0.0, 100.0)
-                } else {
-                    let lo_pct = 100.0 * (lo as f64 - self.first_value) / self.first_value;
-                    let hi_pct = 100.0 * (hi as f64 - self.first_value) / self.first_value;
-                    (lo_pct, hi_pct)
-                }
-            }
-            PriceScaleMode::IndexedTo100 => {
-                if self.first_value.abs() < 1e-10 {
-                    (100.0, 100.0)
-                } else {
-                    let lo_idx = 100.0 * lo as f64 / self.first_value;
-                    let hi_idx = 100.0 * hi as f64 / self.first_value;
-                    (lo_idx, hi_idx)
-                }
-            }
-        };
-
-        let raw_range = internal_hi - internal_lo;
-        let internal_frac = 1.0 - self.scale_margin_top - self.scale_margin_bottom;
-        if internal_frac <= 0.0 {
-            return;
-        }
-
-        let full_range = if raw_range > 0.0 {
-            raw_range / internal_frac
-        } else {
-            // Degenerate single price — extend by fallback value (LWC behavior)
-            DEGENERATE_PRICE_RANGE_FALLBACK / internal_frac
-        };
-        self.price_min = internal_lo - full_range * self.scale_margin_bottom;
-        self.price_max = self.price_min + full_range;
+        let _ = self.fit_raw_price_bounds(lo as f64, hi as f64, bars.close(start) as f64);
     }
 
     // --- Coordinate conversion helpers ---
@@ -275,14 +301,24 @@ impl Viewport {
                 if self.first_value.abs() < 1e-10 {
                     0.0
                 } else {
-                    100.0 * (price - self.first_value) / self.first_value
+                    let result = 100.0 * (price - self.first_value) / self.first_value;
+                    if self.first_value < 0.0 {
+                        -result
+                    } else {
+                        result
+                    }
                 }
             }
             PriceScaleMode::IndexedTo100 => {
                 if self.first_value.abs() < 1e-10 {
                     100.0
                 } else {
-                    100.0 * price / self.first_value
+                    let result = 100.0 * (price - self.first_value) / self.first_value + 100.0;
+                    if self.first_value < 0.0 {
+                        -result
+                    } else {
+                        result
+                    }
                 }
             }
         }
@@ -298,14 +334,24 @@ impl Viewport {
                 if self.first_value.abs() < 1e-10 {
                     0.0
                 } else {
-                    self.first_value * (1.0 + internal / 100.0)
+                    let value = if self.first_value < 0.0 {
+                        -internal
+                    } else {
+                        internal
+                    };
+                    (value / 100.0) * self.first_value + self.first_value
                 }
             }
             PriceScaleMode::IndexedTo100 => {
                 if self.first_value.abs() < 1e-10 {
                     0.0
                 } else {
-                    self.first_value * internal / 100.0
+                    let value = if self.first_value < 0.0 {
+                        -internal
+                    } else {
+                        internal
+                    } - 100.0;
+                    (value / 100.0) * self.first_value + self.first_value
                 }
             }
         }
@@ -498,6 +544,43 @@ mod tests {
         assert_eq!(vp.price_to_frac(100.0), 0.0);
         assert_eq!(vp.price_to_frac(150.0), 0.5);
         assert_eq!(vp.price_to_frac(200.0), 1.0);
+    }
+
+    #[test]
+    fn test_percentage_negative_base_matches_sign_flip() {
+        let mut vp = Viewport::new(800, 600);
+        vp.price_scale_mode = PriceScaleMode::Percentage;
+        vp.first_value = -100.0;
+
+        assert_eq!(vp.price_to_internal(-110.0), -10.0);
+        assert_eq!(vp.price_to_internal(-90.0), 10.0);
+        assert_eq!(vp.internal_to_price(-10.0), -110.0);
+        assert_eq!(vp.internal_to_price(10.0), -90.0);
+    }
+
+    #[test]
+    fn test_indexed_negative_base_matches_sign_flip() {
+        let mut vp = Viewport::new(800, 600);
+        vp.price_scale_mode = PriceScaleMode::IndexedTo100;
+        vp.first_value = -100.0;
+
+        assert_eq!(vp.price_to_internal(-110.0), -110.0);
+        assert_eq!(vp.price_to_internal(-90.0), -90.0);
+        assert_eq!(vp.internal_to_price(-110.0), -110.0);
+        assert_eq!(vp.internal_to_price(-90.0), -90.0);
+    }
+
+    #[test]
+    fn test_logarithmic_roundtrip_preserves_sign() {
+        let mut vp = Viewport::new(800, 600);
+        vp.price_scale_mode = PriceScaleMode::Logarithmic;
+        vp.log_formula = LogFormula::for_range(-110.0, -90.0);
+
+        let low = vp.price_to_internal(-110.0);
+        let high = vp.price_to_internal(-90.0);
+        assert!(low < high);
+        assert!((vp.internal_to_price(low) - -110.0).abs() < 1e-9);
+        assert!((vp.internal_to_price(high) - -90.0).abs() < 1e-9);
     }
 
     #[test]

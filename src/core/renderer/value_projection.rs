@@ -14,7 +14,7 @@ use crate::core::footprint::{FootprintBar, FootprintData, FootprintOptions};
 use crate::core::formatters::{format_indexed, format_percent, format_price};
 use crate::core::renderer::traits::ChartStyle;
 use crate::core::renderer::transforms::price_to_y;
-use crate::core::series::SeriesCollection;
+use crate::core::series::{SeriesCollection, SeriesType};
 use crate::core::viewport::{PriceScaleMode, Viewport};
 
 /// A projected last-value item (used by both pane overlays and price-axis labels).
@@ -31,6 +31,231 @@ pub struct ProjectedLastValue {
     /// Optional countdown string (e.g. "00:39") — rendered on a second line
     /// below the price label, TradingView-style.
     pub countdown: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TimeScaleIndex {
+    timestamps: Vec<u64>,
+    main_bar_slots: Vec<usize>,
+    main_bar_by_slot: Vec<Option<usize>>,
+}
+
+impl TimeScaleIndex {
+    pub fn from_bars(bars: &BarArray) -> Self {
+        let mut timestamps = Vec::with_capacity(bars.len());
+        let mut main_bar_slots = Vec::with_capacity(bars.len());
+        let mut main_bar_by_slot = Vec::with_capacity(bars.len());
+        for index in 0..bars.len() {
+            timestamps.push(bars.timestamp(index));
+            main_bar_slots.push(index);
+            main_bar_by_slot.push(Some(index));
+        }
+        Self {
+            timestamps,
+            main_bar_slots,
+            main_bar_by_slot,
+        }
+    }
+
+    pub fn from_bars_and_series(bars: &BarArray, series: &SeriesCollection) -> Self {
+        let mut timestamps = Vec::with_capacity(
+            bars.len()
+                + series
+                    .iter()
+                    .map(|series| match series.series_type() {
+                        SeriesType::Line | SeriesType::Area | SeriesType::Baseline => {
+                            series.line_data.timestamps.len()
+                        }
+                        SeriesType::Histogram => series.histogram_data.timestamps.len(),
+                        SeriesType::Bar => series.bar_data.timestamps.len(),
+                        SeriesType::Candlestick => 0,
+                    })
+                    .sum::<usize>(),
+        );
+
+        for index in 0..bars.len() {
+            let timestamp = bars.timestamp(index);
+            if timestamp > 0 {
+                timestamps.push(timestamp);
+            }
+        }
+
+        for series in series.iter() {
+            let source: &[u64] = match series.series_type() {
+                SeriesType::Line | SeriesType::Area | SeriesType::Baseline => {
+                    &series.line_data.timestamps
+                }
+                SeriesType::Histogram => &series.histogram_data.timestamps,
+                SeriesType::Bar => &series.bar_data.timestamps,
+                SeriesType::Candlestick => &[],
+            };
+            timestamps.extend(source.iter().copied().filter(|timestamp| *timestamp > 0));
+        }
+
+        timestamps.sort_unstable();
+        timestamps.dedup();
+
+        let mut main_bar_slots = Vec::with_capacity(bars.len());
+        let mut main_bar_by_slot = vec![None; timestamps.len()];
+        for index in 0..bars.len() {
+            let timestamp = bars.timestamp(index);
+            let slot = timestamps.binary_search(&timestamp).unwrap_or(0);
+            main_bar_slots.push(slot);
+            if let Some(entry) = main_bar_by_slot.get_mut(slot) {
+                *entry = Some(index);
+            }
+        }
+
+        Self {
+            timestamps,
+            main_bar_slots,
+            main_bar_by_slot,
+        }
+    }
+
+    #[inline]
+    pub fn timestamps(&self) -> &[u64] {
+        &self.timestamps
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.timestamps.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.timestamps.is_empty()
+    }
+
+    #[inline]
+    pub fn main_bar_len(&self) -> usize {
+        self.main_bar_slots.len()
+    }
+
+    #[inline]
+    pub fn logical_index_for_timestamp(&self, ts: u64) -> Option<f64> {
+        timestamp_to_bar_index_in_slice(ts, &self.timestamps)
+    }
+
+    #[inline]
+    pub fn timestamp_at(&self, index: usize) -> Option<u64> {
+        self.timestamps.get(index).copied()
+    }
+
+    #[inline]
+    pub fn logical_index_for_main_bar(&self, bar_index: usize) -> Option<f64> {
+        self.main_bar_slots.get(bar_index).map(|slot| *slot as f64)
+    }
+
+    #[inline]
+    pub fn main_bar_index_at_slot(&self, slot: usize) -> Option<usize> {
+        self.main_bar_by_slot.get(slot).copied().flatten()
+    }
+
+    #[inline]
+    pub fn main_bar_index_for_logical(&self, logical_index: f64) -> Option<usize> {
+        if !logical_index.is_finite() || logical_index < 0.0 {
+            return None;
+        }
+        self.main_bar_index_at_slot(logical_index.floor() as usize)
+    }
+
+    pub fn nearest_main_bar(&self, logical_index: f64) -> Option<(usize, usize)> {
+        if self.main_bar_slots.is_empty() || !logical_index.is_finite() {
+            return None;
+        }
+
+        let target = logical_index.clamp(0.0, self.timestamps.len().saturating_sub(1) as f64);
+        let target_slot = target.floor() as usize;
+
+        let nearest_main_bar_index = match self.main_bar_slots.binary_search(&target_slot) {
+            Ok(pos) => pos,
+            Err(0) => 0,
+            Err(pos) if pos >= self.main_bar_slots.len() => self.main_bar_slots.len() - 1,
+            Err(pos) => {
+                let prev = self.main_bar_slots[pos - 1];
+                let next = self.main_bar_slots[pos];
+                let prev_dist = (target - prev as f64).abs();
+                let next_dist = (next as f64 - target).abs();
+                if prev_dist <= next_dist {
+                    pos - 1
+                } else {
+                    pos
+                }
+            }
+        };
+
+        Some((
+            nearest_main_bar_index,
+            self.main_bar_slots[nearest_main_bar_index],
+        ))
+    }
+
+    #[inline]
+    pub fn nearest_main_bar_index_for_logical(&self, logical_index: f64) -> Option<usize> {
+        self.nearest_main_bar(logical_index)
+            .map(|(main_bar_index, _)| main_bar_index)
+    }
+
+    #[inline]
+    pub fn nearest_main_bar_slot_for_logical(&self, logical_index: f64) -> Option<usize> {
+        self.nearest_main_bar(logical_index)
+            .map(|(_, logical_slot)| logical_slot)
+    }
+
+    pub fn visible_main_bar_range(
+        &self,
+        start_logical: f64,
+        end_logical: f64,
+    ) -> Option<(usize, usize)> {
+        if self.main_bar_slots.is_empty()
+            || !start_logical.is_finite()
+            || !end_logical.is_finite()
+            || end_logical <= start_logical
+        {
+            return None;
+        }
+
+        let start_slot = start_logical.floor().max(0.0) as usize;
+        let end_slot = end_logical.ceil().max(0.0) as usize;
+        let first = self
+            .main_bar_slots
+            .partition_point(|slot| *slot < start_slot);
+        let last = self.main_bar_slots.partition_point(|slot| *slot < end_slot);
+        (first < last).then_some((first, last))
+    }
+
+    pub fn resolve_rounded_timestamp(&self, logical_index: f64) -> Option<u64> {
+        let len = self.timestamps.len();
+        if len == 0 || !logical_index.is_finite() {
+            return None;
+        }
+
+        let idx = logical_index.round() as isize;
+        if idx >= 0 && idx < len as isize {
+            return self.timestamps.get(idx as usize).copied();
+        }
+
+        if len >= 2 && idx < 0 {
+            let dt = self.timestamps[1] as f64 - self.timestamps[0] as f64;
+            if dt > 0.0 {
+                let extra = logical_index * dt;
+                return Some((self.timestamps[0] as f64 + extra).round() as u64);
+            }
+        }
+
+        if len >= 2 && idx >= len as isize {
+            let last = len - 1;
+            let dt = self.timestamps[last] as f64 - self.timestamps[last - 1] as f64;
+            if dt > 0.0 {
+                let extra = (logical_index - last as f64) * dt;
+                return Some((self.timestamps[last] as f64 + extra).round() as u64);
+            }
+        }
+
+        None
+    }
 }
 
 /// Candle-area height in physical pixels.
@@ -63,10 +288,11 @@ pub fn y_tick_step_internal(vp: &Viewport, axis_ph: f64, dpr: f64, style: &Chart
     let mark_height = style.price_scale_tick_mark_spacing_css();
     let scale_height = axis_ph / dpr;
     let max_tick_span = range * mark_height / scale_height;
+    let min_movement = inferred_min_movement(range);
 
-    let s1 = lwc_tick_span(range, max_tick_span, &[2.0, 2.5, 2.0]);
-    let s2 = lwc_tick_span(range, max_tick_span, &[2.0, 2.0, 2.5]);
-    let s3 = lwc_tick_span(range, max_tick_span, &[2.5, 2.0, 2.0]);
+    let s1 = lwc_tick_span(range, max_tick_span, min_movement, &[2.0, 2.5, 2.0]);
+    let s2 = lwc_tick_span(range, max_tick_span, min_movement, &[2.0, 2.0, 2.5]);
+    let s3 = lwc_tick_span(range, max_tick_span, min_movement, &[2.5, 2.0, 2.0]);
 
     s1.min(s2).min(s3).max(0.0001)
 }
@@ -74,14 +300,15 @@ pub fn y_tick_step_internal(vp: &Viewport, axis_ph: f64, dpr: f64, style: &Chart
 const TICK_SPAN_EPS: f64 = 1e-14;
 const FRACTIONAL_DIVIDERS: [f64; 3] = [2.0, 2.5, 2.0];
 
-/// LWC default base for `PriceTickSpanCalculator` (100 = 2 decimal places).
-/// This sets `minMovement = 1/BASE = 0.01`, preventing ticks finer than 1 cent.
-const LWC_DEFAULT_BASE: f64 = 100.0;
-
 /// Port of LWC's `PriceTickSpanCalculator.tickSpan()` for base-decimal prices
-/// (base = 100, matching LWC's default PriceScale formatter).
-fn lwc_tick_span(range: f64, max_tick_span: f64, integral_dividers: &[f64]) -> f64 {
-    let min_movement = 1.0 / LWC_DEFAULT_BASE; // 0.01
+/// with an adaptive minimum movement derived from the current range.
+fn lwc_tick_span(
+    range: f64,
+    max_tick_span: f64,
+    min_movement: f64,
+    integral_dividers: &[f64],
+) -> f64 {
+    let min_movement = min_movement.max(1e-8);
 
     let mut span = 10.0_f64.powf(0.0_f64.max(range.log10().ceil()));
 
@@ -124,6 +351,13 @@ fn lwc_tick_span(range: f64, max_tick_span: f64, integral_dividers: &[f64]) -> f
     }
 
     span
+}
+
+#[inline]
+fn inferred_min_movement(range: f64) -> f64 {
+    let magnitude = range.abs().max(1e-12);
+    let exponent = magnitude.log10().floor() as i32 - 2;
+    10.0_f64.powi(exponent.clamp(-8, 8))
 }
 
 /// Format a raw price according to the active price-scale mode.
@@ -395,39 +629,36 @@ fn heikin_ashi_last_open_close(bars: &BarArray) -> Option<(f64, f64)> {
     Some((prev_ha_open, prev_ha_close))
 }
 
-/// Map a timestamp to a fractional bar index using `BarArray` timestamps.
-///
-/// Returns:
-/// - exact index for an exact timestamp match
-/// - interpolated fractional index between surrounding bars
-/// - extrapolated fractional index before/after the data range
-pub fn timestamp_to_bar_index_in_bars(ts: u64, bars: &BarArray) -> Option<f64> {
-    let len = bars.len();
+fn timestamp_to_bar_index_in_slice_impl(
+    ts: u64,
+    len: usize,
+    timestamp_at: impl Fn(usize) -> u64,
+) -> Option<f64> {
     if len == 0 {
         return None;
     }
 
-    // lower_bound binary search on BarArray::timestamp(i)
+    // lower_bound binary search on the timestamp source.
     let mut lo = 0usize;
     let mut hi = len;
     while lo < hi {
         let mid = lo + (hi - lo) / 2;
-        if bars.timestamp(mid) < ts {
+        if timestamp_at(mid) < ts {
             lo = mid + 1;
         } else {
             hi = mid;
         }
     }
 
-    if lo < len && bars.timestamp(lo) == ts {
+    if lo < len && timestamp_at(lo) == ts {
         return Some(lo as f64);
     }
 
     // insertion point = lo
     if lo == 0 {
         if len >= 2 {
-            let t0 = bars.timestamp(0) as f64;
-            let t1 = bars.timestamp(1) as f64;
+            let t0 = timestamp_at(0) as f64;
+            let t1 = timestamp_at(1) as f64;
             let dt = t1 - t0;
             if dt > 0.0 {
                 return Some(-((t0 - ts as f64) / dt));
@@ -438,8 +669,8 @@ pub fn timestamp_to_bar_index_in_bars(ts: u64, bars: &BarArray) -> Option<f64> {
 
     if lo >= len {
         if len >= 2 {
-            let tn1 = bars.timestamp(len - 1) as f64;
-            let tn2 = bars.timestamp(len - 2) as f64;
+            let tn1 = timestamp_at(len - 1) as f64;
+            let tn2 = timestamp_at(len - 2) as f64;
             let dt = tn1 - tn2;
             if dt > 0.0 {
                 return Some((len - 1) as f64 + ((ts as f64 - tn1) / dt));
@@ -448,8 +679,8 @@ pub fn timestamp_to_bar_index_in_bars(ts: u64, bars: &BarArray) -> Option<f64> {
         return None;
     }
 
-    let t0 = bars.timestamp(lo - 1) as f64;
-    let t1 = bars.timestamp(lo) as f64;
+    let t0 = timestamp_at(lo - 1) as f64;
+    let t1 = timestamp_at(lo) as f64;
     let dt = t1 - t0;
     if dt <= 0.0 {
         return Some(lo as f64);
@@ -457,6 +688,21 @@ pub fn timestamp_to_bar_index_in_bars(ts: u64, bars: &BarArray) -> Option<f64> {
 
     let frac = (ts as f64 - t0) / dt;
     Some((lo - 1) as f64 + frac)
+}
+
+/// Map a timestamp to a fractional bar index using a timestamp slice.
+pub fn timestamp_to_bar_index_in_slice(ts: u64, bar_timestamps: &[u64]) -> Option<f64> {
+    timestamp_to_bar_index_in_slice_impl(ts, bar_timestamps.len(), |index| bar_timestamps[index])
+}
+
+/// Map a timestamp to a fractional bar index using `BarArray` timestamps.
+///
+/// Returns:
+/// - exact index for an exact timestamp match
+/// - interpolated fractional index between surrounding bars
+/// - extrapolated fractional index before/after the data range
+pub fn timestamp_to_bar_index_in_bars(ts: u64, bars: &BarArray) -> Option<f64> {
+    timestamp_to_bar_index_in_slice_impl(ts, bars.len(), |index| bars.timestamp(index))
 }
 
 #[cfg(test)]
@@ -489,7 +735,8 @@ mod tests {
                 volume: 120.0,
                 _pad: 0.0,
             },
-        ]);
+        ])
+        .unwrap();
         bars
     }
 
@@ -530,7 +777,8 @@ mod tests {
             close: 100.1,
             volume: 100.0,
             _pad: 0.0,
-        }]);
+        }])
+        .unwrap();
 
         let mut footprint = FootprintData::new();
         footprint.set_bar(

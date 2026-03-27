@@ -2791,7 +2791,8 @@ mod tests {
                 volume: 300.0,
                 _pad: 0.0,
             },
-        ]);
+        ])
+        .unwrap();
         bars
     }
 
@@ -2834,7 +2835,8 @@ mod tests {
                 volume: 160.0,
                 _pad: 0.0,
             },
-        ]);
+        ])
+        .unwrap();
         bars
     }
 
@@ -3750,7 +3752,8 @@ plot(ta.sma(close, 3))"#;
                 volume: 100.0,
                 _pad: 0.0,
             },
-        ]);
+        ])
+        .unwrap();
 
         let mut instance = IndicatorInstance::new(21, 1, serde_json::Value::Null);
 
@@ -3845,7 +3848,7 @@ plotHistogram(hist)"#;
                 _pad: 0.0,
             })
             .collect();
-        bars.set(bar_data);
+        bars.set(bar_data).unwrap();
 
         let mut instance = IndicatorInstance::new(22, 1, serde_json::Value::Null);
 
@@ -3942,7 +3945,8 @@ plotHistogram(h, color = h >= 0 ? color.green : color.red)"#;
                 volume: 1000.0,
                 _pad: 0.0,
             },
-        ]);
+        ])
+        .unwrap();
 
         let mut instance = IndicatorInstance::new(23, 1, serde_json::Value::Null);
 
@@ -4039,7 +4043,7 @@ plotHistogram(h, color = h >= 0 ? color.green : color.red)"#;
                 }
             })
             .collect();
-        bars.set(bar_data);
+        bars.set(bar_data).unwrap();
 
         let mut instance = IndicatorInstance::new(24, 1, serde_json::Value::Null);
 

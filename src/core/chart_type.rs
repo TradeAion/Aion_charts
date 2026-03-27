@@ -151,8 +151,9 @@ impl Default for MainChartOptions {
             chart_type: MainChartType::Candlestick,
             up_color: up,
             down_color: down,
-            up_border_color: Some(crate::core::renderer::theme::BORDER_BULLISH),
-            down_border_color: Some(crate::core::renderer::theme::BORDER_BEARISH),
+            // LWC default: candle borders inherit the candle fill color.
+            up_border_color: Some(up),
+            down_border_color: Some(down),
             border_visible: true,
             wick_visible: true,
             // Line/Area defaults

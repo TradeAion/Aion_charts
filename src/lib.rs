@@ -24,7 +24,7 @@
 //! bars.set(vec![
 //!     Bar { timestamp: 1700000000000, open: 100.0, high: 105.0, low: 98.0, close: 103.0, volume: 1000.0, _pad: 0.0 },
 //!     Bar { timestamp: 1700000060000, open: 103.0, high: 108.0, low: 101.0, close: 106.0, volume: 1200.0, _pad: 0.0 },
-//! ]);
+//! ]).unwrap();
 //!
 //! // Create a viewport
 //! let mut viewport = Viewport::new(800, 600);

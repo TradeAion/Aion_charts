@@ -13,6 +13,7 @@
 use std::collections::HashMap;
 
 use crate::core::data::BarArray;
+use crate::core::renderer::value_projection::TimeScaleIndex;
 
 /// Execution side: buy or sell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,7 +105,9 @@ pub struct ExecutionMark {
     /// Group ID for related fills (optional, e.g., same trade).
     pub group_id: Option<String>,
 
-    // Internal cached bar index (populated by resolve_bar_indices)
+    // Internal cached logical index for the current time-scale mapping.
+    pub(crate) resolved_time_index: Option<f64>,
+    // Backward-compatible integer slot cache derived from the logical index.
     pub(crate) resolved_bar_index: Option<usize>,
 }
 
@@ -130,6 +133,7 @@ impl ExecutionMark {
             label: None,
             color: None,
             group_id: None,
+            resolved_time_index: None,
             resolved_bar_index: None,
         }
     }
@@ -303,20 +307,52 @@ impl ExecutionMarkManager {
             .collect()
     }
 
+    /// Get marks visible in a logical index range [start, end].
+    pub fn in_logical_range(&self, start: f64, end: f64) -> Vec<&ExecutionMark> {
+        self.marks
+            .values()
+            .filter(|mark| {
+                mark.resolved_time_index
+                    .map(|index| index >= start && index <= end)
+                    .unwrap_or(false)
+            })
+            .collect()
+    }
+
     /// Resolve timestamps to bar indices using the provided bar data.
     ///
     /// This should be called after setting bars or execution marks, before rendering.
     /// Uses binary search for efficiency.
     pub fn resolve_bar_indices(&mut self, bars: &BarArray) {
-        if bars.is_empty() {
+        let time_scale = TimeScaleIndex::from_bars(bars);
+        self.resolve_time_scale_indices(&time_scale);
+    }
+
+    pub fn resolve_time_scale_indices(&mut self, time_scale: &TimeScaleIndex) {
+        if time_scale.is_empty() {
             for mark in self.marks.values_mut() {
+                mark.resolved_time_index = None;
                 mark.resolved_bar_index = None;
             }
             return;
         }
 
+        let first_timestamp = time_scale.timestamp_at(0).unwrap_or(0);
+        let last_timestamp = time_scale
+            .timestamp_at(time_scale.len().saturating_sub(1))
+            .unwrap_or(first_timestamp);
+
         for mark in self.marks.values_mut() {
-            mark.resolved_bar_index = timestamp_to_bar_index(mark.timestamp_ms, bars);
+            mark.resolved_time_index = if mark.timestamp_ms < first_timestamp {
+                None
+            } else if mark.timestamp_ms >= last_timestamp {
+                Some(time_scale.len().saturating_sub(1) as f64)
+            } else {
+                time_scale.logical_index_for_timestamp(mark.timestamp_ms)
+            };
+            mark.resolved_bar_index = mark
+                .resolved_time_index
+                .and_then(|index| time_scale.nearest_main_bar_index_for_logical(index));
         }
     }
 
@@ -326,7 +362,7 @@ impl ExecutionMarkManager {
         start_bar: usize,
         end_bar: usize,
     ) -> Vec<&ExecutionMark> {
-        self.in_bar_range(start_bar, end_bar)
+        self.in_logical_range(start_bar as f64, end_bar as f64)
     }
 
     /// Get marks by group ID.
@@ -408,7 +444,8 @@ mod tests {
 
     fn make_bars(timestamps: &[u64]) -> BarArray {
         let mut bars = BarArray::new();
-        bars.set(timestamps.iter().map(|&ts| make_bar(ts)).collect());
+        bars.set(timestamps.iter().map(|&ts| make_bar(ts)).collect())
+            .unwrap();
         bars
     }
 

@@ -150,7 +150,8 @@ mod tests {
                 volume: 200.0,
                 _pad: 0.0,
             },
-        ]);
+        ])
+        .unwrap();
         bars
     }
 

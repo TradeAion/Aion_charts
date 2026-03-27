@@ -19,12 +19,13 @@ use crate::core::renderer::canvas_dash::{clear_canvas_line_dash, set_canvas_line
 use crate::core::renderer::line_generator;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
+use crate::core::renderer::theme::contrast_text_color;
 use crate::core::renderer::traits::{ChartStyle, CrosshairState};
 
 use crate::core::renderer::series::CandleSizing;
 use crate::core::renderer::transforms::bar_to_x;
 use crate::core::renderer::value_projection::{
-    price_to_pane_y_phys, project_main_last_value, timestamp_to_bar_index_in_bars,
+    price_to_pane_y_phys, project_main_last_value, TimeScaleIndex,
 };
 use crate::core::series::{LineStyle, SeriesCollection, SeriesType};
 use crate::core::viewport::Viewport;
@@ -134,15 +135,15 @@ impl OverlayRenderer {
         crosshair: &CrosshairState,
         style: &ChartStyle,
         top_drawings: &[DrawingGeometry],
-        bars: Option<&BarArray>,
+        legend_context: Option<(&BarArray, &Viewport, &TimeScaleIndex)>,
     ) {
         let pw = self.pw as f64;
         let ph = self.ph as f64;
         self.ctx.clear_rect(0.0, 0.0, pw, ph);
 
         // Legend: OHLCV values in top-left corner
-        if let Some(bars) = bars {
-            self.render_legend(crosshair, style, bars);
+        if let Some((bars, viewport, time_scale)) = legend_context {
+            self.render_legend(crosshair, style, bars, viewport, time_scale);
         }
 
         // Draw active/hovered drawings BELOW crosshair
@@ -241,17 +242,27 @@ impl OverlayRenderer {
 
     /// Render OHLCV legend in the top-left corner of the pane.
     /// Shows values for the bar at the crosshair position, or the last bar if no crosshair.
-    fn render_legend(&mut self, crosshair: &CrosshairState, style: &ChartStyle, bars: &BarArray) {
+    fn render_legend(
+        &mut self,
+        crosshair: &CrosshairState,
+        style: &ChartStyle,
+        bars: &BarArray,
+        viewport: &Viewport,
+        time_scale: &TimeScaleIndex,
+    ) {
         if bars.len() == 0 {
             return;
         }
 
         let dpr = self.dpr;
+        let pane_css_w = if dpr > 0.0 { self.pw as f64 / dpr } else { 0.0 };
 
         // Pick the bar to display: hovered bar or last bar
         let bar_i = if crosshair.active {
-            crosshair
-                .bar_index
+            viewport
+                .bar_index_for_crosshair(crosshair.x, pane_css_w)
+                .and_then(|slot| time_scale.nearest_main_bar_index_for_logical(slot as f64))
+                .or(crosshair.bar_index)
                 .unwrap_or(bars.len() - 1)
                 .min(bars.len() - 1)
         } else {
@@ -336,7 +347,7 @@ impl OverlayRenderer {
         &self,
         series: &SeriesCollection,
         viewport: &Viewport,
-        bar_timestamps: &[u64],
+        time_scale: &TimeScaleIndex,
         pane_w: f64,
         pane_h: f64,
         v_ratio: f64,
@@ -363,7 +374,7 @@ impl OverlayRenderer {
             let points = line_generator::generate_line_series_points(
                 s,
                 viewport,
-                bar_timestamps,
+                time_scale.timestamps(),
                 pane_w,
                 pane_h,
             );
@@ -437,6 +448,7 @@ impl OverlayRenderer {
         &self,
         series: &SeriesCollection,
         bars: &crate::core::data::BarArray,
+        time_scale: &TimeScaleIndex,
         main_chart_type: MainChartType,
         footprint_data: &FootprintData,
         footprint_opts: &FootprintOptions,
@@ -498,30 +510,32 @@ impl OverlayRenderer {
                 dpr,
             ) {
                 let last_idx = bars.len() - 1;
-                let slot_center = bar_to_x(last_idx as f64 + 0.5, viewport, pane_pw);
-                let x_anchor = if main_chart_type == MainChartType::Footprint {
-                    // Mirror footprint_generator layout: candle = 15% of slot on left
-                    let sizing =
-                        CandleSizing::compute_from_pane(pane_pw, viewport, h_ratio, v_ratio);
-                    let half_bar = (sizing.bar_width * 0.5).floor();
-                    let slot_left = (slot_center - half_bar).round();
-                    let candle_w = (sizing.bar_width * 0.15).round().max(3.0);
-                    // Anchor from candle body's right edge so the horizontal line
-                    // visually "leaves" the footprint candle the same way as
-                    // regular candlestick mode.
-                    slot_left + candle_w
-                } else {
-                    slot_center
-                };
-                let y_phys = projected.y_phys;
-                // Clip to full pane height (LWC: y < 0 || y > bitmapSize.height)
-                if x_anchor >= 0.0 && x_anchor < pane_pw && y_phys >= 0.0 && y_phys <= pane_ph {
-                    let y = y_phys.round() + correction;
-                    self.ctx.set_stroke_style_str(&rgba(&projected.color));
-                    self.ctx.begin_path();
-                    self.ctx.move_to(x_anchor.max(0.0), y);
-                    self.ctx.line_to(pane_pw + line_w + 1.0, y);
-                    self.ctx.stroke();
+                if let Some(last_slot) = time_scale.logical_index_for_main_bar(last_idx) {
+                    let slot_center = bar_to_x(last_slot + 0.5, viewport, pane_pw);
+                    let x_anchor = if main_chart_type == MainChartType::Footprint {
+                        // Mirror footprint_generator layout: candle = 15% of slot on left
+                        let sizing =
+                            CandleSizing::compute_from_pane(pane_pw, viewport, h_ratio, v_ratio);
+                        let half_bar = (sizing.bar_width * 0.5).floor();
+                        let slot_left = (slot_center - half_bar).round();
+                        let candle_w = (sizing.bar_width * 0.15).round().max(3.0);
+                        // Anchor from candle body's right edge so the horizontal line
+                        // visually "leaves" the footprint candle the same way as
+                        // regular candlestick mode.
+                        slot_left + candle_w
+                    } else {
+                        slot_center
+                    };
+                    let y_phys = projected.y_phys;
+                    // Clip to full pane height (LWC: y < 0 || y > bitmapSize.height)
+                    if x_anchor >= 0.0 && x_anchor < pane_pw && y_phys >= 0.0 && y_phys <= pane_ph {
+                        let y = y_phys.round() + correction;
+                        self.ctx.set_stroke_style_str(&rgba(&projected.color));
+                        self.ctx.begin_path();
+                        self.ctx.move_to(x_anchor.max(0.0), y);
+                        self.ctx.line_to(pane_pw + line_w + 1.0, y);
+                        self.ctx.stroke();
+                    }
                 }
             }
         }
@@ -570,7 +584,7 @@ impl OverlayRenderer {
                 Some(v) => v,
                 None => continue,
             };
-            let bar_idx = match timestamp_to_bar_index_in_bars(ts, bars) {
+            let bar_idx = match time_scale.logical_index_for_timestamp(ts) {
                 Some(v) => v,
                 None => continue,
             };
@@ -703,8 +717,8 @@ impl OverlayRenderer {
         self.ctx.fill();
 
         // ── Draw text ──
-        self.ctx
-            .set_fill_style_str(&rgba(&style.crosshair_label_text));
+        let text_color = contrast_text_color(color);
+        self.ctx.set_fill_style_str(&rgba(&text_color));
         self.ctx.set_text_align("center");
         self.ctx.set_text_baseline("middle");
         let _ = self.ctx.fill_text(
@@ -844,7 +858,7 @@ impl OverlayRenderer {
         crosshair: &CrosshairState,
         series: &SeriesCollection,
         bars: &crate::core::data::BarArray,
-        _bar_timestamps: &[u64],
+        time_scale: &TimeScaleIndex,
         viewport: &Viewport,
         style: &ChartStyle,
         pane_css_w: f64,
@@ -858,9 +872,15 @@ impl OverlayRenderer {
         let _pane_pw = pane_css_w * dpr;
         let pane_ph = pane_css_h * dpr;
 
-        // Get bar index at crosshair X
-        let bar_idx = match crosshair.bar_index {
-            Some(i) => i,
+        let target_ts = match viewport
+            .bar_index_for_crosshair(crosshair.x, pane_css_w)
+            .and_then(|slot| time_scale.resolve_rounded_timestamp(slot as f64))
+            .or_else(|| {
+                crosshair
+                    .bar_index
+                    .and_then(|idx| bars.get(idx).map(|b| b.timestamp))
+            }) {
+            Some(ts) => ts,
             None => return,
         };
 
@@ -877,13 +897,6 @@ impl OverlayRenderer {
                 SeriesType::Line | SeriesType::Area | SeriesType::Baseline => {}
                 _ => continue,
             }
-
-            // Find the data point at or near bar_idx by matching timestamp
-            let target_ts = if bar_idx < bars.len() {
-                bars.timestamp(bar_idx)
-            } else {
-                continue;
-            };
 
             // Linear search for matching timestamp in series data
             let data = &s.line_data;
@@ -948,6 +961,7 @@ impl OverlayRenderer {
         &self,
         markers: &MarkerManager,
         bars: &BarArray,
+        time_scale: &TimeScaleIndex,
         viewport: &Viewport,
         style: &ChartStyle,
         pane_css_w: f64,
@@ -956,18 +970,16 @@ impl OverlayRenderer {
         let dpr = self.dpr;
         let pane_ph = pane_css_h * dpr;
 
-        // Calculate visible bar range
-        let bar_count = bars.len();
-        if bar_count == 0 {
+        if bars.len() == 0 || time_scale.is_empty() {
             return;
         }
 
-        let start_idx = (viewport.start_bar.floor() as usize).min(bar_count.saturating_sub(1));
-        let end_idx = (viewport.end_bar.ceil() as usize).min(bar_count.saturating_sub(1));
-
-        // Calculate bar spacing
-        let visible_bars = (viewport.end_bar - viewport.start_bar).max(1.0);
-        let bar_spacing_css = pane_css_w / visible_bars;
+        let Some((start_idx, end_exclusive)) =
+            time_scale.visible_main_bar_range(viewport.start_bar, viewport.end_bar)
+        else {
+            return;
+        };
+        let end_idx = end_exclusive.saturating_sub(1);
 
         // Collect all visible markers for two-pass rendering
         struct MarkerDraw {
@@ -986,9 +998,12 @@ impl OverlayRenderer {
             let visible = series_markers.in_range(start_idx, end_idx);
 
             for marker in visible {
+                let Some(logical_slot) = time_scale.logical_index_for_main_bar(marker.bar_index)
+                else {
+                    continue;
+                };
                 // Calculate X position from bar index
-                let bar_offset = marker.bar_index as f64 - viewport.start_bar;
-                let x_css = bar_offset * bar_spacing_css + bar_spacing_css * 0.5;
+                let x_css = viewport.bar_center_css(logical_slot as usize, pane_css_w);
                 let x_phys = x_css * dpr;
 
                 if x_phys < 0.0 || x_phys > pane_css_w * dpr {
@@ -1134,6 +1149,7 @@ impl OverlayRenderer {
         &self,
         execution_marks: &crate::core::execution_marks::ExecutionMarkManager,
         bars: &BarArray,
+        _time_scale: &TimeScaleIndex,
         viewport: &Viewport,
         style: &ChartStyle,
         show_text: bool,
@@ -1152,19 +1168,13 @@ impl OverlayRenderer {
             return Vec::new();
         }
 
-        let bar_count = bars.len();
-        let start_idx = (viewport.start_bar.floor() as usize).min(bar_count.saturating_sub(1));
-        let end_idx = (viewport.end_bar.ceil() as usize).min(bar_count.saturating_sub(1));
-
         // Get visible execution marks
-        let visible_marks = execution_marks.in_bar_range(start_idx, end_idx);
+        let visible_marks =
+            execution_marks.in_logical_range(viewport.start_bar.floor(), viewport.end_bar.ceil());
         if visible_marks.is_empty() {
             return Vec::new();
         }
-
-        // Calculate bar spacing
-        let visible_bars = (viewport.end_bar - viewport.start_bar).max(1.0);
-        let bar_spacing_css = pane_css_w / visible_bars;
+        let bar_count = bars.len();
 
         // Primary execution arrows follow the approved trading markup palette.
         let buy_color: [f32; 4] = [41.0 / 255.0, 98.0 / 255.0, 1.0, 1.0]; // #2962FF
@@ -1188,6 +1198,9 @@ impl OverlayRenderer {
         let arrow_gap_css = 8.0;
 
         for mark in visible_marks {
+            let Some(time_index) = mark.resolved_time_index else {
+                continue;
+            };
             let Some(bar_idx) = mark.resolved_bar_index else {
                 continue;
             };
@@ -1197,9 +1210,8 @@ impl OverlayRenderer {
             }
 
             // Calculate X position (center of bar)
-            let bar_offset = bar_idx as f64 - viewport.start_bar;
-            let x_css = bar_offset * bar_spacing_css + bar_spacing_css * 0.5;
-            let x_phys = x_css * dpr;
+            let x_phys = bar_to_x(time_index + 0.5, viewport, pane_pw);
+            let x_css = x_phys / dpr;
 
             if x_phys < 0.0 || x_phys > pane_pw {
                 continue;
@@ -1394,20 +1406,20 @@ impl OverlayRenderer {
         };
 
         // Both marks need resolved bar indices
-        let (Some(entry_bar), Some(exit_bar)) = (entry.resolved_bar_index, exit.resolved_bar_index)
+        let (Some(entry_time_index), Some(exit_time_index)) =
+            (entry.resolved_time_index, exit.resolved_time_index)
         else {
             return;
         };
 
         let dpr = self.dpr;
-        let visible_bars = (viewport.end_bar - viewport.start_bar).max(1.0);
-        let bar_spacing_css = pane_css_w / visible_bars;
 
         // Calculate positions at the execution prices
-        let entry_x = (entry_bar as f64 - viewport.start_bar + 0.5) * bar_spacing_css * dpr;
+        let pane_pw = pane_css_w * dpr;
+        let entry_x = bar_to_x(entry_time_index + 0.5, viewport, pane_pw);
         let entry_y = viewport.price_to_css_y(entry.price, pane_css_h) * dpr;
 
-        let exit_x = (exit_bar as f64 - viewport.start_bar + 0.5) * bar_spacing_css * dpr;
+        let exit_x = bar_to_x(exit_time_index + 0.5, viewport, pane_pw);
         let exit_y = viewport.price_to_css_y(exit.price, pane_css_h) * dpr;
 
         // Colors for entry/exit markers match the execution palette unless overridden.
@@ -1457,14 +1469,7 @@ impl OverlayRenderer {
     /// This is intentionally a true vertical arrow instead of a chevron so
     /// traders can distinguish the side/intent marker from the precise fill
     /// locator drawn at the execution price itself.
-    fn draw_execution_arrow(
-        &self,
-        x: f64,
-        center_y: f64,
-        size: f64,
-        points_up: bool,
-        color: &str,
-    ) {
+    fn draw_execution_arrow(&self, x: f64, center_y: f64, size: f64, points_up: bool, color: &str) {
         self.ctx.save();
         self.ctx.set_line_join("miter");
 
@@ -1566,13 +1571,13 @@ impl OverlayRenderer {
     pub fn render_indicator_labels(
         &mut self,
         instructions: &[DrawInstruction],
-        bars: &BarArray,
+        time_scale: &TimeScaleIndex,
         viewport: &Viewport,
         style: &ChartStyle,
         pane_css_w: f64,
         pane_css_h: f64,
     ) {
-        if instructions.is_empty() || bars.is_empty() {
+        if instructions.is_empty() || time_scale.is_empty() {
             return;
         }
 
@@ -1600,7 +1605,7 @@ impl OverlayRenderer {
             if text.is_empty() {
                 continue;
             }
-            let Some(bar_idx) = timestamp_to_bar_index_in_bars(*timestamp, bars) else {
+            let Some(bar_idx) = time_scale.logical_index_for_timestamp(*timestamp) else {
                 continue;
             };
             let x = bar_to_x(bar_idx + 0.5, viewport, pane_pw);

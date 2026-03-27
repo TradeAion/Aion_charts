@@ -32,10 +32,10 @@
 //! bars.set(vec![
 //!     Bar { timestamp: 1700000000000, open: 100.0, high: 105.0, low: 98.0, close: 103.0, volume: 1000.0, _pad: 0.0 },
 //!     Bar { timestamp: 1700000060000, open: 103.0, high: 108.0, low: 101.0, close: 106.0, volume: 1200.0, _pad: 0.0 },
-//! ]);
+//! ]).unwrap();
 //!
 //! // Stream real-time updates (O(1) each)
-//! bars.append(Bar { timestamp: 1700000120000, open: 106.0, high: 110.0, low: 104.0, close: 109.0, volume: 800.0, _pad: 0.0 });
+//! bars.append(Bar { timestamp: 1700000120000, open: 106.0, high: 110.0, low: 104.0, close: 109.0, volume: 800.0, _pad: 0.0 }).unwrap();
 //!
 //! // Access data
 //! if let Some(bar) = bars.get(0) {
@@ -175,7 +175,7 @@ impl BarArray {
         }
     }
 
-    pub fn set(&mut self, bars: Vec<Bar>) {
+    pub fn set(&mut self, bars: Vec<Bar>) -> Result<(), String> {
         // Clear pending buffer since we're replacing all data
         self.pending.clear();
         self.dirty = false;
@@ -188,14 +188,24 @@ impl BarArray {
         let mut c = Float32Builder::with_capacity(len);
         let mut v = Float32Builder::with_capacity(len);
 
-        for bar in bars {
-            let sanitized = Self::sanitize_bar(&bar);
-            ts.append_value(sanitized.timestamp);
-            o.append_value(sanitized.open);
-            h.append_value(sanitized.high);
-            l.append_value(sanitized.low);
-            c.append_value(sanitized.close);
-            v.append_value(sanitized.volume);
+        let mut last_timestamp: Option<u64> = None;
+        for (index, bar) in bars.into_iter().enumerate() {
+            if let Some(previous) = last_timestamp {
+                if bar.timestamp <= previous {
+                    return Err(format!(
+                        "bar_data::set: timestamps must be strictly increasing at index {index}: {} <= {}",
+                        bar.timestamp, previous
+                    ));
+                }
+            }
+            let normalized = Self::validate_bar("set", &bar, index)?;
+            ts.append_value(normalized.timestamp);
+            o.append_value(normalized.open);
+            h.append_value(normalized.high);
+            l.append_value(normalized.low);
+            c.append_value(normalized.close);
+            v.append_value(normalized.volume);
+            last_timestamp = Some(normalized.timestamp);
         }
 
         self.timestamps = ts.finish();
@@ -205,43 +215,37 @@ impl BarArray {
         self.closes = c.finish();
         self.volumes = v.finish();
         self.len = len;
+        Ok(())
     }
 
-    /// Sanitize a bar: replace NaN/Infinity with sensible defaults,
-    /// clamp volume ≥ 0, ensure high ≥ max(open,close) and low ≤ min(open,close).
+    /// Validate and normalize a bar:
+    /// reject non-finite scalars, clamp volume ≥ 0, and ensure
+    /// high ≥ max(open, close) plus low ≤ min(open, close).
     #[inline]
-    fn sanitize_bar(bar: &Bar) -> Bar {
-        let open = if bar.open.is_finite() { bar.open } else { 0.0 };
-        let close = if bar.close.is_finite() {
-            bar.close
-        } else {
-            open
-        };
-        let high = if bar.high.is_finite() {
-            bar.high.max(open).max(close)
-        } else {
-            open.max(close)
-        };
-        let low = if bar.low.is_finite() {
-            bar.low.min(open).min(close)
-        } else {
-            open.min(close)
-        };
-        let volume = if bar.volume.is_finite() {
-            bar.volume.max(0.0)
-        } else {
-            0.0
-        };
-
-        Bar {
-            timestamp: bar.timestamp,
-            open,
-            high,
-            low,
-            close,
-            volume,
-            _pad: 0.0,
+    fn validate_bar(context: &str, bar: &Bar, index: usize) -> Result<Bar, String> {
+        for (field, value) in [
+            ("open", bar.open),
+            ("high", bar.high),
+            ("low", bar.low),
+            ("close", bar.close),
+            ("volume", bar.volume),
+        ] {
+            if !value.is_finite() {
+                return Err(format!(
+                    "bar_data::{context}: {field} at index {index} must be finite, got {value}"
+                ));
+            }
         }
+
+        Ok(Bar {
+            timestamp: bar.timestamp,
+            open: bar.open,
+            high: bar.high.max(bar.open).max(bar.close),
+            low: bar.low.min(bar.open).min(bar.close),
+            close: bar.close,
+            volume: bar.volume.max(0.0),
+            _pad: 0.0,
+        })
     }
 
     /// Get a bar at the given index, returns None if out of bounds.
@@ -310,9 +314,17 @@ impl BarArray {
     /// Append a single bar to the end of the array.
     /// This is O(1) - the bar is added to a pending buffer.
     /// The pending buffer is automatically flushed when it reaches chunk_size.
-    pub fn append(&mut self, bar: Bar) {
-        let sanitized = Self::sanitize_bar(&bar);
-        self.pending.push(sanitized);
+    pub fn append(&mut self, bar: Bar) -> Result<(), String> {
+        if let Some(last_timestamp) = self.len.checked_sub(1).map(|index| self.timestamp(index)) {
+            if bar.timestamp <= last_timestamp {
+                return Err(format!(
+                    "bar_data::append: timestamp must be > last timestamp ({} <= {})",
+                    bar.timestamp, last_timestamp
+                ));
+            }
+        }
+        let normalized = Self::validate_bar("append", &bar, self.len)?;
+        self.pending.push(normalized);
         self.len += 1;
         self.dirty = true;
 
@@ -320,29 +332,38 @@ impl BarArray {
         if self.pending.len() >= self.chunk_size {
             self.flush();
         }
+        Ok(())
     }
 
     /// Update the last bar in the array. No-op if the array is empty.
     /// This is O(1) - updates either the pending buffer or marks for rebuild.
-    pub fn update_last(&mut self, bar: Bar) {
+    pub fn update_last(&mut self, bar: Bar) -> Result<bool, String> {
         if self.len == 0 {
-            return;
+            return Ok(false);
         }
 
-        let sanitized = Self::sanitize_bar(&bar);
+        let last_timestamp = self.timestamp(self.len - 1);
+        if bar.timestamp != last_timestamp {
+            return Err(format!(
+                "bar_data::update_last: timestamp must equal last timestamp ({} != {})",
+                bar.timestamp, last_timestamp
+            ));
+        }
+        let normalized = Self::validate_bar("update_last", &bar, self.len - 1)?;
 
         if !self.pending.is_empty() {
             // Last bar is in pending buffer - O(1) update
             let last_idx = self.pending.len() - 1;
-            self.pending[last_idx] = sanitized;
+            self.pending[last_idx] = normalized;
         } else {
             // Last bar is in Arrow arrays - need to rebuild just that bar
             // We can optimize this by putting the update in pending and marking dirty
             // Then flush will handle the merge
-            self.rebuild_with_last_updated(&sanitized);
+            self.rebuild_with_last_updated(&normalized);
         }
 
         self.dirty = true;
+        Ok(true)
     }
 
     /// Rebuild Arrow arrays with the last element updated.
@@ -544,7 +565,8 @@ impl BarArray {
                     bars.push(bar);
                 }
             }
-            arr.set(bars);
+            arr.set(bars)
+                .expect("downsample source bars should already be valid");
             return arr;
         }
 
@@ -608,7 +630,8 @@ impl BarArray {
         }
 
         let mut arr = BarArray::new();
-        arr.set(sampled);
+        arr.set(sampled)
+            .expect("downsampled bars should already be valid");
         arr
     }
 }
@@ -703,7 +726,7 @@ mod tests {
             make_bar(2000, 51.0),
             make_bar(3000, 52.0),
         ];
-        arr.set(bars);
+        arr.set(bars).unwrap();
 
         assert_eq!(arr.len(), 3);
         assert!(!arr.is_empty());
@@ -712,7 +735,8 @@ mod tests {
     #[test]
     fn test_bar_array_get_bounds_checking() {
         let mut arr = BarArray::new();
-        arr.set(vec![make_bar(1000, 50.0), make_bar(2000, 51.0)]);
+        arr.set(vec![make_bar(1000, 50.0), make_bar(2000, 51.0)])
+            .unwrap();
 
         // Valid indices
         assert!(arr.get(0).is_some());
@@ -726,7 +750,8 @@ mod tests {
     #[test]
     fn test_bar_array_get_values() {
         let mut arr = BarArray::new();
-        arr.set(vec![make_bar(1000, 50.0), make_bar(2000, 60.0)]);
+        arr.set(vec![make_bar(1000, 50.0), make_bar(2000, 60.0)])
+            .unwrap();
 
         let bar0 = arr.get(0).unwrap();
         assert_eq!(bar0.timestamp, 1000);
@@ -744,13 +769,13 @@ mod tests {
         let mut arr = BarArray::new();
         assert_eq!(arr.len(), 0);
 
-        arr.append(make_bar(1000, 50.0));
+        arr.append(make_bar(1000, 50.0)).unwrap();
         assert_eq!(arr.len(), 1);
 
-        arr.append(make_bar(2000, 51.0));
+        arr.append(make_bar(2000, 51.0)).unwrap();
         assert_eq!(arr.len(), 2);
 
-        arr.append(make_bar(3000, 52.0));
+        arr.append(make_bar(3000, 52.0)).unwrap();
         assert_eq!(arr.len(), 3);
     }
 
@@ -759,7 +784,7 @@ mod tests {
         let mut arr = BarArray::new();
 
         // Append without flush - should be in pending buffer
-        arr.append(make_bar(1000, 50.0));
+        arr.append(make_bar(1000, 50.0)).unwrap();
 
         // Should still be readable via get()
         let bar = arr.get(0).unwrap();
@@ -772,7 +797,8 @@ mod tests {
 
         // Append exactly chunk_size bars
         for i in 0..4 {
-            arr.append(make_bar(i as u64 * 1000, 50.0 + i as f32));
+            arr.append(make_bar(i as u64 * 1000, 50.0 + i as f32))
+                .unwrap();
         }
 
         // Should have auto-flushed, all bars accessible
@@ -787,12 +813,12 @@ mod tests {
         let mut arr = BarArray::with_chunk_size(2);
 
         // Add bars that will flush (2 bars)
-        arr.append(make_bar(1000, 50.0));
-        arr.append(make_bar(2000, 51.0)); // Triggers flush
+        arr.append(make_bar(1000, 50.0)).unwrap();
+        arr.append(make_bar(2000, 51.0)).unwrap(); // Triggers flush
 
         // Add more bars (in pending)
-        arr.append(make_bar(3000, 52.0));
-        arr.append(make_bar(4000, 53.0)); // Triggers flush again
+        arr.append(make_bar(3000, 52.0)).unwrap();
+        arr.append(make_bar(4000, 53.0)).unwrap(); // Triggers flush again
 
         // All 4 bars should be accessible
         assert_eq!(arr.len(), 4);
@@ -807,11 +833,11 @@ mod tests {
     #[test]
     fn test_update_last_in_pending() {
         let mut arr = BarArray::new();
-        arr.append(make_bar(1000, 50.0));
-        arr.append(make_bar(2000, 51.0));
+        arr.append(make_bar(1000, 50.0)).unwrap();
+        arr.append(make_bar(2000, 51.0)).unwrap();
 
         // Update last bar (in pending buffer)
-        arr.update_last(make_bar(2000, 99.0));
+        arr.update_last(make_bar(2000, 99.0)).unwrap();
 
         let bar = arr.get(1).unwrap();
         assert_eq!(bar.close, 99.0);
@@ -820,64 +846,75 @@ mod tests {
     #[test]
     fn test_update_last_in_arrow() {
         let mut arr = BarArray::new();
-        arr.set(vec![make_bar(1000, 50.0), make_bar(2000, 51.0)]);
+        arr.set(vec![make_bar(1000, 50.0), make_bar(2000, 51.0)])
+            .unwrap();
 
         // Update last bar (in Arrow arrays, pending is empty)
-        arr.update_last(make_bar(2000, 99.0));
+        arr.update_last(make_bar(2000, 99.0)).unwrap();
 
         let bar = arr.get(1).unwrap();
         assert_eq!(bar.close, 99.0);
     }
 
     #[test]
-    fn test_update_last_on_empty_is_noop() {
+    fn test_update_last_on_empty_returns_false() {
         let mut arr = BarArray::new();
-        arr.update_last(make_bar(1000, 50.0)); // Should not panic
+        assert!(!arr.update_last(make_bar(1000, 50.0)).unwrap());
         assert_eq!(arr.len(), 0);
     }
 
-    // ── NaN/Infinity sanitization ──
+    // ── Invalid data rejection ──
 
     #[test]
-    fn test_sanitize_nan_values() {
+    fn test_append_rejects_nan_values() {
         let mut arr = BarArray::new();
-        arr.append(Bar {
-            timestamp: 1000,
-            open: f32::NAN,
-            high: f32::NAN,
-            low: f32::NAN,
-            close: f32::NAN,
-            volume: f32::NAN,
-            _pad: 0.0,
-        });
-
-        let bar = arr.get(0).unwrap();
-        assert_eq!(bar.open, 0.0);
-        assert_eq!(bar.high, 0.0);
-        assert_eq!(bar.low, 0.0);
-        assert_eq!(bar.close, 0.0);
-        assert_eq!(bar.volume, 0.0);
+        let err = arr
+            .append(Bar {
+                timestamp: 1000,
+                open: f32::NAN,
+                high: f32::NAN,
+                low: f32::NAN,
+                close: f32::NAN,
+                volume: f32::NAN,
+                _pad: 0.0,
+            })
+            .unwrap_err();
+        assert!(err.contains("must be finite"));
     }
 
     #[test]
-    fn test_sanitize_infinity_values() {
+    fn test_set_rejects_infinity_values() {
         let mut arr = BarArray::new();
-        arr.append(Bar {
-            timestamp: 1000,
-            open: f32::INFINITY,
-            high: f32::NEG_INFINITY,
-            low: f32::INFINITY,
-            close: f32::NEG_INFINITY,
-            volume: f32::INFINITY,
-            _pad: 0.0,
-        });
+        let err = arr
+            .set(vec![Bar {
+                timestamp: 1000,
+                open: f32::INFINITY,
+                high: f32::NEG_INFINITY,
+                low: f32::INFINITY,
+                close: f32::NEG_INFINITY,
+                volume: f32::INFINITY,
+                _pad: 0.0,
+            }])
+            .unwrap_err();
+        assert!(err.contains("must be finite"));
+    }
 
-        let bar = arr.get(0).unwrap();
-        assert_eq!(bar.open, 0.0);
-        assert_eq!(bar.high, 0.0);
-        assert_eq!(bar.low, 0.0);
-        assert_eq!(bar.close, 0.0);
-        assert_eq!(bar.volume, 0.0);
+    #[test]
+    fn test_update_last_rejects_timestamp_mismatch() {
+        let mut arr = BarArray::new();
+        arr.append(make_bar(1000, 50.0)).unwrap();
+
+        let err = arr.update_last(make_bar(2000, 60.0)).unwrap_err();
+        assert!(err.contains("timestamp must equal last timestamp"));
+    }
+
+    #[test]
+    fn test_append_rejects_non_increasing_timestamp() {
+        let mut arr = BarArray::new();
+        arr.append(make_bar(1000, 50.0)).unwrap();
+
+        let err = arr.append(make_bar(1000, 60.0)).unwrap_err();
+        assert!(err.contains("timestamp must be > last timestamp"));
     }
 
     // ── Direct accessor tests ──
@@ -904,7 +941,8 @@ mod tests {
                 volume: 200.0,
                 _pad: 0.0,
             },
-        ]);
+        ])
+        .unwrap();
 
         assert_eq!(arr.timestamp(0), 1000);
         assert_eq!(arr.timestamp(1), 2000);
@@ -924,12 +962,33 @@ mod tests {
     #[test]
     fn test_get_unchecked() {
         let mut arr = BarArray::new();
-        arr.set(vec![make_bar(1000, 50.0), make_bar(2000, 60.0)]);
+        arr.set(vec![make_bar(1000, 50.0), make_bar(2000, 60.0)])
+            .unwrap();
 
         let bar0 = arr.get_unchecked(0);
         assert_eq!(bar0.close, 50.0);
 
         let bar1 = arr.get_unchecked(1);
         assert_eq!(bar1.close, 60.0);
+    }
+
+    #[test]
+    fn test_bar_array_normalizes_finite_bounds() {
+        let mut arr = BarArray::new();
+        arr.append(Bar {
+            timestamp: 1000,
+            open: 10.0,
+            high: 9.0,
+            low: 12.0,
+            close: 11.0,
+            volume: -5.0,
+            _pad: 0.0,
+        })
+        .unwrap();
+
+        let bar = arr.get(0).unwrap();
+        assert_eq!(bar.high, 11.0);
+        assert_eq!(bar.low, 10.0);
+        assert_eq!(bar.volume, 0.0);
     }
 }

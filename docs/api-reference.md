@@ -18,7 +18,7 @@ static create_chart(
 ```
 
 **Parameters:**
-- `container` — DOM element or element ID string
+- `container` — DOM element or bare element ID string. Pass `'chart'` or an `HTMLElement`; do not pass CSS selectors like `'#chart'`.
 - `options.renderer` — `'webgpu'` (default), `'auto'`, or `'canvas2d'`
 - `options.autoRender` — `true` to start RAF loop automatically
 - `options.theme` — `'dark'`, `'light'`
@@ -35,10 +35,11 @@ Renderer resolution:
 Update chart options at runtime.
 
 ```ts
-apply_options(options: { theme?: 'dark' | 'light' }): void
+apply_options(options: CreateChartOptions): void
 ```
 
 Notes:
+- `theme`, `symbol`, `interval`, `crosshair`, `priceScale`, and `autoRender` may be updated at runtime.
 - `renderer` is create-time only.
 - `apply_options({ renderer: ... })` is ignored and emits an `error` event.
 
@@ -407,9 +408,13 @@ Add sub-chart panes for indicators like RSI, MACD, etc.
 
 ## Price Lines
 
-### `create_price_line(price, r, g, b, a, width, style, label)`
+### `create_price_line(price, r, g, b, a, width, style, draggable)`
 
 Create a horizontal price line. Returns a `price_line_id`.
+
+- `style` is one of `'solid'`, `'dotted'`, `'dashed'`, `'large_dashed'`, `'sparse_dotted'`
+- `draggable` controls whether the line can be dragged vertically
+- Set the label text separately with `set_price_line_label(id, label)`
 
 ### `remove_price_line(id)` / `set_price_line_price(id, price)` / `set_price_line_visible(id, visible)`
 
@@ -419,12 +424,14 @@ Manage price lines.
 
 ## Series Markers
 
-### `add_marker(series_id, timestamp, position, shape, r, g, b, a, text)`
+### `add_marker(series_id, bar_index, shape, position, price, r, g, b, a, size, text)`
 
-Add a marker (arrow, circle, square) at a specific bar.
+Add a marker (arrow, circle, square) at a specific bar index.
 
 - `position`: `'above_bar'`, `'below_bar'`, `'at_price'`
 - `shape`: `'arrow_up'`, `'arrow_down'`, `'circle'`, `'square'`
+- `price` is only used when `position === 'at_price'`
+- `size` controls marker size in CSS pixels
 
 ### `remove_marker(series_id, marker_id)` / `clear_markers(series_id)` / `clear_all_markers()`
 
@@ -643,12 +650,12 @@ Subscribe to chart events:
 
 | Event | Payload |
 |---|---|
-| `crosshairMove` | `{ price, timestamp, bar_index, x, y }` |
-| `click` | `{ price, timestamp, bar_index, x, y }` |
-| `visibleRangeChange` | `{ start, end }` |
+| `crosshairMove` | `{ x, y, barIndex, price, timestamp }` |
+| `click` | `{ x, y, barIndex, price }` |
+| `visibleRangeChange` | `{ startBar, endBar }` |
 | `symbolChange` | `{ symbol }` |
 | `intervalChange` | `{ interval }` |
-| `chartTypeChange` | `{ chart_type }` |
+| `chartTypeChange` | `{ chartType }` |
 | `priceScaleChange` | `{ mode }` |
 | `resize` | `{ width, height }` |
 | `drawingCreated` | `{ id, tool }` |
@@ -668,11 +675,11 @@ Synchronize multiple chart panes:
 
 ```ts
 const group = new ChartGroup();
-group.add_pane(chart1_id, 'BTCUSD', '1h');
-group.add_pane(chart2_id, 'ETHUSD', '1h');
-group.link_panes(chart1_id, chart2_id, 'link-1');
-group.set_sync('link-1', 'time', true);
-group.set_sync('link-1', 'crosshair', true);
+const paneA = group.add_pane('BTCUSD', '1h');
+const paneB = group.add_pane('ETHUSD', '1h');
+group.link_panes(paneA, paneB);
+group.set_sync('time', true);
+group.set_sync('crosshair', true);
 ```
 
 ### `ChartWorkspace`

@@ -22,7 +22,7 @@ pub mod types;
 pub mod vertical_line;
 
 use crate::core::data::BarArray;
-use crate::core::renderer::value_projection::timestamp_to_bar_index_in_bars;
+use crate::core::renderer::value_projection::TimeScaleIndex;
 use crate::core::viewport::Viewport;
 use drawing::{ensure_next_drawing_id_at_least, Drawing};
 use persistence::{
@@ -116,6 +116,16 @@ impl DrawingManager {
         self.drawings.iter_mut().find(|d| d.id() == id)
     }
 
+    #[inline]
+    fn drawing_renders_on_top(&self, drawing: &dyn Drawing) -> bool {
+        let is_hovered = self.hovered_id == Some(drawing.id());
+        let is_active = matches!(
+            drawing.state(),
+            DrawingState::Selected | DrawingState::Creating { .. } | DrawingState::Dragging { .. }
+        );
+        is_hovered || is_active || drawing.z_order() == ZOrder::Top
+    }
+
     /// All drawings (for rendering).
     pub fn all(&self) -> &[Box<dyn Drawing>] {
         &self.drawings
@@ -192,13 +202,18 @@ impl DrawingManager {
     ) -> Option<(u64, HitResult)> {
         let mut best: Option<(u64, HitResult)> = None;
 
-        for d in &self.drawings {
-            let result = d.hit_test(cursor_css_x, cursor_css_y, vp, pane_css_w, pane_css_h);
-            if result.is_hit() {
-                match &best {
-                    Some((_, prev)) if prev.distance <= result.distance => {}
-                    _ => {
-                        best = Some((d.id(), result));
+        for top_bucket in [false, true] {
+            for d in &self.drawings {
+                if self.drawing_renders_on_top(d.as_ref()) != top_bucket {
+                    continue;
+                }
+                let result = d.hit_test(cursor_css_x, cursor_css_y, vp, pane_css_w, pane_css_h);
+                if result.is_hit() {
+                    match &best {
+                        Some((_, prev)) if prev.distance < result.distance => {}
+                        _ => {
+                            best = Some((d.id(), result));
+                        }
                     }
                 }
             }
@@ -458,15 +473,7 @@ impl DrawingManager {
                 continue;
             }
 
-            let is_hovered = self.hovered_id == Some(d.id());
-            let is_active = matches!(
-                d.state(),
-                DrawingState::Selected
-                    | DrawingState::Creating { .. }
-                    | DrawingState::Dragging { .. }
-            );
-
-            if is_hovered || is_active || d.z_order() == ZOrder::Top {
+            if self.drawing_renders_on_top(d.as_ref()) {
                 top.push(geom);
             } else {
                 base.push(geom);
@@ -569,51 +576,34 @@ impl DrawingManager {
         self.replace_from_snapshot(snapshot)
     }
 
-    /// Resolve a timestamp for a fractional bar index using bar data.
-    /// Returns `None` if bars are empty or the index is out of range.
-    fn resolve_timestamp(bar_index: f64, bars: &BarArray) -> Option<u64> {
-        let len = bars.len();
-        if len == 0 {
-            return None;
-        }
-        let idx = bar_index.round() as isize;
-        if idx < 0 || idx >= len as isize {
-            // Extrapolate for out-of-range indices
-            if len >= 2 {
-                let dt = bars.timestamp(len - 1) as f64 - bars.timestamp(len - 2) as f64;
-                if dt > 0.0 {
-                    let base_ts = bars.timestamp(len - 1) as f64;
-                    let extra = (bar_index - (len - 1) as f64) * dt;
-                    return Some((base_ts + extra).round() as u64);
-                }
-            }
-            if len >= 2 && idx < 0 {
-                let dt = bars.timestamp(1) as f64 - bars.timestamp(0) as f64;
-                if dt > 0.0 {
-                    let base_ts = bars.timestamp(0) as f64;
-                    let extra = bar_index * dt;
-                    return Some((base_ts + extra).round() as u64);
-                }
-            }
-            return None;
-        }
-        Some(bars.timestamp(idx as usize))
+    /// Resolve a timestamp for a fractional logical index using the current
+    /// merged time-scale.
+    fn resolve_timestamp(bar_index: f64, time_scale: &TimeScaleIndex) -> Option<u64> {
+        time_scale.resolve_rounded_timestamp(bar_index)
     }
 
     /// Fill in missing `timestamp` fields on all drawing anchor points
     /// (and brush intermediate points) using the current bar data.
     pub fn stamp_timestamps(&mut self, bars: &BarArray) {
+        let time_scale = TimeScaleIndex::from_bars(bars);
+        self.stamp_timestamps_with_time_scale(&time_scale);
+    }
+
+    /// Fill in missing `timestamp` fields on all drawing anchor points
+    /// (and brush intermediate points) using the current merged time scale.
+    pub fn stamp_timestamps_with_time_scale(&mut self, time_scale: &TimeScaleIndex) {
         for drawing in &mut self.drawings {
             for anchor in drawing.anchors_mut().iter_mut() {
                 if anchor.point.timestamp.is_none() {
-                    anchor.point.timestamp = Self::resolve_timestamp(anchor.point.bar_index, bars);
+                    anchor.point.timestamp =
+                        Self::resolve_timestamp(anchor.point.bar_index, time_scale);
                 }
             }
             if drawing.tool() == DrawingTool::Brush {
                 if let Some(brush) = drawing.as_any_mut().downcast_mut::<brush::BrushDrawing>() {
                     for pt in brush.points_mut().iter_mut() {
                         if pt.timestamp.is_none() {
-                            pt.timestamp = Self::resolve_timestamp(pt.bar_index, bars);
+                            pt.timestamp = Self::resolve_timestamp(pt.bar_index, time_scale);
                         }
                     }
                 }
@@ -624,7 +614,14 @@ impl DrawingManager {
     /// Remap all drawing positions from stored timestamps to new bar indices
     /// in the given (potentially different-timeframe) bar data.
     pub fn remap_to_new_data(&mut self, bars: &BarArray) {
-        if bars.len() == 0 {
+        let time_scale = TimeScaleIndex::from_bars(bars);
+        self.remap_to_time_scale(&time_scale);
+    }
+
+    /// Remap all drawing positions from stored timestamps to the current merged
+    /// logical time scale.
+    pub fn remap_to_time_scale(&mut self, time_scale: &TimeScaleIndex) {
+        if time_scale.is_empty() {
             return;
         }
         for drawing in &mut self.drawings {
@@ -634,7 +631,7 @@ impl DrawingManager {
             }
             for anchor in drawing.anchors_mut().iter_mut() {
                 if let Some(ts) = anchor.point.timestamp {
-                    if let Some(new_idx) = timestamp_to_bar_index_in_bars(ts, bars) {
+                    if let Some(new_idx) = time_scale.logical_index_for_timestamp(ts) {
                         anchor.point.bar_index = new_idx;
                     }
                 }
@@ -643,7 +640,7 @@ impl DrawingManager {
                 if let Some(brush) = drawing.as_any_mut().downcast_mut::<brush::BrushDrawing>() {
                     for pt in brush.points_mut().iter_mut() {
                         if let Some(ts) = pt.timestamp {
-                            if let Some(new_idx) = timestamp_to_bar_index_in_bars(ts, bars) {
+                            if let Some(new_idx) = time_scale.logical_index_for_timestamp(ts) {
                                 pt.bar_index = new_idx;
                             }
                         }
@@ -905,6 +902,86 @@ mod tests {
         let (bottom, top) = dragging_mgr.generate_all_geometry(&vp, 800.0, 600.0, 1.0, 1.0, 1.0);
         assert_eq!(bottom.len(), 0);
         assert_eq!(top.len(), 1);
+    }
+
+    #[test]
+    fn hit_test_prefers_later_idle_drawing_when_identical_drawings_overlap() {
+        let mut manager = DrawingManager::new();
+        let first = complete_trend_line(&mut manager);
+        let second = complete_trend_line(&mut manager);
+        manager.deselect_all();
+
+        let vp = test_viewport();
+        let pw = 800.0;
+        let ph = 600.0;
+        let hit = manager
+            .hit_test(
+                vp.bar_to_frac(15.0) * pw,
+                vp.price_to_css_y(105.0, ph),
+                &vp,
+                pw,
+                ph,
+            )
+            .expect("overlap hit");
+
+        assert_ne!(first, second);
+        assert_eq!(hit.0, second);
+    }
+
+    #[test]
+    fn hit_test_prefers_selected_top_bucket_drawing_over_later_idle_overlap() {
+        let mut manager = DrawingManager::new();
+        let first = complete_trend_line(&mut manager);
+        let second = complete_trend_line(&mut manager);
+        manager.deselect_all();
+        manager.select(first);
+
+        let vp = test_viewport();
+        let pw = 800.0;
+        let ph = 600.0;
+        let hit = manager
+            .hit_test(
+                vp.bar_to_frac(15.0) * pw,
+                vp.price_to_css_y(105.0, ph),
+                &vp,
+                pw,
+                ph,
+            )
+            .expect("overlap hit");
+
+        assert_eq!(hit.0, first);
+        assert_ne!(hit.0, second);
+    }
+
+    #[test]
+    fn hit_test_still_prefers_closer_drawing_when_top_bucket_is_farther() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::TrendLine;
+        let lower = manager.start_creating(10.0, 100.0).expect("lower line");
+        manager.finalize_creation_step(20.0, 110.0);
+        manager.deselect_all();
+
+        manager.active_tool = DrawingTool::TrendLine;
+        let upper = manager.start_creating(10.0, 101.5).expect("upper line");
+        manager.finalize_creation_step(20.0, 111.5);
+        manager.deselect_all();
+        manager.select(upper);
+
+        let vp = test_viewport();
+        let pw = 800.0;
+        let ph = 600.0;
+        let hit = manager
+            .hit_test(
+                vp.bar_to_frac(15.0) * pw,
+                vp.price_to_css_y(105.0, ph),
+                &vp,
+                pw,
+                ph,
+            )
+            .expect("nearby overlap hit");
+
+        assert_eq!(hit.0, lower);
+        assert_ne!(hit.0, upper);
     }
 
     #[test]

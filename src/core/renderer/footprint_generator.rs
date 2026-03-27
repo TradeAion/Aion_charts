@@ -30,7 +30,32 @@ use crate::core::renderer::draw_list::{ColoredRect, DrawText, HorizontalGradient
 use crate::core::renderer::series::CandleSizing;
 use crate::core::renderer::traits::ChartStyle;
 use crate::core::renderer::transforms::{bar_to_x, color4, price_to_y};
+use crate::core::renderer::value_projection::TimeScaleIndex;
 use crate::core::viewport::Viewport;
+
+#[inline]
+fn visible_main_bar_range(
+    bars: &BarArray,
+    viewport: &Viewport,
+    time_scale: &TimeScaleIndex,
+) -> Option<(usize, usize)> {
+    if bars.is_empty() {
+        return None;
+    }
+    time_scale.visible_main_bar_range(viewport.start_bar - 1.0, viewport.end_bar + 1.0)
+}
+
+#[inline]
+fn main_bar_center_x(
+    bar_index: usize,
+    viewport: &Viewport,
+    time_scale: &TimeScaleIndex,
+    chart_w: f64,
+) -> Option<f64> {
+    time_scale
+        .logical_index_for_main_bar(bar_index)
+        .map(|logical_index| bar_to_x(logical_index + 0.5, viewport, chart_w))
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Output Types
@@ -60,6 +85,7 @@ pub struct FootprintGeometry {
 /// Canvas2D and WebGPU use this output identically.
 pub fn generate_footprint_geometry(
     bars: &BarArray,
+    time_scale: &TimeScaleIndex,
     viewport: &Viewport,
     style: &ChartStyle,
     fp_data: &FootprintData,
@@ -77,10 +103,14 @@ pub fn generate_footprint_geometry(
     let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
 
-    let start = (viewport.start_bar.floor() as usize)
-        .saturating_sub(1)
-        .min(bars.len());
-    let end = ((viewport.end_bar.ceil() as usize) + 1).min(bars.len());
+    let Some((start, end)) = visible_main_bar_range(bars, viewport, time_scale) else {
+        return FootprintGeometry {
+            base_rects: Vec::new(),
+            gradient_rects: Vec::new(),
+            overlay_rects: Vec::new(),
+            texts: Vec::new(),
+        };
+    };
 
     if start >= end {
         return FootprintGeometry {
@@ -111,6 +141,7 @@ pub fn generate_footprint_geometry(
                 // No footprint data — render as a simple candlestick fallback
                 generate_fallback_candle(
                     i,
+                    time_scale,
                     bar.open,
                     bar.high,
                     bar.low,
@@ -129,6 +160,7 @@ pub fn generate_footprint_geometry(
         if fp_bar.levels.is_empty() {
             generate_fallback_candle(
                 i,
+                time_scale,
                 bar.open,
                 bar.high,
                 bar.low,
@@ -146,7 +178,9 @@ pub fn generate_footprint_geometry(
         // ── Compute bar geometry ──
         // Layout: [candle | gap | ladder]
         // The candle occupies the left portion, the ladder the right.
-        let center_x = bar_to_x(i as f64 + 0.5, viewport, pane_w);
+        let Some(center_x) = main_bar_center_x(i, viewport, time_scale, pane_w) else {
+            continue;
+        };
         let half_bar = (sizing.bar_width * 0.5).floor();
         let slot_left = (center_x - half_bar).round();
         let slot_width = sizing.bar_width;
@@ -994,6 +1028,7 @@ fn render_delta_bar(
 /// Render a simple candlestick for bars without footprint data.
 fn generate_fallback_candle(
     bar_idx: usize,
+    time_scale: &TimeScaleIndex,
     open: f32,
     high: f32,
     low: f32,
@@ -1017,7 +1052,9 @@ fn generate_fallback_candle(
         color4(&style.wick_bearish_color)
     };
 
-    let center_x = bar_to_x(bar_idx as f64 + 0.5, vp, chart_w).round();
+    let Some(center_x) = main_bar_center_x(bar_idx, vp, time_scale, chart_w).map(f64::round) else {
+        return;
+    };
     let body_top = price_to_y(open.max(close) as f64, vp, candle_h).round();
     let body_bottom = price_to_y(open.min(close) as f64, vp, candle_h).round();
     let high_y = price_to_y(high as f64, vp, candle_h).round();
@@ -1305,7 +1342,8 @@ mod tests {
             close: 100.9,
             volume: 50.0,
             _pad: 0.0,
-        }]);
+        }])
+        .unwrap();
         bars
     }
 
@@ -1442,9 +1480,19 @@ mod tests {
         let viewport = sample_viewport();
         let style = ChartStyle::default();
         let opts = FootprintOptions::default();
+        let time_scale = TimeScaleIndex::from_bars(&bars);
 
         let geom = generate_footprint_geometry(
-            &bars, &viewport, &style, &fp_data, &opts, 400.0, 300.0, 1.0, 1.0,
+            &bars,
+            &time_scale,
+            &viewport,
+            &style,
+            &fp_data,
+            &opts,
+            400.0,
+            300.0,
+            1.0,
+            1.0,
         );
 
         let ladder_left = geom
@@ -1469,9 +1517,19 @@ mod tests {
         let viewport = sample_viewport();
         let style = ChartStyle::default();
         let opts = FootprintOptions::default();
+        let time_scale = TimeScaleIndex::from_bars(&bars);
 
         let geom = generate_footprint_geometry(
-            &bars, &viewport, &style, &fp_data, &opts, 400.0, 300.0, 1.0, 1.0,
+            &bars,
+            &time_scale,
+            &viewport,
+            &style,
+            &fp_data,
+            &opts,
+            400.0,
+            300.0,
+            1.0,
+            1.0,
         );
 
         assert!(
@@ -1507,9 +1565,19 @@ mod tests {
         opts.show_delta_bar = false;
         opts.show_unfinished_auction = false;
         opts.show_volume_text = false;
+        let time_scale = TimeScaleIndex::from_bars(&bars);
 
         let geom = generate_footprint_geometry(
-            &bars, &viewport, &style, &fp_data, &opts, 400.0, 300.0, 1.0, 1.0,
+            &bars,
+            &time_scale,
+            &viewport,
+            &style,
+            &fp_data,
+            &opts,
+            400.0,
+            300.0,
+            1.0,
+            1.0,
         );
 
         let ladder = geom
@@ -1562,9 +1630,19 @@ mod tests {
         opts.show_delta_bar = false;
         opts.show_unfinished_auction = false;
         opts.show_volume_text = true;
+        let time_scale = TimeScaleIndex::from_bars(&bars);
 
         let geom = generate_footprint_geometry(
-            &bars, &viewport, &style, &fp_data, &opts, 400.0, 300.0, 1.0, 1.0,
+            &bars,
+            &time_scale,
+            &viewport,
+            &style,
+            &fp_data,
+            &opts,
+            400.0,
+            300.0,
+            1.0,
+            1.0,
         );
 
         let left_label = format_volume(338.0);

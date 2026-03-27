@@ -37,6 +37,7 @@ use crate::core::constants::{
 };
 use crate::core::data::BarArray;
 use crate::core::renderer::traits::{CrosshairMode, CrosshairState};
+use crate::core::renderer::value_projection::TimeScaleIndex;
 use crate::core::viewport::Viewport;
 
 /// Get current time in milliseconds (platform-agnostic).
@@ -56,8 +57,30 @@ fn now_ms() -> f64 {
 
 /// Manhattan distance threshold before drag starts (LWC: CancelClickManhattanDistance = 5).
 const CANCEL_CLICK_DISTANCE: f64 = 5.0;
+/// Manhattan distance threshold for mouse double-click detection.
+const DOUBLE_CLICK_DISTANCE: f64 = 5.0;
 /// Replay trim cursor: inline SVG scissors icon with crosshair fallback.
 const REPLAY_SCISSORS_CURSOR: &str = "url(\"data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20width%3D%2724%27%20height%3D%2724%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23d7d9dd%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%276%27%20cy%3D%276%27%20r%3D%272%27/%3E%3Ccircle%20cx%3D%276%27%20cy%3D%2718%27%20r%3D%272%27/%3E%3Cpath%20d%3D%27M20%204%20L8.12%2015.88%27/%3E%3Cpath%20d%3D%27M14.47%2014.48%20L20%2020%27/%3E%3Cpath%20d%3D%27M8.12%208.12%20L12%2012%27/%3E%3C/svg%3E\") 6 6, crosshair";
+
+fn reset_time_range(viewport: &mut Viewport, data_len: usize) {
+    let len = data_len as f64;
+    let visible = len.min(DEFAULT_INITIAL_VISIBLE_BARS);
+    viewport.set_range(len - visible, len);
+}
+
+fn snap_crosshair_to_time_scale(
+    viewport: &Viewport,
+    time_scale: &TimeScaleIndex,
+    crosshair: &mut CrosshairState,
+    x_css: f64,
+    pane_css_w: f64,
+) {
+    let grid_idx = viewport.bar_index_for_crosshair(x_css, pane_css_w);
+    crosshair.bar_index = grid_idx.and_then(|idx| time_scale.main_bar_index_at_slot(idx));
+    crosshair.x = grid_idx
+        .map(|idx| viewport.bar_center_css(idx, pane_css_w))
+        .unwrap_or(x_css);
+}
 
 /// Which zone the pointer is in — determined by the WASM layer based on DOM element.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -91,6 +114,8 @@ pub struct InteractionHandler {
     // ── Double-click detection ──
     last_click_time: f64,
     last_click_zone: HitZone,
+    last_click_x: f64,
+    last_click_y: f64,
 
     // ── Time axis scale state (LWC: TimeScale.startScale / scaleTo / endScale) ──
     time_scale_start_x: f64,
@@ -170,6 +195,8 @@ impl InteractionHandler {
             press_zone: HitZone::None,
             last_click_time: 0.0,
             last_click_zone: HitZone::None,
+            last_click_x: 0.0,
+            last_click_y: 0.0,
             time_scale_start_x: 0.0,
             time_scale_start_visible_bars: 0.0,
             price_scale_start_y_inv: 0.0,
@@ -212,6 +239,28 @@ impl InteractionHandler {
     /// Set whether the current device is touch (call from pointermove/pointerdown).
     pub fn set_touch(&mut self, is_touch: bool) {
         self.is_touch = is_touch;
+    }
+
+    /// Returns true when the current press matches the previous click closely
+    /// enough to count as a repeated click/tap.
+    pub fn is_double_click_candidate(
+        &self,
+        zone: HitZone,
+        now_ms: f64,
+        distance_threshold: f64,
+    ) -> bool {
+        if zone == HitZone::None || self.last_click_zone != zone || self.last_click_time <= 0.0 {
+            return false;
+        }
+
+        let dt = now_ms - self.last_click_time;
+        if dt < 0.0 || dt >= DOUBLE_CLICK_WINDOW_MS {
+            return false;
+        }
+
+        let manhattan =
+            (self.press_x - self.last_click_x).abs() + (self.press_y - self.last_click_y).abs();
+        manhattan < distance_threshold
     }
 
     /// Called when pointer enters a widget zone.
@@ -296,6 +345,7 @@ impl InteractionHandler {
         zoom_price_with_time: bool,
         viewport: &mut Viewport,
         bars: &BarArray,
+        data_len: usize,
     ) {
         if !self.pinch_active {
             return;
@@ -312,7 +362,7 @@ impl InteractionHandler {
         // Time zoom — same as LWC zoomTime
         let factor = 1.0 / (1.0 + zoom_scale / ZOOM_FACTOR_DIVISOR);
         viewport.zoom(self.pinch_start_center_bar, factor);
-        viewport.clamp_to_data(bars.len());
+        viewport.clamp_to_data(data_len);
 
         if zoom_price_with_time {
             // Footprint mode: zoom price around the initial pinch focal Y value.
@@ -365,6 +415,7 @@ impl InteractionHandler {
         crosshair: &mut CrosshairState,
         viewport: &mut Viewport,
         bars: &BarArray,
+        data_len: usize,
     ) {
         if self.touch_crosshair_mode == TouchCrosshairMode::Tracking {
             // Hide crosshair
@@ -373,9 +424,7 @@ impl InteractionHandler {
         } else {
             // Reset view (same as mouse double-click on chart)
             viewport.price_locked = false;
-            let len = bars.len() as f64;
-            let visible = len.min(DEFAULT_INITIAL_VISIBLE_BARS);
-            viewport.set_range(len - visible, len);
+            reset_time_range(viewport, data_len);
             viewport.auto_fit_price(bars);
         }
     }
@@ -390,10 +439,9 @@ impl InteractionHandler {
         viewport: &mut Viewport,
         crosshair: &mut CrosshairState,
         bars: &BarArray,
+        time_scale: &TimeScaleIndex,
         dpr: f64,
     ) {
-        let pane_phys_w = pane_css_w * dpr;
-        let _pane_phys_h = pane_css_h * dpr;
         let candle_phys_h = pane_css_h * viewport.candle_height_frac() * dpr;
         let now = now_ms();
 
@@ -407,19 +455,7 @@ impl InteractionHandler {
             let cx = new_x.clamp(0.0, pane_css_w);
 
             crosshair.active = true;
-
-            // Get grid-snapped index (can be beyond data_len in empty space)
-            let grid_idx = viewport.bar_index_for_crosshair(cx * dpr, pane_phys_w);
-
-            // bar_index is only set if we have actual data at this position
-            crosshair.bar_index = grid_idx.filter(|&idx| idx < bars.len());
-
-            // X line always snaps to bar grid (like LWC) - even in empty space
-            if let Some(idx) = grid_idx {
-                crosshair.x = viewport.bar_center_css(idx, pane_css_w);
-            } else {
-                crosshair.x = cx;
-            }
+            snap_crosshair_to_time_scale(viewport, time_scale, crosshair, cx, pane_css_w);
 
             // Y line behavior depends on mode
             match crosshair.mode {
@@ -461,19 +497,7 @@ impl InteractionHandler {
         else if !self.is_touch {
             crosshair.active = true;
             let cx = x.clamp(0.0, pane_css_w);
-
-            // Get grid-snapped index (can be beyond data_len in empty space)
-            let grid_idx = viewport.bar_index_for_crosshair(cx * dpr, pane_phys_w);
-
-            // bar_index is only set if we have actual data at this position
-            crosshair.bar_index = grid_idx.filter(|&idx| idx < bars.len());
-
-            // X line always snaps to bar grid (like LWC) - even in empty space
-            if let Some(idx) = grid_idx {
-                crosshair.x = viewport.bar_center_css(idx, pane_css_w);
-            } else {
-                crosshair.x = cx;
-            }
+            snap_crosshair_to_time_scale(viewport, time_scale, crosshair, cx, pane_css_w);
 
             // Y line behavior depends on mode
             match crosshair.mode {
@@ -529,7 +553,7 @@ impl InteractionHandler {
                 let new_start = self.scroll_start_bar + dx_bars;
                 let new_end = new_start + bar_span;
                 viewport.set_range(new_start, new_end);
-                viewport.clamp_to_data(bars.len());
+                viewport.clamp_to_data(time_scale.len());
 
                 // Price scroll — both mouse and touch when price is locked
                 if viewport.price_locked {
@@ -556,6 +580,7 @@ impl InteractionHandler {
         pane_css_w: f64,
         viewport: &mut Viewport,
         bars: &BarArray,
+        data_len: usize,
     ) {
         if self.pressed && self.press_zone == HitZone::TimeAxis {
             let manhattan = (x - self.press_x).abs();
@@ -566,14 +591,13 @@ impl InteractionHandler {
                 let start_len = (pane_css_w - self.time_scale_start_x).clamp(1.0, pane_css_w);
                 let current_len = (pane_css_w - x).clamp(1.0, pane_css_w);
                 let ratio = start_len / current_len;
-                let new_bar_count = (self.time_scale_start_visible_bars * ratio).clamp(
-                    TIME_AXIS_MIN_BARS,
-                    bars.len() as f64 * TIME_AXIS_MAX_BAR_MULTIPLIER,
-                );
+                let max_visible_bars = (data_len.max(1) as f64) * TIME_AXIS_MAX_BAR_MULTIPLIER;
+                let new_bar_count = (self.time_scale_start_visible_bars * ratio)
+                    .clamp(TIME_AXIS_MIN_BARS, max_visible_bars);
                 let end = viewport.end_bar;
                 let new_start = end - new_bar_count;
                 viewport.set_range(new_start, end);
-                viewport.clamp_to_data(bars.len());
+                viewport.clamp_to_data(data_len);
                 if !viewport.price_locked {
                     viewport.auto_fit_price(bars);
                 }
@@ -655,9 +679,17 @@ impl InteractionHandler {
     }
 
     /// Pointer up on any widget.
-    pub fn pointer_up(&mut self, viewport: &mut Viewport, bars: &BarArray, now_ms: f64) {
+    pub fn pointer_up(
+        &mut self,
+        viewport: &mut Viewport,
+        bars: &BarArray,
+        data_len: usize,
+        now_ms: f64,
+    ) {
         let was_click = self.pressed && !self.drag_active;
         let zone = self.press_zone;
+        let click_x = self.press_x;
+        let click_y = self.press_y;
 
         // Kinetic scrolling: TOUCH ONLY, horizontal only
         if self.is_touch && self.pressed && self.drag_active && zone == HitZone::Chart {
@@ -682,13 +714,15 @@ impl InteractionHandler {
 
         // Double-click / double-tap detection
         if was_click && zone != HitZone::None && !self.long_press_fired {
-            let dt = now_ms - self.last_click_time;
-            if dt < DOUBLE_CLICK_WINDOW_MS && self.last_click_zone == zone {
+            let distance_threshold = if self.is_touch {
+                30.0
+            } else {
+                DOUBLE_CLICK_DISTANCE
+            };
+            if self.is_double_click_candidate(zone, now_ms, distance_threshold) {
                 match zone {
                     HitZone::TimeAxis => {
-                        let len = bars.len() as f64;
-                        let visible = len.min(DEFAULT_INITIAL_VISIBLE_BARS);
-                        viewport.set_range(len - visible, len);
+                        reset_time_range(viewport, data_len);
                         if !viewport.price_locked {
                             viewport.auto_fit_price(bars);
                         }
@@ -701,9 +735,7 @@ impl InteractionHandler {
                         // For touch: handled separately via touch_double_tap
                         if !self.is_touch {
                             viewport.price_locked = false;
-                            let len = bars.len() as f64;
-                            let visible = len.min(DEFAULT_INITIAL_VISIBLE_BARS);
-                            viewport.set_range(len - visible, len);
+                            reset_time_range(viewport, data_len);
                             viewport.auto_fit_price(bars);
                         }
                     }
@@ -711,9 +743,13 @@ impl InteractionHandler {
                 }
                 self.last_click_time = 0.0;
                 self.last_click_zone = HitZone::None;
+                self.last_click_x = 0.0;
+                self.last_click_y = 0.0;
             } else {
                 self.last_click_time = now_ms;
                 self.last_click_zone = zone;
+                self.last_click_x = click_x;
+                self.last_click_y = click_y;
             }
         }
     }
@@ -733,6 +769,7 @@ impl InteractionHandler {
         zoom_price_with_time: bool,
         viewport: &mut Viewport,
         bars: &BarArray,
+        data_len: usize,
     ) {
         if pane_css_w <= 0.0 {
             return;
@@ -758,7 +795,7 @@ impl InteractionHandler {
                 viewport.start_bar + focal_frac * (viewport.end_bar - viewport.start_bar);
 
             viewport.zoom(focal_bar, factor);
-            viewport.clamp_to_data(bars.len());
+            viewport.clamp_to_data(data_len);
             if zoom_price_with_time {
                 let candle_css_h = (pane_css_h * viewport.candle_height_frac()).max(1.0);
                 let focal_y_css = y.clamp(0.0, candle_css_h);
@@ -776,7 +813,7 @@ impl InteractionHandler {
             let visible_bars = viewport.end_bar - viewport.start_bar;
             let bar_spacing = pane_css_w / visible_bars;
             let scroll_bars = adj_dx * SCROLL_MULTIPLIER / bar_spacing;
-            viewport.pan_clamped(scroll_bars, bars.len());
+            viewport.pan_clamped(scroll_bars, data_len);
             if !viewport.price_locked {
                 viewport.auto_fit_price(bars);
             }
@@ -793,9 +830,11 @@ impl InteractionHandler {
         pane_css_h: f64,
         viewport: &mut Viewport,
         bars: &BarArray,
+        data_len: usize,
     ) {
         self.pane_wheel(
             x, 0.0, 0.0, delta_y, delta_mode, pane_css_w, pane_css_h, false, viewport, bars,
+            data_len,
         );
     }
 
@@ -826,6 +865,20 @@ impl InteractionHandler {
     /// Set the drawing-aware cursor override (called from WASM hover hit-test).
     pub fn set_drawing_cursor(&mut self, cursor: Option<&'static str>) {
         self.drawing_cursor = cursor;
+    }
+
+    /// Cancel the current pointer gesture without turning it into a click/double-click.
+    ///
+    /// Used by drawing/price-line flows that consume pointer release internally and
+    /// still need the base interaction state machine to fully let go.
+    pub fn cancel_pointer_gesture(&mut self) {
+        self.pressed = false;
+        self.drag_active = false;
+        self.press_zone = HitZone::None;
+        self.long_press_fired = false;
+        self.is_gliding = false;
+        self.velocity_x = 0.0;
+        self.velocity_y = 0.0;
     }
 
     /// Enable/disable replay trim mode cursor policy.
@@ -873,7 +926,11 @@ impl InteractionHandler {
 
         // Drawing drag in progress — use the drag cursor
         if self.drawing_drag_active {
-            return self.drawing_cursor.unwrap_or("grabbing");
+            return match self.drawing_cursor {
+                Some("move") => "grabbing",
+                Some(cursor) => cursor,
+                None => "grabbing",
+            };
         }
 
         if self.drag_active {
@@ -904,6 +961,7 @@ impl InteractionHandler {
         _pane_css_h: f64,
         viewport: &mut Viewport,
         bars: &BarArray,
+        data_len: usize,
     ) -> bool {
         if !self.is_gliding {
             return false;
@@ -921,7 +979,7 @@ impl InteractionHandler {
         if pane_css_w > 0.0 {
             let bar_span = viewport.end_bar - viewport.start_bar;
             let dx_bars = -dx / pane_css_w * bar_span;
-            viewport.pan_clamped(dx_bars, bars.len());
+            viewport.pan_clamped(dx_bars, data_len);
             if !viewport.price_locked {
                 viewport.auto_fit_price(bars);
             }
@@ -994,7 +1052,7 @@ mod tests {
             });
         }
         let mut bars = BarArray::new();
-        bars.set(out);
+        bars.set(out).unwrap();
         bars
     }
 
@@ -1016,7 +1074,17 @@ mod tests {
         let start_price_span = vp.price_max - vp.price_min;
 
         ih.pane_wheel(
-            400.0, 180.0, 0.0, -120.0, 0, 800.0, 600.0, true, &mut vp, &bars,
+            400.0,
+            180.0,
+            0.0,
+            -120.0,
+            0,
+            800.0,
+            600.0,
+            true,
+            &mut vp,
+            &bars,
+            bars.len(),
         );
 
         let end_span = vp.end_bar - vp.start_bar;
@@ -1045,7 +1113,17 @@ mod tests {
         let start_max = vp.price_max;
 
         ih.pane_wheel(
-            400.0, 180.0, 0.0, -120.0, 0, 800.0, 600.0, false, &mut vp, &bars,
+            400.0,
+            180.0,
+            0.0,
+            -120.0,
+            0,
+            800.0,
+            600.0,
+            false,
+            &mut vp,
+            &bars,
+            bars.len(),
         );
 
         assert!(
@@ -1074,7 +1152,17 @@ mod tests {
         let before_price = vp.pixel_to_price(y_css, candle_css_h);
 
         ih.pane_wheel(
-            300.0, y_css, 0.0, -90.0, 0, 800.0, 600.0, true, &mut vp, &bars,
+            300.0,
+            y_css,
+            0.0,
+            -90.0,
+            0,
+            800.0,
+            600.0,
+            true,
+            &mut vp,
+            &bars,
+            bars.len(),
         );
 
         let after_price = vp.pixel_to_price(y_css, candle_css_h);
@@ -1098,7 +1186,7 @@ mod tests {
         let start_price_span = vp.price_max - vp.price_min;
 
         ih.pinch_start(400.0, 170.0, 100.0, 800.0, 600.0, true, &vp);
-        ih.pinch_update(1.2, true, &mut vp, &bars);
+        ih.pinch_update(1.2, true, &mut vp, &bars, bars.len());
 
         let end_span = vp.end_bar - vp.start_bar;
         let end_price_span = vp.price_max - vp.price_min;
@@ -1121,7 +1209,7 @@ mod tests {
         vp.price_locked = false;
 
         ih.pinch_start(400.0, 170.0, 100.0, 800.0, 600.0, false, &vp);
-        ih.pinch_update(1.2, false, &mut vp, &bars);
+        ih.pinch_update(1.2, false, &mut vp, &bars, bars.len());
 
         assert!(
             !vp.price_locked,

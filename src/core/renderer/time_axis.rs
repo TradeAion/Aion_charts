@@ -11,7 +11,12 @@
 use crate::core::formatters::format_crosshair_time;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
+use crate::core::renderer::tick_marks::{
+    collect_visible_time_points, nearest_visible_time_point, timestamp_for_logical_index,
+};
 use crate::core::renderer::traits::{ChartStyle, CrosshairState, TickMark};
+use crate::core::renderer::value_projection::TimeScaleIndex;
+use crate::core::series::SeriesCollection;
 use crate::core::viewport::Viewport;
 use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
@@ -96,13 +101,27 @@ impl TimeAxisRenderer {
             self.base_ctx.fill_rect(0.0, 0.0, w, border_size);
         }
 
-        // Tick marks are intentionally hidden; keep tick values for label placement.
+        if style.axis_border_visible && style.axis_ticks_visible {
+            self.base_ctx
+                .set_fill_style_str(&rgba(&style.axis_border_color));
+            let tick_width = dpr.floor().max(1.0);
+            let tick_height = (style.axis_tick_length as f64 * dpr).round().max(1.0);
+            for t in ticks {
+                if t.pixel < 0.0 || t.pixel > pane_w {
+                    continue;
+                }
+                let tick_x = (t.pixel - tick_width / 2.0).round();
+                self.base_ctx
+                    .fill_rect(tick_x, border_size, tick_width, tick_height);
+            }
+        }
 
         // Tick labels — draw in media (CSS) coordinate space for sharp text.
         self.base_ctx.save();
         let _ = self.base_ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
 
         let css_font_normal = format!("{}px {}", style.font_size, style.font_family);
+        let css_font_major = format!("600 {}px {}", style.font_size, style.font_family);
         self.base_ctx
             .set_fill_style_str(&rgba(&style.axis_text_color));
         self.base_ctx.set_text_align("center");
@@ -116,15 +135,19 @@ impl TimeAxisRenderer {
         let pane_css_w_axis = pane_w / dpr;
 
         for t in ticks {
-            if t.pixel < 0.0 || t.pixel > pane_w {
+            if t.pixel < 0.0 || t.pixel > pane_w || t.label.is_empty() {
                 continue;
             }
-            // Keep x-axis tick labels at consistent weight to match LWC visual tone.
-            self.base_ctx.set_font(&css_font_normal);
+            let css_font = if t.major {
+                &css_font_major
+            } else {
+                &css_font_normal
+            };
+            self.base_ctx.set_font(css_font);
             let x_css = align_tick_label_x_css(
                 &mut self.text_cache,
                 &self.base_ctx,
-                &css_font_normal,
+                css_font,
                 &t.label,
                 t.pixel / dpr,
                 pane_css_w_axis,
@@ -139,7 +162,9 @@ impl TimeAxisRenderer {
     pub fn render_top(
         &mut self,
         crosshair: &CrosshairState,
-        bars: &crate::core::data::BarArray,
+        _bars: &crate::core::data::BarArray,
+        _series: &SeriesCollection,
+        time_scale: &TimeScaleIndex,
         vp: &Viewport,
         style: &ChartStyle,
         pane_css_w: f64,
@@ -160,13 +185,20 @@ impl TimeAxisRenderer {
             return;
         }
 
-        // Bar index at crosshair X — use floor() not round() (matches interaction.rs fix)
-        let bar_idx = vp.bar_index_at_pixel(mx_css, pane_css_w, bars.len());
-        let bar_i = bar_idx.unwrap_or(0);
-        let bar_lbl = if bar_idx.is_some() && bars.timestamp(bar_i) > 0 {
-            format_crosshair_time(bars.timestamp(bar_i))
-        } else {
-            format!("{}", bar_i)
+        let logical_index = vp.pixel_to_bar(mx_css, pane_css_w);
+        let visible_time_points = collect_visible_time_points(vp, time_scale);
+        let snapped_timestamp = nearest_visible_time_point(&visible_time_points, logical_index)
+            .filter(|point| (point.logical_index - logical_index).abs() <= 0.75)
+            .map(|point| point.timestamp);
+        let fallback_timestamp = vp
+            .bar_index_for_crosshair(mx_css, pane_css_w)
+            .and_then(|idx| timestamp_for_logical_index(time_scale, idx as i64));
+        let bar_lbl = match snapped_timestamp
+            .or(fallback_timestamp)
+            .filter(|&ts| ts > 0)
+        {
+            Some(ts) => format_crosshair_time(ts),
+            None => return,
         };
 
         // LWC parity: compute label geometry in media/CSS coordinates, then convert to bitmap.

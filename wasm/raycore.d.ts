@@ -14,7 +14,9 @@
  * import init, { RayCore } from './pkg/raycore_wasm.js';
  * await init();
  *
- * const chart = await RayCore.create_chart('#chart', {
+ * const chartHost = document.getElementById('chart');
+ * if (!chartHost) throw new Error("Missing chart element with id 'chart'");
+ * const chart = await RayCore.create_chart(chartHost, {
  *   theme: 'dark',
  *   autoRender: true,
  *   symbol: 'BTCUSD',
@@ -1223,6 +1225,8 @@ export declare class RayCore {
 
   /**
    * Add a horizontal price line.
+   * Pass the line color as RGBA components, the width and style explicitly,
+   * and use `set_price_line_label()` if you want a custom label string.
    * @param draggable — Whether the user can drag the line to a new price.
    * @returns Price line ID.
    */
@@ -1253,9 +1257,12 @@ export declare class RayCore {
 
   /**
    * Add a marker to a series at the specified bar index.
-   * @param shape    — `"arrow_up"` | `"arrow_down"` | `"circle"` | `"square"`
-   * @param position — `"above_bar"` | `"below_bar"` | `"at_price"`
-   * @param price    — Used only when `position === "at_price"`.
+   * @param bar_index — Bar index to attach the marker to.
+   * @param shape     — `"arrow_up"` | `"arrow_down"` | `"circle"` | `"square"`
+   * @param position  — `"above_bar"` | `"below_bar"` | `"at_price"`
+   * @param price     — Used only when `position === "at_price"`.
+   * @param size      — Marker size.
+   * @param text      — Label text shown with the marker.
    * @returns Marker ID.
    */
   add_marker(
@@ -1621,7 +1628,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
  * ```ts
  * import init, { RayCore } from './pkg/raycore_wasm.js';
  * await init();
- * const chart = await RayCore.create_chart('#chart', { theme: 'dark' });
+ * const chart = await RayCore.create_chart(document.getElementById('chart')!, { theme: 'dark' });
  * ```
  */
 export default function init(

@@ -7,13 +7,12 @@
 //! `Rc<RefCell<EventEmitter>>`, both the public `render()` method and the
 //! RAF closure can call the same code without duplication.
 
-use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::chart_inner::{ChartInner, SharedInner};
-use crate::event_emitter::{chart_event_to_js, EventEmitter};
+use crate::event_emitter::chart_event_to_js;
 use crate::subpane::IndicatorConfig;
-use crate::{get_dpr, sync_widget_sizes};
+use crate::{get_dpr, sync_widget_sizes, RenderInvalidation};
 use raycore::tick_marks;
 
 /// Execute the full render pipeline.
@@ -24,13 +23,9 @@ use raycore::tick_marks;
 ///
 /// Uses `try_borrow_mut()` to gracefully skip a frame if `inner` is already
 /// borrowed (e.g., during an event handler callback).
-pub(crate) fn do_render_frame(
-    inner: &SharedInner,
-    dirty: &Rc<Cell<bool>>,
-    event_emitter: &Rc<RefCell<EventEmitter>>,
-) {
+pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation>) -> bool {
     let Ok(mut s) = inner.try_borrow_mut() else {
-        return;
+        return false;
     };
 
     // Detect DPR changes (browser zoom) that may not trigger ResizeObserver
@@ -41,6 +36,17 @@ pub(crate) fn do_render_frame(
         for subpane in s.subpanes.iter_mut() {
             subpane.resize(current_dpr);
         }
+    }
+
+    let subpane_animation_active = s.subpanes.iter().any(|subpane| {
+        let scroll = subpane.scroll_state.borrow();
+        scroll.dragging || scroll.animation.is_active()
+    });
+    let needs_continuous_render = s.interaction.is_gliding
+        || subpane_animation_active
+        || (s.replay_active && s.replay_playing);
+    if !dirty.get() && !needs_continuous_render {
+        return false;
     }
 
     let dpr = s.engine.dpr;
@@ -68,6 +74,10 @@ pub(crate) fn do_render_frame(
     }
 
     let (pane_css_w_pre, pane_css_h_pre) = s.layout.pane_css_size();
+    let before_start = s.engine.viewport.start_bar;
+    let before_end = s.engine.viewport.end_bar;
+    let before_price_min = s.engine.viewport.price_min;
+    let before_price_max = s.engine.viewport.price_max;
 
     // Update main chart kinetic scrolling
     {
@@ -81,6 +91,7 @@ pub(crate) fn do_render_frame(
             pane_css_h_pre,
             &mut engine.viewport,
             &engine.bars,
+            engine.time_scale.len(),
         );
     }
 
@@ -104,11 +115,23 @@ pub(crate) fn do_render_frame(
         }
     }
 
+    if (before_start - s.engine.viewport.start_bar).abs() > 1e-9
+        || (before_end - s.engine.viewport.end_bar).abs() > 1e-9
+        || (before_price_min - s.engine.viewport.price_min).abs() > 1e-9
+        || (before_price_max - s.engine.viewport.price_max).abs() > 1e-9
+    {
+        let start_bar = s.engine.viewport.start_bar;
+        let end_bar = s.engine.viewport.end_bar;
+        s.engine
+            .event_bus
+            .emit(raycore::ChartEvent::VisibleRangeChange { start_bar, end_bar });
+    }
+
     // 1. Provisional ticks from current pane size (for axis-width estimation).
     let mut pane_pw = s.engine.viewport.width as f64;
     let mut pane_ph = s.engine.viewport.height as f64;
     if pane_pw <= 0.0 || pane_ph <= 0.0 {
-        return;
+        return false;
     }
     let candle_ph = pane_ph * s.engine.viewport.candle_height_frac();
     let provisional_y_ticks =
@@ -164,21 +187,23 @@ pub(crate) fn do_render_frame(
     }
 
     // 3. Immediately synchronize canvas/renderer sizes with the new layout.
-    sync_widget_sizes(&mut *s, dpr, false);
+    sync_widget_sizes(&mut *s, dpr, true);
 
     // 4. Recompute pane dimensions + final ticks after layout sync.
     let (pane_css_w, pane_css_h) = s.layout.pane_css_size();
     pane_pw = s.engine.viewport.width as f64;
     pane_ph = s.engine.viewport.height as f64;
     if pane_pw <= 0.0 || pane_ph <= 0.0 {
-        return;
+        return false;
     }
 
     let y_ticks = {
         let candle_ph = pane_ph * s.engine.viewport.candle_height_frac();
         tick_marks::compute_y_ticks(&s.engine.viewport, pane_ph, candle_ph, dpr, &s.engine.style)
     };
-    let x_ticks = tick_marks::compute_x_ticks(&s.engine.viewport, &s.engine.bars, pane_pw, dpr);
+    let x_ticks =
+        tick_marks::compute_x_ticks(&s.engine.viewport, &s.engine.time_scale, pane_pw, dpr);
+    let time_scale = s.engine.time_scale.clone();
 
     // 5. Generate drawing geometry (bottom = idle/non-hovered, top = hovered/active).
     let (mut base_drawings, mut top_drawings) = s.engine.drawings.generate_all_geometry(
@@ -219,14 +244,12 @@ pub(crate) fn do_render_frame(
     }
 
     // 5b. Engine render — grid + bottom drawings + data series on pane base canvas.
-    if let Err(e) = s.engine.render(&y_ticks, &x_ticks, &base_drawings) {
+    if let Err(e) = s
+        .engine
+        .render(&time_scale, &y_ticks, &x_ticks, &base_drawings)
+    {
         log::warn!("render error: {}", e);
     }
-
-    // 5c. Dashed line series — rendered via Canvas2D strokePath (not rects).
-    let bar_ts: Vec<u64> = (0..s.engine.bars.len())
-        .map(|i| s.engine.bars.timestamp(i))
-        .collect();
 
     // 6. Render overlay, dashed series, price lines, last price lines, drawings, crosshair, markers
     {
@@ -258,7 +281,7 @@ pub(crate) fn do_render_frame(
             &main_crosshair,
             crosshair_style,
             &top_drawings,
-            Some(&engine.bars),
+            Some((&engine.bars, &engine.viewport, &time_scale)),
         );
         // Footprint text labels — rendered on overlay for both WebGPU and Canvas2D
         // so text always appears on top of the chart data.
@@ -266,7 +289,7 @@ pub(crate) fn do_render_frame(
         overlay.render_dashed_series(
             &engine.series,
             &engine.viewport,
-            &bar_ts,
+            &time_scale,
             pane_pw,
             pane_ph,
             engine.v_pixel_ratio,
@@ -282,6 +305,7 @@ pub(crate) fn do_render_frame(
         overlay.render_last_price_lines(
             &engine.series,
             &engine.bars,
+            &time_scale,
             engine.main_chart_options.chart_type,
             &engine.footprint_data,
             &engine.main_chart_options.footprint,
@@ -308,6 +332,7 @@ pub(crate) fn do_render_frame(
         overlay.render_markers(
             &engine.markers,
             &engine.bars,
+            &time_scale,
             &engine.viewport,
             &engine.style,
             pane_css_w,
@@ -315,7 +340,7 @@ pub(crate) fn do_render_frame(
         );
         overlay.render_indicator_labels(
             &indicator_draw_instructions,
-            &engine.bars,
+            &time_scale,
             &engine.viewport,
             &engine.style,
             pane_css_w,
@@ -325,7 +350,7 @@ pub(crate) fn do_render_frame(
             &main_crosshair,
             &engine.series,
             &engine.bars,
-            &bar_ts,
+            &time_scale,
             &engine.viewport,
             crosshair_style,
             pane_css_w,
@@ -337,6 +362,7 @@ pub(crate) fn do_render_frame(
         *execution_mark_hit_areas = overlay.render_execution_marks(
             &engine.execution_marks,
             &engine.bars,
+            &time_scale,
             &engine.viewport,
             &engine.style,
             engine.execution_mark_text_visible(),
@@ -410,6 +436,8 @@ pub(crate) fn do_render_frame(
         time_axis_renderer.render_top(
             &engine.crosshair,
             &engine.bars,
+            &engine.series,
+            &engine.time_scale,
             &engine.viewport,
             crosshair_style,
             pane_css_w,
@@ -478,7 +506,8 @@ pub(crate) fn do_render_frame(
             .unwrap_or(&engine.style);
         for subpane in subpanes.iter_mut() {
             subpane.resize(dpr);
-            let top_drawings = subpane.render(&engine.viewport, &engine.style, &x_ticks);
+            let top_drawings =
+                subpane.render(&engine.viewport, &time_scale, &engine.style, &x_ticks);
 
             subpane.clear_crosshair_overlay();
             subpane.render_top_drawings(&top_drawings);
@@ -491,6 +520,12 @@ pub(crate) fn do_render_frame(
     }
 
     // 10. Clear dirty flag + release borrow
+    let keep_animating = s.interaction.is_gliding
+        || s.subpanes.iter().any(|subpane| {
+            let scroll = subpane.scroll_state.borrow();
+            scroll.dragging || scroll.animation.is_active()
+        })
+        || (s.replay_active && s.replay_playing);
     drop(s);
     dirty.set(false);
 
@@ -499,11 +534,13 @@ pub(crate) fn do_render_frame(
         let events: Vec<raycore::ChartEvent> = s.engine.event_bus.drain().collect();
         drop(s);
         if !events.is_empty() {
-            let mut emitter = event_emitter.borrow_mut();
+            let mut emitter = dirty.event_emitter().borrow_mut();
             for event in &events {
                 let js_event = chart_event_to_js(event);
                 emitter.emit(event.name(), &js_event);
             }
         }
     }
+
+    keep_animating
 }

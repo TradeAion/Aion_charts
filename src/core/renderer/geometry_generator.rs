@@ -17,7 +17,44 @@ use crate::core::renderer::draw_list::{ColoredRect, DrawList};
 use crate::core::renderer::series::CandleSizing;
 use crate::core::renderer::traits::{ChartStyle, TickMark};
 use crate::core::renderer::transforms::{bar_to_x, color4, price_to_y};
+use crate::core::renderer::value_projection::TimeScaleIndex;
 use crate::core::viewport::Viewport;
+
+#[inline]
+fn visible_main_bar_range(
+    bars: &crate::core::data::BarArray,
+    vp: &Viewport,
+    time_scale: &TimeScaleIndex,
+) -> Option<(usize, usize)> {
+    if bars.is_empty() {
+        return None;
+    }
+    time_scale.visible_main_bar_range(vp.start_bar - 1.0, vp.end_bar + 1.0)
+}
+
+#[inline]
+fn main_bar_center_x(
+    bar_index: usize,
+    vp: &Viewport,
+    time_scale: &TimeScaleIndex,
+    chart_w: f64,
+) -> Option<f64> {
+    time_scale
+        .logical_index_for_main_bar(bar_index)
+        .map(|logical_index| bar_to_x(logical_index + 0.5, vp, chart_w))
+}
+
+#[inline]
+fn main_bar_slot_x(
+    bar_index: usize,
+    vp: &Viewport,
+    time_scale: &TimeScaleIndex,
+    chart_w: f64,
+) -> Option<f64> {
+    time_scale
+        .logical_index_for_main_bar(bar_index)
+        .map(|logical_index| bar_to_x(logical_index, vp, chart_w))
+}
 
 /// Generate the complete DrawList for one frame (legacy monolithic path).
 /// Order: background → grid lines → volume → candles.
@@ -34,6 +71,7 @@ pub fn generate(
     x_ticks: &[TickMark],
 ) -> DrawList {
     let mut dl = DrawList::new();
+    let time_scale = TimeScaleIndex::from_bars(bars);
 
     // Background fill
     let (br, bg, bb, ba) = color4(&style.bg_color);
@@ -60,6 +98,7 @@ pub fn generate(
 
     generate_volume_into(
         bars,
+        &time_scale,
         viewport,
         style,
         pane_w,
@@ -70,6 +109,7 @@ pub fn generate(
     );
     generate_candles_into(
         bars,
+        &time_scale,
         viewport,
         style,
         style.wick_bullish_color,
@@ -104,6 +144,7 @@ pub fn generate_grid_rects(
 /// Generate candle rects (wicks, borders, body fills).
 pub fn generate_candle_rects(
     bars: &crate::core::data::BarArray,
+    time_scale: &TimeScaleIndex,
     viewport: &Viewport,
     style: &ChartStyle,
     bullish_border_color: [f32; 4],
@@ -119,6 +160,7 @@ pub fn generate_candle_rects(
     let mut rects = Vec::with_capacity(bars.len() * 6);
     generate_candles_into(
         bars,
+        time_scale,
         viewport,
         style,
         bullish_border_color,
@@ -134,6 +176,7 @@ pub fn generate_candle_rects(
 /// Generate volume bar rects.
 pub fn generate_volume_rects(
     bars: &crate::core::data::BarArray,
+    time_scale: &TimeScaleIndex,
     viewport: &Viewport,
     style: &ChartStyle,
     pane_w: f64,
@@ -146,7 +189,7 @@ pub fn generate_volume_rects(
     let candle_h = pane_h - vol_h;
     let mut rects = Vec::with_capacity(bars.len());
     generate_volume_into(
-        bars, viewport, style, pane_w, candle_h, vol_h, &sizing, &mut rects,
+        bars, time_scale, viewport, style, pane_w, candle_h, vol_h, &sizing, &mut rects,
     );
     rects
 }
@@ -235,15 +278,15 @@ pub struct ProjectedCandle {
 /// This centralizes the bar/wick overlap clamp and pixel rounding policy.
 pub fn project_candles(
     bars: &crate::core::data::BarArray,
+    time_scale: &TimeScaleIndex,
     vp: &Viewport,
     chart_w: f64,
     candle_h: f64,
     sizing: &CandleSizing,
 ) -> Vec<ProjectedCandle> {
-    let start = (vp.start_bar.floor() as usize)
-        .saturating_sub(1)
-        .min(bars.len());
-    let end = ((vp.end_bar.ceil() as usize) + 1).min(bars.len());
+    let Some((start, end)) = visible_main_bar_range(bars, vp, time_scale) else {
+        return Vec::new();
+    };
     if start >= end {
         return Vec::new();
     }
@@ -259,7 +302,9 @@ pub fn project_candles(
         let b = bars.get_unchecked(i);
         let bull = b.close >= b.open;
 
-        let center_x = bar_to_x(i as f64 + 0.5, vp, chart_w).round();
+        let Some(center_x) = main_bar_center_x(i, vp, time_scale, chart_w).map(f64::round) else {
+            continue;
+        };
         let body_top = price_to_y(b.open.max(b.close) as f64, vp, candle_h).round();
         let body_bottom = price_to_y(b.open.min(b.close) as f64, vp, candle_h).round();
         let high_y = price_to_y(b.high as f64, vp, candle_h).round();
@@ -301,6 +346,7 @@ pub fn project_candles(
 
 fn generate_candles_into(
     bars: &crate::core::data::BarArray,
+    time_scale: &TimeScaleIndex,
     vp: &Viewport,
     style: &ChartStyle,
     bullish_border_color: [f32; 4],
@@ -310,7 +356,7 @@ fn generate_candles_into(
     sizing: &CandleSizing,
     rects: &mut Vec<ColoredRect>,
 ) {
-    let projected = project_candles(bars, vp, chart_w, candle_h, sizing);
+    let projected = project_candles(bars, time_scale, vp, chart_w, candle_h, sizing);
     if projected.is_empty() {
         return;
     }
@@ -423,6 +469,7 @@ fn generate_candles_into(
 
 fn generate_volume_into(
     bars: &crate::core::data::BarArray,
+    time_scale: &TimeScaleIndex,
     vp: &Viewport,
     style: &ChartStyle,
     chart_w: f64,
@@ -431,10 +478,9 @@ fn generate_volume_into(
     sizing: &CandleSizing,
     rects: &mut Vec<ColoredRect>,
 ) {
-    let start = (vp.start_bar.floor() as usize)
-        .saturating_sub(1)
-        .min(bars.len());
-    let end = ((vp.end_bar.ceil() as usize) + 1).min(bars.len());
+    let Some((start, end)) = visible_main_bar_range(bars, vp, time_scale) else {
+        return;
+    };
     if start >= end {
         return;
     }
@@ -458,7 +504,9 @@ fn generate_volume_into(
             color4(&style.bearish_volume_color)
         };
 
-        let cx = bar_to_x(i as f64 + 0.5, vp, chart_w);
+        let Some(cx) = main_bar_center_x(i, vp, time_scale, chart_w) else {
+            continue;
+        };
         let h = (b.volume as f64 / max_vol as f64) * vol_h;
         let top = candle_h + vol_h - h;
 
@@ -485,6 +533,7 @@ fn generate_volume_into(
 /// Generate OHLC bar rects (vertical line + open/close ticks).
 pub fn generate_ohlc_bar_rects(
     bars: &crate::core::data::BarArray,
+    time_scale: &TimeScaleIndex,
     viewport: &Viewport,
     style: &ChartStyle,
     pane_w: f64,
@@ -496,12 +545,15 @@ pub fn generate_ohlc_bar_rects(
     let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
     let mut rects = Vec::with_capacity(bars.len() * 3);
-    generate_ohlc_bars_into(bars, viewport, style, pane_w, candle_h, &sizing, &mut rects);
+    generate_ohlc_bars_into(
+        bars, time_scale, viewport, style, pane_w, candle_h, &sizing, &mut rects,
+    );
     rects
 }
 
 fn generate_ohlc_bars_into(
     bars: &crate::core::data::BarArray,
+    time_scale: &TimeScaleIndex,
     vp: &Viewport,
     style: &ChartStyle,
     chart_w: f64,
@@ -509,10 +561,9 @@ fn generate_ohlc_bars_into(
     sizing: &CandleSizing,
     rects: &mut Vec<ColoredRect>,
 ) {
-    let start = (vp.start_bar.floor() as usize)
-        .saturating_sub(1)
-        .min(bars.len());
-    let end = ((vp.end_bar.ceil() as usize) + 1).min(bars.len());
+    let Some((start, end)) = visible_main_bar_range(bars, vp, time_scale) else {
+        return;
+    };
     if start >= end {
         return;
     }
@@ -529,7 +580,9 @@ fn generate_ohlc_bars_into(
             color4(&style.wick_bearish_color)
         };
 
-        let phys_x = bar_to_x(i as f64 + 0.5, vp, chart_w).round();
+        let Some(phys_x) = main_bar_center_x(i, vp, time_scale, chart_w).map(f64::round) else {
+            continue;
+        };
         let high_y = price_to_y(b.high as f64, vp, candle_h).round();
         let low_y = price_to_y(b.low as f64, vp, candle_h).round();
         let open_y = price_to_y(b.open as f64, vp, candle_h).round();
@@ -591,14 +644,23 @@ pub fn generate_line_chart_rects(
     let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
     let mut rects = Vec::with_capacity(bars.len());
+    let time_scale = TimeScaleIndex::from_bars(bars);
     generate_line_into(
-        bars, viewport, line_color, line_width, pane_w, candle_h, &mut rects,
+        bars,
+        &time_scale,
+        viewport,
+        line_color,
+        line_width,
+        pane_w,
+        candle_h,
+        &mut rects,
     );
     rects
 }
 
 fn generate_line_into(
     bars: &crate::core::data::BarArray,
+    time_scale: &TimeScaleIndex,
     vp: &Viewport,
     color: [f32; 4],
     line_width: f32,
@@ -606,10 +668,9 @@ fn generate_line_into(
     candle_h: f64,
     rects: &mut Vec<ColoredRect>,
 ) {
-    let start = (vp.start_bar.floor() as usize)
-        .saturating_sub(1)
-        .min(bars.len());
-    let end = ((vp.end_bar.ceil() as usize) + 1).min(bars.len());
+    let Some((start, end)) = visible_main_bar_range(bars, vp, time_scale) else {
+        return;
+    };
     if start >= end || end - start < 2 {
         return;
     }
@@ -623,8 +684,12 @@ fn generate_line_into(
         let b1 = bars.get_unchecked(i);
         let b2 = bars.get_unchecked(i + 1);
 
-        let x1 = bar_to_x(i as f64 + 0.5, vp, chart_w);
-        let x2 = bar_to_x((i + 1) as f64 + 0.5, vp, chart_w);
+        let Some(x1) = main_bar_center_x(i, vp, time_scale, chart_w) else {
+            continue;
+        };
+        let Some(x2) = main_bar_center_x(i + 1, vp, time_scale, chart_w) else {
+            continue;
+        };
         let y1 = price_to_y(b1.close as f64, vp, candle_h);
         let y2 = price_to_y(b2.close as f64, vp, candle_h);
 
@@ -667,6 +732,7 @@ fn generate_line_into(
 /// Generate area chart rects (filled area below the close line).
 pub fn generate_area_chart_rects(
     bars: &crate::core::data::BarArray,
+    time_scale: &TimeScaleIndex,
     viewport: &Viewport,
     fill_color: [f32; 4],
     line_color: [f32; 4],
@@ -679,11 +745,13 @@ pub fn generate_area_chart_rects(
     let mut rects = Vec::with_capacity(bars.len() * 2);
 
     // Generate fill area first (underneath)
-    generate_area_fill_into(bars, viewport, fill_color, pane_w, candle_h, &mut rects);
+    generate_area_fill_into(
+        bars, time_scale, viewport, fill_color, pane_w, candle_h, &mut rects,
+    );
 
     // Then generate line on top
     generate_line_into(
-        bars, viewport, line_color, line_width, pane_w, candle_h, &mut rects,
+        bars, time_scale, viewport, line_color, line_width, pane_w, candle_h, &mut rects,
     );
 
     rects
@@ -691,16 +759,16 @@ pub fn generate_area_chart_rects(
 
 fn generate_area_fill_into(
     bars: &crate::core::data::BarArray,
+    time_scale: &TimeScaleIndex,
     vp: &Viewport,
     color: [f32; 4],
     chart_w: f64,
     candle_h: f64,
     rects: &mut Vec<ColoredRect>,
 ) {
-    let start = (vp.start_bar.floor() as usize)
-        .saturating_sub(1)
-        .min(bars.len());
-    let end = ((vp.end_bar.ceil() as usize) + 1).min(bars.len());
+    let Some((start, end)) = visible_main_bar_range(bars, vp, time_scale) else {
+        return;
+    };
     if start >= end {
         return;
     }
@@ -711,8 +779,17 @@ fn generate_area_fill_into(
     // interpolating the top edge to create a smooth fill below the line
     for i in start..end {
         let b = bars.get_unchecked(i);
-        let x1 = bar_to_x(i as f64, vp, chart_w);
-        let x2 = bar_to_x((i + 1) as f64, vp, chart_w);
+        let Some(x1) = main_bar_slot_x(i, vp, time_scale, chart_w) else {
+            continue;
+        };
+        let x2 = if i + 1 < bars.len() {
+            match main_bar_slot_x(i + 1, vp, time_scale, chart_w) {
+                Some(value) => value,
+                None => continue,
+            }
+        } else {
+            x1 + (chart_w / (vp.end_bar - vp.start_bar)).max(0.0)
+        };
         let y = price_to_y(b.close as f64, vp, candle_h);
 
         // Get next bar's close for interpolation (or use current if at end)
@@ -765,14 +842,14 @@ use crate::core::renderer::draw_list::{AreaSegment, LineSegment};
 /// so area fills cannot self-overlap and produce dark patches.
 fn generate_main_area_points(
     bars: &crate::core::data::BarArray,
+    time_scale: &TimeScaleIndex,
     viewport: &Viewport,
     pane_w: f64,
     candle_h: f64,
 ) -> Vec<(f32, f32)> {
-    let start = (viewport.start_bar.floor() as usize)
-        .saturating_sub(1)
-        .min(bars.len());
-    let end = ((viewport.end_bar.ceil() as usize) + 1).min(bars.len());
+    let Some((start, end)) = visible_main_bar_range(bars, viewport, time_scale) else {
+        return Vec::new();
+    };
     if start >= end {
         return Vec::new();
     }
@@ -781,7 +858,9 @@ fn generate_main_area_points(
     let mut last_x_bucket: Option<i32> = None;
     for i in start..end {
         let b = bars.get_unchecked(i);
-        let x = bar_to_x(i as f64 + 0.5, viewport, pane_w) as f32;
+        let Some(x) = main_bar_center_x(i, viewport, time_scale, pane_w).map(|x| x as f32) else {
+            continue;
+        };
         let y = price_to_y(b.close as f64, viewport, candle_h) as f32;
 
         if !x.is_finite() || !y.is_finite() {
@@ -815,6 +894,7 @@ fn generate_main_area_points(
 /// Generate line segments for the Canvas2D line rendering (smooth anti-aliased lines).
 pub fn generate_line_segments(
     bars: &crate::core::data::BarArray,
+    time_scale: &TimeScaleIndex,
     viewport: &Viewport,
     line_color: [f32; 4],
     line_width: f32,
@@ -824,10 +904,9 @@ pub fn generate_line_segments(
     let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
 
-    let start = (viewport.start_bar.floor() as usize)
-        .saturating_sub(1)
-        .min(bars.len());
-    let end = ((viewport.end_bar.ceil() as usize) + 1).min(bars.len());
+    let Some((start, end)) = visible_main_bar_range(bars, viewport, time_scale) else {
+        return Vec::new();
+    };
 
     if end <= start || end - start < 2 {
         return Vec::new();
@@ -840,9 +919,14 @@ pub fn generate_line_segments(
         let b1 = bars.get_unchecked(i);
         let b2 = bars.get_unchecked(i + 1);
 
-        let x1 = bar_to_x(i as f64 + 0.5, viewport, pane_w) as f32;
+        let Some(x1) = main_bar_center_x(i, viewport, time_scale, pane_w).map(|x| x as f32) else {
+            continue;
+        };
         let y1 = price_to_y(b1.close as f64, viewport, candle_h) as f32;
-        let x2 = bar_to_x((i + 1) as f64 + 0.5, viewport, pane_w) as f32;
+        let Some(x2) = main_bar_center_x(i + 1, viewport, time_scale, pane_w).map(|x| x as f32)
+        else {
+            continue;
+        };
         let y2 = price_to_y(b2.close as f64, viewport, candle_h) as f32;
 
         segments.push(LineSegment {
@@ -865,6 +949,7 @@ pub fn generate_line_segments(
 /// Generate area segments (trapezoids) for smooth area chart fills.
 pub fn generate_area_segments(
     bars: &crate::core::data::BarArray,
+    time_scale: &TimeScaleIndex,
     viewport: &Viewport,
     top_color: [f32; 4],
     bottom_color: [f32; 4],
@@ -873,7 +958,7 @@ pub fn generate_area_segments(
 ) -> Vec<AreaSegment> {
     let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
-    let points = generate_main_area_points(bars, viewport, pane_w, candle_h);
+    let points = generate_main_area_points(bars, time_scale, viewport, pane_w, candle_h);
     if points.len() < 2 {
         return Vec::new();
     }
@@ -918,6 +1003,7 @@ pub fn generate_area_segments(
 /// This keeps the line perfectly connected to the fill across zoom levels.
 pub fn generate_main_area_line_segments(
     bars: &crate::core::data::BarArray,
+    time_scale: &TimeScaleIndex,
     viewport: &Viewport,
     line_color: [f32; 4],
     line_width: f32,
@@ -926,7 +1012,7 @@ pub fn generate_main_area_line_segments(
 ) -> Vec<LineSegment> {
     let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
-    let points = generate_main_area_points(bars, viewport, pane_w, candle_h);
+    let points = generate_main_area_points(bars, time_scale, viewport, pane_w, candle_h);
     if points.len() < 2 {
         return Vec::new();
     }
@@ -963,6 +1049,7 @@ pub fn generate_main_area_line_segments(
 /// Transforms OHLC data using Heikin-Ashi formula, then renders as candlesticks.
 pub fn generate_heikin_ashi_rects(
     bars: &crate::core::data::BarArray,
+    time_scale: &TimeScaleIndex,
     viewport: &Viewport,
     style: &ChartStyle,
     pane_w: f64,
@@ -974,12 +1061,15 @@ pub fn generate_heikin_ashi_rects(
     let vol_h = pane_h * viewport.volume_height_ratio as f64;
     let candle_h = pane_h - vol_h;
     let mut rects = Vec::with_capacity(bars.len() * 6);
-    generate_heikin_ashi_into(bars, viewport, style, pane_w, candle_h, &sizing, &mut rects);
+    generate_heikin_ashi_into(
+        bars, time_scale, viewport, style, pane_w, candle_h, &sizing, &mut rects,
+    );
     rects
 }
 
 fn generate_heikin_ashi_into(
     bars: &crate::core::data::BarArray,
+    time_scale: &TimeScaleIndex,
     vp: &Viewport,
     style: &ChartStyle,
     chart_w: f64,
@@ -987,10 +1077,9 @@ fn generate_heikin_ashi_into(
     sizing: &CandleSizing,
     rects: &mut Vec<ColoredRect>,
 ) {
-    let start = (vp.start_bar.floor() as usize)
-        .saturating_sub(1)
-        .min(bars.len());
-    let end = ((vp.end_bar.ceil() as usize) + 1).min(bars.len());
+    let Some((start, end)) = visible_main_bar_range(bars, vp, time_scale) else {
+        return;
+    };
     if start >= end {
         return;
     }
@@ -1035,7 +1124,9 @@ fn generate_heikin_ashi_into(
             color4(&style.bearish_color)
         };
 
-        let phys_x = bar_to_x(i as f64 + 0.5, vp, chart_w).round();
+        let Some(phys_x) = main_bar_center_x(i, vp, time_scale, chart_w).map(f64::round) else {
+            continue;
+        };
         let body_top = price_to_y(ha_open.max(ha_close) as f64, vp, candle_h).round();
         let body_bottom = price_to_y(ha_open.min(ha_close) as f64, vp, candle_h).round();
         let high_y = price_to_y(ha_high as f64, vp, candle_h).round();

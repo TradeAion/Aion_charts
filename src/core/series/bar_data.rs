@@ -3,7 +3,9 @@
 //! Used by the Bar (OHLC) series type. Similar to the main BarArray but
 //! managed per-series (not the global candlestick data).
 
-use crate::core::series::validation::{ensure_equal_len, ensure_strictly_increasing_timestamps};
+use crate::core::series::validation::{
+    ensure_equal_len, ensure_finite_ohlc_point, ensure_strictly_increasing_timestamps,
+};
 
 /// A single OHLC data point.
 #[derive(Debug, Clone, Copy)]
@@ -39,7 +41,17 @@ impl OhlcDataArray {
     }
 
     /// Set data from a vector of OhlcPoint.
-    pub fn set_data(&mut self, data: Vec<OhlcPoint>) {
+    pub fn set_data(&mut self, data: Vec<OhlcPoint>) -> Result<(), String> {
+        for i in 1..data.len() {
+            if data[i].timestamp <= data[i - 1].timestamp {
+                return Err(format!(
+                    "bar timestamps must be strictly increasing at index {}: {} <= {}",
+                    i,
+                    data[i].timestamp,
+                    data[i - 1].timestamp
+                ));
+            }
+        }
         self.timestamps.clear();
         self.open.clear();
         self.high.clear();
@@ -50,14 +62,15 @@ impl OhlcDataArray {
         self.high.reserve(data.len());
         self.low.reserve(data.len());
         self.close.reserve(data.len());
-        for p in data {
-            let p = Self::sanitize_point(p);
+        for (index, p) in data.into_iter().enumerate() {
+            let p = Self::validate_point("set_data", p, index)?;
             self.timestamps.push(p.timestamp);
             self.open.push(p.open);
             self.high.push(p.high);
             self.low.push(p.low);
             self.close.push(p.close);
         }
+        Ok(())
     }
 
     /// Set data from parallel arrays.
@@ -87,13 +100,17 @@ impl OhlcDataArray {
         self.close.reserve(count);
 
         for i in 0..count {
-            let p = Self::sanitize_point(OhlcPoint {
-                timestamp: timestamps[i],
-                open: open[i],
-                high: high[i],
-                low: low[i],
-                close: close[i],
-            });
+            let p = Self::validate_point(
+                "set_from_arrays",
+                OhlcPoint {
+                    timestamp: timestamps[i],
+                    open: open[i],
+                    high: high[i],
+                    low: low[i],
+                    close: close[i],
+                },
+                i,
+            )?;
             self.timestamps.push(p.timestamp);
             self.open.push(p.open);
             self.high.push(p.high);
@@ -104,28 +121,44 @@ impl OhlcDataArray {
     }
 
     /// Append a single OHLC point.
-    pub fn push(&mut self, point: OhlcPoint) {
-        let p = Self::sanitize_point(point);
+    pub fn push(&mut self, point: OhlcPoint) -> Result<(), String> {
+        let p = Self::validate_point("push", point, self.timestamps.len())?;
+        if let Some(last_ts) = self.last_timestamp() {
+            if p.timestamp <= last_ts {
+                return Err(format!(
+                    "push requires timestamp > last timestamp ({} <= {})",
+                    p.timestamp, last_ts
+                ));
+            }
+        }
         self.timestamps.push(p.timestamp);
         self.open.push(p.open);
         self.high.push(p.high);
         self.low.push(p.low);
         self.close.push(p.close);
+        Ok(())
     }
 
     /// Update the last point in-place. Returns false if the series is empty.
-    pub fn update_last(&mut self, point: OhlcPoint) -> bool {
+    pub fn update_last(&mut self, point: OhlcPoint) -> Result<bool, String> {
         if self.timestamps.is_empty() {
-            return false;
+            return Ok(false);
         }
-        let p = Self::sanitize_point(point);
+        let p = Self::validate_point("update_last", point, self.timestamps.len() - 1)?;
+        let last_ts = self.timestamps[self.timestamps.len() - 1];
+        if p.timestamp != last_ts {
+            return Err(format!(
+                "update_last requires timestamp == last timestamp ({} != {})",
+                p.timestamp, last_ts
+            ));
+        }
         let idx = self.timestamps.len() - 1;
         self.timestamps[idx] = p.timestamp;
         self.open[idx] = p.open;
         self.high[idx] = p.high;
         self.low[idx] = p.low;
         self.close[idx] = p.close;
-        true
+        Ok(true)
     }
 
     /// Last timestamp, if any.
@@ -153,34 +186,16 @@ impl OhlcDataArray {
     }
 
     #[inline]
-    fn sanitize_point(point: OhlcPoint) -> OhlcPoint {
-        let open = if point.open.is_finite() {
-            point.open
-        } else {
-            0.0
-        };
-        let close = if point.close.is_finite() {
-            point.close
-        } else {
-            open
-        };
-        let high = if point.high.is_finite() {
-            point.high.max(open).max(close)
-        } else {
-            open.max(close)
-        };
-        let low = if point.low.is_finite() {
-            point.low.min(open).min(close)
-        } else {
-            open.min(close)
-        };
-        OhlcPoint {
+    fn validate_point(context: &str, point: OhlcPoint, index: usize) -> Result<OhlcPoint, String> {
+        ensure_finite_ohlc_point(&format!("bar_data::{context}"), &point, index)?;
+
+        Ok(OhlcPoint {
             timestamp: point.timestamp,
-            open,
-            high,
-            low,
-            close,
-        }
+            open: point.open,
+            high: point.high.max(point.open).max(point.close),
+            low: point.low.min(point.open).min(point.close),
+            close: point.close,
+        })
     }
 }
 
@@ -197,7 +212,8 @@ mod tests {
             high: 90.0,
             low: 110.0,
             close: 105.0,
-        });
+        })
+        .unwrap();
 
         let p = arr.get(0);
         assert_eq!(p.high, 105.0);
@@ -205,21 +221,18 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_point_handles_non_finite() {
+    fn validate_point_rejects_non_finite() {
         let mut arr = OhlcDataArray::new();
-        arr.push(OhlcPoint {
-            timestamp: 1,
-            open: f32::NAN,
-            high: f32::NEG_INFINITY,
-            low: f32::INFINITY,
-            close: f32::NAN,
-        });
-
-        let p = arr.get(0);
-        assert_eq!(p.open, 0.0);
-        assert_eq!(p.close, 0.0);
-        assert_eq!(p.high, 0.0);
-        assert_eq!(p.low, 0.0);
+        let err = arr
+            .push(OhlcPoint {
+                timestamp: 1,
+                open: f32::NAN,
+                high: f32::NEG_INFINITY,
+                low: f32::INFINITY,
+                close: f32::NAN,
+            })
+            .unwrap_err();
+        assert!(err.contains("must be finite"));
     }
 
     #[test]
@@ -244,5 +257,29 @@ mod tests {
             )
             .unwrap_err();
         assert!(err.contains("strictly increasing"));
+    }
+
+    #[test]
+    fn update_last_rejects_timestamp_mismatch() {
+        let mut arr = OhlcDataArray::new();
+        arr.push(OhlcPoint {
+            timestamp: 1,
+            open: 10.0,
+            high: 11.0,
+            low: 9.0,
+            close: 10.5,
+        })
+        .unwrap();
+
+        let err = arr
+            .update_last(OhlcPoint {
+                timestamp: 2,
+                open: 10.0,
+                high: 11.0,
+                low: 9.0,
+                close: 10.5,
+            })
+            .unwrap_err();
+        assert!(err.contains("timestamp == last timestamp"));
     }
 }

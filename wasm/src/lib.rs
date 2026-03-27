@@ -32,6 +32,7 @@ use serde_json::Value as JsonValue;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::rc::Weak;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -268,6 +269,112 @@ fn sync_widget_sizes(s: &mut ChartInner, dpr: f64, prefer_exact: bool) {
         .resize((tw * dpr).round() as u32, (th * dpr).round() as u32, dpr);
 }
 
+pub(crate) struct RenderInvalidation {
+    dirty: Cell<bool>,
+    inner: SharedInner,
+    event_emitter: Rc<RefCell<EventEmitter>>,
+    auto_render: Rc<Cell<bool>>,
+    raf_closure: Rc<RefCell<Option<Closure<dyn FnMut()>>>>,
+    raf_id: Rc<Cell<i32>>,
+    replay_forced_auto_render: Rc<Cell<bool>>,
+    self_ref: RefCell<Weak<RenderInvalidation>>,
+}
+
+impl RenderInvalidation {
+    fn new(
+        inner: SharedInner,
+        event_emitter: Rc<RefCell<EventEmitter>>,
+        auto_render: Rc<Cell<bool>>,
+        raf_closure: Rc<RefCell<Option<Closure<dyn FnMut()>>>>,
+        raf_id: Rc<Cell<i32>>,
+        replay_forced_auto_render: Rc<Cell<bool>>,
+    ) -> Rc<Self> {
+        let this = Rc::new(Self {
+            dirty: Cell::new(false),
+            inner,
+            event_emitter,
+            auto_render,
+            raf_closure,
+            raf_id,
+            replay_forced_auto_render,
+            self_ref: RefCell::new(Weak::new()),
+        });
+        *this.self_ref.borrow_mut() = Rc::downgrade(&this);
+        this
+    }
+
+    pub(crate) fn get(&self) -> bool {
+        self.dirty.get()
+    }
+
+    pub(crate) fn set(&self, value: bool) {
+        self.dirty.set(value);
+        if value {
+            if let Some(this) = self.self_ref.borrow().upgrade() {
+                request_auto_render_frame_if_needed(&this);
+            }
+        }
+    }
+
+    pub(crate) fn event_emitter(&self) -> &Rc<RefCell<EventEmitter>> {
+        &self.event_emitter
+    }
+}
+
+fn ensure_auto_render_closure(dirty: &Rc<RenderInvalidation>) {
+    if dirty.raf_closure.borrow().is_some() {
+        return;
+    }
+
+    let inner = Rc::clone(&dirty.inner);
+    let dirty_for_tick = Rc::clone(dirty);
+
+    let tick_closure = Closure::wrap(Box::new(move || {
+        dirty_for_tick.raf_id.set(0);
+
+        let keep_animating = render_frame::do_render_frame(&inner, &dirty_for_tick);
+        if dirty_for_tick.replay_forced_auto_render.get() {
+            let should_restore = inner
+                .try_borrow()
+                .map(|s| !s.replay_active || !s.replay_playing)
+                .unwrap_or(false);
+            if should_restore {
+                dirty_for_tick.replay_forced_auto_render.set(false);
+                if !dirty_for_tick.auto_render.get() {
+                    return;
+                }
+            }
+        }
+
+        if keep_animating {
+            request_auto_render_frame_if_needed(&dirty_for_tick);
+        }
+    }) as Box<dyn FnMut()>);
+
+    *dirty.raf_closure.borrow_mut() = Some(tick_closure);
+}
+
+fn request_auto_render_frame_if_needed(dirty: &Rc<RenderInvalidation>) {
+    if (!dirty.auto_render.get() && !dirty.replay_forced_auto_render.get())
+        || dirty.raf_id.get() != 0
+    {
+        return;
+    }
+
+    ensure_auto_render_closure(dirty);
+
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let slot = dirty.raf_closure.borrow();
+    let Some(callback) = slot.as_ref() else {
+        return;
+    };
+    if let Ok(id) = window.request_animation_frame(callback.as_ref().unchecked_ref()) {
+        dirty.raf_id.set(id);
+    }
+}
+
 fn with_crosshair_lines_mut<F>(style: &mut ChartStyle, target: &str, mut f: F)
 where
     F: FnMut(&mut raycore::core::renderer::traits::CrosshairLineStyle),
@@ -486,6 +593,7 @@ fn js_get_bool(obj: &JsValue, key: &str) -> Option<bool> {
 
 fn resolve_synced_crosshair_state(
     viewport: &Viewport,
+    time_scale: &raycore::core::renderer::value_projection::TimeScaleIndex,
     pane_width: f64,
     pane_height: f64,
     fallback_x: f64,
@@ -493,17 +601,23 @@ fn resolve_synced_crosshair_state(
     bar_index: Option<usize>,
     price: Option<f64>,
 ) -> (f64, f64, Option<usize>, f64) {
-    let resolved_bar_index = bar_index.or_else(|| {
-        if pane_width > 0.0 {
-            viewport.bar_index_for_crosshair(fallback_x, pane_width)
-        } else {
-            None
-        }
-    });
+    let resolved_logical_slot = bar_index
+        .and_then(|idx| time_scale.logical_index_for_main_bar(idx))
+        .map(|slot| slot as usize)
+        .or_else(|| {
+            if pane_width > 0.0 {
+                viewport.bar_index_for_crosshair(fallback_x, pane_width)
+            } else {
+                None
+            }
+        });
+    let resolved_bar_index = resolved_logical_slot
+        .and_then(|slot| time_scale.main_bar_index_at_slot(slot))
+        .or(bar_index);
 
-    let x = if let Some(idx) = resolved_bar_index {
+    let x = if let Some(slot) = resolved_logical_slot {
         if pane_width > 0.0 {
-            viewport.bar_center_css(idx, pane_width)
+            viewport.bar_center_css(slot, pane_width)
         } else {
             fallback_x
         }
@@ -1432,16 +1546,15 @@ pub struct RayCore {
     /// Active theme configuration.
     theme_config: raycore::ThemeConfig,
     /// Whether auto-render (internal RAF loop) is active.
-    auto_render: bool,
-    /// RAF closure slot for auto-render mode. Stored as Rc so the closure
-    /// can reference the same slot when rescheduling itself each frame.
-    _raf_closure: Option<Rc<RefCell<Option<Closure<dyn FnMut()>>>>>,
+    auto_render: Rc<Cell<bool>>,
+    /// RAF closure slot for auto-render mode. One frame is queued at a time.
+    _raf_closure: Rc<RefCell<Option<Closure<dyn FnMut()>>>>,
     /// Current RAF ID for cancellation.
     _raf_id: Rc<Cell<i32>>,
     /// True when replay playback temporarily forced auto-render in manual mode.
     replay_forced_auto_render: Rc<Cell<bool>>,
     /// Dirty flag — set on any mutation, cleared after render.
-    dirty: Rc<Cell<bool>>,
+    dirty: Rc<RenderInvalidation>,
 }
 
 #[wasm_bindgen]
@@ -1569,7 +1682,22 @@ impl RayCore {
             execution_mark_hit_areas: Vec::new(),
             hovered_execution_mark_id: None,
             selected_execution_mark_id: None,
+            price_line_drag_id: None,
         }));
+
+        let event_emitter = Rc::new(RefCell::new(EventEmitter::new()));
+        let auto_render = Rc::new(Cell::new(false));
+        let raf_closure = Rc::new(RefCell::new(None));
+        let raf_id = Rc::new(Cell::new(0));
+        let replay_forced_auto_render = Rc::new(Cell::new(false));
+        let dirty = RenderInvalidation::new(
+            Rc::clone(&inner),
+            Rc::clone(&event_emitter),
+            Rc::clone(&auto_render),
+            Rc::clone(&raf_closure),
+            Rc::clone(&raf_id),
+            Rc::clone(&replay_forced_auto_render),
+        );
 
         let mut closures: Vec<Closure<dyn FnMut(web_sys::Event)>> = Vec::new();
         let mut wheel_closures: Vec<Closure<dyn FnMut(web_sys::WheelEvent)>> = Vec::new();
@@ -1595,6 +1723,7 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let pane_c = pane_container_el.clone();
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
@@ -1614,6 +1743,7 @@ impl RayCore {
                     let cursor = s.cursor_css();
                     let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
                     let _ = html_el.style().set_property("cursor", cursor);
+                    dirty.set(true);
                 }));
             pane_el
                 .add_event_listener_with_callback("pointerenter", cb.as_ref().unchecked_ref())?;
@@ -1623,6 +1753,7 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let pane_c = pane_container_el.clone();
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
                     let Ok(mut s) = inner.try_borrow_mut() else {
@@ -1632,6 +1763,7 @@ impl RayCore {
                     // Clear the override to let CSS default take over (crosshair)
                     let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
                     let _ = html_el.style().set_property("cursor", "");
+                    dirty.set(true);
                 }));
             pane_el
                 .add_event_listener_with_callback("pointerleave", cb.as_ref().unchecked_ref())?;
@@ -1642,6 +1774,7 @@ impl RayCore {
             let inner = Rc::clone(&inner);
             let pane_c = pane_container_el.clone();
             let grid_move = grid_c.clone();
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
@@ -1672,6 +1805,7 @@ impl RayCore {
                     } else {
                         let _ = grid_el.style().set_property("cursor", "");
                     }
+                    dirty.set(true);
                 }));
             pane_el.add_event_listener_with_callback("pointermove", cb.as_ref().unchecked_ref())?;
             closures.push(cb);
@@ -1683,6 +1817,7 @@ impl RayCore {
             let lp_timer = Rc::clone(&long_press_timer);
             let lp_cb = Rc::clone(&long_press_cb_handle);
             let last_tap = Rc::clone(&last_tap_time);
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
@@ -1729,28 +1864,35 @@ impl RayCore {
                         let cursor = s.cursor_css();
                         let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
                         let _ = html_el.style().set_property("cursor", cursor);
+                        dirty.set(true);
                         return;
                     }
 
                     s.on_pointer_down(x, y, HitZone::Chart, shift_pressed, ctrl_pressed);
                     let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
                     let _ = html_el.set_pointer_capture(pe.pointer_id());
+                    dirty.set(true);
 
                     if is_touch {
                         // Double-tap detection (500ms)
                         let now = js_sys::Date::now();
                         let last = *last_tap.borrow();
                         if now - last < 500.0 {
-                            // Double tap
-                            *last_tap.borrow_mut() = 0.0;
-                            s.on_touch_double_tap();
-                            return;
+                            if s.interaction
+                                .is_double_click_candidate(HitZone::Chart, now, 30.0)
+                            {
+                                *last_tap.borrow_mut() = 0.0;
+                                s.on_touch_double_tap();
+                                dirty.set(true);
+                                return;
+                            }
                         }
                         *last_tap.borrow_mut() = now;
 
                         // Start long-press timer (240ms like LWC)
                         let inner_lp = Rc::clone(&inner);
                         let lp_timer_inner = Rc::clone(&lp_timer);
+                        let dirty_lp = Rc::clone(&dirty);
                         let lp_x = x;
                         let lp_y = y;
 
@@ -1763,6 +1905,7 @@ impl RayCore {
                                     && !s.interaction.pinch_active
                                 {
                                     s.on_long_press(lp_x, lp_y);
+                                    dirty_lp.set(true);
                                 }
                             }
                             *lp_timer_inner.borrow_mut() = None;
@@ -1789,9 +1932,13 @@ impl RayCore {
             let grid_up = grid_c.clone();
             let lp_timer = Rc::clone(&long_press_timer);
             let lp_cb = Rc::clone(&long_press_cb_handle);
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
+                    let (x, y) = event_css_pos(&pe, &pane_c);
+                    let shift_pressed = pe.shift_key();
+                    let ctrl_pressed = pe.ctrl_key();
 
                     // Cancel long-press timer
                     if let Some(tid) = lp_timer.borrow_mut().take() {
@@ -1803,6 +1950,7 @@ impl RayCore {
                         return;
                     };
                     s.on_pointer_up();
+                    s.on_pane_pointer_move(x, y, shift_pressed, ctrl_pressed);
                     let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
                     let _ = html_el.release_pointer_capture(pe.pointer_id());
                     let cursor = s.cursor_css();
@@ -1811,6 +1959,7 @@ impl RayCore {
                     // Clear grid wrapper override
                     let grid_el: &web_sys::HtmlElement = grid_up.unchecked_ref();
                     let _ = grid_el.style().set_property("cursor", "");
+                    dirty.set(true);
                 }));
             pane_el.add_event_listener_with_callback("pointerup", cb.as_ref().unchecked_ref())?;
             closures.push(cb);
@@ -1819,6 +1968,7 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let pane_c = pane_container_el.clone();
+            let dirty = Rc::clone(&dirty);
             let cb = Closure::<dyn FnMut(web_sys::WheelEvent)>::wrap(Box::new(
                 move |e: web_sys::WheelEvent| {
                     e.prevent_default();
@@ -1828,6 +1978,7 @@ impl RayCore {
                     };
                     s.on_pointer_enter(HitZone::Chart);
                     s.on_pane_wheel(x, y, e.delta_x(), e.delta_y(), e.delta_mode());
+                    dirty.set(true);
                 },
             ));
             let opts = web_sys::AddEventListenerOptions::new();
@@ -1842,6 +1993,7 @@ impl RayCore {
         // pane: contextmenu — remove all scale drawings and exit scale mode on right-click
         {
             let inner = Rc::clone(&inner);
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     e.prevent_default();
@@ -1854,6 +2006,7 @@ impl RayCore {
                         s.engine.drawings.cancel_creation();
                         s.engine.drawings.active_tool = raycore::DrawingTool::None;
                     }
+                    dirty.set(true);
                 }));
             pane_el.add_event_listener_with_callback("contextmenu", cb.as_ref().unchecked_ref())?;
             closures.push(cb);
@@ -1863,19 +2016,25 @@ impl RayCore {
             let inner = Rc::clone(&inner);
             let pane_c = pane_container_el.clone();
             let grid_can = grid_c.clone();
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
+                    let (x, y) = event_css_pos(&pe, &pane_c);
+                    let shift_pressed = pe.shift_key();
+                    let ctrl_pressed = pe.ctrl_key();
                     let Ok(mut s) = inner.try_borrow_mut() else {
                         return;
                     };
                     s.on_pointer_up();
+                    s.on_pane_pointer_move(x, y, shift_pressed, ctrl_pressed);
                     let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
                     let _ = html_el.release_pointer_capture(pe.pointer_id());
                     let cursor = s.cursor_css();
                     let _ = html_el.style().set_property("cursor", cursor);
                     let grid_el: &web_sys::HtmlElement = grid_can.unchecked_ref();
                     let _ = grid_el.style().set_property("cursor", "");
+                    dirty.set(true);
                 }));
             pane_el
                 .add_event_listener_with_callback("pointercancel", cb.as_ref().unchecked_ref())?;
@@ -1889,6 +2048,7 @@ impl RayCore {
             let pane_c = pane_container_el.clone();
             let lp_timer = Rc::clone(&long_press_timer);
             let lp_cb = Rc::clone(&long_press_cb_handle);
+            let dirty = Rc::clone(&dirty);
             let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::wrap(Box::new(
                 move |e: web_sys::TouchEvent| {
                     e.prevent_default();
@@ -1916,6 +2076,7 @@ impl RayCore {
                             return;
                         };
                         s.on_pinch_start(cx, cy, distance);
+                        dirty.set(true);
                     }
                 },
             ));
@@ -1931,6 +2092,7 @@ impl RayCore {
         // touchmove: update pinch scale
         {
             let inner = Rc::clone(&inner);
+            let dirty = Rc::clone(&dirty);
             let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::wrap(Box::new(
                 move |e: web_sys::TouchEvent| {
                     e.prevent_default();
@@ -1951,6 +2113,7 @@ impl RayCore {
                             return;
                         };
                         s.on_pinch_update(scale);
+                        dirty.set(true);
                     }
                 },
             ));
@@ -1966,6 +2129,7 @@ impl RayCore {
         // touchend: end pinch when fingers lift
         {
             let inner = Rc::clone(&inner);
+            let dirty = Rc::clone(&dirty);
             let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::wrap(Box::new(
                 move |e: web_sys::TouchEvent| {
                     let touches = e.touches();
@@ -1975,6 +2139,7 @@ impl RayCore {
                         };
                         if s.interaction.pinch_active {
                             s.on_pinch_end();
+                            dirty.set(true);
                         }
                     }
                 },
@@ -2000,6 +2165,7 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let price_c = price_container_el.clone();
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
                     let Ok(mut s) = inner.try_borrow_mut() else {
@@ -2009,6 +2175,7 @@ impl RayCore {
                     let cursor = s.cursor_css();
                     let html_el: &web_sys::HtmlElement = price_c.unchecked_ref();
                     let _ = html_el.style().set_property("cursor", cursor);
+                    dirty.set(true);
                 }));
             price_el
                 .add_event_listener_with_callback("pointerenter", cb.as_ref().unchecked_ref())?;
@@ -2018,6 +2185,7 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let price_c = price_container_el.clone();
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
                     let Ok(mut s) = inner.try_borrow_mut() else {
@@ -2026,6 +2194,7 @@ impl RayCore {
                     s.on_pointer_leave(HitZone::PriceAxis);
                     let html_el: &web_sys::HtmlElement = price_c.unchecked_ref();
                     let _ = html_el.style().set_property("cursor", "");
+                    dirty.set(true);
                 }));
             price_el
                 .add_event_listener_with_callback("pointerleave", cb.as_ref().unchecked_ref())?;
@@ -2036,6 +2205,7 @@ impl RayCore {
             let inner = Rc::clone(&inner);
             let price_c = price_container_el.clone();
             let grid_move_p = grid_c.clone();
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
@@ -2057,6 +2227,7 @@ impl RayCore {
                     } else {
                         let _ = grid_el.style().set_property("cursor", "");
                     }
+                    dirty.set(true);
                 }));
             price_el
                 .add_event_listener_with_callback("pointermove", cb.as_ref().unchecked_ref())?;
@@ -2066,6 +2237,7 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let price_c = price_container_el.clone();
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
@@ -2078,6 +2250,7 @@ impl RayCore {
                     s.on_pointer_down(0.0, y, HitZone::PriceAxis, false, false);
                     let html_el: &web_sys::HtmlElement = price_c.unchecked_ref();
                     let _ = html_el.set_pointer_capture(pe.pointer_id());
+                    dirty.set(true);
                 }));
             price_el
                 .add_event_listener_with_callback("pointerdown", cb.as_ref().unchecked_ref())?;
@@ -2088,6 +2261,7 @@ impl RayCore {
             let inner = Rc::clone(&inner);
             let price_c = price_container_el.clone();
             let grid_up_p = grid_c.clone();
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
@@ -2103,6 +2277,7 @@ impl RayCore {
                     // Clear grid wrapper override
                     let grid_el: &web_sys::HtmlElement = grid_up_p.unchecked_ref();
                     let _ = grid_el.style().set_property("cursor", "");
+                    dirty.set(true);
                 }));
             price_el.add_event_listener_with_callback("pointerup", cb.as_ref().unchecked_ref())?;
             closures.push(cb);
@@ -2110,6 +2285,7 @@ impl RayCore {
         // price axis: wheel
         {
             let inner = Rc::clone(&inner);
+            let dirty = Rc::clone(&dirty);
             let cb = Closure::<dyn FnMut(web_sys::WheelEvent)>::wrap(Box::new(
                 move |e: web_sys::WheelEvent| {
                     e.prevent_default();
@@ -2118,6 +2294,7 @@ impl RayCore {
                     };
                     s.on_pointer_enter(HitZone::PriceAxis);
                     s.on_price_axis_wheel(e.delta_y(), e.delta_mode());
+                    dirty.set(true);
                 },
             ));
             let opts = web_sys::AddEventListenerOptions::new();
@@ -2144,6 +2321,7 @@ impl RayCore {
             let inner = Rc::clone(&inner);
             let price_c = price_container_el.clone();
             let grid_can_p = grid_c.clone();
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
@@ -2157,6 +2335,7 @@ impl RayCore {
                     let _ = html_el.style().set_property("cursor", cursor);
                     let grid_el: &web_sys::HtmlElement = grid_can_p.unchecked_ref();
                     let _ = grid_el.style().set_property("cursor", "");
+                    dirty.set(true);
                 }));
             price_el
                 .add_event_listener_with_callback("pointercancel", cb.as_ref().unchecked_ref())?;
@@ -2174,6 +2353,7 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let time_c = time_container_el.clone();
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
                     let Ok(mut s) = inner.try_borrow_mut() else {
@@ -2183,6 +2363,7 @@ impl RayCore {
                     let cursor = s.cursor_css();
                     let html_el: &web_sys::HtmlElement = time_c.unchecked_ref();
                     let _ = html_el.style().set_property("cursor", cursor);
+                    dirty.set(true);
                 }));
             time_el
                 .add_event_listener_with_callback("pointerenter", cb.as_ref().unchecked_ref())?;
@@ -2192,6 +2373,7 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let time_c = time_container_el.clone();
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
                     let Ok(mut s) = inner.try_borrow_mut() else {
@@ -2200,6 +2382,7 @@ impl RayCore {
                     s.on_pointer_leave(HitZone::TimeAxis);
                     let html_el: &web_sys::HtmlElement = time_c.unchecked_ref();
                     let _ = html_el.style().set_property("cursor", "");
+                    dirty.set(true);
                 }));
             time_el
                 .add_event_listener_with_callback("pointerleave", cb.as_ref().unchecked_ref())?;
@@ -2210,6 +2393,7 @@ impl RayCore {
             let inner = Rc::clone(&inner);
             let time_c = time_container_el.clone();
             let grid_move_t = grid_c.clone();
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
@@ -2231,6 +2415,7 @@ impl RayCore {
                     } else {
                         let _ = grid_el.style().set_property("cursor", "");
                     }
+                    dirty.set(true);
                 }));
             time_el.add_event_listener_with_callback("pointermove", cb.as_ref().unchecked_ref())?;
             closures.push(cb);
@@ -2239,6 +2424,7 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let time_c = time_container_el.clone();
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
@@ -2251,6 +2437,7 @@ impl RayCore {
                     s.on_pointer_down(x, 0.0, HitZone::TimeAxis, false, false);
                     let html_el: &web_sys::HtmlElement = time_c.unchecked_ref();
                     let _ = html_el.set_pointer_capture(pe.pointer_id());
+                    dirty.set(true);
                 }));
             time_el.add_event_listener_with_callback("pointerdown", cb.as_ref().unchecked_ref())?;
             closures.push(cb);
@@ -2260,6 +2447,7 @@ impl RayCore {
             let inner = Rc::clone(&inner);
             let time_c = time_container_el.clone();
             let grid_up_t = grid_c.clone();
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
@@ -2275,6 +2463,7 @@ impl RayCore {
                     // Clear grid wrapper override
                     let grid_el: &web_sys::HtmlElement = grid_up_t.unchecked_ref();
                     let _ = grid_el.style().set_property("cursor", "");
+                    dirty.set(true);
                 }));
             time_el.add_event_listener_with_callback("pointerup", cb.as_ref().unchecked_ref())?;
             closures.push(cb);
@@ -2283,6 +2472,7 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner);
             let time_c = time_container_el.clone();
+            let dirty = Rc::clone(&dirty);
             let cb = Closure::<dyn FnMut(web_sys::WheelEvent)>::wrap(Box::new(
                 move |e: web_sys::WheelEvent| {
                     e.prevent_default();
@@ -2292,6 +2482,7 @@ impl RayCore {
                     };
                     s.on_pointer_enter(HitZone::TimeAxis);
                     s.on_time_axis_wheel(x, e.delta_y(), e.delta_mode());
+                    dirty.set(true);
                 },
             ));
             let opts = web_sys::AddEventListenerOptions::new();
@@ -2317,6 +2508,7 @@ impl RayCore {
             let inner = Rc::clone(&inner);
             let time_c = time_container_el.clone();
             let grid_can_t = grid_c.clone();
+            let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
@@ -2330,6 +2522,7 @@ impl RayCore {
                     let _ = html_el.style().set_property("cursor", cursor);
                     let grid_el: &web_sys::HtmlElement = grid_can_t.unchecked_ref();
                     let _ = grid_el.style().set_property("cursor", "");
+                    dirty.set(true);
                 }));
             time_el
                 .add_event_listener_with_callback("pointercancel", cb.as_ref().unchecked_ref())?;
@@ -2377,6 +2570,7 @@ impl RayCore {
             let raf_scheduled = Rc::clone(&resize_raf_scheduled);
             let raf_id = Rc::clone(&resize_raf_id);
             let raf_slot = Rc::clone(&resize_raf_closure_slot);
+            let dirty = Rc::clone(&dirty);
 
             let cb =
                 Closure::<dyn Fn(js_sys::Array)>::wrap(Box::new(move |entries: js_sys::Array| {
@@ -2417,6 +2611,7 @@ impl RayCore {
                     let raf_scheduled_for_raf = Rc::clone(&raf_scheduled);
                     let raf_id_for_raf = Rc::clone(&raf_id);
                     let raf_slot_for_raf = Rc::clone(&raf_slot);
+                    let dirty_for_raf = Rc::clone(&dirty);
 
                     let raf_cb = Closure::<dyn FnMut(f64)>::wrap(Box::new(move |_ts: f64| {
                         raf_id_for_raf.set(0);
@@ -2456,6 +2651,7 @@ impl RayCore {
                                 width: cw,
                                 height: ch,
                             });
+                            dirty_for_raf.set(true);
                         }
 
                         raf_slot_for_raf.borrow_mut().take();
@@ -2515,13 +2711,13 @@ impl RayCore {
             _long_press_timer: long_press_timer,
             _last_tap_time: last_tap_time,
             _event_registry: EventListenerRegistry::new(),
-            event_emitter: Rc::new(RefCell::new(EventEmitter::new())),
+            event_emitter,
             theme_config: raycore::ThemeConfig::default(),
-            auto_render: false,
-            _raf_closure: None,
-            _raf_id: Rc::new(Cell::new(0)),
-            replay_forced_auto_render: Rc::new(Cell::new(false)),
-            dirty: Rc::new(Cell::new(false)),
+            auto_render,
+            _raf_closure: raf_closure,
+            _raf_id: raf_id,
+            replay_forced_auto_render,
+            dirty,
         })
     }
 
@@ -2599,7 +2795,7 @@ impl RayCore {
 
         // Apply auto-render
         let auto_render = js_get_bool(&options, "autoRender").unwrap_or(true);
-        chart.auto_render = auto_render;
+        chart.auto_render.set(auto_render);
         if auto_render {
             chart.start_auto_render_internal();
         }
@@ -2689,12 +2885,12 @@ impl RayCore {
 
         // Auto render
         if let Some(auto) = js_get_bool(&options, "autoRender") {
-            if auto && !self.auto_render {
-                self.auto_render = true;
+            if auto && !self.auto_render.get() {
+                self.auto_render.set(true);
                 self.replay_forced_auto_render.set(false);
                 self.start_auto_render_internal();
-            } else if !auto && self.auto_render {
-                self.auto_render = false;
+            } else if !auto && self.auto_render.get() {
+                self.auto_render.set(false);
                 self.stop_auto_render_internal();
                 self.ensure_forced_auto_render_for_replay();
             }
@@ -3277,8 +3473,8 @@ impl RayCore {
 
     /// Start the auto-render RAF loop.
     pub fn start_auto_render(&mut self) {
-        if !self.auto_render {
-            self.auto_render = true;
+        if !self.auto_render.get() {
+            self.auto_render.set(true);
             self.replay_forced_auto_render.set(false);
             self.start_auto_render_internal();
         }
@@ -3286,15 +3482,15 @@ impl RayCore {
 
     /// Stop the auto-render RAF loop. Caller must manually call render().
     pub fn stop_auto_render(&mut self) {
-        if self.auto_render {
-            self.auto_render = false;
+        if self.auto_render.get() {
+            self.auto_render.set(false);
             self.stop_auto_render_internal();
         }
     }
 
     /// Returns whether auto-render is currently active.
     pub fn is_auto_render(&self) -> bool {
-        self.auto_render
+        self.auto_render.get()
     }
 
     // ── Replay ───────────────────────────────────────────────────────────────
@@ -3940,7 +4136,10 @@ impl RayCore {
     // ── Viewport control ─────────────────────────────────────────────────────
 
     pub fn zoom_to_range(&mut self, start: u64, end: u64) {
-        self.inner.borrow_mut().engine.zoom_to_range(start, end);
+        let mut s = self.inner.borrow_mut();
+        s.engine.zoom_to_range(start, end);
+        emit_visible_range_change(&mut s.engine);
+        drop(s);
         self.mark_dirty();
     }
 
@@ -4026,6 +4225,7 @@ impl RayCore {
         let (resolved_x, resolved_y, resolved_bar_index, resolved_price) =
             resolve_synced_crosshair_state(
                 &s.engine.viewport,
+                &s.engine.time_scale,
                 pw,
                 ph,
                 x,
@@ -4062,6 +4262,7 @@ impl RayCore {
         let (resolved_x, resolved_y, resolved_bar_index, resolved_price) =
             resolve_synced_crosshair_state(
                 &s.engine.viewport,
+                &s.engine.time_scale,
                 pw,
                 ph,
                 0.0,
@@ -4570,6 +4771,7 @@ impl RayCore {
                 vp.price_locked = snapshot.viewport.price_locked;
                 vp.auto_scroll = snapshot.viewport.auto_scroll;
             }
+            emit_visible_range_change(&mut s.engine);
             let margin_top = finite_or(
                 snapshot.viewport.scale_margin_top,
                 raycore::core::constants::DEFAULT_SCALE_MARGIN_TOP,
@@ -5722,7 +5924,11 @@ impl RayCore {
         let obj = js_sys::Object::new();
         let (pane_css_w, pane_css_h) = s.layout.pane_css_size();
 
-        let Some(bar_index) = raycore::timestamp_to_bar_index(timestamp_ms, &s.engine.bars) else {
+        let Some(logical_index) = s
+            .engine
+            .time_scale
+            .logical_index_for_timestamp(timestamp_ms)
+        else {
             let _ =
                 js_sys::Reflect::set(&obj, &JsValue::from_str("x"), &JsValue::from_f64(f64::NAN));
             let _ =
@@ -5735,7 +5941,11 @@ impl RayCore {
             return obj.into();
         };
 
-        let x = s.engine.viewport.bar_center_css(bar_index, pane_css_w);
+        let x = raycore::core::renderer::transforms::bar_to_x(
+            logical_index + 0.5,
+            &s.engine.viewport,
+            pane_css_w,
+        );
         let y = s.engine.viewport.price_to_css_y(price, pane_css_h);
         let visible = x.is_finite()
             && y.is_finite()
@@ -6911,7 +7121,7 @@ impl RayCore {
 
                     // bar_index is only set if we have actual data at this position
                     s.engine.crosshair.bar_index =
-                        grid_idx.filter(|&idx| idx < s.engine.bars.len());
+                        grid_idx.and_then(|idx| s.engine.time_scale.main_bar_index_at_slot(idx));
 
                     // X snaps to bar grid (like LWC) - even in empty space
                     if let Some(idx) = grid_idx {
@@ -6978,6 +7188,10 @@ impl RayCore {
                         }
 
                         // Horizontal drag - scroll time axis (shared with main chart)
+                        let before_start = s.engine.viewport.start_bar;
+                        let before_end = s.engine.viewport.end_bar;
+                        let before_price_min = s.engine.viewport.price_min;
+                        let before_price_max = s.engine.viewport.price_max;
                         let delta_x = x - drag_sx.get();
                         let bar_range = drag_eb.get() - drag_sb.get();
                         if pw > 0.0 {
@@ -6989,6 +7203,13 @@ impl RayCore {
                             s.engine.viewport.clamp_to_data(bar_len);
                             // Main chart auto-fits if not locked
                             s.engine.auto_fit_price_if_unlocked();
+                        }
+                        if (before_start - s.engine.viewport.start_bar).abs() > 1e-9
+                            || (before_end - s.engine.viewport.end_bar).abs() > 1e-9
+                            || (before_price_min - s.engine.viewport.price_min).abs() > 1e-9
+                            || (before_price_max - s.engine.viewport.price_max).abs() > 1e-9
+                        {
+                            emit_visible_range_change(&mut s.engine);
                         }
 
                         // Vertical drag - ONLY if subpane price is locked (same as main chart)
@@ -7094,28 +7315,18 @@ impl RayCore {
                         let hit = sp.drawings.hit_test(x, y, &hybrid_vp, pw, ph);
                         if let Some((id, result)) = hit {
                             use raycore::core::drawings::types::HitPart;
-                            let tool = sp
-                                .drawings
-                                .get(id)
-                                .map(|d| d.tool())
-                                .unwrap_or(raycore::DrawingTool::None);
                             let anchor_idx = match result.part {
                                 HitPart::Anchor(i) => Some(i),
                                 _ => None,
                             };
 
-                            // Rectangle: body clicks select only (fall through to pan).
-                            // Edges are mapped to side anchors, so edge drags resize.
-                            if tool == raycore::DrawingTool::Rectangle
-                                && result.part == HitPart::Body
-                            {
-                                sp.drawings.select(id);
-                            } else {
-                                sp.drawings.select(id);
-                                sp.drawings.start_drag(id, anchor_idx, bar, price);
-                                drop(s);
-                                return; // Don't pan while dragging drawing
-                            }
+                            // Match main-pane drawing behavior: body hits move the
+                            // whole drawing, while rectangle edges/corners resize
+                            // through their dedicated anchor hits.
+                            sp.drawings.select(id);
+                            sp.drawings.start_drag(id, anchor_idx, bar, price);
+                            drop(s);
+                            return; // Don't pan while dragging drawing
                         } else {
                             // Click on empty space: deselect
                             sp.drawings.deselect_all();
@@ -7226,12 +7437,27 @@ impl RayCore {
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
+                    let rect = chart_c.get_bounding_client_rect();
+                    let x = pe.client_x() as f64 - rect.left();
+                    let y = pe.client_y() as f64 - rect.top();
+                    let pw = rect.width();
+                    let ph = rect.height();
                     drag.set(false);
 
-                    // Cancel scroll tracking (no kinetic animation)
+                    // Mirror pointerup teardown so canceled drawing gestures do not remain latched.
                     {
-                        let s = inner.borrow();
-                        if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == pid) {
+                        let Ok(mut s) = inner.try_borrow_mut() else {
+                            return;
+                        };
+                        let bar = s.engine.viewport.pixel_to_bar(x, pw);
+                        if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
+                            let price = sp.viewport.pixel_to_price(y, ph);
+                            if sp.drawings.is_creating() {
+                                sp.drawings.finalize_creation_step(bar, price);
+                            }
+                            if let Some(id) = sp.drawings.selected_id {
+                                sp.drawings.end_drag(id);
+                            }
                             sp.scroll_state.borrow_mut().animation.stop();
                         }
                     }
@@ -8150,7 +8376,8 @@ impl RayCore {
 
     /// Render one frame. Call from requestAnimationFrame.
     pub fn render(&mut self) {
-        render_frame::do_render_frame(&self.inner, &self.dirty, &self.event_emitter);
+        self.dirty.set(true);
+        let _ = render_frame::do_render_frame(&self.inner, &self.dirty);
     }
 
     // ── Private helpers ────────────────────────────────────────────────────────
@@ -8170,7 +8397,7 @@ impl RayCore {
     }
 
     fn ensure_forced_auto_render_for_replay(&mut self) {
-        if self.auto_render || self.replay_forced_auto_render.get() {
+        if self.auto_render.get() || self.replay_forced_auto_render.get() {
             return;
         }
         self.replay_forced_auto_render.set(true);
@@ -8202,100 +8429,10 @@ impl RayCore {
         }
     }
 
-    /// Start the internal requestAnimationFrame loop.
-    ///
-    /// Uses a self-scheduling RAF callback that checks the dirty flag
-    /// and calls the render pipeline when needed. The closure captures
-    /// `SharedInner` directly to avoid borrow-checker issues with `&mut self`.
+    /// Queue an internal requestAnimationFrame when auto-render is active.
     fn start_auto_render_internal(&mut self) {
-        // Already running?
-        if self
-            ._raf_closure
-            .as_ref()
-            .map(|slot| slot.borrow().is_some())
-            .unwrap_or(false)
-        {
-            return;
-        }
-        if self
-            ._raf_closure
-            .as_ref()
-            .map(|slot| slot.borrow().is_none())
-            .unwrap_or(false)
-        {
-            self._raf_closure = None;
-        }
-
-        let inner = Rc::clone(&self.inner);
-        let dirty = Rc::clone(&self.dirty);
-        let raf_id = Rc::clone(&self._raf_id);
-        let event_emitter = Rc::clone(&self.event_emitter);
-        let replay_forced = Rc::clone(&self.replay_forced_auto_render);
-
-        // Self-referencing closure pattern for RAF:
-        //
-        //  1. Allocate a shared slot: Rc<RefCell<Option<Closure>>>
-        //  2. The closure captures a clone of that Rc
-        //  3. Store the closure INTO the slot (not take it out!) so the clone
-        //     the closure holds always has Some(closure) for rescheduling
-        //  4. Store the Rc itself on self to keep the closure alive
-        //
-        // If we called `.take()` on the slot (old bug) the clone inside the
-        // closure would see None and the loop would fire exactly once.
-        let closure_slot: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
-
-        // Clone captured by the closure for self-rescheduling
-        let slot_for_reschedule = Rc::clone(&closure_slot);
-
-        let tick_closure = Closure::wrap(Box::new(move || {
-            // Always render every frame in auto-render mode.
-            // The dirty flag is NOT used as a render gate here because interaction
-            // closures (pointer move, wheel, drag) don't hold a reference to `dirty`
-            // and therefore can never mark it — any dirty-guard would prevent
-            // interactions from ever producing a new frame.
-            render_frame::do_render_frame(&inner, &dirty, &event_emitter);
-
-            // Manual-render charts can temporarily force auto-render for replay playback.
-            // When replay playback stops/exits, drop out of RAF and restore manual mode.
-            if replay_forced.get() {
-                let should_restore = inner
-                    .try_borrow()
-                    .map(|s| !s.replay_active || !s.replay_playing)
-                    .unwrap_or(false);
-                if should_restore {
-                    replay_forced.set(false);
-                    slot_for_reschedule.borrow_mut().take();
-                    raf_id.set(0);
-                    return;
-                }
-            }
-
-            // Reschedule: read the closure from the shared slot and pass it to RAF.
-            if let Some(window) = web_sys::window() {
-                if let Some(c) = slot_for_reschedule.borrow().as_ref() {
-                    if let Ok(id) = window.request_animation_frame(c.as_ref().unchecked_ref()) {
-                        raf_id.set(id);
-                    }
-                }
-            }
-        }) as Box<dyn FnMut()>);
-
-        // Kick off the first frame BEFORE storing the closure so we have a
-        // valid JS function reference to pass to request_animation_frame.
-        if let Some(window) = web_sys::window() {
-            if let Ok(id) = window.request_animation_frame(tick_closure.as_ref().unchecked_ref()) {
-                self._raf_id.set(id);
-            }
-        }
-
-        // Keep the closure INSIDE the slot so slot_for_reschedule (captured
-        // by the closure) can find it on every tick.
-        *closure_slot.borrow_mut() = Some(tick_closure);
-
-        // Store the Rc on self — this keeps the closure alive for the lifetime
-        // of RayCore and allows stop_auto_render_internal to drop it.
-        self._raf_closure = Some(closure_slot);
         self.dirty.set(true);
+        request_auto_render_frame_if_needed(&self.dirty);
     }
 
     /// Stop the internal requestAnimationFrame loop.
@@ -8314,10 +8451,7 @@ impl RayCore {
         // Drop the closure by clearing the slot, then the Rc.
         // The closure captures slot_for_reschedule which holds the same Rc,
         // so clearing the slot breaks the reference cycle.
-        if let Some(slot) = &self._raf_closure {
-            slot.borrow_mut().take(); // drop the Closure, breaking the cycle
-        }
-        self._raf_closure = None;
+        self._raf_closure.borrow_mut().take();
     }
 
     /// Dispose: remove all event listeners, disconnect resize observer, and clean up resources.

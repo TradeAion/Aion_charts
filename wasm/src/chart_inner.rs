@@ -13,7 +13,7 @@ use wasm_bindgen::JsCast;
 
 use raycore::{
     Bar, ChartEngine, ExecutionMarkHitArea, HitZone, InteractionHandler, MainChartType,
-    OverlayRenderer, PriceAxisRenderer, TimeAxisRenderer,
+    OverlayRenderer, PriceAxisRenderer, PriceLineHit, PriceLineId, TimeAxisRenderer,
 };
 
 use crate::canvas_manager::WidgetLayout;
@@ -207,6 +207,8 @@ pub struct ChartInner {
     pub hovered_execution_mark_id: Option<String>,
     /// Currently selected/clicked execution mark ID (for showing selected locators).
     pub selected_execution_mark_id: Option<String>,
+    /// Active price-line drag ID, if the user is dragging a draggable price line.
+    pub price_line_drag_id: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -314,6 +316,33 @@ impl ChartInner {
             });
     }
 
+    fn emit_visible_range_change_if_changed(
+        &mut self,
+        before_start: f64,
+        before_end: f64,
+        before_price_min: f64,
+        before_price_max: f64,
+    ) {
+        let after_start = self.engine.viewport.start_bar;
+        let after_end = self.engine.viewport.end_bar;
+        let after_price_min = self.engine.viewport.price_min;
+        let after_price_max = self.engine.viewport.price_max;
+        const EPS: f64 = 1e-9;
+
+        if (before_start - after_start).abs() > EPS
+            || (before_end - after_end).abs() > EPS
+            || (before_price_min - after_price_min).abs() > EPS
+            || (before_price_max - after_price_max).abs() > EPS
+        {
+            self.engine
+                .event_bus
+                .emit(raycore::ChartEvent::VisibleRangeChange {
+                    start_bar: after_start,
+                    end_bar: after_end,
+                });
+        }
+    }
+
     /// Resolve a Ctrl+OHLC snap target at the current pointer position.
     ///
     /// Uses the nearest valid bar index (clamped to data bounds) so snapping
@@ -325,19 +354,22 @@ impl ChartInner {
         pane_css_w: f64,
         pane_css_h: f64,
     ) -> Option<OhlcSnapTarget> {
-        let bars_len = self.engine.bars.len();
-        if bars_len == 0 || pane_css_w <= 0.0 || pane_css_h <= 0.0 {
+        if self.engine.bars.len() == 0 || pane_css_w <= 0.0 || pane_css_h <= 0.0 {
             return None;
         }
 
-        let bar_idx = self
+        let logical_slot = self
             .engine
             .viewport
-            .bar_index_at_pixel(x_css, pane_css_w, bars_len)
+            .bar_index_at_pixel(x_css, pane_css_w, self.engine.time_scale.len())
             .unwrap_or_else(|| {
                 let raw = self.engine.viewport.pixel_to_bar(x_css, pane_css_w).floor();
-                raw.clamp(0.0, (bars_len - 1) as f64) as usize
+                raw.max(0.0) as usize
             });
+        let (bar_idx, snap_slot) = self
+            .engine
+            .time_scale
+            .nearest_main_bar(logical_slot as f64)?;
 
         let snap_price = snap_to_ohlc_price(
             &self.engine.bars,
@@ -346,7 +378,7 @@ impl ChartInner {
             &self.engine.viewport,
             pane_css_h,
         );
-        let snap_x_css = self.engine.viewport.bar_center_css(bar_idx, pane_css_w);
+        let snap_x_css = self.engine.viewport.bar_center_css(snap_slot, pane_css_w);
         let snap_y_css = self
             .engine
             .viewport
@@ -355,7 +387,7 @@ impl ChartInner {
 
         Some(OhlcSnapTarget {
             bar_idx,
-            bar: bar_idx as f64 + 0.5,
+            bar: snap_slot as f64 + 0.5,
             price: snap_price,
             x_css: snap_x_css,
             y_css: snap_y_css,
@@ -404,7 +436,10 @@ impl ChartInner {
         let vp_auto_scroll = self.engine.viewport.auto_scroll;
         let crosshair_bar_index = self.engine.crosshair.bar_index;
 
-        self.engine.bars.set(bars);
+        self.engine
+            .bars
+            .set(bars)
+            .expect("replay bars should already be finite and ordered");
         self.engine.studies.update_studies(&self.engine.bars);
         self.engine.indicators.on_set_data(&self.engine.bars);
 
@@ -744,6 +779,14 @@ impl ChartInner {
         let (pw, ph) = self.layout.pane_css_size();
         let dpr = self.engine.dpr;
 
+        if let Some(id) = self.price_line_drag_id {
+            self.engine
+                .price_lines
+                .drag_to(PriceLineId(id), y, &self.engine.viewport, ph);
+            self.engine.crosshair.active = false;
+            return;
+        }
+
         // Pre-compute logical coords from viewport (before any mutable drawing borrow)
         let mut bar = self.engine.viewport.pixel_to_bar(x, pw);
         // Use candle area height for drawing coordinates — matches price_to_css_y().
@@ -908,6 +951,10 @@ impl ChartInner {
             engine,
             ..
         } = self;
+        let before_start = engine.viewport.start_bar;
+        let before_end = engine.viewport.end_bar;
+        let before_price_min = engine.viewport.price_min;
+        let before_price_max = engine.viewport.price_max;
         interaction.pane_pointer_move(
             x,
             y,
@@ -916,8 +963,22 @@ impl ChartInner {
             &mut engine.viewport,
             &mut engine.crosshair,
             &engine.bars,
+            &engine.time_scale,
             dpr,
         );
+
+        if (before_start - engine.viewport.start_bar).abs() > 1e-9
+            || (before_end - engine.viewport.end_bar).abs() > 1e-9
+            || (before_price_min - engine.viewport.price_min).abs() > 1e-9
+            || (before_price_max - engine.viewport.price_max).abs() > 1e-9
+        {
+            engine
+                .event_bus
+                .emit(raycore::ChartEvent::VisibleRangeChange {
+                    start_bar: engine.viewport.start_bar,
+                    end_bar: engine.viewport.end_bar,
+                });
+        }
 
         if let Some(snap) = ctrl_snap_target {
             // Keep visual crosshair locked to the same OHLC point used by drawing snap.
@@ -931,7 +992,11 @@ impl ChartInner {
         // Emit crosshair move event
         if engine.crosshair.active {
             let bar_idx = engine.crosshair.bar_index;
-            let timestamp = bar_idx.and_then(|idx| engine.bars.get(idx).map(|b| b.timestamp));
+            let timestamp = engine
+                .viewport
+                .bar_index_for_crosshair(engine.crosshair.x, pw)
+                .and_then(|slot| engine.time_scale.resolve_rounded_timestamp(slot as f64))
+                .or_else(|| bar_idx.and_then(|idx| engine.bars.get(idx).map(|b| b.timestamp)));
             engine.event_bus.emit(raycore::ChartEvent::CrosshairMove {
                 x,
                 y,
@@ -952,6 +1017,15 @@ impl ChartInner {
     ) {
         let (pw, ph) = self.layout.pane_css_size();
 
+        {
+            let Self {
+                interaction,
+                engine,
+                ..
+            } = self;
+            interaction.pointer_down(x, y, zone, &engine.viewport, ph);
+        }
+
         if zone == HitZone::Chart {
             let mut bar = self.engine.viewport.pixel_to_bar(x, pw);
             // Use candle area height — consistent with point_to_css / price_to_css_y.
@@ -967,6 +1041,26 @@ impl ChartInner {
             {
                 bar = snap.bar;
                 price = snap.price;
+            }
+
+            if !self.interaction.is_touch
+                && !self.engine.drawings.is_tool_active()
+                && !self.engine.drawings.is_creating()
+                && !self.interaction.drawing_drag_active
+            {
+                if let PriceLineHit::Line(id) =
+                    self.engine
+                        .price_lines
+                        .hit_test(y, &self.engine.viewport, ph)
+                {
+                    if self.engine.price_lines.start_drag(id) {
+                        self.price_line_drag_id = Some(id.0);
+                        self.interaction.drag_active = true;
+                        self.interaction.set_drawing_cursor(Some("ns-resize"));
+                        self.engine.crosshair.active = false;
+                        return;
+                    }
+                }
             }
 
             let mut should_return = false;
@@ -998,19 +1092,13 @@ impl ChartInner {
                             _ => None,
                         };
 
-                        // Rectangle: body clicks select only and fall through to chart pan.
-                        // Edges are hit-tested as side anchors (TM/RM/BM/LM), so
-                        // edge drags resize and can flip while opposite side stays fixed.
-                        if tool == raycore::DrawingTool::Rectangle && result.part == HitPart::Body {
-                            drawings.select(id);
-                            // Don't start drag — fall through to chart pan
-                        } else {
-                            drawings.select(id);
-                            drawings.start_drag(id, anchor_idx, bar, price);
-                            drag_cursor =
-                                Some(cursor_for_drawing_hit(tool, result.part, anchor_idx));
-                            should_return = true;
-                        }
+                        // Allow body-dragging again for rectangles and other drawings.
+                        // Rectangle edges/corners still resize because they are exposed
+                        // as dedicated anchor hits, while body hits move the whole shape.
+                        drawings.select(id);
+                        drawings.start_drag(id, anchor_idx, bar, price);
+                        drag_cursor = Some(cursor_for_drawing_hit(tool, result.part, anchor_idx));
+                        should_return = true;
                     } else {
                         // Click on empty space: deselect
                         drawings.deselect_all();
@@ -1019,6 +1107,10 @@ impl ChartInner {
             }
 
             if should_return {
+                // A drawing tool or drawing drag owns this gesture now.
+                // Clear the base pane interaction so pointer-move cannot fall
+                // through into chart pan while the drawing preview is active.
+                self.interaction.cancel_pointer_gesture();
                 self.engine.stamp_drawing_timestamps();
                 if let Some(cursor) = drag_cursor {
                     self.interaction.drawing_drag_active = true;
@@ -1027,18 +1119,20 @@ impl ChartInner {
                 return; // don't pan while drawing tool / drawing drag
             }
         }
-
-        let Self {
-            interaction,
-            engine,
-            ..
-        } = self;
-        interaction.pointer_down(x, y, zone, &engine.viewport, ph);
     }
 
     pub fn on_pointer_up(&mut self) {
         let now_ms = js_sys::Date::now();
         let (pw, ph) = self.layout.pane_css_size();
+
+        if let Some(id) = self.price_line_drag_id.take() {
+            self.engine.price_lines.end_drag(PriceLineId(id));
+            self.interaction.cancel_pointer_gesture();
+            self.interaction.drawing_drag_active = false;
+            self.interaction.set_drawing_cursor(None);
+            self.engine.crosshair.active = false;
+            return;
+        }
 
         // If a drawing was being created (drag-to-create: release = place second anchor)
         {
@@ -1071,6 +1165,12 @@ impl ChartInner {
                     drawings.finalize_creation_step(bar, price);
                 }
                 self.engine.stamp_drawing_timestamps();
+                self.interaction.cancel_pointer_gesture();
+                self.interaction.drawing_drag_active = false;
+                self.interaction.set_drawing_cursor(None);
+                if !self.interaction.is_touch {
+                    self.engine.crosshair.active = true;
+                }
                 return;
             }
         }
@@ -1091,6 +1191,7 @@ impl ChartInner {
         }
         if ended_drag {
             self.engine.stamp_drawing_timestamps();
+            self.interaction.cancel_pointer_gesture();
             self.interaction.drawing_drag_active = false;
             self.interaction.set_drawing_cursor(None);
             // Restore crosshair for mouse (touch handled by tracking mode)
@@ -1106,24 +1207,43 @@ impl ChartInner {
         let was_drag = self.interaction.drag_active;
         let click_x = self.interaction.last_move_x;
         let click_y = self.interaction.last_move_y;
+        let before_start = self.engine.viewport.start_bar;
+        let before_end = self.engine.viewport.end_bar;
+        let before_price_min = self.engine.viewport.price_min;
+        let before_price_max = self.engine.viewport.price_max;
 
         let Self {
             interaction,
             engine,
             ..
         } = self;
-        interaction.pointer_up(&mut engine.viewport, &engine.bars, now_ms);
+        interaction.pointer_up(
+            &mut engine.viewport,
+            &engine.bars,
+            engine.time_scale.len(),
+            now_ms,
+        );
+        if (before_start - engine.viewport.start_bar).abs() > 1e-9
+            || (before_end - engine.viewport.end_bar).abs() > 1e-9
+            || (before_price_min - engine.viewport.price_min).abs() > 1e-9
+            || (before_price_max - engine.viewport.price_max).abs() > 1e-9
+        {
+            engine
+                .event_bus
+                .emit(raycore::ChartEvent::VisibleRangeChange {
+                    start_bar: engine.viewport.start_bar,
+                    end_bar: engine.viewport.end_bar,
+                });
+        }
 
         // Emit click event if it was a tap/click (pressed, not a drag)
         if was_pressed && !was_drag {
             let candle_css_h = ph * engine.viewport.candle_height_frac();
             let price = engine.viewport.pixel_to_price(click_y, candle_css_h);
-            let bar_f = engine.viewport.pixel_to_bar(click_x, pw);
-            let bar_index = if bar_f >= 0.0 && (bar_f.round() as usize) < engine.bars.len() {
-                Some(bar_f.round() as usize)
-            } else {
-                None
-            };
+            let bar_index = engine
+                .viewport
+                .bar_index_at_pixel(click_x, pw, engine.time_scale.len())
+                .and_then(|slot| engine.time_scale.main_bar_index_at_slot(slot));
             engine.event_bus.emit(raycore::ChartEvent::Click {
                 x: click_x,
                 y: click_y,
@@ -1148,6 +1268,10 @@ impl ChartInner {
 
     pub fn on_pane_wheel(&mut self, x: f64, y: f64, dx: f64, dy: f64, dm: u32) {
         let (pw, ph) = self.layout.pane_css_size();
+        let before_start = self.engine.viewport.start_bar;
+        let before_end = self.engine.viewport.end_bar;
+        let before_price_min = self.engine.viewport.price_min;
+        let before_price_max = self.engine.viewport.price_max;
         let Self {
             interaction,
             engine,
@@ -1166,54 +1290,143 @@ impl ChartInner {
             zoom_price_with_time,
             &mut engine.viewport,
             &engine.bars,
+            engine.time_scale.len(),
         );
 
-        // Emit visible range change after zoom/pan
-        engine
-            .event_bus
-            .emit(raycore::ChartEvent::VisibleRangeChange {
-                start_bar: engine.viewport.start_bar,
-                end_bar: engine.viewport.end_bar,
-            });
+        if (before_start - engine.viewport.start_bar).abs() > 1e-9
+            || (before_end - engine.viewport.end_bar).abs() > 1e-9
+            || (before_price_min - engine.viewport.price_min).abs() > 1e-9
+            || (before_price_max - engine.viewport.price_max).abs() > 1e-9
+        {
+            engine
+                .event_bus
+                .emit(raycore::ChartEvent::VisibleRangeChange {
+                    start_bar: engine.viewport.start_bar,
+                    end_bar: engine.viewport.end_bar,
+                });
+        }
     }
 
     pub fn on_price_axis_move(&mut self, y: f64) {
         let (_, ph) = self.layout.pane_css_size();
+        let before_start = self.engine.viewport.start_bar;
+        let before_end = self.engine.viewport.end_bar;
+        let before_price_min = self.engine.viewport.price_min;
+        let before_price_max = self.engine.viewport.price_max;
         let Self {
             interaction,
             engine,
             ..
         } = self;
         interaction.price_axis_pointer_move(y, ph, &mut engine.viewport);
+
+        if (before_start - engine.viewport.start_bar).abs() > 1e-9
+            || (before_end - engine.viewport.end_bar).abs() > 1e-9
+            || (before_price_min - engine.viewport.price_min).abs() > 1e-9
+            || (before_price_max - engine.viewport.price_max).abs() > 1e-9
+        {
+            engine
+                .event_bus
+                .emit(raycore::ChartEvent::VisibleRangeChange {
+                    start_bar: engine.viewport.start_bar,
+                    end_bar: engine.viewport.end_bar,
+                });
+        }
     }
 
     pub fn on_price_axis_wheel(&mut self, dy: f64, dm: u32) {
+        let before_start = self.engine.viewport.start_bar;
+        let before_end = self.engine.viewport.end_bar;
+        let before_price_min = self.engine.viewport.price_min;
+        let before_price_max = self.engine.viewport.price_max;
         let Self {
             interaction,
             engine,
             ..
         } = self;
         interaction.price_axis_wheel(dy, dm, &mut engine.viewport);
+
+        if (before_start - engine.viewport.start_bar).abs() > 1e-9
+            || (before_end - engine.viewport.end_bar).abs() > 1e-9
+            || (before_price_min - engine.viewport.price_min).abs() > 1e-9
+            || (before_price_max - engine.viewport.price_max).abs() > 1e-9
+        {
+            engine
+                .event_bus
+                .emit(raycore::ChartEvent::VisibleRangeChange {
+                    start_bar: engine.viewport.start_bar,
+                    end_bar: engine.viewport.end_bar,
+                });
+        }
     }
 
     pub fn on_time_axis_move(&mut self, x: f64) {
         let (pw, _) = self.layout.pane_css_size();
+        let before_start = self.engine.viewport.start_bar;
+        let before_end = self.engine.viewport.end_bar;
+        let before_price_min = self.engine.viewport.price_min;
+        let before_price_max = self.engine.viewport.price_max;
         let Self {
             interaction,
             engine,
             ..
         } = self;
-        interaction.time_axis_pointer_move(x, pw, &mut engine.viewport, &engine.bars);
+        interaction.time_axis_pointer_move(
+            x,
+            pw,
+            &mut engine.viewport,
+            &engine.bars,
+            engine.time_scale.len(),
+        );
+
+        if (before_start - engine.viewport.start_bar).abs() > 1e-9
+            || (before_end - engine.viewport.end_bar).abs() > 1e-9
+            || (before_price_min - engine.viewport.price_min).abs() > 1e-9
+            || (before_price_max - engine.viewport.price_max).abs() > 1e-9
+        {
+            engine
+                .event_bus
+                .emit(raycore::ChartEvent::VisibleRangeChange {
+                    start_bar: engine.viewport.start_bar,
+                    end_bar: engine.viewport.end_bar,
+                });
+        }
     }
 
     pub fn on_time_axis_wheel(&mut self, x: f64, dy: f64, dm: u32) {
         let (pw, ph) = self.layout.pane_css_size();
+        let before_start = self.engine.viewport.start_bar;
+        let before_end = self.engine.viewport.end_bar;
+        let before_price_min = self.engine.viewport.price_min;
+        let before_price_max = self.engine.viewport.price_max;
         let Self {
             interaction,
             engine,
             ..
         } = self;
-        interaction.time_axis_wheel(x, dy, dm, pw, ph, &mut engine.viewport, &engine.bars);
+        interaction.time_axis_wheel(
+            x,
+            dy,
+            dm,
+            pw,
+            ph,
+            &mut engine.viewport,
+            &engine.bars,
+            engine.time_scale.len(),
+        );
+
+        if (before_start - engine.viewport.start_bar).abs() > 1e-9
+            || (before_end - engine.viewport.end_bar).abs() > 1e-9
+            || (before_price_min - engine.viewport.price_min).abs() > 1e-9
+            || (before_price_max - engine.viewport.price_max).abs() > 1e-9
+        {
+            engine
+                .event_bus
+                .emit(raycore::ChartEvent::VisibleRangeChange {
+                    start_bar: engine.viewport.start_bar,
+                    end_bar: engine.viewport.end_bar,
+                });
+        }
     }
 
     pub fn on_pinch_start(&mut self, cx: f64, cy: f64, distance: f64) {
@@ -1237,6 +1450,10 @@ impl ChartInner {
     }
 
     pub fn on_pinch_update(&mut self, scale: f64) {
+        let before_start = self.engine.viewport.start_bar;
+        let before_end = self.engine.viewport.end_bar;
+        let before_price_min = self.engine.viewport.price_min;
+        let before_price_max = self.engine.viewport.price_max;
         let Self {
             interaction,
             engine,
@@ -1249,7 +1466,21 @@ impl ChartInner {
             zoom_price_with_time,
             &mut engine.viewport,
             &engine.bars,
+            engine.time_scale.len(),
         );
+
+        if (before_start - engine.viewport.start_bar).abs() > 1e-9
+            || (before_end - engine.viewport.end_bar).abs() > 1e-9
+            || (before_price_min - engine.viewport.price_min).abs() > 1e-9
+            || (before_price_max - engine.viewport.price_max).abs() > 1e-9
+        {
+            engine
+                .event_bus
+                .emit(raycore::ChartEvent::VisibleRangeChange {
+                    start_bar: engine.viewport.start_bar,
+                    end_bar: engine.viewport.end_bar,
+                });
+        }
     }
 
     pub fn on_pinch_end(&mut self) {
@@ -1266,12 +1497,33 @@ impl ChartInner {
     }
 
     pub fn on_touch_double_tap(&mut self) {
+        let before_start = self.engine.viewport.start_bar;
+        let before_end = self.engine.viewport.end_bar;
+        let before_price_min = self.engine.viewport.price_min;
+        let before_price_max = self.engine.viewport.price_max;
         let Self {
             interaction,
             engine,
             ..
         } = self;
-        interaction.touch_double_tap(&mut engine.crosshair, &mut engine.viewport, &engine.bars);
+        interaction.touch_double_tap(
+            &mut engine.crosshair,
+            &mut engine.viewport,
+            &engine.bars,
+            engine.time_scale.len(),
+        );
+        if (before_start - engine.viewport.start_bar).abs() > 1e-9
+            || (before_end - engine.viewport.end_bar).abs() > 1e-9
+            || (before_price_min - engine.viewport.price_min).abs() > 1e-9
+            || (before_price_max - engine.viewport.price_max).abs() > 1e-9
+        {
+            engine
+                .event_bus
+                .emit(raycore::ChartEvent::VisibleRangeChange {
+                    start_bar: engine.viewport.start_bar,
+                    end_bar: engine.viewport.end_bar,
+                });
+        }
     }
 
     pub fn cursor_css(&self) -> &'static str {

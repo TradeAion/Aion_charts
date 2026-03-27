@@ -17,7 +17,10 @@ import init, { RayCore } from 'raycore-wasm';
 
 await init();
 
-const chart = await RayCore.create_chart('container', {
+const chartHost = document.getElementById('container');
+if (!chartHost) throw new Error("Missing container element with id 'container'");
+
+const chart = await RayCore.create_chart(chartHost, {
   renderer: 'webgpu',
   autoRender: true,
   theme: 'dark',
@@ -86,7 +89,7 @@ Use the `Exec` button in the demo toolbar to toggle sample execution marks on th
 - 10,000+ candles in a single instanced GPU draw call
 - Sub-millisecond frame times on integrated GPUs
 - Zero GC pressure (no JS objects created per frame)
-- Dirty-flag rendering (skips unchanged frames)
+- Automatic RAF rendering when enabled, with manual `render()` available
 
 ---
 

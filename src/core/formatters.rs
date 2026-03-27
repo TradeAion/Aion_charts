@@ -12,9 +12,9 @@ use wasm_bindgen::prelude::*;
 // ── Price formatting (LWC PriceFormatter) ────────────────────────────────────
 
 /// Format a price value with dynamic decimal precision and grouped thousands.
-/// Keeps a minimum of 2 decimal places in normal price mode.
+/// Precision follows the requested tick step instead of forcing 2 decimals.
 pub fn format_price(v: f64, step: f64) -> String {
-    let d = decimal_precision(step).max(2);
+    let d = decimal_precision(step);
     // LWC uses Unicode minus \u{2212} for negative (same width as +)
     if v < 0.0 {
         format!("\u{2212}{}", format_decimal_grouped(v.abs(), d))
@@ -26,7 +26,7 @@ pub fn format_price(v: f64, step: f64) -> String {
 /// Format a percentage value with sign prefix (+/−).
 /// Used for Percentage price scale mode.
 pub fn format_percent(v: f64, step: f64) -> String {
-    let d = decimal_precision(step).min(2);
+    let d = decimal_precision(step);
     if v < 0.0 {
         format!("\u{2212}{}%", format_decimal_grouped(v.abs(), d))
     } else if v > 0.0 {
@@ -39,7 +39,7 @@ pub fn format_percent(v: f64, step: f64) -> String {
 /// Format an indexed value (for IndexedTo100 mode).
 /// Shows value without % sign, typically around 100.
 pub fn format_indexed(v: f64, step: f64) -> String {
-    let d = decimal_precision(step).min(2);
+    let d = decimal_precision(step);
     if v < 0.0 {
         format!("\u{2212}{}", format_decimal_grouped(v.abs(), d))
     } else {
@@ -163,10 +163,16 @@ pub fn format_qty(qty: f64) -> String {
 
 // ── Time formatting (LWC defaultTickMarkFormatter) ───────────────────────────
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimeAxisLabel {
+    pub text: String,
+    pub major: bool,
+}
+
 /// Format a Unix epoch millisecond timestamp into an axis-appropriate label.
 /// Adapts format based on context, matching LWC's defaultTickMarkFormatter.
 #[cfg(target_arch = "wasm32")]
-pub fn format_timestamp(ms: u64) -> String {
+pub fn format_time_axis_label(ms: u64) -> TimeAxisLabel {
     let date = js_sys::Date::new(&JsValue::from_f64(ms as f64));
     let h = date.get_utc_hours();
     let m = date.get_utc_minutes();
@@ -179,17 +185,32 @@ pub fn format_timestamp(ms: u64) -> String {
     if h == 0 && m == 0 && s == 0 {
         if day == 1 {
             if month == 1 {
-                format!("{}", year)
+                TimeAxisLabel {
+                    text: format!("{}", year),
+                    major: true,
+                }
             } else {
-                format_month_short(month)
+                TimeAxisLabel {
+                    text: format_month_short(month),
+                    major: true,
+                }
             }
         } else {
-            format!("{}", day)
+            TimeAxisLabel {
+                text: format!("{}", day),
+                major: false,
+            }
         }
     } else if s != 0 {
-        format!("{:02}:{:02}:{:02}", h, m, s)
+        TimeAxisLabel {
+            text: format!("{:02}:{:02}:{:02}", h, m, s),
+            major: false,
+        }
     } else {
-        format!("{:02}:{:02}", h, m)
+        TimeAxisLabel {
+            text: format!("{:02}:{:02}", h, m),
+            major: false,
+        }
     }
 }
 
@@ -227,6 +248,19 @@ pub fn format_crosshair_time(ms: u64) -> String {
         format!("{}-{:02}-{:02}", year, month, day)
     } else {
         format!("{}-{:02}-{:02} {:02}:{:02}", year, month, day, h, m)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn format_timestamp(ms: u64) -> String {
+    format_time_axis_label(ms).text
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn format_time_axis_label(ms: u64) -> TimeAxisLabel {
+    TimeAxisLabel {
+        text: format!("{}", ms),
+        major: true,
     }
 }
 
@@ -321,14 +355,14 @@ mod tests {
     use super::format_price;
 
     #[test]
-    fn format_price_adds_grouping_and_min_two_decimals() {
-        assert_eq!(format_price(240.0, 1.0), "240.00");
-        assert_eq!(format_price(58_780.0, 1.0), "58,780.00");
+    fn format_price_follows_step_precision() {
+        assert_eq!(format_price(240.0, 1.0), "240");
+        assert_eq!(format_price(58_780.0, 1.0), "58,780");
     }
 
     #[test]
     fn format_price_preserves_higher_precision_when_needed() {
         assert_eq!(format_price(1.234, 0.001), "1.234");
-        assert_eq!(format_price(-1_234.5, 0.1), "\u{2212}1,234.50");
+        assert_eq!(format_price(-1_234.5, 0.1), "\u{2212}1,234.5");
     }
 }

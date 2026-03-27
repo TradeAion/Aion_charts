@@ -14,6 +14,7 @@ use crate::core::formatters::format_countdown;
 use crate::core::price_line::PriceLineManager;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
+use crate::core::renderer::theme::contrast_text_color;
 use crate::core::renderer::tick_marks::infer_bar_interval_ms;
 use crate::core::renderer::traits::{ChartStyle, CrosshairState, TickMark};
 use crate::core::renderer::value_projection::{
@@ -246,6 +247,25 @@ impl PriceAxisRenderer {
             self.base_ctx.fill_rect(0.0, 0.0, border_size, h);
         }
 
+        if style.axis_border_visible && style.axis_ticks_visible {
+            self.base_ctx
+                .set_fill_style_str(&rgba(&style.axis_border_color));
+            let tick_height = dpr.floor().max(1.0);
+            let tick_length = (style.axis_tick_length as f64 * dpr).round().max(1.0);
+            for t in ticks {
+                let y = t.pixel.round();
+                if y < 0.0 || y > h {
+                    continue;
+                }
+                self.base_ctx.fill_rect(
+                    border_size,
+                    (y - tick_height / 2.0).round(),
+                    tick_length,
+                    tick_height,
+                );
+            }
+        }
+
         // Tick labels — draw in media (CSS) coordinate space for sharp text.
         // LWC pattern: save → scale(dpr,dpr) → draw text with CSS-px font → restore.
         self.base_ctx.save();
@@ -411,8 +431,8 @@ impl PriceAxisRenderer {
         let metrics = RightAxisLabelMetrics::from_style(style, dpr);
 
         let css_font = format!("{}px {}", style.font_size, style.font_family);
-        let text_color = style.crosshair_label_text;
         for (_i, item) in labels.iter().enumerate() {
+            let text_color = contrast_text_color(item.color);
             let price_text_w = self
                 .text_cache
                 .measure(&self.base_ctx, &item.label, &font)
@@ -473,7 +493,7 @@ impl PriceAxisRenderer {
             // LWC: corner radius = 2 * horizontalPixelRatio. Rounded on the outside edge.
 
             draw_right_axis_label_background(&self.base_ctx, &geom, &item.color);
-            draw_right_axis_label_tick(&self.base_ctx, &geom, &item.color, dpr);
+            draw_right_axis_label_tick(&self.base_ctx, &geom, &text_color, dpr);
             draw_right_axis_label_text(
                 &self.base_ctx,
                 &mut self.text_cache,
@@ -581,8 +601,8 @@ impl PriceAxisRenderer {
         resolve_label_overlaps(&mut layout, label_h);
 
         let css_font = format!("{}px {}", style.font_size, style.font_family);
-        let text_color = style.crosshair_label_text;
         for (i, entry) in entries.iter().enumerate() {
+            let text_color = contrast_text_color(entry.color);
             let text_w = self
                 .text_cache
                 .measure(&self.base_ctx, &entry.label, &font)

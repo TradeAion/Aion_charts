@@ -104,8 +104,8 @@ pub enum HitPart {
 ///
 /// For rectangles:
 ///   - Anchor corners → resize cursors (nwse-resize / nesw-resize)
-///   - Edge → pointer
-///   - Body (interior) → default (pass-through to pan)
+///   - Edge → move
+///   - Body (interior) → move
 ///
 /// For trend lines / fib / scale:
 ///   - Anchor → pointer (clickable feel)
@@ -149,8 +149,8 @@ pub fn cursor_for_drawing_hit(
         }
         HitPart::Body => {
             match tool {
-                // Rectangle body: pass through to pan (crosshair = normal chart cursor)
-                DrawingTool::Rectangle => "crosshair",
+                // Rectangle body: move the whole shape.
+                DrawingTool::Rectangle => "move",
                 // Horizontal/vertical lines: move cursor
                 DrawingTool::HorizontalLine => "ns-resize",
                 DrawingTool::VerticalLine => "ew-resize",

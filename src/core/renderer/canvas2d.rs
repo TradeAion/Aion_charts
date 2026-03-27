@@ -348,6 +348,7 @@ impl ChartRenderer for Canvas2DRenderer {
                 let line_width = ctx.main_chart_options.line_width * ctx.v_pixel_ratio as f32;
                 let segments = geometry_generator::generate_line_segments(
                     ctx.bars,
+                    ctx.time_scale,
                     ctx.viewport,
                     ctx.main_chart_options.line_color,
                     line_width,
@@ -360,6 +361,7 @@ impl ChartRenderer for Canvas2DRenderer {
                 let line_width = ctx.main_chart_options.line_width * ctx.v_pixel_ratio as f32;
                 let area_segments = geometry_generator::generate_area_segments(
                     ctx.bars,
+                    ctx.time_scale,
                     ctx.viewport,
                     ctx.main_chart_options.area_top_color,
                     ctx.main_chart_options.area_bottom_color,
@@ -368,6 +370,7 @@ impl ChartRenderer for Canvas2DRenderer {
                 );
                 let line_segments = geometry_generator::generate_main_area_line_segments(
                     ctx.bars,
+                    ctx.time_scale,
                     ctx.viewport,
                     ctx.main_chart_options.line_color,
                     line_width,
@@ -388,6 +391,7 @@ impl ChartRenderer for Canvas2DRenderer {
                     .unwrap_or(ctx.style.wick_bearish_color);
                 let rects = geometry_generator::generate_candle_rects(
                     ctx.bars,
+                    ctx.time_scale,
                     ctx.viewport,
                     ctx.style,
                     bullish_border,
@@ -402,6 +406,7 @@ impl ChartRenderer for Canvas2DRenderer {
             MainChartType::OhlcBars => {
                 let rects = geometry_generator::generate_ohlc_bar_rects(
                     ctx.bars,
+                    ctx.time_scale,
                     ctx.viewport,
                     ctx.style,
                     pane_w,
@@ -414,6 +419,7 @@ impl ChartRenderer for Canvas2DRenderer {
             MainChartType::HeikinAshi => {
                 let rects = geometry_generator::generate_heikin_ashi_rects(
                     ctx.bars,
+                    ctx.time_scale,
                     ctx.viewport,
                     ctx.style,
                     pane_w,
@@ -443,6 +449,7 @@ impl ChartRenderer for Canvas2DRenderer {
                         .unwrap_or(ctx.style.wick_bearish_color);
                     let rects = geometry_generator::generate_candle_rects(
                         ctx.bars,
+                        ctx.time_scale,
                         ctx.viewport,
                         ctx.style,
                         bullish_border,
@@ -473,6 +480,7 @@ impl ChartRenderer for Canvas2DRenderer {
         let pane_h = self.physical_height as f64;
         let vol_rects = geometry_generator::generate_volume_rects(
             ctx.bars,
+            ctx.time_scale,
             ctx.viewport,
             ctx.style,
             pane_w,
@@ -488,15 +496,12 @@ impl ChartRenderer for Canvas2DRenderer {
         let pane_w = self.physical_width as f64;
         let pane_h = self.physical_height as f64;
 
-        // Build timestamps slice for bar-index lookup
-        let ts: Vec<u64> = (0..ctx.bars.len()).map(|i| ctx.bars.timestamp(i)).collect();
-
         // Generate smooth line segments + fill rects for overlays
         let (line_segments, fill_rects) =
             crate::core::renderer::line_generator::generate_all_overlay_geometry(
                 ctx.series,
                 ctx.viewport,
-                &ts,
+                ctx.time_scale.timestamps(),
                 pane_w,
                 pane_h,
                 ctx.h_pixel_ratio,
@@ -511,7 +516,7 @@ impl ChartRenderer for Canvas2DRenderer {
             crate::core::renderer::line_generator::generate_indicator_instruction_commands(
                 ctx.indicator_draw_instructions,
                 ctx.viewport,
-                &ts,
+                ctx.time_scale.timestamps(),
                 pane_w,
                 pane_h,
                 ctx.h_pixel_ratio,
