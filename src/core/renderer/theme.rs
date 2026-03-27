@@ -69,9 +69,9 @@ pub const BORDER_BEARISH: [f32; 4] = [ch(0xD0), ch(0x25), ch(0x33), 1.0];
 /// Grid line color.
 pub const GRID: [f32; 4] = [0.2, 0.2, 0.24, 0.4];
 /// Axis border / tick color.
-pub const AXIS_BORDER: [f32; 4] = [0.2, 0.2, 0.24, 1.0];
+pub const AXIS_BORDER: [f32; 4] = [ch(0x2A), ch(0x2A), ch(0x2A), 1.0];
 /// Axis label text color.
-pub const AXIS_TEXT: [f32; 4] = [0.55, 0.55, 0.6, 1.0];
+pub const AXIS_TEXT: [f32; 4] = [ch(0xF5), ch(0xF5), ch(0xF5), 1.0];
 /// Crosshair line color (LWC: #9598A1).
 pub const CROSSHAIR: [f32; 4] = [ch(0x95), ch(0x98), ch(0xA1), 1.0];
 /// Crosshair label background (LWC: #131722).
@@ -495,8 +495,8 @@ impl ThemeConfig {
                 wick_bullish: WICK_BULLISH,
                 wick_bearish: WICK_BEARISH,
                 grid: [ch(0xE0), ch(0xE3), ch(0xEB), 0.4], // #E0E3EB @ 40%
-                axis_border: [ch(0xE0), ch(0xE3), ch(0xEB), 1.0], // #E0E3EB
-                axis_text: [ch(0x78), ch(0x7B), ch(0x86), 1.0], // #787B86
+                axis_border: [ch(0xF5), ch(0xF5), ch(0xF5), 1.0], // #F5F5F5
+                axis_text: [ch(0x17), ch(0x17), ch(0x17), 1.0], // #171717
             },
             crosshair: ThemeCrosshair {
                 line_color: [ch(0x75), ch(0x86), ch(0x96), 1.0], // #758696
@@ -844,5 +844,19 @@ mod tests {
             legacy.axis_ticks_visible,
             "tick marks should stay enabled by default"
         );
+    }
+
+    #[test]
+    fn axis_palette_matches_requested_presets() {
+        let dark = ThemeConfig::dark();
+        let light = ThemeConfig::light();
+
+        assert_eq!(dark.colors.axis_border, [ch(0x2A), ch(0x2A), ch(0x2A), 1.0]);
+        assert_eq!(dark.colors.axis_text, [ch(0xF5), ch(0xF5), ch(0xF5), 1.0]);
+        assert_eq!(
+            light.colors.axis_border,
+            [ch(0xF5), ch(0xF5), ch(0xF5), 1.0]
+        );
+        assert_eq!(light.colors.axis_text, [ch(0x17), ch(0x17), ch(0x17), 1.0]);
     }
 }

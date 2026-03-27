@@ -613,7 +613,7 @@
         <div class="setting-row">
           <span class="setting-label">Border Color</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-axis-border-color" value="#2a2a30">
+            <input type="color" class="setting-input" id="cfg-axis-border-color" value="#2a2a2a">
           </div>
         </div>
         <div class="setting-row">
@@ -635,7 +635,7 @@
         <div class="setting-row">
           <span class="setting-label">Text Color</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-axis-text-color" value="#787b86">
+            <input type="color" class="setting-input" id="cfg-axis-text-color" value="#f5f5f5">
           </div>
         </div>
         <div class="setting-row">
@@ -729,6 +729,16 @@
     let hudBaseStatus = '';
     let requestedRenderer = 'webgpu';
     let rendererFallbackText = '';
+    const themeLinkedSettings = {
+      dark: {
+        axisBorder: '#2a2a2a',
+        axisText: '#f5f5f5',
+      },
+      light: {
+        axisBorder: '#f5f5f5',
+        axisText: '#171717',
+      },
+    };
     const replaySession = {
       speedBarsPerSecond: 1,
       edgeBehavior: 'auto_pause',
@@ -759,6 +769,12 @@
       const g = parseInt(hex.slice(3, 5), 16) / 255;
       const b = parseInt(hex.slice(5, 7), 16) / 255;
       return [r, g, b, 1.0];
+    }
+
+    function syncThemeLinkedSettings() {
+      const palette = isDark ? themeLinkedSettings.dark : themeLinkedSettings.light;
+      $('cfg-axis-border-color').value = palette.axisBorder;
+      $('cfg-axis-text-color').value = palette.axisText;
     }
 
     function replayStatusSuffix() {
@@ -1095,6 +1111,7 @@
         syncExecutionMarkDisplayToggles();
 
         // Apply initial settings
+        syncThemeLinkedSettings();
         applyAllSettings();
         applyReplaySessionOptions();
         syncReplayControls();
@@ -1250,7 +1267,7 @@
       $('theme-toggle').textContent = isDark ? '☀ Light' : '🌙 Dark';
       if (core) {
         core.apply_options({ theme: isDark ? 'dark' : 'light' });
-        // Preserve user-selected styling values across theme switches.
+        syncThemeLinkedSettings();
         applyAllSettings();
       }
     };
