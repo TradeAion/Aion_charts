@@ -17,6 +17,7 @@
 //!   - Time axis always visible at bottom
 #![allow(dead_code)]
 
+use crate::RenderInvalidation;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, Document, HtmlCanvasElement, HtmlDivElement, MouseEvent};
@@ -346,7 +347,7 @@ pub struct SubPane {
     pub drawings: DrawingManager,
 
     // ── Event closures (prevent GC) ──
-    _closures: Vec<Closure<dyn FnMut(MouseEvent)>>,
+    _closures: Vec<Closure<dyn FnMut(web_sys::Event)>>,
     pub _interaction_closures: Vec<Closure<dyn FnMut(web_sys::Event)>>,
     pub _wheel_closures: Vec<Closure<dyn FnMut(web_sys::WheelEvent)>>,
     pub _touch_closures: Vec<Closure<dyn FnMut(web_sys::TouchEvent)>>,
@@ -368,6 +369,8 @@ impl SubPane {
         dpr: f64,
         _style: &ChartStyle,
         separator_style: &SubPaneSeparatorStyle,
+        separator_drag_cb: Rc<dyn Fn(f64)>,
+        dirty: Rc<RenderInvalidation>,
     ) -> Result<Self, JsValue> {
         let config = IndicatorConfig::for_type(indicator_type);
         let pane_row = grid_row + 1;
@@ -389,7 +392,7 @@ impl SubPane {
         separator.style().set_css_text(&format!(
             "grid-column:1/3;grid-row:{row};\
              height:{line_h:.3}px;background:{bg};\
-             position:relative;z-index:10;",
+             position:relative;z-index:10;cursor:ns-resize;",
             row = grid_row,
             line_h = line_h,
             bg = sep_bg,
@@ -477,19 +480,19 @@ impl SubPane {
         // ── Separator drag ─────────────────────────────────────────────
         let drag_state = Rc::new(RefCell::new(DragState {
             active: false,
-            start_y: 0.0,
-            start_h: initial_height,
+            last_y: 0.0,
         }));
-        let mut closures: Vec<Closure<dyn FnMut(MouseEvent)>> = Vec::new();
+        let mut closures: Vec<Closure<dyn FnMut(web_sys::Event)>> = Vec::new();
 
         // Hover highlight
         {
             let sep = separator.clone();
             let hover_bg = separator_hover_css.clone();
-            let c = Closure::wrap(Box::new(move |_: MouseEvent| {
-                let bg = hover_bg.borrow();
-                let _ = sep.style().set_property("background", bg.as_str());
-            }) as Box<dyn FnMut(MouseEvent)>);
+            let c =
+                Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
+                    let bg = hover_bg.borrow();
+                    let _ = sep.style().set_property("background", bg.as_str());
+                }));
             handle.add_event_listener_with_callback("mouseenter", c.as_ref().unchecked_ref())?;
             closures.push(c);
         }
@@ -497,12 +500,13 @@ impl SubPane {
             let sep = separator.clone();
             let ds = drag_state.clone();
             let base_bg = separator_bg_css.clone();
-            let c = Closure::wrap(Box::new(move |_: MouseEvent| {
-                if !ds.borrow().active {
-                    let bg = base_bg.borrow();
-                    let _ = sep.style().set_property("background", bg.as_str());
-                }
-            }) as Box<dyn FnMut(MouseEvent)>);
+            let c =
+                Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
+                    if !ds.borrow().active {
+                        let bg = base_bg.borrow();
+                        let _ = sep.style().set_property("background", bg.as_str());
+                    }
+                }));
             handle.add_event_listener_with_callback("mouseleave", c.as_ref().unchecked_ref())?;
             closures.push(c);
         }
@@ -511,15 +515,17 @@ impl SubPane {
         {
             let ds = drag_state.clone();
             let ov = drag_overlay.clone();
-            let sh = shared_height.clone();
-            let c = Closure::wrap(Box::new(move |e: MouseEvent| {
-                let mut state = ds.borrow_mut();
-                state.active = true;
-                state.start_y = e.page_y() as f64;
-                state.start_h = sh.get();
-                let _ = ov.style().set_property("display", "block");
-                e.prevent_default();
-            }) as Box<dyn FnMut(MouseEvent)>);
+            let dirty = Rc::clone(&dirty);
+            let c =
+                Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
+                    let e: MouseEvent = e.unchecked_into();
+                    let mut state = ds.borrow_mut();
+                    state.active = true;
+                    state.last_y = e.page_y() as f64;
+                    let _ = ov.style().set_property("display", "block");
+                    dirty.set(true);
+                    e.prevent_default();
+                }));
             handle.add_event_listener_with_callback("mousedown", c.as_ref().unchecked_ref())?;
             closures.push(c);
         }
@@ -527,16 +533,36 @@ impl SubPane {
         // mousemove -> update shared height
         {
             let ds = drag_state.clone();
-            let sh = shared_height.clone();
-            let c = Closure::wrap(Box::new(move |e: MouseEvent| {
-                let state = ds.borrow();
-                if !state.active {
-                    return;
-                }
-                let delta = e.page_y() as f64 - state.start_y;
-                let new_h = (state.start_h - delta).max(MIN_PANE_HEIGHT);
-                sh.set(new_h);
-            }) as Box<dyn FnMut(MouseEvent)>);
+            let ov = drag_overlay.clone();
+            let sep = separator.clone();
+            let base_bg = separator_bg_css.clone();
+            let separator_drag_cb = Rc::clone(&separator_drag_cb);
+            let dirty = Rc::clone(&dirty);
+            let c =
+                Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
+                    let e: MouseEvent = e.unchecked_into();
+                    let mut state = ds.borrow_mut();
+                    if !state.active {
+                        return;
+                    }
+                    if e.buttons() == 0 {
+                        state.active = false;
+                        let _ = ov.style().set_property("display", "none");
+                        let bg = base_bg.borrow();
+                        let _ = sep.style().set_property("background", bg.as_str());
+                        dirty.set(true);
+                        return;
+                    }
+                    let next_y = e.page_y() as f64;
+                    let delta = next_y - state.last_y;
+                    state.last_y = next_y;
+                    drop(state);
+                    if delta.abs() > f64::EPSILON {
+                        separator_drag_cb(delta);
+                    }
+                    dirty.set(true);
+                    e.prevent_default();
+                }));
             drag_overlay
                 .add_event_listener_with_callback("mousemove", c.as_ref().unchecked_ref())?;
             closures.push(c);
@@ -548,13 +574,20 @@ impl SubPane {
             let ov = drag_overlay.clone();
             let sep = separator.clone();
             let base_bg = separator_bg_css.clone();
-            let c = Closure::wrap(Box::new(move |_: MouseEvent| {
-                ds.borrow_mut().active = false;
-                let _ = ov.style().set_property("display", "none");
-                let bg = base_bg.borrow();
-                let _ = sep.style().set_property("background", bg.as_str());
-            }) as Box<dyn FnMut(MouseEvent)>);
+            let dirty = Rc::clone(&dirty);
+            let c =
+                Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
+                    ds.borrow_mut().active = false;
+                    let _ = ov.style().set_property("display", "none");
+                    let bg = base_bg.borrow();
+                    let _ = sep.style().set_property("background", bg.as_str());
+                    dirty.set(true);
+                }));
             drag_overlay.add_event_listener_with_callback("mouseup", c.as_ref().unchecked_ref())?;
+            drag_overlay
+                .add_event_listener_with_callback("pointerup", c.as_ref().unchecked_ref())?;
+            drag_overlay
+                .add_event_listener_with_callback("pointercancel", c.as_ref().unchecked_ref())?;
             closures.push(c);
         }
 
@@ -1292,8 +1325,7 @@ impl SubPane {
 
 struct DragState {
     active: bool,
-    start_y: f64,
-    start_h: f64,
+    last_y: f64,
 }
 
 fn create_canvas(doc: &Document, id: &str, z_index: u32) -> Result<HtmlCanvasElement, JsValue> {

@@ -1938,7 +1938,7 @@ impl RayCore {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
                     let (x, y) = event_css_pos(&pe, &pane_c);
                     let shift_pressed = pe.shift_key();
-                    let ctrl_pressed = pe.ctrl_key();
+                    let ctrl_pressed = pe.ctrl_key() || pe.meta_key();
 
                     // Cancel long-press timer
                     if let Some(tid) = lp_timer.borrow_mut().take() {
@@ -2016,17 +2016,25 @@ impl RayCore {
             let inner = Rc::clone(&inner);
             let pane_c = pane_container_el.clone();
             let grid_can = grid_c.clone();
+            let lp_timer = Rc::clone(&long_press_timer);
+            let lp_cb = Rc::clone(&long_press_cb_handle);
             let dirty = Rc::clone(&dirty);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
                     let (x, y) = event_css_pos(&pe, &pane_c);
                     let shift_pressed = pe.shift_key();
-                    let ctrl_pressed = pe.ctrl_key();
+                    let ctrl_pressed = pe.ctrl_key() || pe.meta_key();
+
+                    if let Some(tid) = lp_timer.borrow_mut().take() {
+                        let _ = web_sys::window().unwrap().clear_timeout_with_handle(tid);
+                    }
+                    *lp_cb.borrow_mut() = None;
+
                     let Ok(mut s) = inner.try_borrow_mut() else {
                         return;
                     };
-                    s.on_pointer_up();
+                    s.on_pointer_cancel();
                     s.on_pane_pointer_move(x, y, shift_pressed, ctrl_pressed);
                     let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
                     let _ = html_el.release_pointer_capture(pe.pointer_id());
@@ -6895,6 +6903,7 @@ impl RayCore {
         height_css: f64,
     ) -> u32 {
         let inner_for_events = Rc::clone(&self.inner);
+        let dirty_for_events = Rc::clone(&self.dirty);
 
         // ── Phase 1: Create sub-pane, extract DOM refs + shared state ──
         let creation_result: Option<(
@@ -6944,6 +6953,26 @@ impl RayCore {
                 } else {
                     height_css
                 };
+                let separator_drag_cb: Rc<dyn Fn(f64)> = {
+                    let inner = Rc::clone(&inner_for_events);
+                    let dirty = Rc::clone(&dirty_for_events);
+                    Rc::new(move |delta_y: f64| {
+                        let Ok(mut s) = inner.try_borrow_mut() else {
+                            return;
+                        };
+                        let Some(separator_idx) = s.pane_coordinator.separator_index(id) else {
+                            return;
+                        };
+                        s.pane_coordinator.drag_separator(separator_idx, delta_y);
+                        let heights = s.pane_coordinator.all_heights();
+                        for (subpane_id, height) in heights {
+                            if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == subpane_id) {
+                                sp.set_height(height);
+                            }
+                        }
+                        dirty.set(true);
+                    })
+                };
 
                 let mut subpane = match SubPane::new(
                     &doc,
@@ -6956,6 +6985,8 @@ impl RayCore {
                     dpr,
                     &s.engine.style,
                     &s.subpane_separator_style,
+                    separator_drag_cb,
+                    Rc::clone(&dirty_for_events),
                 ) {
                     Ok(sp) => sp,
                     Err(e) => {
@@ -7040,6 +7071,7 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner_for_events);
             let ca = crosshair_active.clone();
+            let dirty = Rc::clone(&dirty_for_events);
             let pid = pane_id;
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_: web_sys::Event| {
@@ -7050,6 +7082,7 @@ impl RayCore {
                     };
                     s.engine.crosshair.active = true;
                     s.active_subpane_id = Some(pid);
+                    dirty.set(true);
                 }));
             let _ = chart_el
                 .add_event_listener_with_callback("pointerenter", cb.as_ref().unchecked_ref());
@@ -7061,6 +7094,7 @@ impl RayCore {
             let inner = Rc::clone(&inner_for_events);
             let ca = crosshair_active.clone();
             let drag = sp_drag_active.clone();
+            let dirty = Rc::clone(&dirty_for_events);
             let pid = pane_id;
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_: web_sys::Event| {
@@ -7069,13 +7103,29 @@ impl RayCore {
                     let Ok(mut s) = inner.try_borrow_mut() else {
                         return;
                     };
+                    let mut drawing_gesture_active = false;
                     if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
+                        drawing_gesture_active =
+                            sp.drawings.is_creating()
+                                || sp
+                                    .drawings
+                                    .selected_id
+                                    .and_then(|id| sp.drawings.get(id).map(|d| d.state()))
+                                    .is_some_and(|state| {
+                                        matches!(
+                                        state,
+                                        raycore::core::drawings::types::DrawingState::Dragging {
+                                            ..
+                                        }
+                                    )
+                                    });
                         sp.drawings.clear_hovered();
                     }
-                    if !drag.get() {
+                    if !drag.get() && !drawing_gesture_active {
                         s.engine.crosshair.active = false;
                         s.active_subpane_id = None;
                     }
+                    dirty.set(true);
                 }));
             let _ = chart_el
                 .add_event_listener_with_callback("pointerleave", cb.as_ref().unchecked_ref());
@@ -7096,6 +7146,7 @@ impl RayCore {
             let drag_pmin = sp_drag_start_price_min.clone();
             let drag_pmax = sp_drag_start_price_max.clone();
             let is_touch = sp_is_touch.clone();
+            let dirty = Rc::clone(&dirty_for_events);
             let pid = pane_id;
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
@@ -7136,6 +7187,7 @@ impl RayCore {
                     let main_end_bar = s.engine.viewport.end_bar;
 
                     // Update drawing preview or drag if active
+                    let mut drawing_cursor: Option<&'static str> = None;
                     if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
                         let price = sp.viewport.pixel_to_price(y, ph);
                         let mut is_drawing_drag = false;
@@ -7147,12 +7199,32 @@ impl RayCore {
 
                         // Update drawing drag
                         if let Some(id) = sp.drawings.selected_id {
-                            if matches!(
-                                sp.drawings.get(id).map(|d| d.state()),
-                                Some(raycore::core::drawings::types::DrawingState::Dragging { .. })
-                            ) {
+                            let drag_state = sp.drawings.get(id).map(|d| (d.tool(), d.state()));
+                            if let Some((
+                                tool,
+                                raycore::core::drawings::types::DrawingState::Dragging {
+                                    anchor_index,
+                                    ..
+                                },
+                            )) = drag_state
+                            {
                                 sp.drawings.update_drag(id, bar, price);
                                 is_drawing_drag = true;
+                                let hit_part = match anchor_index {
+                                    Some(i) => raycore::core::drawings::types::HitPart::Anchor(i),
+                                    None => raycore::core::drawings::types::HitPart::Body,
+                                };
+                                let drag_cursor =
+                                    raycore::core::drawings::types::cursor_for_drawing_hit(
+                                        tool,
+                                        hit_part,
+                                        anchor_index,
+                                    );
+                                drawing_cursor = Some(if drag_cursor == "move" {
+                                    "grabbing"
+                                } else {
+                                    drag_cursor
+                                });
                             }
                         }
 
@@ -7168,10 +7240,27 @@ impl RayCore {
                             hybrid_vp.price_max = sp.viewport.price_max;
                             hybrid_vp.volume_height_ratio = 0.0;
 
-                            let hovered_id = sp
-                                .drawings
-                                .hit_test(x, y, &hybrid_vp, pw, ph)
-                                .map(|(id, _)| id);
+                            let hovered_id =
+                                sp.drawings
+                                    .hit_test(x, y, &hybrid_vp, pw, ph)
+                                    .map(|(id, hit)| {
+                                        let anchor_idx = match hit.part {
+                                            raycore::core::drawings::types::HitPart::Anchor(i) => {
+                                                Some(i)
+                                            }
+                                            _ => None,
+                                        };
+                                        if let Some(tool) = sp.drawings.get(id).map(|d| d.tool()) {
+                                            drawing_cursor = Some(
+                                            raycore::core::drawings::types::cursor_for_drawing_hit(
+                                                tool,
+                                                hit.part,
+                                                anchor_idx,
+                                            ),
+                                        );
+                                        }
+                                        id
+                                    });
                             sp.drawings.set_hovered(hovered_id);
                         } else {
                             sp.drawings.clear_hovered();
@@ -7229,7 +7318,12 @@ impl RayCore {
 
                         let html_el: &web_sys::HtmlElement = chart_c.unchecked_ref();
                         let _ = html_el.style().set_property("cursor", "grabbing");
+                    } else {
+                        let cursor = drawing_cursor.unwrap_or("crosshair");
+                        let html_el: &web_sys::HtmlElement = chart_c.unchecked_ref();
+                        let _ = html_el.style().set_property("cursor", cursor);
                     }
+                    dirty.set(true);
                 }));
             let _ = chart_el
                 .add_event_listener_with_callback("pointermove", cb.as_ref().unchecked_ref());
@@ -7248,6 +7342,7 @@ impl RayCore {
             let drag_pmax = sp_drag_start_price_max.clone();
             let chart_c = chart_el.clone();
             let is_touch = sp_is_touch.clone();
+            let dirty = Rc::clone(&dirty_for_events);
             let pid = pane_id;
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
@@ -7293,6 +7388,10 @@ impl RayCore {
                             }
                         }
                         drop(s);
+                        let html_el: &web_sys::HtmlElement = chart_c.unchecked_ref();
+                        let _ = html_el.set_pointer_capture(pe.pointer_id());
+                        let _ = html_el.style().set_property("cursor", "crosshair");
+                        dirty.set(true);
                         return; // Don't pan while creating drawing
                     }
 
@@ -7325,7 +7424,25 @@ impl RayCore {
                             // through their dedicated anchor hits.
                             sp.drawings.select(id);
                             sp.drawings.start_drag(id, anchor_idx, bar, price);
+                            let cursor = sp
+                                .drawings
+                                .get(id)
+                                .map(|d| {
+                                    raycore::core::drawings::types::cursor_for_drawing_hit(
+                                        d.tool(),
+                                        result.part,
+                                        anchor_idx,
+                                    )
+                                })
+                                .unwrap_or("move");
                             drop(s);
+                            let html_el: &web_sys::HtmlElement = chart_c.unchecked_ref();
+                            let _ = html_el.set_pointer_capture(pe.pointer_id());
+                            let _ = html_el.style().set_property(
+                                "cursor",
+                                if cursor == "move" { "grabbing" } else { cursor },
+                            );
+                            dirty.set(true);
                             return; // Don't pan while dragging drawing
                         } else {
                             // Click on empty space: deselect
@@ -7360,6 +7477,7 @@ impl RayCore {
                     // Capture pointer for reliable drag across boundaries
                     let html_el: &web_sys::HtmlElement = chart_c.unchecked_ref();
                     let _ = html_el.set_pointer_capture(pe.pointer_id());
+                    dirty.set(true);
                 }));
             let _ = chart_el
                 .add_event_listener_with_callback("pointerdown", cb.as_ref().unchecked_ref());
@@ -7372,6 +7490,7 @@ impl RayCore {
             let drag = sp_drag_active.clone();
             let chart_c = chart_el.clone();
             let is_touch = sp_is_touch.clone();
+            let dirty = Rc::clone(&dirty_for_events);
             let pid = pane_id;
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
@@ -7390,6 +7509,8 @@ impl RayCore {
                             return;
                         };
                         let bar = s.engine.viewport.pixel_to_bar(x, pw);
+                        let main_start_bar = s.engine.viewport.start_bar;
+                        let main_end_bar = s.engine.viewport.end_bar;
                         if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
                             let price = sp.viewport.pixel_to_price(y, ph);
 
@@ -7402,6 +7523,15 @@ impl RayCore {
                             if let Some(id) = sp.drawings.selected_id {
                                 sp.drawings.end_drag(id);
                             }
+
+                            let mut hybrid_vp = Viewport::new(pw as u32, ph as u32);
+                            hybrid_vp.start_bar = main_start_bar;
+                            hybrid_vp.end_bar = main_end_bar;
+                            hybrid_vp.price_min = sp.viewport.price_min;
+                            hybrid_vp.price_max = sp.viewport.price_max;
+                            hybrid_vp.volume_height_ratio = 0.0;
+                            let hovered = sp.drawings.hit_test(x, y, &hybrid_vp, pw, ph);
+                            sp.drawings.set_hovered(hovered.map(|(id, _)| id));
                         }
                     }
 
@@ -7421,7 +7551,38 @@ impl RayCore {
 
                     let html_el: &web_sys::HtmlElement = chart_c.unchecked_ref();
                     let _ = html_el.release_pointer_capture(pe.pointer_id());
-                    let _ = html_el.style().set_property("cursor", "crosshair");
+                    let cursor = {
+                        let Ok(s) = inner.try_borrow() else {
+                            return;
+                        };
+                        let mut hover_cursor = "crosshair";
+                        let main_start_bar = s.engine.viewport.start_bar;
+                        let main_end_bar = s.engine.viewport.end_bar;
+                        if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == pid) {
+                            let mut hybrid_vp = Viewport::new(pw as u32, ph as u32);
+                            hybrid_vp.start_bar = main_start_bar;
+                            hybrid_vp.end_bar = main_end_bar;
+                            hybrid_vp.price_min = sp.viewport.price_min;
+                            hybrid_vp.price_max = sp.viewport.price_max;
+                            hybrid_vp.volume_height_ratio = 0.0;
+                            if let Some((id, hit)) = sp.drawings.hit_test(x, y, &hybrid_vp, pw, ph)
+                            {
+                                let anchor_idx = match hit.part {
+                                    raycore::core::drawings::types::HitPart::Anchor(i) => Some(i),
+                                    _ => None,
+                                };
+                                if let Some(tool) = sp.drawings.get(id).map(|d| d.tool()) {
+                                    hover_cursor =
+                                        raycore::core::drawings::types::cursor_for_drawing_hit(
+                                            tool, hit.part, anchor_idx,
+                                        );
+                                }
+                            }
+                        }
+                        hover_cursor
+                    };
+                    let _ = html_el.style().set_property("cursor", cursor);
+                    dirty.set(true);
                 }));
             let _ =
                 chart_el.add_event_listener_with_callback("pointerup", cb.as_ref().unchecked_ref());
@@ -7433,6 +7594,7 @@ impl RayCore {
             let inner = Rc::clone(&inner_for_events);
             let drag = sp_drag_active.clone();
             let chart_c = chart_el.clone();
+            let dirty = Rc::clone(&dirty_for_events);
             let pid = pane_id;
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
@@ -7449,22 +7611,61 @@ impl RayCore {
                         let Ok(mut s) = inner.try_borrow_mut() else {
                             return;
                         };
-                        let bar = s.engine.viewport.pixel_to_bar(x, pw);
+                        let main_start_bar = s.engine.viewport.start_bar;
+                        let main_end_bar = s.engine.viewport.end_bar;
                         if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
-                            let price = sp.viewport.pixel_to_price(y, ph);
                             if sp.drawings.is_creating() {
-                                sp.drawings.finalize_creation_step(bar, price);
+                                sp.drawings.cancel_creation();
                             }
                             if let Some(id) = sp.drawings.selected_id {
                                 sp.drawings.end_drag(id);
                             }
+                            let mut hybrid_vp = Viewport::new(pw as u32, ph as u32);
+                            hybrid_vp.start_bar = main_start_bar;
+                            hybrid_vp.end_bar = main_end_bar;
+                            hybrid_vp.price_min = sp.viewport.price_min;
+                            hybrid_vp.price_max = sp.viewport.price_max;
+                            hybrid_vp.volume_height_ratio = 0.0;
+                            let hovered = sp.drawings.hit_test(x, y, &hybrid_vp, pw, ph);
+                            sp.drawings.set_hovered(hovered.map(|(id, _)| id));
                             sp.scroll_state.borrow_mut().animation.stop();
                         }
                     }
 
                     let html_el: &web_sys::HtmlElement = chart_c.unchecked_ref();
                     let _ = html_el.release_pointer_capture(pe.pointer_id());
-                    let _ = html_el.style().set_property("cursor", "crosshair");
+                    let cursor = {
+                        let Ok(s) = inner.try_borrow() else {
+                            return;
+                        };
+                        let mut hover_cursor = "crosshair";
+                        let main_start_bar = s.engine.viewport.start_bar;
+                        let main_end_bar = s.engine.viewport.end_bar;
+                        if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == pid) {
+                            let mut hybrid_vp = Viewport::new(pw as u32, ph as u32);
+                            hybrid_vp.start_bar = main_start_bar;
+                            hybrid_vp.end_bar = main_end_bar;
+                            hybrid_vp.price_min = sp.viewport.price_min;
+                            hybrid_vp.price_max = sp.viewport.price_max;
+                            hybrid_vp.volume_height_ratio = 0.0;
+                            if let Some((id, hit)) = sp.drawings.hit_test(x, y, &hybrid_vp, pw, ph)
+                            {
+                                let anchor_idx = match hit.part {
+                                    raycore::core::drawings::types::HitPart::Anchor(i) => Some(i),
+                                    _ => None,
+                                };
+                                if let Some(tool) = sp.drawings.get(id).map(|d| d.tool()) {
+                                    hover_cursor =
+                                        raycore::core::drawings::types::cursor_for_drawing_hit(
+                                            tool, hit.part, anchor_idx,
+                                        );
+                                }
+                            }
+                        }
+                        hover_cursor
+                    };
+                    let _ = html_el.style().set_property("cursor", cursor);
+                    dirty.set(true);
                 }));
             let _ = chart_el
                 .add_event_listener_with_callback("pointercancel", cb.as_ref().unchecked_ref());
@@ -7475,6 +7676,7 @@ impl RayCore {
         {
             let inner = Rc::clone(&inner_for_events);
             let chart_c = chart_el.clone();
+            let dirty = Rc::clone(&dirty_for_events);
             let cb = Closure::<dyn FnMut(web_sys::WheelEvent)>::wrap(Box::new(
                 move |e: web_sys::WheelEvent| {
                     e.prevent_default();
@@ -7485,6 +7687,7 @@ impl RayCore {
                         return;
                     };
                     s.on_pane_wheel(x, y, e.delta_x(), e.delta_y(), e.delta_mode());
+                    dirty.set(true);
                 },
             ));
             let opts = web_sys::AddEventListenerOptions::new();
@@ -7517,6 +7720,7 @@ impl RayCore {
             let pinch_sb = sp_pinch_start_start_bar.clone();
             let pinch_eb = sp_pinch_start_end_bar.clone();
             let pinch_cx = sp_pinch_center_x.clone();
+            let dirty = Rc::clone(&dirty_for_events);
             let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::wrap(Box::new(
                 move |e: web_sys::TouchEvent| {
                     e.prevent_default();
@@ -7540,6 +7744,7 @@ impl RayCore {
                         let s = inner.borrow();
                         pinch_sb.set(s.engine.viewport.start_bar);
                         pinch_eb.set(s.engine.viewport.end_bar);
+                        dirty.set(true);
                     }
                 },
             ));
@@ -7562,6 +7767,7 @@ impl RayCore {
             let pinch_eb = sp_pinch_start_end_bar.clone();
             let pinch_cx = sp_pinch_center_x.clone();
             let chart_c = chart_el.clone();
+            let dirty = Rc::clone(&dirty_for_events);
             let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::wrap(Box::new(
                 move |e: web_sys::TouchEvent| {
                     e.prevent_default();
@@ -7592,6 +7798,7 @@ impl RayCore {
                         s.engine.viewport.end_bar = new_end;
                         let bar_len = s.engine.bars.len();
                         s.engine.viewport.clamp_to_data(bar_len);
+                        dirty.set(true);
                     }
                 },
             ));
@@ -7608,11 +7815,13 @@ impl RayCore {
         // ── chart: touchend (end pinch) ──
         {
             let pinch = sp_pinch_active.clone();
+            let dirty = Rc::clone(&dirty_for_events);
             let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::wrap(Box::new(
                 move |e: web_sys::TouchEvent| {
                     let touches = e.touches();
                     if touches.length() < 2 {
                         pinch.set(false);
+                        dirty.set(true);
                     }
                 },
             ));
@@ -7629,6 +7838,7 @@ impl RayCore {
         // ── chart: dblclick (reset viewport to default) ──
         {
             let inner = Rc::clone(&inner_for_events);
+            let dirty = Rc::clone(&dirty_for_events);
             let pid = pane_id;
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
@@ -7639,15 +7849,63 @@ impl RayCore {
                         sp.reset_price_viewport();
                         log::info!("SubPane {} viewport reset via double-click", pid);
                     }
+                    dirty.set(true);
                 }));
             let _ =
                 chart_el.add_event_listener_with_callback("dblclick", cb.as_ref().unchecked_ref());
             interaction_closures.push(cb);
         }
 
+        // ── axis: pointerenter ──
+        {
+            let inner = Rc::clone(&inner_for_events);
+            let ca = crosshair_active.clone();
+            let dirty = Rc::clone(&dirty_for_events);
+            let pid = pane_id;
+            let cb =
+                Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
+                    ca.set(true);
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
+                    s.engine.crosshair.active = true;
+                    s.active_subpane_id = Some(pid);
+                    dirty.set(true);
+                }));
+            let _ = axis_el
+                .add_event_listener_with_callback("pointerenter", cb.as_ref().unchecked_ref());
+            interaction_closures.push(cb);
+        }
+
+        // ── axis: pointerleave ──
+        {
+            let inner = Rc::clone(&inner_for_events);
+            let ca = crosshair_active.clone();
+            let drag = sp_drag_active.clone();
+            let adrag = axis_drag_active.clone();
+            let dirty = Rc::clone(&dirty_for_events);
+            let pid = pane_id;
+            let cb =
+                Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
+                    ca.set(false);
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
+                    if !drag.get() && !adrag.get() && s.active_subpane_id == Some(pid) {
+                        s.engine.crosshair.active = false;
+                        s.active_subpane_id = None;
+                    }
+                    dirty.set(true);
+                }));
+            let _ = axis_el
+                .add_event_listener_with_callback("pointerleave", cb.as_ref().unchecked_ref());
+            interaction_closures.push(cb);
+        }
+
         // ── axis: dblclick (toggle auto-scale) ──
         {
             let inner = Rc::clone(&inner_for_events);
+            let dirty = Rc::clone(&dirty_for_events);
             let pid = pane_id;
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
@@ -7658,6 +7916,7 @@ impl RayCore {
                         sp.toggle_auto_scale();
                         log::info!("SubPane {} auto-scale toggled: {}", pid, sp.auto_scale);
                     }
+                    dirty.set(true);
                 }));
             let _ =
                 axis_el.add_event_listener_with_callback("dblclick", cb.as_ref().unchecked_ref());
@@ -7667,6 +7926,7 @@ impl RayCore {
         // ── axis: wheel (zoom sub-pane price range) ──
         {
             let inner = Rc::clone(&inner_for_events);
+            let dirty = Rc::clone(&dirty_for_events);
             let pid = pane_id;
             let cb = Closure::<dyn FnMut(web_sys::WheelEvent)>::wrap(Box::new(
                 move |e: web_sys::WheelEvent| {
@@ -7684,6 +7944,7 @@ impl RayCore {
                         // Lock price axis after manual zoom (same as main chart)
                         sp.viewport.price_locked = true;
                     }
+                    dirty.set(true);
                 },
             ));
             let opts = web_sys::AddEventListenerOptions::new();
@@ -7705,6 +7966,7 @@ impl RayCore {
             let apmin = axis_drag_start_price_min.clone();
             let apmax = axis_drag_start_price_max.clone();
             let axis_c = axis_el.clone();
+            let dirty = Rc::clone(&dirty_for_events);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
@@ -7720,6 +7982,7 @@ impl RayCore {
                     drop(s);
                     let html_el: &web_sys::HtmlElement = axis_c.unchecked_ref();
                     let _ = html_el.set_pointer_capture(pe.pointer_id());
+                    dirty.set(true);
                 }));
             let _ = axis_el
                 .add_event_listener_with_callback("pointerdown", cb.as_ref().unchecked_ref());
@@ -7735,14 +7998,25 @@ impl RayCore {
             let apmin = axis_drag_start_price_min.clone();
             let apmax = axis_drag_start_price_max.clone();
             let axis_c = axis_el.clone();
+            let cy = crosshair_y.clone();
+            let ca = crosshair_active.clone();
+            let dirty = Rc::clone(&dirty_for_events);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
-                    if !adrag.get() {
-                        return;
-                    }
                     let pe: web_sys::PointerEvent = e.unchecked_into();
                     let rect = axis_c.get_bounding_client_rect();
                     let y = pe.client_y() as f64 - rect.top();
+                    cy.set(y);
+                    ca.set(true);
+                    if !adrag.get() {
+                        let Ok(mut s) = inner.try_borrow_mut() else {
+                            return;
+                        };
+                        s.engine.crosshair.active = true;
+                        s.active_subpane_id = Some(pid);
+                        dirty.set(true);
+                        return;
+                    }
                     let css_h = rect.height();
                     if css_h <= 1.0 {
                         return;
@@ -7763,6 +8037,7 @@ impl RayCore {
                         // Lock price axis after manual scaling (same as main chart)
                         sp.viewport.price_locked = true;
                     }
+                    dirty.set(true);
                 }));
             let _ = axis_el
                 .add_event_listener_with_callback("pointermove", cb.as_ref().unchecked_ref());
@@ -7773,15 +8048,35 @@ impl RayCore {
         {
             let adrag = axis_drag_active.clone();
             let axis_c = axis_el.clone();
+            let dirty = Rc::clone(&dirty_for_events);
             let cb =
                 Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
                     adrag.set(false);
                     let html_el: &web_sys::HtmlElement = axis_c.unchecked_ref();
                     let _ = html_el.release_pointer_capture(pe.pointer_id());
+                    dirty.set(true);
                 }));
             let _ =
                 axis_el.add_event_listener_with_callback("pointerup", cb.as_ref().unchecked_ref());
+            interaction_closures.push(cb);
+        }
+
+        // ── axis: pointercancel ──
+        {
+            let adrag = axis_drag_active.clone();
+            let axis_c = axis_el.clone();
+            let dirty = Rc::clone(&dirty_for_events);
+            let cb =
+                Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
+                    let pe: web_sys::PointerEvent = e.unchecked_into();
+                    adrag.set(false);
+                    let html_el: &web_sys::HtmlElement = axis_c.unchecked_ref();
+                    let _ = html_el.release_pointer_capture(pe.pointer_id());
+                    dirty.set(true);
+                }));
+            let _ = axis_el
+                .add_event_listener_with_callback("pointercancel", cb.as_ref().unchecked_ref());
             interaction_closures.push(cb);
         }
 
@@ -7901,6 +8196,8 @@ impl RayCore {
                 sp.set_height(height);
             }
         }
+        drop(s);
+        self.dirty.set(true);
     }
 
     /// Get the number of indicator sub-panes.

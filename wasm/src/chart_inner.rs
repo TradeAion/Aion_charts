@@ -1266,6 +1266,50 @@ impl ChartInner {
         }
     }
 
+    pub fn on_pointer_cancel(&mut self) {
+        if let Some(id) = self.price_line_drag_id.take() {
+            self.engine.price_lines.end_drag(PriceLineId(id));
+            self.interaction.cancel_pointer_gesture();
+            self.interaction.drawing_drag_active = false;
+            self.interaction.set_drawing_cursor(None);
+            self.engine.crosshair.active = false;
+            return;
+        }
+
+        if self.engine.drawings.is_creating() {
+            self.engine.drawings.cancel_creation();
+            self.engine.stamp_drawing_timestamps();
+            self.interaction.cancel_pointer_gesture();
+            self.interaction.drawing_drag_active = false;
+            self.interaction.set_drawing_cursor(None);
+            if !self.interaction.is_touch {
+                self.engine.crosshair.active = true;
+            }
+            return;
+        }
+
+        if let Some(id) = self.engine.drawings.selected_id {
+            if matches!(
+                self.engine.drawings.get(id).map(|d| d.state()),
+                Some(raycore::core::drawings::types::DrawingState::Dragging { .. })
+            ) {
+                self.engine.drawings.end_drag(id);
+                self.engine.stamp_drawing_timestamps();
+                self.interaction.cancel_pointer_gesture();
+                self.interaction.drawing_drag_active = false;
+                self.interaction.set_drawing_cursor(None);
+                if !self.interaction.is_touch {
+                    self.engine.crosshair.active = true;
+                }
+                return;
+            }
+        }
+
+        self.interaction.cancel_pointer_gesture();
+        self.interaction.drawing_drag_active = false;
+        self.interaction.set_drawing_cursor(None);
+    }
+
     pub fn on_pane_wheel(&mut self, x: f64, y: f64, dx: f64, dy: f64, dm: u32) {
         let (pw, ph) = self.layout.pane_css_size();
         let before_start = self.engine.viewport.start_bar;
