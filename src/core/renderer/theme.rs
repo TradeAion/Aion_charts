@@ -49,7 +49,7 @@ pub const fn ch(v: u8) -> f32 {
 // ═════════════════════════════════════════════════════════════════════════════
 
 /// Main chart & axis background.
-pub const BG: [f32; 4] = [ch(0x17), ch(0x17), ch(0x17), 1.0];
+pub const BG: [f32; 4] = [ch(0x13), ch(0x13), ch(0x15), 1.0];
 /// Bullish candle body (#5b9cf6).
 pub const BULLISH: [f32; 4] = [ch(0x35), ch(0x59), ch(0xE9), 1.0];
 /// Bearish candle body (#f7525f).
@@ -71,13 +71,13 @@ pub const GRID: [f32; 4] = [0.2, 0.2, 0.24, 0.4];
 /// Axis border / tick color.
 pub const AXIS_BORDER: [f32; 4] = [ch(0x2A), ch(0x2A), ch(0x2A), 1.0];
 /// Axis label text color.
-pub const AXIS_TEXT: [f32; 4] = [ch(0xF5), ch(0xF5), ch(0xF5), 1.0];
+pub const AXIS_TEXT: [f32; 4] = [ch(0xE7), ch(0xE7), ch(0xE7), 1.0];
 /// Crosshair line color for the dark theme.
 pub const CROSSHAIR: [f32; 4] = [ch(0xEB), ch(0xEB), ch(0xEB), 1.0];
 /// Crosshair label background for the dark theme.
 pub const CROSSHAIR_LABEL_BG: [f32; 4] = [ch(0xEB), ch(0xEB), ch(0xEB), 1.0];
 /// Crosshair label text for the dark theme.
-pub const CROSSHAIR_LABEL_TEXT: [f32; 4] = [ch(0x17), ch(0x17), ch(0x17), 1.0];
+pub const CROSSHAIR_LABEL_TEXT: [f32; 4] = [ch(0x13), ch(0x13), ch(0x15), 1.0];
 /// Font family (LWC default).
 pub const FONT_FAMILY: &str =
     "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
@@ -496,11 +496,11 @@ impl ThemeConfig {
                 wick_bearish: WICK_BEARISH,
                 grid: [ch(0xE0), ch(0xE3), ch(0xEB), 0.4], // #E0E3EB @ 40%
                 axis_border: [ch(0xF5), ch(0xF5), ch(0xF5), 1.0], // #F5F5F5
-                axis_text: [ch(0x17), ch(0x17), ch(0x17), 1.0], // #171717
+                axis_text: [ch(0x13), ch(0x13), ch(0x15), 1.0], // #131315
             },
             crosshair: ThemeCrosshair {
-                line_color: [ch(0x17), ch(0x17), ch(0x17), 1.0], // #171717
-                label_bg: [ch(0x17), ch(0x17), ch(0x17), 1.0],   // #171717
+                line_color: [ch(0x13), ch(0x13), ch(0x15), 1.0], // #131315
+                label_bg: [ch(0x13), ch(0x13), ch(0x15), 1.0],   // #131315
                 label_text: [ch(0xF5), ch(0xF5), ch(0xF5), 1.0], // #F5F5F5
                 line_width: 1.0,
                 line_style: LineStyle::LargeDashed,
@@ -852,12 +852,12 @@ mod tests {
         let light = ThemeConfig::light();
 
         assert_eq!(dark.colors.axis_border, [ch(0x2A), ch(0x2A), ch(0x2A), 1.0]);
-        assert_eq!(dark.colors.axis_text, [ch(0xF5), ch(0xF5), ch(0xF5), 1.0]);
+        assert_eq!(dark.colors.axis_text, [ch(0xE7), ch(0xE7), ch(0xE7), 1.0]);
         assert_eq!(
             light.colors.axis_border,
             [ch(0xF5), ch(0xF5), ch(0xF5), 1.0]
         );
-        assert_eq!(light.colors.axis_text, [ch(0x17), ch(0x17), ch(0x17), 1.0]);
+        assert_eq!(light.colors.axis_text, [ch(0x13), ch(0x13), ch(0x15), 1.0]);
         assert_eq!(
             dark.crosshair.line_color,
             [ch(0xEB), ch(0xEB), ch(0xEB), 1.0]
@@ -865,15 +865,15 @@ mod tests {
         assert_eq!(dark.crosshair.label_bg, [ch(0xEB), ch(0xEB), ch(0xEB), 1.0]);
         assert_eq!(
             dark.crosshair.label_text,
-            [ch(0x17), ch(0x17), ch(0x17), 1.0]
+            [ch(0x13), ch(0x13), ch(0x15), 1.0]
         );
         assert_eq!(
             light.crosshair.line_color,
-            [ch(0x17), ch(0x17), ch(0x17), 1.0]
+            [ch(0x13), ch(0x13), ch(0x15), 1.0]
         );
         assert_eq!(
             light.crosshair.label_bg,
-            [ch(0x17), ch(0x17), ch(0x17), 1.0]
+            [ch(0x13), ch(0x13), ch(0x15), 1.0]
         );
         assert_eq!(
             light.crosshair.label_text,

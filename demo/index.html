@@ -517,7 +517,7 @@
         <div class="setting-row">
           <span class="setting-label">Label Text</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-crosshair-label-text" value="#171717">
+            <input type="color" class="setting-input" id="cfg-crosshair-label-text" value="#131315">
           </div>
         </div>
         <div class="setting-row">
@@ -635,7 +635,7 @@
         <div class="setting-row">
           <span class="setting-label">Text Color</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-axis-text-color" value="#f5f5f5">
+            <input type="color" class="setting-input" id="cfg-axis-text-color" value="#e7e7e7">
           </div>
         </div>
         <div class="setting-row">
@@ -731,17 +731,19 @@
     let rendererFallbackText = '';
     const themeLinkedSettings = {
       dark: {
+        background: '#131315',
         axisBorder: '#2a2a2a',
-        axisText: '#f5f5f5',
+        axisText: '#e7e7e7',
         crosshair: '#ebebeb',
         crosshairLabelBg: '#ebebeb',
-        crosshairLabelText: '#171717',
+        crosshairLabelText: '#131315',
       },
       light: {
+        background: '#ffffff',
         axisBorder: '#f5f5f5',
-        axisText: '#171717',
-        crosshair: '#171717',
-        crosshairLabelBg: '#171717',
+        axisText: '#131315',
+        crosshair: '#131315',
+        crosshairLabelBg: '#131315',
         crosshairLabelText: '#f5f5f5',
       },
     };
@@ -784,6 +786,13 @@
       $('cfg-crosshair-color').value = palette.crosshair;
       $('cfg-crosshair-label-bg').value = palette.crosshairLabelBg;
       $('cfg-crosshair-label-text').value = palette.crosshairLabelText;
+    }
+
+    function applyThemePreviewOverrides() {
+      if (!core) return;
+      const palette = isDark ? themeLinkedSettings.dark : themeLinkedSettings.light;
+      const bg = hexToRgba(palette.background);
+      core.set_background_color(bg[0], bg[1], bg[2], bg[3]);
     }
 
     function replayStatusSuffix() {
@@ -1122,6 +1131,7 @@
         // Apply initial settings
         syncThemeLinkedSettings();
         applyAllSettings();
+        applyThemePreviewOverrides();
         applyReplaySessionOptions();
         syncReplayControls();
         applyDemoExecutionMarks();
@@ -1278,6 +1288,7 @@
         core.apply_options({ theme: isDark ? 'dark' : 'light' });
         syncThemeLinkedSettings();
         applyAllSettings();
+        applyThemePreviewOverrides();
       }
     };
 

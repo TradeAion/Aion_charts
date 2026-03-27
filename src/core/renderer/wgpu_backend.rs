@@ -596,7 +596,7 @@ impl ChartRenderer for WgpuRenderer {
                 label: Some("raycore_encoder"),
             });
         // Cache the theme bg_color as a wgpu::Color for all LoadOp::Clear calls this frame.
-        // Previously this was hardcoded to 0.09020 (#171717 dark) — now it always matches
+        // Previously this was hardcoded to 0.09020 (#131315 dark) — now it always matches
         // the active theme so light/custom themes clear correctly.
         let bg = &ctx.style.bg_color;
         let bg_color = wgpu::Color {
