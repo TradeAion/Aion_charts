@@ -58,14 +58,14 @@ pub const BEARISH: [f32; 4] = [ch(0xF2), ch(0x07), ch(0x51), 1.0];
 pub const BULLISH_VOLUME: [f32; 4] = [ch(0x00), ch(0xB5), ch(0x62), 0.35];
 /// Bearish volume.
 pub const BEARISH_VOLUME: [f32; 4] = [ch(0xF2), ch(0x07), ch(0x51), 0.35];
-/// Bullish wick/border (#1DAF61).
-pub const WICK_BULLISH: [f32; 4] = [ch(0x1D), ch(0xAF), ch(0x61), 1.0];
+/// Bullish wick (#00B562), matching the body fill.
+pub const WICK_BULLISH: [f32; 4] = [ch(0x00), ch(0xB5), ch(0x62), 1.0];
 /// Bearish wick (#F20751), matching the body fill.
 pub const WICK_BEARISH: [f32; 4] = [ch(0xF2), ch(0x07), ch(0x51), 1.0];
-/// Bullish candle border (#1DAF61).
-pub const BORDER_BULLISH: [f32; 4] = [ch(0x1D), ch(0xAF), ch(0x61), 1.0];
-/// Bearish candle border (#4D011A), pushed very dark for clear edge contrast.
-pub const BORDER_BEARISH: [f32; 4] = [ch(0x4D), ch(0x01), ch(0x1A), 1.0];
+/// Bullish candle border (#008045).
+pub const BORDER_BULLISH: [f32; 4] = [ch(0x00), ch(0x80), ch(0x45), 1.0];
+/// Bearish candle border (#89002B).
+pub const BORDER_BEARISH: [f32; 4] = [ch(0x89), ch(0x00), ch(0x2B), 1.0];
 /// Grid line color.
 pub const GRID: [f32; 4] = [0.2, 0.2, 0.24, 0.4];
 /// Axis border / tick color.
@@ -653,6 +653,12 @@ impl ThemeConfig {
     /// Returns `(up_color, down_color)`.
     pub fn chart_type_colors(&self) -> ([f32; 4], [f32; 4]) {
         (self.colors.bullish, self.colors.bearish)
+    }
+
+    /// Get the main chart border colors for candlestick/OHLC chart types.
+    /// Returns `(up_border_color, down_border_color)`.
+    pub fn chart_type_border_colors(&self) -> ([f32; 4], [f32; 4]) {
+        (BORDER_BULLISH, BORDER_BEARISH)
     }
 
     /// Convert an RGBA [f32; 4] color to a CSS `rgba(...)` string.

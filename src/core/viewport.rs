@@ -359,7 +359,7 @@ impl Viewport {
 
     #[inline]
     pub fn pixel_to_bar(&self, x_px: f64, chart_width_px: f64) -> f64 {
-        let frac = x_px / chart_width_px;
+        let frac = (x_px + 1.0) / chart_width_px;
         self.start_bar + frac * (self.end_bar - self.start_bar)
     }
 
@@ -417,7 +417,7 @@ impl Viewport {
     #[inline]
     pub fn bar_center_css(&self, idx: usize, pane_css_w: f64) -> f64 {
         let frac = (idx as f64 + 0.5 - self.start_bar) / (self.end_bar - self.start_bar);
-        (frac * pane_css_w).clamp(0.0, pane_css_w)
+        (frac * pane_css_w - 1.0).clamp(0.0, pane_css_w)
     }
 
     /// Fraction of pane height used for the candle area (1.0 − volume_height_ratio).
@@ -594,6 +594,25 @@ mod tests {
         let y_high = vp.price_to_css_y(200.0, 600.0);
 
         assert!(y_high < y_low); // High price = lower Y
+    }
+
+    #[test]
+    fn test_bar_center_css_matches_lwc_coordinate_bias() {
+        let mut vp = Viewport::new(1000, 600);
+        vp.set_range(10.0, 110.0);
+
+        assert!((vp.bar_center_css(10, 1000.0) - 4.0).abs() < 1e-9);
+        assert!((vp.bar_center_css(11, 1000.0) - 14.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_pixel_to_bar_tracks_shifted_slot_projection() {
+        let mut vp = Viewport::new(1000, 600);
+        vp.set_range(10.0, 110.0);
+
+        assert!((vp.pixel_to_bar(4.0, 1000.0) - 10.5).abs() < 1e-9);
+        assert_eq!(vp.bar_index_at_pixel(4.0, 1000.0, 200), Some(10));
+        assert_eq!(vp.bar_index_for_crosshair(4.0, 1000.0), Some(10));
     }
 
     // ── Zoom operations ──

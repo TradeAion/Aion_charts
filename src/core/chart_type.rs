@@ -147,13 +147,13 @@ impl Default for MainChartOptions {
     fn default() -> Self {
         let theme = crate::core::renderer::theme::ThemeConfig::default();
         let (up, down) = theme.chart_type_colors();
+        let (up_border, down_border) = theme.chart_type_border_colors();
         Self {
             chart_type: MainChartType::Candlestick,
             up_color: up,
             down_color: down,
-            // LWC default: candle borders inherit the candle fill color.
-            up_border_color: Some(up),
-            down_border_color: Some(down),
+            up_border_color: Some(up_border),
+            down_border_color: Some(down_border),
             border_visible: true,
             wick_visible: true,
             // Line/Area defaults

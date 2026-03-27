@@ -263,6 +263,8 @@ fn push_inner_border(
 /// Values are in physical pixels, using LWC-style inclusive body/wick ends.
 #[derive(Debug, Clone, Copy)]
 pub struct ProjectedCandle {
+    pub body_left: f64,
+    pub body_width: f64,
     pub bar_left: f64,
     pub bar_width: f64,
     pub wick_left: f64,
@@ -320,8 +322,12 @@ pub fn project_candles(
         prev_wick_right = Some(wick_right);
 
         // Body X edges with anti-overlap clamp.
-        let mut bar_left = center_x - half_bar;
-        let bar_right = bar_left + sizing.bar_width - 1.0;
+        let body_left = center_x - half_bar;
+        let body_right = body_left + sizing.bar_width - 1.0;
+        let body_width = (body_right - body_left + 1.0).max(1.0);
+
+        let mut bar_left = body_left;
+        let bar_right = body_right;
         if let Some(prev) = prev_bar_right {
             bar_left = bar_left.max(prev + 1.0).min(bar_right);
         }
@@ -329,6 +335,8 @@ pub fn project_candles(
         prev_bar_right = Some(bar_right);
 
         projected.push(ProjectedCandle {
+            body_left,
+            body_width,
             bar_left,
             bar_width,
             wick_left,
@@ -441,8 +449,8 @@ fn generate_candles_into(
                 color4(&style.bearish_color)
             };
 
-            let right = c.bar_left + c.bar_width - 1.0;
-            let bl = c.bar_left + sizing.border_width;
+            let right = c.body_left + c.body_width - 1.0;
+            let bl = c.body_left + sizing.border_width;
             let bt = c.body_top + sizing.border_width;
             let br_x = right - sizing.border_width;
             let bb_y = c.body_bottom - sizing.border_width;
@@ -1178,5 +1186,82 @@ fn generate_heikin_ashi_into(
 
         prev_ha_open = ha_open;
         prev_ha_close = ha_close;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::project_candles;
+    use crate::core::data::{Bar, BarArray};
+    use crate::core::renderer::series::CandleSizing;
+    use crate::core::renderer::value_projection::TimeScaleIndex;
+    use crate::core::viewport::Viewport;
+
+    fn sample_bars() -> BarArray {
+        let mut bars = BarArray::new();
+        bars.set(vec![
+            Bar {
+                timestamp: 1,
+                open: 10.0,
+                high: 11.0,
+                low: 9.0,
+                close: 10.5,
+                volume: 100.0,
+                _pad: 0.0,
+            },
+            Bar {
+                timestamp: 2,
+                open: 10.5,
+                high: 11.5,
+                low: 10.0,
+                close: 11.0,
+                volume: 120.0,
+                _pad: 0.0,
+            },
+            Bar {
+                timestamp: 3,
+                open: 11.0,
+                high: 11.4,
+                low: 10.4,
+                close: 10.8,
+                volume: 90.0,
+                _pad: 0.0,
+            },
+            Bar {
+                timestamp: 4,
+                open: 10.8,
+                high: 11.2,
+                low: 10.2,
+                close: 10.6,
+                volume: 80.0,
+                _pad: 0.0,
+            },
+        ])
+        .expect("sample bars");
+        bars
+    }
+
+    #[test]
+    fn body_width_stays_unclamped_when_border_rect_is_narrowed() {
+        let bars = sample_bars();
+        let time_scale = TimeScaleIndex::from_bars(&bars);
+        let mut viewport = Viewport::new(8, 200);
+        viewport.volume_height_ratio = 0.0;
+        viewport.set_range(0.0, 3.1);
+        viewport.price_min = 9.0;
+        viewport.price_max = 12.0;
+
+        let sizing = CandleSizing::compute_from_pane(8.0, &viewport, 1.0, 1.0);
+        let projected = project_candles(&bars, &time_scale, &viewport, 8.0, 200.0, &sizing);
+
+        assert_eq!(sizing.bar_width, 3.0);
+        assert_eq!(projected.len(), 4);
+
+        let overlapped = projected
+            .iter()
+            .find(|c| c.bar_width < c.body_width)
+            .expect("expected at least one overlap-clamped border rect");
+        assert_eq!(overlapped.body_width, 3.0);
+        assert_eq!(overlapped.bar_width, 2.0);
     }
 }
