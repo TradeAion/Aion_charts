@@ -675,6 +675,39 @@ impl ChartEngine {
         Ok(())
     }
 
+    /// Replace all bar data while preserving the current viewport state.
+    ///
+    /// This is used by replay trim flows, which need a full data/time-scale
+    /// rebuild without snapping the user back to the default recent viewport.
+    pub fn set_data_preserving_viewport(&mut self, bars: Vec<Bar>) -> Result<(), String> {
+        let vp_start = self.viewport.start_bar;
+        let vp_end = self.viewport.end_bar;
+        let vp_price_min = self.viewport.price_min;
+        let vp_price_max = self.viewport.price_max;
+        let vp_price_locked = self.viewport.price_locked;
+        let vp_auto_scroll = self.viewport.auto_scroll;
+
+        self.replace_main_bars(bars)?;
+
+        self.viewport.start_bar = vp_start;
+        self.viewport.end_bar = vp_end;
+        self.viewport.price_locked = vp_price_locked;
+        self.viewport.auto_scroll = vp_auto_scroll;
+        self.viewport.clamp_to_data(self.bars.len());
+
+        if self.viewport.price_locked {
+            self.viewport.price_min = vp_price_min;
+            self.viewport.price_max = vp_price_max;
+            self.viewport.price_invalidated = true;
+        } else if self.auto_fit_price_for_current_chart_impl(false) {
+            self.viewport.price_invalidated = false;
+        } else {
+            self.viewport.price_invalidated = true;
+        }
+
+        Ok(())
+    }
+
     /// Replace all bar data and footprint data in one operation.
     ///
     /// Footprint levels are expected to be indexed against the provided `bars`.
@@ -2967,5 +3000,30 @@ mod tests {
             y_top > 0.0,
             "footprint top extension should not initialize clipped at the pane top"
         );
+    }
+
+    #[test]
+    fn set_data_preserving_viewport_rebuilds_time_scale_for_trimmed_data() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        let bars: Vec<Bar> = (0..8).map(|i| mk_bar(1_000 + i * 1_000)).collect();
+        engine.set_data(bars).unwrap();
+        engine.viewport.set_range(2.0, 10.0);
+        engine.viewport.price_locked = false;
+
+        engine
+            .set_data_preserving_viewport(vec![mk_bar(1_000)])
+            .unwrap();
+
+        assert_eq!(engine.bars.len(), 1);
+        assert_eq!(engine.time_scale.main_bar_len(), 1);
+        assert!(
+            engine.viewport.end_bar > engine.viewport.start_bar,
+            "trimmed replay viewport should remain a valid range, got start={} end={}",
+            engine.viewport.start_bar,
+            engine.viewport.end_bar
+        );
+
+        let time_scale = engine.time_scale.clone();
+        engine.render(&time_scale, &[], &[], &[]).unwrap();
     }
 }

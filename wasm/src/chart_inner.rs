@@ -427,50 +427,25 @@ impl ChartInner {
             .collect()
     }
 
-    fn replay_apply_bars_preserve_viewport(&mut self, bars: Vec<Bar>) {
-        let vp_start = self.engine.viewport.start_bar;
-        let vp_end = self.engine.viewport.end_bar;
-        let vp_price_min = self.engine.viewport.price_min;
-        let vp_price_max = self.engine.viewport.price_max;
-        let vp_price_locked = self.engine.viewport.price_locked;
-        let vp_auto_scroll = self.engine.viewport.auto_scroll;
+    fn replay_apply_bars_preserve_viewport(&mut self, bars: Vec<Bar>) -> Result<(), String> {
         let crosshair_bar_index = self.engine.crosshair.bar_index;
 
-        self.engine
-            .bars
-            .set(bars)
-            .expect("replay bars should already be finite and ordered");
-        self.engine.studies.update_studies(&self.engine.bars);
-        self.engine.indicators.on_set_data(&self.engine.bars);
-
-        self.engine.viewport.start_bar = vp_start;
-        self.engine.viewport.end_bar = vp_end;
-        self.engine.viewport.price_locked = vp_price_locked;
-        self.engine.viewport.auto_scroll = vp_auto_scroll;
-        self.engine.viewport.clamp_to_data(self.engine.bars.len());
-
-        if self.engine.viewport.price_locked {
-            self.engine.viewport.price_min = vp_price_min;
-            self.engine.viewport.price_max = vp_price_max;
-        } else {
-            self.engine.viewport.auto_fit_price(&self.engine.bars);
-        }
+        self.engine.set_data_preserving_viewport(bars)?;
 
         self.engine.crosshair.bar_index =
             crosshair_bar_index.filter(|&idx| idx < self.engine.bars.len());
+        Ok(())
     }
 
     fn replay_apply_cutoff_to_engine(&mut self) -> Result<(), String> {
         if self.replay_archive.is_empty() || self.replay_cutoff_index.is_none() {
-            self.replay_apply_bars_preserve_viewport(Vec::new());
-            return Ok(());
+            return self.replay_apply_bars_preserve_viewport(Vec::new());
         }
 
         let max_idx = self.replay_archive.len() - 1;
         let cutoff = self.replay_cutoff_index.unwrap_or(max_idx).min(max_idx);
         self.replay_cutoff_index = Some(cutoff);
-        self.replay_apply_bars_preserve_viewport(self.replay_archive[..=cutoff].to_vec());
-        Ok(())
+        self.replay_apply_bars_preserve_viewport(self.replay_archive[..=cutoff].to_vec())
     }
 
     fn replay_validate_append_timestamp(
