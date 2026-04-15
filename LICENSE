@@ -1,41 +1,46 @@
-AxiusCharts Proprietary License
-Copyright (c) 2024-2026 AxiusCharts (https://github.com/Axiusflow/Axius_charts/). All rights reserved.
+AXIUSFLOW PROPRIETARY LICENSE
+Copyright (c) 2024-2026 AxiusFlow. All rights reserved.
 
-NOTICE: This software and all associated source code, shaders, documentation,
-compiled binaries, and assets (collectively, the "Software") are the exclusive
-intellectual property of AxiusCharts (https://github.com/Axiusflow/Axius_charts/).
+This repository and all associated source code, shaders, documentation, builds,
+and assets (collectively, the "Software"), including the AxiusCharts library,
+are proprietary intellectual property of AxiusFlow.
 
-RESTRICTIONS — You may NOT, under any circumstances:
+NO PUBLIC LICENSE GRANTED
+No license or right is granted to any person or organization to use, copy,
+modify, merge, publish, distribute, sublicense, sell, or create derivative
+works from the Software unless expressly authorized by AxiusFlow in writing.
 
-1. COPY, reproduce, or duplicate any part of the Software, in whole or in part.
-2. MODIFY, adapt, translate, reverse-engineer, decompile, or disassemble the
-   Software.
-3. DISTRIBUTE, publish, sublicense, lease, rent, loan, or otherwise transfer
-   the Software or any derivative works to any third party.
-4. USE the Software, in whole or in part, for any commercial, personal,
-   educational, or other purpose without prior written authorization from
-   AxiusCharts.
-5. INCORPORATE any portion of the Software into another product, library,
-   framework, or service.
-6. CREATE derivative works based on the Software.
-7. REMOVE or alter any proprietary notices, labels, trademarks, or branding
-   contained in the Software.
-8. CLAIM ownership, authorship, or credit for any part of the Software.
+AUTHORIZED ACCESS
+Access to this private repository does not by itself grant permission to use
+the Software beyond the scope of written authorization from AxiusFlow.
+Employees, contractors, and partners may use the Software only as explicitly
+permitted by their agreement with AxiusFlow.
 
-NO LICENSE IS GRANTED — Viewing this repository does NOT grant you any license,
-implied or otherwise, to use, copy, modify, or distribute the Software.
+RESTRICTIONS
+Without prior written permission from AxiusFlow, you may not:
+1. Reproduce, copy, or redistribute any part of the Software.
+2. Modify, adapt, reverse-engineer, decompile, or disassemble the Software,
+   except where and only to the extent required by applicable law.
+3. Create derivative works from the Software.
+4. Remove or alter proprietary notices, trademarks, or branding.
+5. Claim ownership, authorship, or rights in the Software.
 
-ENFORCEMENT — Any unauthorized use, reproduction, or distribution of the
-Software will be pursued to the fullest extent of applicable law, including
-but not limited to civil damages and criminal penalties under copyright,
-trade secret, and intellectual property statutes.
+CONFIDENTIALITY
+To the extent the Software is not publicly disclosed by AxiusFlow, it is
+confidential. Any unauthorized disclosure is prohibited.
 
-ATTRIBUTION — This library is the original creation of AxiusCharts
-(https://github.com/Axiusflow/Axius_charts/). All credit for the design, architecture, and
-implementation belongs solely to AxiusCharts.
+OWNERSHIP
+All rights, title, and interest in and to the Software remain exclusively with
+AxiusFlow.
 
-FOR PERMISSIONS — Contact https://github.com/Axiusflow/Axius_charts/ for licensing inquiries.
-
+DISCLAIMER
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED. IN NO EVENT SHALL AXIUSCHARTS BE LIABLE FOR ANY CLAIM, DAMAGES, OR
-OTHER LIABILITY ARISING FROM THE USE OR INABILITY TO USE THE SOFTWARE.
+IMPLIED, INCLUDING BUT NOT LIMITED TO MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+LIMITATION OF LIABILITY
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, AXIUSFLOW SHALL NOT BE LIABLE FOR ANY
+CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM OR RELATED TO THE SOFTWARE.
+
+PERMISSIONS
+For licensing or permission requests, contact AxiusFlow directly.

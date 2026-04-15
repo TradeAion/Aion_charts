@@ -2,7 +2,7 @@
 
 **High-performance WebGPU/Canvas2D charting engine built in Rust + WASM.**
 
-Created by [AxiusCharts](https://github.com/Axiusflow/Axius_charts/)
+Created by [AxiusFlow](https://github.com/Axiusflow)
 
 ---
 
@@ -97,4 +97,4 @@ Use the `Exec` button in the demo toolbar to toggle sample execution marks on th
 
 Proprietary. All rights reserved. See [LICENSE](./LICENSE).
 
-*Built by [AxiusCharts](https://github.com/Axiusflow/Axius_charts/)*
+*Built by [AxiusFlow](https://github.com/Axiusflow)*
