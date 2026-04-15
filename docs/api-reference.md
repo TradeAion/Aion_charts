@@ -1,12 +1,12 @@
 # API Reference
 
-Complete reference for the RayCore WASM public API.
+Complete reference for the AxiusCharts WASM public API.
 
 ---
 
 ## Lifecycle
 
-### `RayCore.create_chart(container, options)`
+### `AxiusCharts.create_chart(container, options)`
 
 Create a new chart instance.
 
@@ -14,7 +14,7 @@ Create a new chart instance.
 static create_chart(
   container: HTMLElement | string,
   options?: CreateChartOptions
-): Promise<RayCore>
+): Promise<AxiusCharts>
 ```
 
 **Parameters:**
@@ -342,9 +342,9 @@ Persist and restore full chart state (recommended):
 
 ```ts
 const snapshot = chart.export_persistence_state('workspace-main');
-localStorage.setItem('raycore.chart-state', snapshot);
+localStorage.setItem('axiuscharts.chart-state', snapshot);
 
-const saved = localStorage.getItem('raycore.chart-state');
+const saved = localStorage.getItem('axiuscharts.chart-state');
 if (saved) chart.import_persistence_state(saved);
 ```
 
@@ -356,9 +356,9 @@ Persist and restore drawings only (legacy/partial snapshot).
 
 ```ts
 const snapshot = chart.export_drawings();
-localStorage.setItem('raycore.drawings', snapshot);
+localStorage.setItem('axiuscharts.drawings', snapshot);
 
-const saved = localStorage.getItem('raycore.drawings');
+const saved = localStorage.getItem('axiuscharts.drawings');
 if (saved) chart.import_drawings(saved);
 ```
 
@@ -695,7 +695,7 @@ ws.split_active('vertical');
 
 ## Static Methods
 
-### `RayCore.get_supported_renderers()`
+### `AxiusCharts.get_supported_renderers()`
 
 Returns `['webgpu', 'canvas2d']` or `['canvas2d']` depending on browser support.
 

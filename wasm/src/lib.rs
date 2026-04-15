@@ -1,4 +1,4 @@
-//! RayCore WASM bindings — LWC-style widget-based chart library.
+//! AxiusCharts WASM bindings — LWC-style widget-based chart library.
 //!
 //! Architecture (matches LWC):
 //!   - WidgetLayout creates CSS-grid DOM: [pane|price_axis] / [time_axis]
@@ -7,7 +7,7 @@
 //!   - ChartEngine renders the pane only; axis renderers are separate
 //!
 //! Public WASM API:
-//!   RayCore.create_chart(container, options)  → sets up everything, attaches all events
+//!   AxiusCharts.create_chart(container, options)  → sets up everything, attaches all events
 //!   core.set_data_arrays(open, high, ...)     → load bar data
 //!   core.render()                             → draw one frame (call from RAF)
 //!   core.dispose()                            → detach events, cleanup
@@ -17,7 +17,7 @@
 //!   - canvas_manager: DOM layout and canvas management (WidgetLayout)
 //!   - subpane: Indicator subpane management
 
-use raycore::{
+use axiuscharts::{
     generate_footprint_sample_data, generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions,
     BaselineSeriesOptions, Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup,
     ChartPaneId, ChartStyle, CrosshairMagnetMode, CrosshairSnapshot, DataRange, GpuContext,
@@ -98,7 +98,7 @@ fn emit_visible_range_change(engine: &mut ChartEngine) {
     let end_bar = engine.viewport.end_bar;
     engine
         .event_bus
-        .emit(raycore::ChartEvent::VisibleRangeChange { start_bar, end_bar });
+        .emit(axiuscharts::ChartEvent::VisibleRangeChange { start_bar, end_bar });
 }
 
 fn reset_main_viewport_and_emit(engine: &mut ChartEngine, mode: Option<&str>) {
@@ -377,7 +377,7 @@ fn request_auto_render_frame_if_needed(dirty: &Rc<RenderInvalidation>) {
 
 fn with_crosshair_lines_mut<F>(style: &mut ChartStyle, target: &str, mut f: F)
 where
-    F: FnMut(&mut raycore::core::renderer::traits::CrosshairLineStyle),
+    F: FnMut(&mut axiuscharts::core::renderer::traits::CrosshairLineStyle),
 {
     match target {
         "vert" | "vertical" => f(&mut style.crosshair_vert_line),
@@ -389,20 +389,20 @@ where
     }
 }
 
-fn parse_crosshair_mode(mode: &str) -> raycore::CrosshairMode {
+fn parse_crosshair_mode(mode: &str) -> axiuscharts::CrosshairMode {
     match mode {
-        "normal" => raycore::CrosshairMode::Normal,
-        "magnet_ohlc" | "ohlc" => raycore::CrosshairMode::MagnetOHLC,
-        "magnet" => raycore::CrosshairMode::Magnet,
-        _ => raycore::CrosshairMode::Normal,
+        "normal" => axiuscharts::CrosshairMode::Normal,
+        "magnet_ohlc" | "ohlc" => axiuscharts::CrosshairMode::MagnetOHLC,
+        "magnet" => axiuscharts::CrosshairMode::Magnet,
+        _ => axiuscharts::CrosshairMode::Normal,
     }
 }
 
-fn crosshair_mode_key(mode: raycore::CrosshairMode) -> &'static str {
+fn crosshair_mode_key(mode: axiuscharts::CrosshairMode) -> &'static str {
     match mode {
-        raycore::CrosshairMode::Normal => "normal",
-        raycore::CrosshairMode::Magnet => "magnet",
-        raycore::CrosshairMode::MagnetOHLC => "magnet_ohlc",
+        axiuscharts::CrosshairMode::Normal => "normal",
+        axiuscharts::CrosshairMode::Magnet => "magnet",
+        axiuscharts::CrosshairMode::MagnetOHLC => "magnet_ohlc",
     }
 }
 
@@ -514,7 +514,7 @@ fn json_value_to_js(value: &JsonValue) -> JsValue {
     }
 }
 
-fn diagnostics_to_js(diagnostics: &[raycore::CompileDiagnostic]) -> JsValue {
+fn diagnostics_to_js(diagnostics: &[axiuscharts::CompileDiagnostic]) -> JsValue {
     let out = js_sys::Array::new();
     for d in diagnostics {
         let obj = js_sys::Object::new();
@@ -524,9 +524,9 @@ fn diagnostics_to_js(diagnostics: &[raycore::CompileDiagnostic]) -> JsValue {
             &JsValue::from_str(&d.code),
         );
         let severity = match d.severity {
-            raycore::DiagnosticSeverity::Error => "error",
-            raycore::DiagnosticSeverity::Warning => "warning",
-            raycore::DiagnosticSeverity::Info => "info",
+            axiuscharts::DiagnosticSeverity::Error => "error",
+            axiuscharts::DiagnosticSeverity::Warning => "warning",
+            axiuscharts::DiagnosticSeverity::Info => "info",
         };
         let _ = js_sys::Reflect::set(
             &obj,
@@ -593,7 +593,7 @@ fn js_get_bool(obj: &JsValue, key: &str) -> Option<bool> {
 
 fn resolve_synced_crosshair_state(
     viewport: &Viewport,
-    time_scale: &raycore::core::renderer::value_projection::TimeScaleIndex,
+    time_scale: &axiuscharts::core::renderer::value_projection::TimeScaleIndex,
     pane_width: f64,
     pane_height: f64,
     fallback_x: f64,
@@ -896,43 +896,43 @@ fn line_style_key(style: LineStyle) -> &'static str {
     }
 }
 
-fn parse_crosshair_mode_js(value: &JsValue) -> Option<raycore::CrosshairMode> {
+fn parse_crosshair_mode_js(value: &JsValue) -> Option<axiuscharts::CrosshairMode> {
     if let Some(mode) = value.as_string() {
         return Some(parse_crosshair_mode(mode.trim()));
     }
     if let Some(raw) = value.as_f64() {
         let key = raw.round() as i32;
         return Some(match key {
-            1 => raycore::CrosshairMode::Magnet,
-            2 => raycore::CrosshairMode::MagnetOHLC,
-            _ => raycore::CrosshairMode::Normal,
+            1 => axiuscharts::CrosshairMode::Magnet,
+            2 => axiuscharts::CrosshairMode::MagnetOHLC,
+            _ => axiuscharts::CrosshairMode::Normal,
         });
     }
     None
 }
 
-fn parse_price_scale_mode_js(value: &JsValue) -> Option<raycore::PriceScaleMode> {
+fn parse_price_scale_mode_js(value: &JsValue) -> Option<axiuscharts::PriceScaleMode> {
     if let Some(mode) = value.as_string() {
-        return Some(raycore::PriceScaleMode::from_str(mode.trim()));
+        return Some(axiuscharts::PriceScaleMode::from_str(mode.trim()));
     }
     if let Some(raw) = value.as_f64() {
         let key = raw.round() as i32;
         return Some(match key {
-            1 => raycore::PriceScaleMode::Logarithmic,
-            2 => raycore::PriceScaleMode::Percentage,
-            3 => raycore::PriceScaleMode::IndexedTo100,
-            _ => raycore::PriceScaleMode::Normal,
+            1 => axiuscharts::PriceScaleMode::Logarithmic,
+            2 => axiuscharts::PriceScaleMode::Percentage,
+            3 => axiuscharts::PriceScaleMode::IndexedTo100,
+            _ => axiuscharts::PriceScaleMode::Normal,
         });
     }
     None
 }
 
-fn price_scale_mode_key(mode: raycore::PriceScaleMode) -> &'static str {
+fn price_scale_mode_key(mode: axiuscharts::PriceScaleMode) -> &'static str {
     match mode {
-        raycore::PriceScaleMode::Normal => "normal",
-        raycore::PriceScaleMode::Logarithmic => "logarithmic",
-        raycore::PriceScaleMode::Percentage => "percentage",
-        raycore::PriceScaleMode::IndexedTo100 => "indexed_to_100",
+        axiuscharts::PriceScaleMode::Normal => "normal",
+        axiuscharts::PriceScaleMode::Logarithmic => "logarithmic",
+        axiuscharts::PriceScaleMode::Percentage => "percentage",
+        axiuscharts::PriceScaleMode::IndexedTo100 => "indexed_to_100",
     }
 }
 
@@ -1077,7 +1077,7 @@ fn build_footprint_levels(
     prices: &[f32],
     bid_volumes: &[f32],
     ask_volumes: &[f32],
-) -> Result<Vec<raycore::FootprintLevel>, JsValue> {
+) -> Result<Vec<axiuscharts::FootprintLevel>, JsValue> {
     let len = prices.len();
     ensure_equal_len("prices", len, "bid_volumes", bid_volumes.len())?;
     ensure_equal_len("prices", len, "ask_volumes", ask_volumes.len())?;
@@ -1110,7 +1110,7 @@ fn build_footprint_levels(
     }
 
     Ok((0..len)
-        .map(|i| raycore::FootprintLevel {
+        .map(|i| axiuscharts::FootprintLevel {
             price: prices[i],
             bid_volume: bid_volumes[i],
             ask_volume: ask_volumes[i],
@@ -1122,13 +1122,13 @@ fn validate_footprint_bar_alignment(
     ctx: &str,
     bar_index: usize,
     bar: &Bar,
-    levels: &[raycore::FootprintLevel],
+    levels: &[axiuscharts::FootprintLevel],
 ) -> Result<(), JsValue> {
     if levels.is_empty() {
         return Ok(());
     }
     let tick = if levels.len() > 1 {
-        let bar = raycore::FootprintBar {
+        let bar = axiuscharts::FootprintBar {
             levels: levels.to_vec(),
         };
         bar.inferred_tick_size()
@@ -1161,7 +1161,7 @@ fn build_footprint_data_from_aligned_arrays(
     prices: &[f32],
     bid_volumes: &[f32],
     ask_volumes: &[f32],
-) -> Result<raycore::FootprintData, JsValue> {
+) -> Result<axiuscharts::FootprintData, JsValue> {
     ensure_equal_len("prices", prices.len(), "bid_volumes", bid_volumes.len())?;
     ensure_equal_len("prices", prices.len(), "ask_volumes", ask_volumes.len())?;
     ensure_finite_slice("prices", prices)?;
@@ -1199,7 +1199,7 @@ fn build_footprint_data_from_aligned_arrays(
         )));
     }
 
-    let mut footprint = raycore::FootprintData::new();
+    let mut footprint = axiuscharts::FootprintData::new();
     for i in 0..bars.len() {
         let start = level_offsets[i] as usize;
         let end = level_offsets[i + 1] as usize;
@@ -1214,7 +1214,7 @@ fn build_footprint_data_from_aligned_arrays(
             &ask_volumes[start..end],
         )?;
         validate_footprint_bar_alignment(ctx, i, &bars[i], &levels)?;
-        footprint.set_bar(i, raycore::FootprintBar { levels });
+        footprint.set_bar(i, axiuscharts::FootprintBar { levels });
     }
     Ok(footprint)
 }
@@ -1231,7 +1231,7 @@ fn build_historical_footprint_dataset_from_arrays(
     prices: &[f32],
     bid_volumes: &[f32],
     ask_volumes: &[f32],
-) -> Result<(Vec<Bar>, raycore::FootprintData), JsValue> {
+) -> Result<(Vec<Bar>, axiuscharts::FootprintData), JsValue> {
     let bars = build_main_bars_from_arrays(ctx, open, high, low, close, volume, timestamps)?;
     ensure_ohlcv_sanity_for_footprint(ctx, &bars)?;
     let footprint = build_footprint_data_from_aligned_arrays(
@@ -1267,7 +1267,7 @@ fn parse_color_json_value(value: &serde_json::Value) -> Option<[f32; 4]> {
 
 fn parse_historical_footprint_json_dataset(
     json: &str,
-) -> Result<(Vec<Bar>, raycore::FootprintData), JsValue> {
+) -> Result<(Vec<Bar>, axiuscharts::FootprintData), JsValue> {
     let parsed: serde_json::Value =
         serde_json::from_str(json).map_err(|e| js_err(format!("JSON parse error: {}", e)))?;
 
@@ -1288,7 +1288,7 @@ fn parse_historical_footprint_json_dataset(
     };
 
     let mut bars = Vec::with_capacity(items.len());
-    let mut footprint = raycore::FootprintData::new();
+    let mut footprint = axiuscharts::FootprintData::new();
 
     for (bar_index, item) in items.iter().enumerate() {
         let timestamp = item
@@ -1409,7 +1409,7 @@ fn parse_historical_footprint_json_dataset(
             bars.last().expect("just pushed bar"),
             &levels,
         )?;
-        footprint.set_bar(bar_index, raycore::FootprintBar { levels });
+        footprint.set_bar(bar_index, axiuscharts::FootprintBar { levels });
     }
 
     let timestamps: Vec<u64> = bars.iter().map(|b| b.timestamp).collect();
@@ -1445,8 +1445,8 @@ fn normalize_price_range(min: f64, max: f64, fallback_min: f64, fallback_max: f6
     (lo, hi)
 }
 
-fn validate_drawing_snapshot(snapshot: &raycore::DrawingSnapshot) -> Result<(), String> {
-    let mut manager = raycore::DrawingManager::new();
+fn validate_drawing_snapshot(snapshot: &axiuscharts::DrawingSnapshot) -> Result<(), String> {
+    let mut manager = axiuscharts::DrawingManager::new();
     manager.replace_from_snapshot(snapshot.clone())
 }
 
@@ -1457,13 +1457,13 @@ const CHART_PERSISTENCE_VERSION: u32 = 1;
 struct PaneDrawingStore {
     #[serde(rename = "paneId")]
     pane_id: u32,
-    drawings: raycore::DrawingSnapshot,
+    drawings: axiuscharts::DrawingSnapshot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DrawingStore {
     version: u32,
-    main: raycore::DrawingSnapshot,
+    main: axiuscharts::DrawingSnapshot,
     #[serde(default)]
     subpanes: Vec<PaneDrawingStore>,
 }
@@ -1520,7 +1520,7 @@ struct ChartPersistenceState {
 }
 
 #[wasm_bindgen]
-pub struct RayCore {
+pub struct AxiusCharts {
     inner: SharedInner,
     mtf_resolver: Arc<SnapshotMtfResolver>,
     active_renderer_name: String,
@@ -1544,7 +1544,7 @@ pub struct RayCore {
     /// JS event emitter for on/off/once callbacks (Rc for RAF closure sharing).
     event_emitter: Rc<RefCell<EventEmitter>>,
     /// Active theme configuration.
-    theme_config: raycore::ThemeConfig,
+    theme_config: axiuscharts::ThemeConfig,
     /// Whether auto-render (internal RAF loop) is active.
     auto_render: Rc<Cell<bool>>,
     /// RAF closure slot for auto-render mode. One frame is queued at a time.
@@ -1558,9 +1558,9 @@ pub struct RayCore {
 }
 
 #[wasm_bindgen]
-impl RayCore {
+impl AxiusCharts {
     /// Create with a specific renderer backend (`auto`, `webgpu`, `canvas2d`).
-    pub async fn create_with(container_id: &str, renderer: &str) -> Result<RayCore, JsValue> {
+    pub async fn create_with(container_id: &str, renderer: &str) -> Result<AxiusCharts, JsValue> {
         init_logging();
 
         let layout = WidgetLayout::new(container_id)?;
@@ -1569,7 +1569,7 @@ impl RayCore {
         let requested_renderer_str = requested_renderer.as_str().to_string();
 
         // Set initial axis sizes so CSS grid can compute pane dimensions
-        let style = raycore::ChartStyle::default();
+        let style = axiuscharts::ChartStyle::default();
         let time_axis_h = style.time_axis_height();
         let initial_price_w = 50.0; // will be recalculated on first render
         layout.update_axis_sizes(initial_price_w, time_axis_h);
@@ -1585,7 +1585,7 @@ impl RayCore {
         let pane_ph = (pane_css_h * dpr).round() as u32;
 
         log::info!(
-            "RayCore: creating '{}' — pane CSS {}x{}, physical {}x{}, dpr={}",
+            "AxiusCharts: creating '{}' — pane CSS {}x{}, physical {}x{}, dpr={}",
             requested_renderer.as_str(),
             pane_css_w,
             pane_css_h,
@@ -1606,7 +1606,7 @@ impl RayCore {
         let active_renderer_name = resolution.active.to_string();
         if let Some(reason) = &resolution.fallback_reason {
             log::warn!(
-                "RayCore: renderer '{}' fell back to '{}': {}",
+                "AxiusCharts: renderer '{}' fell back to '{}': {}",
                 requested_renderer.as_str(),
                 active_renderer_name,
                 reason
@@ -1639,7 +1639,7 @@ impl RayCore {
         if let Some(reason) = resolution.fallback_reason.clone() {
             engine
                 .event_bus
-                .emit(raycore::ChartEvent::RendererFallback {
+                .emit(axiuscharts::ChartEvent::RendererFallback {
                     requested: requested_renderer.as_str().to_string(),
                     active: active_renderer_name.clone(),
                     reason,
@@ -1649,7 +1649,7 @@ impl RayCore {
         engine.indicators.set_mtf_resolver(mtf_resolver.clone());
         let interaction = InteractionHandler::new();
 
-        log::info!("RayCore initialized: {}", engine.renderer_name());
+        log::info!("AxiusCharts initialized: {}", engine.renderer_name());
 
         // Initialize pane height coordinator with main pane height
         let pane_coordinator = PaneHeightCoordinator::new(pane_css_h);
@@ -2002,9 +2002,9 @@ impl RayCore {
                     };
                     s.engine.drawings.remove_all_scale();
                     // Also exit scale drawing mode if active
-                    if s.engine.drawings.active_tool == raycore::DrawingTool::Scale {
+                    if s.engine.drawings.active_tool == axiuscharts::DrawingTool::Scale {
                         s.engine.drawings.cancel_creation();
-                        s.engine.drawings.active_tool = raycore::DrawingTool::None;
+                        s.engine.drawings.active_tool = axiuscharts::DrawingTool::None;
                     }
                     dirty.set(true);
                 }));
@@ -2655,7 +2655,7 @@ impl RayCore {
                             sync_widget_sizes(&mut *s, dpr, true);
 
                             let (cw, ch) = s.layout.container_css_size();
-                            s.engine.event_bus.emit(raycore::ChartEvent::Resize {
+                            s.engine.event_bus.emit(axiuscharts::ChartEvent::Resize {
                                 width: cw,
                                 height: ch,
                             });
@@ -2703,7 +2703,7 @@ impl RayCore {
             (cb, observer)
         };
 
-        Ok(RayCore {
+        Ok(AxiusCharts {
             inner,
             mtf_resolver,
             active_renderer_name,
@@ -2720,7 +2720,7 @@ impl RayCore {
             _last_tap_time: last_tap_time,
             _event_registry: EventListenerRegistry::new(),
             event_emitter,
-            theme_config: raycore::ThemeConfig::default(),
+            theme_config: axiuscharts::ThemeConfig::default(),
             auto_render,
             _raf_closure: raf_closure,
             _raf_id: raf_id,
@@ -2746,7 +2746,7 @@ impl RayCore {
 
     // ── Modern API ───────────────────────────────────────────────────────────
 
-    /// Create a new RayCore instance with a full options object.
+    /// Create a new AxiusCharts instance with a full options object.
     ///
     /// `container` can be an `HTMLElement` reference or a string container ID.
     /// `options` is an optional JS object:
@@ -2761,7 +2761,7 @@ impl RayCore {
     ///   priceScale: { mode: "normal", margins: { top: 0.1, bottom: 0.1 } },
     /// }
     /// ```
-    pub async fn create_chart(container: JsValue, options: JsValue) -> Result<RayCore, JsValue> {
+    pub async fn create_chart(container: JsValue, options: JsValue) -> Result<AxiusCharts, JsValue> {
         let options = normalize_options(options);
 
         // Resolve container: HTMLElement or string ID
@@ -2771,7 +2771,7 @@ impl RayCore {
             // If element has an ID, use it. Otherwise assign a temporary one.
             let id = el.id();
             if id.is_empty() {
-                let generated = format!("raycore-{}", js_sys::Date::now() as u64);
+                let generated = format!("axiuscharts-{}", js_sys::Date::now() as u64);
                 el.set_id(&generated);
                 generated
             } else {
@@ -2792,7 +2792,7 @@ impl RayCore {
             if let Some(theme_str) = theme_val.as_string() {
                 match theme_str.as_str() {
                     "light" => {
-                        chart.theme_config = raycore::ThemeConfig::light();
+                        chart.theme_config = axiuscharts::ThemeConfig::light();
                         let style = chart.theme_config.to_chart_style();
                         chart.inner.borrow_mut().engine.style = style;
                     }
@@ -2843,7 +2843,7 @@ impl RayCore {
                 .borrow_mut()
                 .engine
                 .event_bus
-                .emit(raycore::ChartEvent::Error {
+                .emit(axiuscharts::ChartEvent::Error {
                     message: "renderer is create-time only; apply_options({ renderer }) is ignored"
                         .to_string(),
                 });
@@ -2854,10 +2854,10 @@ impl RayCore {
             if let Some(theme_str) = theme_val.as_string() {
                 match theme_str.as_str() {
                     "dark" => {
-                        self.theme_config = raycore::ThemeConfig::dark();
+                        self.theme_config = axiuscharts::ThemeConfig::dark();
                     }
                     "light" => {
-                        self.theme_config = raycore::ThemeConfig::light();
+                        self.theme_config = axiuscharts::ThemeConfig::light();
                     }
                     _ => {}
                 }
@@ -2875,7 +2875,7 @@ impl RayCore {
                 s.symbol = symbol.clone();
                 s.engine
                     .event_bus
-                    .emit(raycore::ChartEvent::SymbolChange { symbol });
+                    .emit(axiuscharts::ChartEvent::SymbolChange { symbol });
             }
         }
 
@@ -2886,7 +2886,7 @@ impl RayCore {
                 .borrow_mut()
                 .engine
                 .event_bus
-                .emit(raycore::ChartEvent::IntervalChange { interval });
+                .emit(axiuscharts::ChartEvent::IntervalChange { interval });
         }
 
         css_changed = self.apply_lwc_compat_options(&options) || css_changed;
@@ -2911,7 +2911,7 @@ impl RayCore {
     }
 
     /// Apply Lightweight Charts style-compatible nested options directly to
-    /// RayCore style/runtime state. Returns true when theme CSS variables
+    /// AxiusCharts style/runtime state. Returns true when theme CSS variables
     /// should be refreshed.
     fn apply_lwc_compat_options(&mut self, options: &JsValue) -> bool {
         if options.is_undefined() || options.is_null() {
@@ -3138,7 +3138,7 @@ impl RayCore {
                     s.engine.set_main_chart_type(next_chart_type);
                     s.engine
                         .event_bus
-                        .emit(raycore::ChartEvent::ChartTypeChange {
+                        .emit(axiuscharts::ChartEvent::ChartTypeChange {
                             chart_type: next_chart_type.as_str().to_string(),
                         });
                 }
@@ -3636,13 +3636,13 @@ impl RayCore {
     /// Get the current theme preset name ("dark", "light", or "custom").
     pub fn theme(&self) -> String {
         // Check if it matches a known preset
-        let dark = raycore::ThemeConfig::dark();
+        let dark = axiuscharts::ThemeConfig::dark();
         if self.theme_config.colors.background == dark.colors.background
             && self.theme_config.colors.bullish == dark.colors.bullish
         {
             "dark".to_string()
         } else {
-            let light = raycore::ThemeConfig::light();
+            let light = axiuscharts::ThemeConfig::light();
             if self.theme_config.colors.background == light.colors.background {
                 "light".to_string()
             } else {
@@ -3802,7 +3802,7 @@ impl RayCore {
         }
         inner
             .engine
-            .set_footprint_bar(bar_index, raycore::FootprintBar { levels });
+            .set_footprint_bar(bar_index, axiuscharts::FootprintBar { levels });
         drop(inner);
         self.dirty.set(true);
         Ok(())
@@ -3884,7 +3884,7 @@ impl RayCore {
                 &bid_volumes[start..end],
                 &ask_volumes[start..end],
             )?;
-            bars.push((bar_index, raycore::FootprintBar { levels }));
+            bars.push((bar_index, axiuscharts::FootprintBar { levels }));
         }
 
         inner.engine.set_footprint_bars(bars);
@@ -3959,7 +3959,7 @@ impl RayCore {
             }
 
             let levels = build_footprint_levels("set_footprint_data_json", &prices, &bids, &asks)?;
-            bars.push((bar_index, raycore::FootprintBar { levels }));
+            bars.push((bar_index, axiuscharts::FootprintBar { levels }));
         }
         inner.engine.set_footprint_bars(bars);
         drop(inner);
@@ -3976,7 +3976,7 @@ impl RayCore {
     /// Set footprint display mode.
     /// Accepted values: "bid_ask", "delta", "volume", "delta_profile", "volume_profile".
     pub fn set_footprint_display_mode(&mut self, mode: &str) {
-        let m = raycore::FootprintDisplayMode::from_str(mode);
+        let m = axiuscharts::FootprintDisplayMode::from_str(mode);
         self.inner.borrow_mut().engine.set_footprint_display_mode(m);
         self.dirty.set(true);
         log::info!("set_footprint_display_mode: {}", m.as_str());
@@ -4031,20 +4031,20 @@ impl RayCore {
         let mut refresh_semantic_theme = false;
 
         if let Some(s) = v["display_mode"].as_str() {
-            opts.display_mode = raycore::FootprintDisplayMode::from_str(s);
+            opts.display_mode = axiuscharts::FootprintDisplayMode::from_str(s);
         }
         if let Some(n) = v["tick_size"].as_f64() {
             opts.tick_size = n as f32;
         }
         if let Some(s) = v["palette"].as_str() {
-            opts.palette = raycore::FootprintPalette::from_str(s);
+            opts.palette = axiuscharts::FootprintPalette::from_str(s);
             refresh_semantic_theme = true;
         }
         if let Some(s) = v["gradient_style"]
             .as_str()
             .or_else(|| v["gradientStyle"].as_str())
         {
-            opts.gradient_style = raycore::FootprintGradientStyle::from_str(s);
+            opts.gradient_style = axiuscharts::FootprintGradientStyle::from_str(s);
             refresh_semantic_theme = true;
         }
         if let Some(value) = v.get("poc_color").or_else(|| v.get("pocColor")) {
@@ -4187,7 +4187,7 @@ impl RayCore {
     pub fn set_crosshair_mode(&mut self, mode: &str) {
         let mut s = self.inner.borrow_mut();
         s.engine.crosshair.mode = match mode {
-            "magnet" => raycore::CrosshairMode::MagnetOHLC,
+            "magnet" => axiuscharts::CrosshairMode::MagnetOHLC,
             _ => parse_crosshair_mode(mode),
         };
     }
@@ -4308,7 +4308,7 @@ impl RayCore {
             .borrow_mut()
             .engine
             .event_bus
-            .emit(raycore::ChartEvent::SymbolChange {
+            .emit(axiuscharts::ChartEvent::SymbolChange {
                 symbol: symbol.to_string(),
             });
         self.dirty.set(true);
@@ -4324,7 +4324,7 @@ impl RayCore {
             .borrow_mut()
             .engine
             .event_bus
-            .emit(raycore::ChartEvent::IntervalChange {
+            .emit(axiuscharts::ChartEvent::IntervalChange {
                 interval: interval.to_string(),
             });
         self.dirty.set(true);
@@ -4353,7 +4353,7 @@ impl RayCore {
     pub fn set_drawing_tool(&mut self, tool: &str) {
         let mut s = self.inner.borrow_mut();
         s.engine.drawings.active_tool =
-            raycore::DrawingTool::from_api_key(tool).unwrap_or(raycore::DrawingTool::None);
+            axiuscharts::DrawingTool::from_api_key(tool).unwrap_or(axiuscharts::DrawingTool::None);
     }
 
     /// Remove the currently selected drawing (e.g. on Delete key).
@@ -4544,7 +4544,7 @@ impl RayCore {
         let start_bar = finite_or(viewport.start_bar, 0.0).max(0.0);
         let mut end_bar = finite_or(
             viewport.end_bar,
-            start_bar + raycore::core::constants::DEFAULT_INITIAL_VISIBLE_BARS,
+            start_bar + axiuscharts::core::constants::DEFAULT_INITIAL_VISIBLE_BARS,
         );
         if end_bar < start_bar {
             end_bar = start_bar;
@@ -4553,21 +4553,21 @@ impl RayCore {
             viewport.price_min,
             viewport.price_max,
             0.0,
-            raycore::core::constants::DEFAULT_PRICE_MAX,
+            axiuscharts::core::constants::DEFAULT_PRICE_MAX,
         );
         let scale_margin_top = finite_or(
             viewport.scale_margin_top,
-            raycore::core::constants::DEFAULT_SCALE_MARGIN_TOP,
+            axiuscharts::core::constants::DEFAULT_SCALE_MARGIN_TOP,
         )
         .clamp(0.0, 0.5);
         let scale_margin_bottom = finite_or(
             viewport.scale_margin_bottom,
-            raycore::core::constants::DEFAULT_SCALE_MARGIN_BOTTOM,
+            axiuscharts::core::constants::DEFAULT_SCALE_MARGIN_BOTTOM,
         )
         .clamp(0.0, 0.5);
         let price_scale_tick_density = finite_or_f32(
             style.price_scale_tick_mark_density,
-            raycore::core::constants::DEFAULT_PRICE_SCALE_TICK_MARK_DENSITY as f32,
+            axiuscharts::core::constants::DEFAULT_PRICE_SCALE_TICK_MARK_DENSITY as f32,
         )
         .max(0.1);
         let volume_visible = s.engine.user_volume_visible();
@@ -4669,7 +4669,7 @@ impl RayCore {
                     sp.viewport.price_min,
                     sp.viewport.price_max,
                     0.0,
-                    raycore::core::constants::DEFAULT_PRICE_MAX,
+                    axiuscharts::core::constants::DEFAULT_PRICE_MAX,
                 );
                 PersistedSubPane {
                     id: sp.id,
@@ -4723,19 +4723,19 @@ impl RayCore {
                 options: serde_json::json!({}),
                 viewport: PersistedViewport {
                     start_bar: 0.0,
-                    end_bar: raycore::core::constants::DEFAULT_INITIAL_VISIBLE_BARS,
+                    end_bar: axiuscharts::core::constants::DEFAULT_INITIAL_VISIBLE_BARS,
                     price_min: 0.0,
-                    price_max: raycore::core::constants::DEFAULT_PRICE_MAX,
+                    price_max: axiuscharts::core::constants::DEFAULT_PRICE_MAX,
                     price_locked: false,
                     price_scale_mode: "normal".to_string(),
-                    scale_margin_top: raycore::core::constants::DEFAULT_SCALE_MARGIN_TOP,
-                    scale_margin_bottom: raycore::core::constants::DEFAULT_SCALE_MARGIN_BOTTOM,
+                    scale_margin_top: axiuscharts::core::constants::DEFAULT_SCALE_MARGIN_TOP,
+                    scale_margin_bottom: axiuscharts::core::constants::DEFAULT_SCALE_MARGIN_BOTTOM,
                     auto_scroll: true,
                 },
                 panes: Vec::new(),
                 drawings: DrawingStore {
                     version: DRAWING_STORE_VERSION,
-                    main: raycore::DrawingSnapshot::default(),
+                    main: axiuscharts::DrawingSnapshot::default(),
                     subpanes: Vec::new(),
                 },
             };
@@ -4776,7 +4776,7 @@ impl RayCore {
             let start_bar = finite_or(snapshot.viewport.start_bar, 0.0).max(0.0);
             let mut end_bar = finite_or(
                 snapshot.viewport.end_bar,
-                start_bar + raycore::core::constants::DEFAULT_INITIAL_VISIBLE_BARS,
+                start_bar + axiuscharts::core::constants::DEFAULT_INITIAL_VISIBLE_BARS,
             );
             if end_bar < start_bar {
                 end_bar = start_bar;
@@ -4785,11 +4785,11 @@ impl RayCore {
                 snapshot.viewport.price_min,
                 snapshot.viewport.price_max,
                 0.0,
-                raycore::core::constants::DEFAULT_PRICE_MAX,
+                axiuscharts::core::constants::DEFAULT_PRICE_MAX,
             );
             {
                 let vp = &mut s.engine.viewport;
-                vp.set_price_scale_mode(raycore::PriceScaleMode::from_str(
+                vp.set_price_scale_mode(axiuscharts::PriceScaleMode::from_str(
                     snapshot.viewport.price_scale_mode.as_str(),
                 ));
                 vp.set_range(start_bar, end_bar);
@@ -4801,12 +4801,12 @@ impl RayCore {
             emit_visible_range_change(&mut s.engine);
             let margin_top = finite_or(
                 snapshot.viewport.scale_margin_top,
-                raycore::core::constants::DEFAULT_SCALE_MARGIN_TOP,
+                axiuscharts::core::constants::DEFAULT_SCALE_MARGIN_TOP,
             )
             .clamp(0.0, 0.5);
             let margin_bottom = finite_or(
                 snapshot.viewport.scale_margin_bottom,
-                raycore::core::constants::DEFAULT_SCALE_MARGIN_BOTTOM,
+                axiuscharts::core::constants::DEFAULT_SCALE_MARGIN_BOTTOM,
             )
             .clamp(0.0, 0.5);
             s.engine.set_price_scale_margins(margin_top, margin_bottom);
@@ -4854,7 +4854,7 @@ impl RayCore {
                 let s = self.inner.borrow();
                 s.engine
                     .studies
-                    .get_study(raycore::StudyId(pane.study_id))
+                    .get_study(axiuscharts::StudyId(pane.study_id))
                     .is_some()
             };
             if !study_exists {
@@ -4890,7 +4890,7 @@ impl RayCore {
                         pane.price_min,
                         pane.price_max,
                         0.0,
-                        raycore::core::constants::DEFAULT_PRICE_MAX,
+                        axiuscharts::core::constants::DEFAULT_PRICE_MAX,
                     );
                     sp.set_height(height_css);
                     sp.auto_scale = pane.auto_scale;
@@ -4942,7 +4942,7 @@ impl RayCore {
             log::error!("export_drawings: failed to serialize drawing snapshot: {err}");
             let fallback = DrawingStore {
                 version: DRAWING_STORE_VERSION,
-                main: raycore::DrawingSnapshot::default(),
+                main: axiuscharts::DrawingSnapshot::default(),
                 subpanes: Vec::new(),
             };
             serde_json::to_string(&fallback).unwrap_or_else(|_| "{}".to_string())
@@ -5311,13 +5311,13 @@ impl RayCore {
     /// Accepted values: "normal", "logarithmic" (or "log"), "percentage" (or "percent"),
     /// "indexed_to_100" (or "indexedTo100", "indexed").
     pub fn set_price_scale_mode(&mut self, mode: &str) {
-        use raycore::PriceScaleMode;
+        use axiuscharts::PriceScaleMode;
         let parsed = PriceScaleMode::from_str(mode);
         let mut s = self.inner.borrow_mut();
         s.engine.viewport.set_price_scale_mode(parsed);
         s.engine
             .event_bus
-            .emit(raycore::ChartEvent::PriceScaleChange {
+            .emit(axiuscharts::ChartEvent::PriceScaleChange {
                 mode: mode.to_string(),
             });
     }
@@ -5329,13 +5329,13 @@ impl RayCore {
     /// Accepted values: "candlestick", "candles", "ohlc", "bars", "line", "area",
     /// "heikin_ashi", "ha", "footprint", "fp", "order_flow".
     pub fn set_chart_type(&mut self, chart_type: &str) {
-        use raycore::MainChartType;
+        use axiuscharts::MainChartType;
         let ct = MainChartType::from_str(chart_type);
         let mut s = self.inner.borrow_mut();
         s.engine.set_main_chart_type(ct);
         s.engine
             .event_bus
-            .emit(raycore::ChartEvent::ChartTypeChange {
+            .emit(axiuscharts::ChartEvent::ChartTypeChange {
                 chart_type: ct.as_str().to_string(),
             });
         log::info!("set_chart_type: {}", ct.as_str());
@@ -5353,7 +5353,7 @@ impl RayCore {
 
     /// Get all available chart types as a comma-separated string.
     pub fn get_available_chart_types() -> String {
-        use raycore::MainChartType;
+        use axiuscharts::MainChartType;
         MainChartType::all()
             .iter()
             .map(|ct| ct.as_str())
@@ -5395,7 +5395,7 @@ impl RayCore {
 
     /// Update the price of an existing price line.
     pub fn set_price_line_price(&mut self, id: u32, price: f64) {
-        use raycore::PriceLineId;
+        use axiuscharts::PriceLineId;
         if let Some(line) = self
             .inner
             .borrow_mut()
@@ -5409,7 +5409,7 @@ impl RayCore {
 
     /// Set whether a price line is visible.
     pub fn set_price_line_visible(&mut self, id: u32, visible: bool) {
-        use raycore::PriceLineId;
+        use axiuscharts::PriceLineId;
         if let Some(line) = self
             .inner
             .borrow_mut()
@@ -5423,7 +5423,7 @@ impl RayCore {
 
     /// Set the label text of a price line. Empty string uses formatted price.
     pub fn set_price_line_label(&mut self, id: u32, label: &str) {
-        use raycore::PriceLineId;
+        use axiuscharts::PriceLineId;
         if let Some(line) = self
             .inner
             .borrow_mut()
@@ -5437,7 +5437,7 @@ impl RayCore {
 
     /// Remove a price line by ID.
     pub fn remove_price_line(&mut self, id: u32) -> bool {
-        use raycore::PriceLineId;
+        use axiuscharts::PriceLineId;
         self.inner
             .borrow_mut()
             .engine
@@ -5481,7 +5481,7 @@ impl RayCore {
             color: [color_r, color_g, color_b, color_a],
             size: size as f64,
             text: text.to_string(),
-            text_color: raycore::ThemeConfig::default()
+            text_color: axiuscharts::ThemeConfig::default()
                 .series_defaults
                 .marker_text_color,
             id: 0, // will be assigned
@@ -5565,7 +5565,7 @@ impl RayCore {
                 color,
                 size,
                 text: String::new(),
-                text_color: raycore::ThemeConfig::default()
+                text_color: axiuscharts::ThemeConfig::default()
                     .series_defaults
                     .marker_text_color,
                 id: 0,
@@ -5606,7 +5606,7 @@ impl RayCore {
         side: &str,
         role: &str,
     ) {
-        use raycore::{ExecutionMark, ExecutionRole, ExecutionSide};
+        use axiuscharts::{ExecutionMark, ExecutionRole, ExecutionSide};
 
         let mark = ExecutionMark::new(
             id,
@@ -5658,7 +5658,7 @@ impl RayCore {
         color_a: f32,
         realized_pnl: f64,
     ) {
-        use raycore::{ExecutionMark, ExecutionRole, ExecutionSide};
+        use axiuscharts::{ExecutionMark, ExecutionRole, ExecutionSide};
 
         let mut mark = ExecutionMark::new(
             id,
@@ -5751,7 +5751,7 @@ impl RayCore {
     ///
     /// `ids` is an array of string IDs (must match mark_data length / 5).
     pub fn set_execution_marks(&mut self, ids: Vec<String>, mark_data: &[f64]) {
-        use raycore::{ExecutionMark, ExecutionRole, ExecutionSide};
+        use axiuscharts::{ExecutionMark, ExecutionRole, ExecutionSide};
 
         const STRIDE: usize = 5; // timestamp_ms, price, quantity, side_idx, role_idx
         let expected_count = mark_data.len() / STRIDE;
@@ -5821,7 +5821,7 @@ impl RayCore {
     /// ]
     /// ```
     pub fn set_execution_marks_json(&mut self, json: &str) -> Result<(), JsValue> {
-        use raycore::{ExecutionMark, ExecutionRole, ExecutionSide};
+        use axiuscharts::{ExecutionMark, ExecutionRole, ExecutionSide};
 
         let items: Vec<serde_json::Value> = serde_json::from_str(json)
             .map_err(|e| js_err(format!("Invalid execution marks JSON: {}", e)))?;
@@ -5933,7 +5933,7 @@ impl RayCore {
     /// Returns -1 if the timestamp is before all bars.
     pub fn timestamp_to_bar_index(&self, timestamp_ms: u64) -> i64 {
         let s = self.inner.borrow();
-        raycore::timestamp_to_bar_index(timestamp_ms, &s.engine.bars)
+        axiuscharts::timestamp_to_bar_index(timestamp_ms, &s.engine.bars)
             .map(|idx| idx as i64)
             .unwrap_or(-1)
     }
@@ -5942,7 +5942,7 @@ impl RayCore {
     /// Returns 0 if the bar index is out of bounds.
     pub fn bar_index_to_timestamp(&self, bar_index: u32) -> u64 {
         let s = self.inner.borrow();
-        raycore::bar_index_to_timestamp(bar_index as usize, &s.engine.bars).unwrap_or(0)
+        axiuscharts::bar_index_to_timestamp(bar_index as usize, &s.engine.bars).unwrap_or(0)
     }
 
     /// Project a timestamp/price coordinate into current pane CSS coordinates.
@@ -5968,7 +5968,7 @@ impl RayCore {
             return obj.into();
         };
 
-        let x = raycore::core::renderer::transforms::bar_to_x(
+        let x = axiuscharts::core::renderer::transforms::bar_to_x(
             logical_index + 0.5,
             &s.engine.viewport,
             pane_css_w,
@@ -6325,7 +6325,7 @@ impl RayCore {
             .inner
             .borrow_mut()
             .engine
-            .remove_study(raycore::StudyId(id));
+            .remove_study(axiuscharts::StudyId(id));
         log::info!("remove_study: id={}, removed={}", id, removed);
         removed
     }
@@ -6335,7 +6335,7 @@ impl RayCore {
     pub fn set_study_parameter(&mut self, id: u32, key: &str, value: f64) {
         let mut s = self.inner.borrow_mut();
         s.engine
-            .set_study_parameter(raycore::StudyId(id), key, value);
+            .set_study_parameter(axiuscharts::StudyId(id), key, value);
         // Recalculate immediately if we have data
         if s.engine.bars.len() > 0 {
             s.engine.recalculate_studies();
@@ -6347,7 +6347,7 @@ impl RayCore {
     /// Returns null if the study or output index doesn't exist.
     pub fn get_study_output(&self, id: u32, output_index: u32) -> JsValue {
         let s = self.inner.borrow();
-        if let Some(study) = s.engine.studies.get_study(raycore::StudyId(id)) {
+        if let Some(study) = s.engine.studies.get_study(axiuscharts::StudyId(id)) {
             if let Some(output) = study.get_output(output_index as usize) {
                 let obj = js_sys::Object::new();
                 let ts_arr =
@@ -6413,9 +6413,9 @@ impl RayCore {
             .unwrap_or_default();
 
         let Ok(mut s) = self.inner.try_borrow_mut() else {
-            let diagnostics = vec![raycore::CompileDiagnostic {
+            let diagnostics = vec![axiuscharts::CompileDiagnostic {
                 code: "INDL-3004".to_string(),
-                severity: raycore::DiagnosticSeverity::Error,
+                severity: axiuscharts::DiagnosticSeverity::Error,
                 message: "indicator runtime is busy; retry compile".to_string(),
                 hint: Some("wait a moment and compile again".to_string()),
                 span: None,
@@ -7016,14 +7016,14 @@ impl RayCore {
                 };
 
                 // Populate with current study data using config colors
-                if let Some(study) = s.engine.studies.get_study(raycore::StudyId(study_id)) {
+                if let Some(study) = s.engine.studies.get_study(axiuscharts::StudyId(study_id)) {
                     let mut data = Vec::new();
                     let mut colors = Vec::new();
                     for i in 0..study.outputs.len() {
                         if let Some(output) = study.get_output(i) {
                             data.push(output.data.clone());
                             colors.push(config.colors.get(i).copied().unwrap_or(
-                                raycore::ThemeConfig::default().indicator_palette.fallback,
+                                axiuscharts::ThemeConfig::default().indicator_palette.fallback,
                             ));
                         }
                     }
@@ -7133,7 +7133,7 @@ impl RayCore {
                                     .is_some_and(|state| {
                                         matches!(
                                         state,
-                                        raycore::core::drawings::types::DrawingState::Dragging {
+                                        axiuscharts::core::drawings::types::DrawingState::Dragging {
                                             ..
                                         }
                                     )
@@ -7221,7 +7221,7 @@ impl RayCore {
                             let drag_state = sp.drawings.get(id).map(|d| (d.tool(), d.state()));
                             if let Some((
                                 tool,
-                                raycore::core::drawings::types::DrawingState::Dragging {
+                                axiuscharts::core::drawings::types::DrawingState::Dragging {
                                     anchor_index,
                                     ..
                                 },
@@ -7230,11 +7230,11 @@ impl RayCore {
                                 sp.drawings.update_drag(id, bar, price);
                                 is_drawing_drag = true;
                                 let hit_part = match anchor_index {
-                                    Some(i) => raycore::core::drawings::types::HitPart::Anchor(i),
-                                    None => raycore::core::drawings::types::HitPart::Body,
+                                    Some(i) => axiuscharts::core::drawings::types::HitPart::Anchor(i),
+                                    None => axiuscharts::core::drawings::types::HitPart::Body,
                                 };
                                 let drag_cursor =
-                                    raycore::core::drawings::types::cursor_for_drawing_hit(
+                                    axiuscharts::core::drawings::types::cursor_for_drawing_hit(
                                         tool,
                                         hit_part,
                                         anchor_index,
@@ -7249,7 +7249,7 @@ impl RayCore {
 
                         if !is_drawing_drag
                             && !sp.drawings.is_creating()
-                            && sp.drawings.active_tool == raycore::DrawingTool::None
+                            && sp.drawings.active_tool == axiuscharts::DrawingTool::None
                         {
                             // Build a hybrid viewport (shared time + subpane price) for hover hit-test.
                             let mut hybrid_vp = Viewport::new(pw as u32, ph as u32);
@@ -7264,14 +7264,14 @@ impl RayCore {
                                     .hit_test(x, y, &hybrid_vp, pw, ph)
                                     .map(|(id, hit)| {
                                         let anchor_idx = match hit.part {
-                                            raycore::core::drawings::types::HitPart::Anchor(i) => {
+                                            axiuscharts::core::drawings::types::HitPart::Anchor(i) => {
                                                 Some(i)
                                             }
                                             _ => None,
                                         };
                                         if let Some(tool) = sp.drawings.get(id).map(|d| d.tool()) {
                                             drawing_cursor = Some(
-                                            raycore::core::drawings::types::cursor_for_drawing_hit(
+                                            axiuscharts::core::drawings::types::cursor_for_drawing_hit(
                                                 tool,
                                                 hit.part,
                                                 anchor_idx,
@@ -7392,7 +7392,7 @@ impl RayCore {
 
                     // Check if drawing tool is active (shared from main chart)
                     let active_tool = s.engine.drawings.active_tool;
-                    if active_tool != raycore::DrawingTool::None {
+                    if active_tool != axiuscharts::DrawingTool::None {
                         if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
                             let price = sp.viewport.pixel_to_price(y, ph);
 
@@ -7432,7 +7432,7 @@ impl RayCore {
 
                         let hit = sp.drawings.hit_test(x, y, &hybrid_vp, pw, ph);
                         if let Some((id, result)) = hit {
-                            use raycore::core::drawings::types::HitPart;
+                            use axiuscharts::core::drawings::types::HitPart;
                             let anchor_idx = match result.part {
                                 HitPart::Anchor(i) => Some(i),
                                 _ => None,
@@ -7447,7 +7447,7 @@ impl RayCore {
                                 .drawings
                                 .get(id)
                                 .map(|d| {
-                                    raycore::core::drawings::types::cursor_for_drawing_hit(
+                                    axiuscharts::core::drawings::types::cursor_for_drawing_hit(
                                         d.tool(),
                                         result.part,
                                         anchor_idx,
@@ -7587,12 +7587,12 @@ impl RayCore {
                             if let Some((id, hit)) = sp.drawings.hit_test(x, y, &hybrid_vp, pw, ph)
                             {
                                 let anchor_idx = match hit.part {
-                                    raycore::core::drawings::types::HitPart::Anchor(i) => Some(i),
+                                    axiuscharts::core::drawings::types::HitPart::Anchor(i) => Some(i),
                                     _ => None,
                                 };
                                 if let Some(tool) = sp.drawings.get(id).map(|d| d.tool()) {
                                     hover_cursor =
-                                        raycore::core::drawings::types::cursor_for_drawing_hit(
+                                        axiuscharts::core::drawings::types::cursor_for_drawing_hit(
                                             tool, hit.part, anchor_idx,
                                         );
                                 }
@@ -7670,12 +7670,12 @@ impl RayCore {
                             if let Some((id, hit)) = sp.drawings.hit_test(x, y, &hybrid_vp, pw, ph)
                             {
                                 let anchor_idx = match hit.part {
-                                    raycore::core::drawings::types::HitPart::Anchor(i) => Some(i),
+                                    axiuscharts::core::drawings::types::HitPart::Anchor(i) => Some(i),
                                     _ => None,
                                 };
                                 if let Some(tool) = sp.drawings.get(id).map(|d| d.tool()) {
                                     hover_cursor =
-                                        raycore::core::drawings::types::cursor_for_drawing_hit(
+                                        axiuscharts::core::drawings::types::cursor_for_drawing_hit(
                                             tool, hit.part, anchor_idx,
                                         );
                                 }
@@ -8164,8 +8164,8 @@ impl RayCore {
     pub fn update_indicator_pane(&mut self, pane_id: u32, study_id: u32) {
         let mut s = self.inner.borrow_mut();
 
-        let study_data: Option<(Vec<raycore::core::series::LineDataArray>, String)> = {
-            if let Some(study) = s.engine.studies.get_study(raycore::StudyId(study_id)) {
+        let study_data: Option<(Vec<axiuscharts::core::series::LineDataArray>, String)> = {
+            if let Some(study) = s.engine.studies.get_study(axiuscharts::StudyId(study_id)) {
                 let mut data = Vec::new();
                 for i in 0..study.outputs.len() {
                     if let Some(output) = study.get_output(i) {
@@ -8187,7 +8187,7 @@ impl RayCore {
                         .enumerate()
                         .map(|(i, _)| {
                             config.colors.get(i).copied().unwrap_or(
-                                raycore::ThemeConfig::default().indicator_palette.fallback,
+                                axiuscharts::ThemeConfig::default().indicator_palette.fallback,
                             )
                         })
                         .collect();
@@ -8403,7 +8403,7 @@ impl RayCore {
         let bar_index = inner.engine.bars.len().saturating_sub(1);
         inner
             .engine
-            .set_footprint_bar(bar_index, raycore::FootprintBar { levels });
+            .set_footprint_bar(bar_index, axiuscharts::FootprintBar { levels });
         Ok(())
     }
 
@@ -8774,7 +8774,7 @@ impl RayCore {
     ///
     /// IMPORTANT: Call this when destroying the chart to prevent memory leaks.
     /// Event listeners attached to DOM elements will keep the closures alive
-    /// even after RayCore is dropped, unless explicitly removed.
+    /// even after AxiusCharts is dropped, unless explicitly removed.
     pub fn dispose(&mut self) {
         // 1. Disconnect resize observer
         if let Some(obs) = self._resize_observer.take() {
@@ -8823,7 +8823,7 @@ impl RayCore {
             inner.subpanes.clear();
         }
 
-        log::info!("RayCore disposed: all event listeners removed");
+        log::info!("AxiusCharts disposed: all event listeners removed");
     }
 }
 
@@ -9032,8 +9032,8 @@ mod tests {
         build_historical_footprint_dataset_from_arrays, parse_historical_footprint_json_dataset,
         parse_main_viewport_preset, reset_main_viewport_and_emit, resolve_synced_crosshair_state,
     };
-    use raycore::core::events::ChartEvent;
-    use raycore::{Bar, ChartEngine, MainViewportPreset, RendererBackend, Viewport};
+    use axiuscharts::core::events::ChartEvent;
+    use axiuscharts::{Bar, ChartEngine, MainViewportPreset, RendererBackend, Viewport};
 
     fn sample_bars(count: usize, start_ts: u64) -> Vec<Bar> {
         (0..count)

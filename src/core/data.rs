@@ -24,7 +24,7 @@
 //! # Example
 //!
 //! ```rust
-//! use raycore::{Bar, BarArray};
+//! use axiuscharts::{Bar, BarArray};
 //!
 //! let mut bars = BarArray::new();
 //!
@@ -64,7 +64,7 @@ const DEFAULT_CHUNK_SIZE: usize = 64;
 /// # Example
 ///
 /// ```rust
-/// use raycore::Bar;
+/// use axiuscharts::Bar;
 ///
 /// let bar = Bar {
 ///     timestamp: 1700000000000, // Nov 14, 2023

@@ -3,18 +3,18 @@ members = [".", "wasm"]
 resolver = "2"
 
 [package]
-name = "raycore"
+name = "axiuscharts"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.83"
-description = "RayCore — high-performance GPU-accelerated charting engine"
+description = "AxiusCharts — high-performance GPU-accelerated charting engine"
 
 [features]
 default = []
 indicator_runtime_v1 = []
 
 [lib]
-name = "raycore"
+name = "axiuscharts"
 path = "src/lib.rs"
 
 [dependencies]

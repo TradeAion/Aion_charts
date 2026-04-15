@@ -65,7 +65,7 @@ struct WorkspaceDividerStyle {
 
 impl Default for WorkspaceDividerStyle {
     fn default() -> Self {
-        let theme = raycore::ThemeConfig::default();
+        let theme = axiuscharts::ThemeConfig::default();
         Self {
             thickness_css: 1.0,
             hit_area_css: 9.0,
@@ -91,7 +91,7 @@ struct WorkspacePaneStyle {
 
 impl Default for WorkspacePaneStyle {
     fn default() -> Self {
-        let theme = raycore::ThemeConfig::default();
+        let theme = axiuscharts::ThemeConfig::default();
         Self {
             background_color: theme.workspace.pane_background,
             active_border_color: theme.workspace.pane_active_border,
@@ -188,7 +188,7 @@ impl WorkspaceInner {
         let host = document
             .create_element("div")?
             .dyn_into::<HtmlDivElement>()?;
-        let host_id = format!("raycore-workspace-pane-{pane_id}");
+        let host_id = format!("axiuscharts-workspace-pane-{pane_id}");
         host.set_id(&host_id);
         host.set_class_name("chart-host");
         host.set_attribute("data-pane-id", &pane_id.to_string())?;

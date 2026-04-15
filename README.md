@@ -1,26 +1,26 @@
-# RayCore
+# AxiusCharts
 
 **High-performance WebGPU/Canvas2D charting engine built in Rust + WASM.**
 
-Created by [RayCharts](https://raycharts.com/)
+Created by [AxiusCharts](https://github.com/Axiusflow/Axius_charts/)
 
 ---
 
 ## Quick Start
 
 ```bash
-npm install raycore-wasm
+npm install axiuscharts-wasm
 ```
 
 ```js
-import init, { RayCore } from 'raycore-wasm';
+import init, { AxiusCharts } from 'axiuscharts-wasm';
 
 await init();
 
 const chartHost = document.getElementById('container');
 if (!chartHost) throw new Error("Missing container element with id 'container'");
 
-const chart = await RayCore.create_chart(chartHost, {
+const chart = await AxiusCharts.create_chart(chartHost, {
   renderer: 'webgpu',
   autoRender: true,
   theme: 'dark',
@@ -97,4 +97,4 @@ Use the `Exec` button in the demo toolbar to toggle sample execution marks on th
 
 Proprietary. All rights reserved. See [LICENSE](./LICENSE).
 
-*Built by [RayCharts](https://raycharts.com/)*
+*Built by [AxiusCharts](https://github.com/Axiusflow/Axius_charts/)*

@@ -1,4 +1,4 @@
-//! Extracted render pipeline — a free function callable from both `RayCore::render()`
+//! Extracted render pipeline — a free function callable from both `AxiusCharts::render()`
 //! and the auto-render RAF loop.
 //!
 //! This module exists because the RAF closure cannot call `&mut self` methods,
@@ -13,12 +13,12 @@ use crate::chart_inner::{ChartInner, SharedInner};
 use crate::event_emitter::chart_event_to_js;
 use crate::subpane::IndicatorConfig;
 use crate::{get_dpr, sync_widget_sizes, RenderInvalidation};
-use raycore::tick_marks;
+use axiuscharts::tick_marks;
 
 /// Execute the full render pipeline.
 ///
 /// This is the single source of truth for rendering. Called from:
-/// - `RayCore::render()` (public API, manual mode)
+/// - `AxiusCharts::render()` (public API, manual mode)
 /// - Auto-render RAF closure (automatic mode)
 ///
 /// Uses `try_borrow_mut()` to gracefully skip a frame if `inner` is already
@@ -56,7 +56,7 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
         log::warn!("replay tick failed: {}", err);
     }
 
-    let mut replay_crosshair_style_override: Option<raycore::ChartStyle> = None;
+    let mut replay_crosshair_style_override: Option<axiuscharts::ChartStyle> = None;
     if s.replay_active && s.replay_trim_edit_mode {
         let mut replay_style = s.engine.style.clone();
 
@@ -64,7 +64,7 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
         replay_style.crosshair_horz_line.visible = false;
         replay_style.crosshair_horz_line.label_visible = false;
 
-        replay_style.crosshair_vert_line.style = raycore::LineStyle::Solid;
+        replay_style.crosshair_vert_line.style = axiuscharts::LineStyle::Solid;
         replay_style.crosshair_vert_line.color = [0.18, 0.72, 0.30, 0.95];
 
         if s.replay_crosshair_over_empty_area() {
@@ -124,7 +124,7 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
         let end_bar = s.engine.viewport.end_bar;
         s.engine
             .event_bus
-            .emit(raycore::ChartEvent::VisibleRangeChange { start_bar, end_bar });
+            .emit(axiuscharts::ChartEvent::VisibleRangeChange { start_bar, end_bar });
     }
 
     // 1. Provisional ticks from current pane size (for axis-width estimation).
@@ -446,7 +446,7 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
 
     // 9. Indicator sub-panes — update data from studies and render
     {
-        let study_updates: Vec<(u32, Vec<raycore::core::series::LineDataArray>, String)> = {
+        let study_updates: Vec<(u32, Vec<axiuscharts::core::series::LineDataArray>, String)> = {
             let ChartInner {
                 ref subpanes,
                 ref engine,
@@ -456,7 +456,7 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
                 .iter()
                 .filter_map(|subpane| {
                     if let Some(study) =
-                        engine.studies.get_study(raycore::StudyId(subpane.study_id))
+                        engine.studies.get_study(axiuscharts::StudyId(subpane.study_id))
                     {
                         let mut data = Vec::new();
                         for i in 0..study.outputs.len() {
@@ -481,7 +481,7 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
                         .enumerate()
                         .map(|(i, _)| {
                             config.colors.get(i).copied().unwrap_or(
-                                raycore::ThemeConfig::default().indicator_palette.fallback,
+                                axiuscharts::ThemeConfig::default().indicator_palette.fallback,
                             )
                         })
                         .collect();
@@ -531,7 +531,7 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
 
     // 11. Flush events from core EventBus to JS callbacks
     if let Ok(mut s) = inner.try_borrow_mut() {
-        let events: Vec<raycore::ChartEvent> = s.engine.event_bus.drain().collect();
+        let events: Vec<axiuscharts::ChartEvent> = s.engine.event_bus.drain().collect();
         drop(s);
         if !events.is_empty() {
             let mut emitter = dirty.event_emitter().borrow_mut();

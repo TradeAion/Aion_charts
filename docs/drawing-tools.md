@@ -1,6 +1,6 @@
 # Drawing Tools
 
-RayCore includes interactive drawing tools for technical analysis annotation.
+AxiusCharts includes interactive drawing tools for technical analysis annotation.
 
 ---
 

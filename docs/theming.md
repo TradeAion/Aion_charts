@@ -1,6 +1,6 @@
 # Theming
 
-RayCore supports dark and light themes out of the box, plus custom color overrides via the theme API.
+AxiusCharts supports dark and light themes out of the box, plus custom color overrides via the theme API.
 
 ---
 
@@ -8,10 +8,10 @@ RayCore supports dark and light themes out of the box, plus custom color overrid
 
 ```js
 // Dark theme (default)
-const chart = await RayCore.create_chart(container, { theme: 'dark' });
+const chart = await AxiusCharts.create_chart(container, { theme: 'dark' });
 
 // Light theme
-const chart = await RayCore.create_chart(container, { theme: 'light' });
+const chart = await AxiusCharts.create_chart(container, { theme: 'light' });
 ```
 
 Switch at runtime:
@@ -24,7 +24,7 @@ chart.apply_options({ theme: 'light' });
 
 ## CSS Variables
 
-RayCore injects CSS custom properties onto the chart container, enabling seamless integration with your app's styling:
+AxiusCharts injects CSS custom properties onto the chart container, enabling seamless integration with your app's styling:
 
 ```js
 const vars = chart.get_css_variables();
@@ -35,13 +35,13 @@ Injected variables include:
 
 | Variable | Description |
 |---|---|
-| `--raycore-bg` | Chart background color |
-| `--raycore-text` | Axis text color |
-| `--raycore-border` | Axis border color |
-| `--raycore-grid` | Grid line color |
-| `--raycore-crosshair` | Crosshair line color |
-| `--raycore-bullish` | Bullish candle color |
-| `--raycore-bearish` | Bearish candle color |
+| `--axiuscharts-bg` | Chart background color |
+| `--axiuscharts-text` | Axis text color |
+| `--axiuscharts-border` | Axis border color |
+| `--axiuscharts-grid` | Grid line color |
+| `--axiuscharts-crosshair` | Crosshair line color |
+| `--axiuscharts-bullish` | Bullish candle color |
+| `--axiuscharts-bearish` | Bearish candle color |
 
 ---
 

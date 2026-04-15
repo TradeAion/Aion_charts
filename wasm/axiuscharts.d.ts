@@ -1,8 +1,8 @@
 /**
- * RayCore — Production-grade WASM charting library
+ * AxiusCharts — Production-grade WASM charting library
  *
  * This is the hand-crafted TypeScript definitions file.
- * It supplements the auto-generated `wasm/pkg/raycore_wasm.d.ts` with:
+ * It supplements the auto-generated `wasm/pkg/axiuscharts_wasm.d.ts` with:
  *   - Full typed event system (ChartEventMap, per-event payload types)
  *   - Properly typed `on<K>()`, `off<K>()`, `once<K>()` overloads
  *   - Typed CreateChartOptions / ThemeConfig interfaces
@@ -11,12 +11,12 @@
  *
  * @example
  * ```ts
- * import init, { RayCore } from './pkg/raycore_wasm.js';
+ * import init, { AxiusCharts } from './pkg/axiuscharts_wasm.js';
  * await init();
  *
  * const chartHost = document.getElementById('chart');
  * if (!chartHost) throw new Error("Missing chart element with id 'chart'");
- * const chart = await RayCore.create_chart(chartHost, {
+ * const chart = await AxiusCharts.create_chart(chartHost, {
  *   theme: 'dark',
  *   autoRender: true,
  *   symbol: 'BTCUSD',
@@ -146,7 +146,7 @@ export interface FootprintOptionsPatch {
 }
 
 /**
- * Options for `RayCore.create_chart()` and `chart.apply_options()`.
+ * Options for `AxiusCharts.create_chart()` and `chart.apply_options()`.
  * All fields are optional. Omitted fields use defaults on creation
  * or keep current values when passed to `apply_options()`.
  */
@@ -320,26 +320,26 @@ export interface ChartEventMap {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * CSS custom properties RayCore writes to its container element.
+ * CSS custom properties AxiusCharts writes to its container element.
  *
  * @example
  * ```css
- * .tooltip { background: var(--raycore-bg); color: var(--raycore-text); }
- * .signal  { color: var(--raycore-bullish); }
+ * .tooltip { background: var(--axiuscharts-bg); color: var(--axiuscharts-text); }
+ * .signal  { color: var(--axiuscharts-bullish); }
  * ```
  */
-export interface RayCoreCssVariables {
-  '--raycore-bg': string;
-  '--raycore-text': string;
-  '--raycore-bullish': string;
-  '--raycore-bearish': string;
-  '--raycore-grid': string;
-  '--raycore-border': string;
-  '--raycore-crosshair': string;
-  '--raycore-crosshair-label-bg': string;
-  '--raycore-crosshair-label-text': string;
-  '--raycore-font-family': string;
-  '--raycore-font-size': string;
+export interface AxiusChartsCssVariables {
+  '--axiuscharts-bg': string;
+  '--axiuscharts-text': string;
+  '--axiuscharts-bullish': string;
+  '--axiuscharts-bearish': string;
+  '--axiuscharts-grid': string;
+  '--axiuscharts-border': string;
+  '--axiuscharts-crosshair': string;
+  '--axiuscharts-crosshair-label-bg': string;
+  '--axiuscharts-crosshair-label-text': string;
+  '--axiuscharts-font-family': string;
+  '--axiuscharts-font-size': string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -442,19 +442,19 @@ export declare class ChartGroup {
 
 /**
  * Manages a resizable split-pane workspace container.
- * Each pane gets a host `<div>` that you pass to `RayCore.create_chart()`.
+ * Each pane gets a host `<div>` that you pass to `AxiusCharts.create_chart()`.
  *
  * @example
  * ```ts
  * const ws = new ChartWorkspace('my-container-id');
  * const rootPaneId = ws.root_pane_id();
  * const hostId     = ws.pane_host_id(rootPaneId);
- * const chart      = await RayCore.create_chart(hostId, { autoRender: true });
+ * const chart      = await AxiusCharts.create_chart(hostId, { autoRender: true });
  *
  * // Split vertically
  * const newPaneId = ws.split_active('vertical');
  * const newHostId = ws.pane_host_id(newPaneId);
- * const chart2    = await RayCore.create_chart(newHostId, { autoRender: true });
+ * const chart2    = await AxiusCharts.create_chart(newHostId, { autoRender: true });
  * ```
  */
 export declare class ChartWorkspace {
@@ -478,7 +478,7 @@ export declare class ChartWorkspace {
 
   /**
    * Get the host element ID for a pane.
-   * Pass this string to `RayCore.create_chart()`.
+   * Pass this string to `AxiusCharts.create_chart()`.
    */
   pane_host_id(pane_id: number): string;
 
@@ -526,10 +526,10 @@ export declare class ChartWorkspace {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RayCore — main chart class
+// AxiusCharts — main chart class
 // ─────────────────────────────────────────────────────────────────────────────
 
-export declare class RayCore {
+export declare class AxiusCharts {
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   /**
@@ -540,7 +540,7 @@ export declare class RayCore {
    *
    * @example
    * ```ts
-   * const chart = await RayCore.create_chart(
+   * const chart = await AxiusCharts.create_chart(
    *   document.getElementById('chart')!,
    *   { theme: 'dark', autoRender: true, symbol: 'BTCUSD' }
    * );
@@ -549,12 +549,12 @@ export declare class RayCore {
   static create_chart(
     container: HTMLElement | string,
     options?: CreateChartOptions,
-  ): Promise<RayCore>;
+  ): Promise<AxiusCharts>;
 
   /**
-   * @deprecated Use `RayCore.create_chart(container, { renderer })` instead.
+   * @deprecated Use `AxiusCharts.create_chart(container, { renderer })` instead.
    */
-  static create_with(container_id: string, renderer: string): Promise<RayCore>;
+  static create_with(container_id: string, renderer: string): Promise<AxiusCharts>;
 
   /**
    * Apply a partial options update at runtime.
@@ -676,10 +676,10 @@ export declare class RayCore {
    * @example
    * ```ts
    * const vars = chart.get_css_variables();
-   * myTooltip.style.background = vars['--raycore-bg'];
+   * myTooltip.style.background = vars['--axiuscharts-bg'];
    * ```
    */
-  get_css_variables(): RayCoreCssVariables;
+  get_css_variables(): AxiusChartsCssVariables;
 
   // ── Data loading ───────────────────────────────────────────────────────────
 
@@ -1626,9 +1626,9 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
  *
  * @example
  * ```ts
- * import init, { RayCore } from './pkg/raycore_wasm.js';
+ * import init, { AxiusCharts } from './pkg/axiuscharts_wasm.js';
  * await init();
- * const chart = await RayCore.create_chart(document.getElementById('chart')!, { theme: 'dark' });
+ * const chart = await AxiusCharts.create_chart(document.getElementById('chart')!, { theme: 'dark' });
  * ```
  */
 export default function init(

@@ -16,7 +16,7 @@
 //! ## Usage
 //!
 //! ```rust,no_run
-//! use raycore::core::renderer::theme::{ThemeConfig, ThemePreset};
+//! use axiuscharts::core::renderer::theme::{ThemeConfig, ThemePreset};
 //!
 //! // Use a preset
 //! let dark = ThemeConfig::dark();
@@ -93,7 +93,7 @@ pub const AXIS_TICK_LENGTH: f32 = 5.0;
 /// Match lightweight-charts contrast selection for solid label backgrounds.
 ///
 /// LWC converts the background to grayscale and chooses black text for bright
-/// labels, otherwise white text. RayCore stores colors normalized to 0.0-1.0,
+/// labels, otherwise white text. AxiusCharts stores colors normalized to 0.0-1.0,
 /// so the grayscale threshold is normalized from 160/255.
 pub fn contrast_text_color(background: [f32; 4]) -> [f32; 4] {
     let grayscale =
@@ -350,7 +350,7 @@ pub struct ThemeSubpaneSeparator {
 
 // ── ThemeConfig (top-level) ─────────────────────────────────────────────────
 
-/// Complete theme configuration for a RayCore chart.
+/// Complete theme configuration for a AxiusCharts chart.
 ///
 /// Organizes all visual settings into logical groups.
 /// Use [`ThemeConfig::dark()`] or [`ThemeConfig::light()`] for presets,
@@ -384,7 +384,7 @@ pub struct ThemeConfig {
 impl ThemeConfig {
     // ── Presets ──────────────────────────────────────────────────────────
 
-    /// Dark theme preset — matches the existing RayCore default (TradingView dark-inspired).
+    /// Dark theme preset — matches the existing AxiusCharts default (TradingView dark-inspired).
     pub fn dark() -> Self {
         Self {
             colors: ThemeColors {
@@ -688,52 +688,52 @@ impl ThemeConfig {
     /// Generate CSS custom properties (variables) from this theme.
     ///
     /// Returns a list of `(name, value)` pairs suitable for setting on a
-    /// DOM element's style. Variable names use the `--raycore-` prefix.
+    /// DOM element's style. Variable names use the `--axiuscharts-` prefix.
     pub fn to_css_variables(&self) -> Vec<(String, String)> {
         let mut vars = Vec::with_capacity(24);
 
         vars.push((
-            "--raycore-bg".into(),
+            "--axiuscharts-bg".into(),
             Self::color_to_css(&self.colors.background),
         ));
         vars.push((
-            "--raycore-text".into(),
+            "--axiuscharts-text".into(),
             Self::color_to_css(&self.colors.axis_text),
         ));
         vars.push((
-            "--raycore-bullish".into(),
+            "--axiuscharts-bullish".into(),
             Self::color_to_css(&self.colors.bullish),
         ));
         vars.push((
-            "--raycore-bearish".into(),
+            "--axiuscharts-bearish".into(),
             Self::color_to_css(&self.colors.bearish),
         ));
         vars.push((
-            "--raycore-grid".into(),
+            "--axiuscharts-grid".into(),
             Self::color_to_css(&self.colors.grid),
         ));
         vars.push((
-            "--raycore-border".into(),
+            "--axiuscharts-border".into(),
             Self::color_to_css(&self.colors.axis_border),
         ));
         vars.push((
-            "--raycore-crosshair".into(),
+            "--axiuscharts-crosshair".into(),
             Self::color_to_css(&self.crosshair.line_color),
         ));
         vars.push((
-            "--raycore-crosshair-label-bg".into(),
+            "--axiuscharts-crosshair-label-bg".into(),
             Self::color_to_css(&self.crosshair.label_bg),
         ));
         vars.push((
-            "--raycore-crosshair-label-text".into(),
+            "--axiuscharts-crosshair-label-text".into(),
             Self::color_to_css(&self.crosshair.label_text),
         ));
         vars.push((
-            "--raycore-font-family".into(),
+            "--axiuscharts-font-family".into(),
             self.typography.font_family.clone(),
         ));
         vars.push((
-            "--raycore-font-size".into(),
+            "--axiuscharts-font-size".into(),
             format!("{}px", self.typography.font_size),
         ));
 
@@ -811,9 +811,9 @@ mod tests {
     fn css_variable_generation() {
         let theme = ThemeConfig::dark();
         let vars = theme.to_css_variables();
-        assert!(vars.iter().any(|(k, _)| k == "--raycore-bg"));
-        assert!(vars.iter().any(|(k, _)| k == "--raycore-bullish"));
-        assert!(vars.iter().any(|(k, _)| k == "--raycore-font-family"));
+        assert!(vars.iter().any(|(k, _)| k == "--axiuscharts-bg"));
+        assert!(vars.iter().any(|(k, _)| k == "--axiuscharts-bullish"));
+        assert!(vars.iter().any(|(k, _)| k == "--axiuscharts-font-family"));
     }
 
     #[test]

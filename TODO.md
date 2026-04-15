@@ -1,4 +1,4 @@
-# RayCore Modernization — Production-Grade API Refactoring
+# AxiusCharts Modernization — Production-Grade API Refactoring
 
 > Started: 2026-02-26 | Status: **ALL PHASES COMPLETE + VERIFIED (final pass)**
 > Previous phases (P0-P3, Phase 5) were COMPLETE — see git history.
@@ -9,16 +9,16 @@
 
 ## Quick Context for Continuation Agents
 
-**What we did:** Complete modernization of RayCore's public API, theming, event system, and DX.
+**What we did:** Complete modernization of AxiusCharts's public API, theming, event system, and DX.
 
 **Architecture:** Two Rust crates:
-- `raycore` (src/) — platform-agnostic core engine, renderers, data structures
-- `raycore-wasm` (wasm/src/) — thin WASM/DOM interop layer via wasm-bindgen
+- `axiuscharts` (src/) — platform-agnostic core engine, renderers, data structures
+- `axiuscharts-wasm` (wasm/src/) — thin WASM/DOM interop layer via wasm-bindgen
 
 **Build commands:**
 ```bash
 cargo check                                                    # core (0 warnings)
-cargo check --target wasm32-unknown-unknown -p raycore-wasm    # wasm (0 warnings)
+cargo check --target wasm32-unknown-unknown -p axiuscharts-wasm    # wasm (0 warnings)
 cargo test                                                     # 98 unit + 4 doc tests
 wasm-pack build wasm --target web --release                    # build WASM package → wasm/pkg/
 ```
@@ -29,7 +29,7 @@ wasm-pack build wasm --target web --release                    # build WASM pack
 - `wasm-pack build` succeeds (886KB .wasm, 156KB .js)
 - All new API methods visible in generated JS: `create_chart`, `apply_options`, `on`, `off`, `once`, `start_auto_render`, `stop_auto_render`, `is_auto_render`, `get_css_variables`, `theme`
 - **Critical RAF loop bug fixed** (was only firing once, now loops correctly)
-- `wasm/raycore.d.ts` — hand-crafted TypeScript definitions with full types for events, options, theme
+- `wasm/axiuscharts.d.ts` — hand-crafted TypeScript definitions with full types for events, options, theme
 
 ---
 
@@ -70,7 +70,7 @@ wasm-pack build wasm --target web --release                    # build WASM pack
 | 9d | **Fix RAF render loop bug** | [x] DONE | `wasm/src/render_frame.rs` — extracted do_render_frame() |
 | 9e | **Zero compiler warnings** | [x] DONE | Various files — unused imports/variables suppressed |
 | 9f | **Fix RAF self-reference bug** | [x] DONE | `wasm/src/lib.rs` — loop now reschedules correctly (Rc slot fix) |
-| 9g | **Hand-crafted TypeScript defs** | [x] DONE | `wasm/raycore.d.ts` — full types for events, options, theme |
+| 9g | **Hand-crafted TypeScript defs** | [x] DONE | `wasm/axiuscharts.d.ts` — full types for events, options, theme |
 
 ## Critical Bug Fixed in Final Session — RAF Self-Reference
 
@@ -91,7 +91,7 @@ The auto-render RAF loop was **not actually rendering**. The loop scheduled itse
 did DPR detection — it never called the render pipeline.
 
 **Fix:** Extracted the full render body into `wasm/src/render_frame.rs::do_render_frame()`.
-Both `RayCore::render()` (public API) and the RAF closure now delegate to this free function.
+Both `AxiusCharts::render()` (public API) and the RAF closure now delegate to this free function.
 The `event_emitter` field was changed from `EventEmitter` to `Rc<RefCell<EventEmitter>>`
 so the RAF closure can capture it.
 
@@ -110,7 +110,7 @@ wasm/src/lib.rs           — RAF closure now calls do_render_frame()
 
 ```javascript
 // Modern API (recommended)
-const chart = await RayCore.create_chart(
+const chart = await AxiusCharts.create_chart(
   document.getElementById('chart'),  // HTMLElement or string ID
   {
     theme: 'dark',                   // 'dark' | 'light'
@@ -118,7 +118,7 @@ const chart = await RayCore.create_chart(
     autoRender: true,                // auto requestAnimationFrame loop
     symbol: 'BTCUSD',
     interval: '1D',
-    watermark: 'RayCharts',
+    watermark: 'AxiusCharts',
     crosshair: { mode: 'normal' },   // 'normal' | 'magnet_ohlc'
     priceScale: {
       mode: 'normal',               // 'normal' | 'logarithmic' | 'percentage' | 'indexedTo100'
@@ -128,7 +128,7 @@ const chart = await RayCore.create_chart(
 );
 
 // Legacy API (deprecated, still works)
-const chart = await RayCore.create('container-id');
+const chart = await AxiusCharts.create('container-id');
 ```
 
 ### Event System
@@ -197,15 +197,15 @@ chart.theme();  // 'dark' | 'light' | 'custom'
 
 // Get CSS variables (for framework integration)
 const vars = chart.get_css_variables();
-// { '--raycore-bg': 'rgba(23,23,23,1)', '--raycore-bullish': '...', ... }
+// { '--axiuscharts-bg': 'rgba(23,23,23,1)', '--axiuscharts-bullish': '...', ... }
 ```
 
 CSS variables set on the container element:
 ```css
---raycore-bg, --raycore-text, --raycore-bullish, --raycore-bearish,
---raycore-grid, --raycore-border, --raycore-watermark,
---raycore-crosshair, --raycore-crosshair-label-bg, --raycore-crosshair-label-text,
---raycore-font-family, --raycore-font-size
+--axiuscharts-bg, --axiuscharts-text, --axiuscharts-bullish, --axiuscharts-bearish,
+--axiuscharts-grid, --axiuscharts-border, --axiuscharts-watermark,
+--axiuscharts-crosshair, --axiuscharts-crosshair-label-bg, --axiuscharts-crosshair-label-text,
+--axiuscharts-font-family, --axiuscharts-font-size
 ```
 
 ### Auto-Render Control
@@ -234,7 +234,7 @@ use wasm_bindgen_futures::spawn_local;
 
 #[wasm_bindgen]
 extern "C" {
-    #[wasm_bindgen(js_namespace = RayCore)]
+    #[wasm_bindgen(js_namespace = AxiusCharts)]
     async fn create_chart(container: &JsValue, options: &JsValue) -> JsValue;
 }
 
@@ -275,7 +275,7 @@ pub fn Chart(
     });
 
     // Reactive theme switching via CSS variables
-    // (theme changes are picked up via --raycore-* vars on the container)
+    // (theme changes are picked up via --axiuscharts-* vars on the container)
 
     view! {
         <div
@@ -292,9 +292,9 @@ pub fn Chart(
 
 ### Leptos Integration Tips
 
-1. **CSS Variables**: The chart sets `--raycore-*` CSS variables on its container. Reference these in Tailwind:
+1. **CSS Variables**: The chart sets `--axiuscharts-*` CSS variables on its container. Reference these in Tailwind:
    ```css
-   .chart-tooltip { background: var(--raycore-bg); color: var(--raycore-text); }
+   .chart-tooltip { background: var(--axiuscharts-bg); color: var(--axiuscharts-text); }
    ```
 
 2. **Reactive Options**: Use `apply_options()` when Leptos signals change:
@@ -334,13 +334,13 @@ pub fn Chart(
 ```
 ┌─────────────────────────────────────────────────────┐
 │  Consumer (JS / Leptos / React / etc.)               │
-│  const chart = await RayCore.create_chart(el, opts)  │
+│  const chart = await AxiusCharts.create_chart(el, opts)  │
 │  chart.on('crosshairMove', fn)                       │
 │  chart.apply_options({ theme: 'light' })             │
 └──────────┬──────────────────────────────────────┬────┘
            │ wasm_bindgen                          │
 ┌──────────▼──────────────────────────────────────▼────┐
-│  wasm/src/lib.rs  (RayCore struct)                   │
+│  wasm/src/lib.rs  (AxiusCharts struct)                   │
 │  ├── EventEmitter (on/off/once → js_sys::Function)   │
 │  ├── ThemeConfig (Dark/Light/Custom)                 │
 │  ├── CreateChartOptions (JsValue parsing)            │
@@ -374,7 +374,7 @@ pub fn Chart(
 ### New Files
 - `wasm/src/event_emitter.rs` — JS event emitter (on/off/once, chart_event_to_js)
 - `wasm/src/render_frame.rs` — Extracted render pipeline (do_render_frame free function)
-- `wasm/raycore.d.ts` — Hand-crafted TypeScript definitions with full event/option types
+- `wasm/axiuscharts.d.ts` — Hand-crafted TypeScript definitions with full event/option types
 
 ### Major Rewrites
 - `src/core/events.rs` — ChartEvent enum (11 variants) + EventBus (ring buffer)

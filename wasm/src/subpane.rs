@@ -10,7 +10,7 @@
 //!
 //! ## Height Coordination
 //!
-//! Uses `PaneHeightCoordinator` to bridge with raycore's `PaneManager` for:
+//! Uses `PaneHeightCoordinator` to bridge with axiuscharts's `PaneManager` for:
 //!   - Stretch-factor based proportional height allocation
 //!   - Coordinated separator dragging (resizing one pane affects neighbors)
 //!   - Minimum height enforcement
@@ -22,15 +22,15 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, Document, HtmlCanvasElement, HtmlDivElement, MouseEvent};
 
-use raycore::core::drawings::types::DrawingGeometry;
-use raycore::core::renderer::canvas_dash::{clear_canvas_line_dash, set_canvas_line_dash};
-use raycore::core::renderer::geometry_generator;
-use raycore::core::renderer::tick_marks::compute_y_ticks;
-use raycore::core::renderer::traits::{ChartStyle, CrosshairMode, CrosshairState, TickMark};
-use raycore::core::renderer::value_projection::TimeScaleIndex;
-use raycore::core::series::LineDataArray;
-use raycore::core::viewport::Viewport;
-use raycore::{DrawingManager, PaneId, PaneManager, PaneOptions, PriceAxisRenderer, ScrollState};
+use axiuscharts::core::drawings::types::DrawingGeometry;
+use axiuscharts::core::renderer::canvas_dash::{clear_canvas_line_dash, set_canvas_line_dash};
+use axiuscharts::core::renderer::geometry_generator;
+use axiuscharts::core::renderer::tick_marks::compute_y_ticks;
+use axiuscharts::core::renderer::traits::{ChartStyle, CrosshairMode, CrosshairState, TickMark};
+use axiuscharts::core::renderer::value_projection::TimeScaleIndex;
+use axiuscharts::core::series::LineDataArray;
+use axiuscharts::core::viewport::Viewport;
+use axiuscharts::{DrawingManager, PaneId, PaneManager, PaneOptions, PriceAxisRenderer, ScrollState};
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -73,7 +73,7 @@ impl SubPaneSeparatorStyle {
 
 // ── PaneHeightCoordinator ──────────────────────────────────────────────────
 //
-// Bridges raycore's PaneManager with the SubPane DOM-based system.
+// Bridges axiuscharts's PaneManager with the SubPane DOM-based system.
 // Coordinates heights across all panes using stretch factors.
 
 /// Maps a SubPane ID to its PaneManager PaneId.
@@ -83,7 +83,7 @@ pub struct PaneMapping {
     pub pane_id: PaneId,
 }
 
-/// Coordinates pane heights using raycore's PaneManager.
+/// Coordinates pane heights using axiuscharts's PaneManager.
 ///
 /// This wrapper:
 /// - Maintains a PaneManager instance for stretch-factor-based heights
@@ -239,7 +239,7 @@ impl IndicatorConfig {
     /// Falls back to sensible defaults for unknown types.
     /// Colors are drawn from the theme's indicator palette.
     pub fn for_type(indicator_type: &str) -> Self {
-        let theme = raycore::ThemeConfig::default();
+        let theme = axiuscharts::ThemeConfig::default();
         let p = &theme.indicator_palette;
         // Palette indices: 0=Blue, 1=Amber, 2=Purple, 3=Red, 4=Green, 5=Grey
         let blue = theme.indicator_color(0);
@@ -374,7 +374,7 @@ impl SubPane {
     ) -> Result<Self, JsValue> {
         let config = IndicatorConfig::for_type(indicator_type);
         let pane_row = grid_row + 1;
-        let id_str = format!("raycore-subpane-{}", id);
+        let id_str = format!("axiuscharts-subpane-{}", id);
 
         let mut separator_style = separator_style.clone();
         separator_style.normalize();
@@ -930,7 +930,7 @@ impl SubPane {
                     .colors
                     .get(i)
                     .copied()
-                    .unwrap_or(raycore::ThemeConfig::default().indicator_palette.fallback);
+                    .unwrap_or(axiuscharts::ThemeConfig::default().indicator_palette.fallback);
                 Some((last_val as f64, color))
             })
             .collect();
@@ -1125,7 +1125,7 @@ impl SubPane {
                 .colors
                 .get(i)
                 .copied()
-                .unwrap_or(raycore::ThemeConfig::default().indicator_palette.fallback);
+                .unwrap_or(axiuscharts::ThemeConfig::default().indicator_palette.fallback);
             self.draw_data_line(line, &color, main_viewport, time_scale, css_w, css_h, dpr);
         }
     }
@@ -1251,7 +1251,7 @@ impl SubPane {
             let font = format!(
                 "{}px {}",
                 t.font_size,
-                raycore::core::renderer::theme::FONT_FAMILY
+                axiuscharts::core::renderer::theme::FONT_FAMILY
             );
             ctx.set_font(&font);
             ctx.set_fill_style_str(&rgba(&[t.r, t.g, t.b, t.a]));

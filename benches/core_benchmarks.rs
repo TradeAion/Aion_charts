@@ -1,4 +1,4 @@
-//! Core benchmarks for RayCharts performance-critical paths.
+//! Core benchmarks for AxiusCharts performance-critical paths.
 //!
 //! Run with: `cargo bench`
 //!
@@ -8,8 +8,8 @@
 //! - Price auto-fit calculations
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use raycore::core::data::{Bar, BarArray};
-use raycore::core::viewport::Viewport;
+use axiuscharts::core::data::{Bar, BarArray};
+use axiuscharts::core::viewport::Viewport;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Test Data Generators

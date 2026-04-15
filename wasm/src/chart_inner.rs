@@ -1,7 +1,7 @@
 //! Internal chart state and helper methods.
 //!
 //! This module contains `ChartInner`, the internal state shared between
-//! event closures and the public RayCore API. Helper methods here handle
+//! event closures and the public AxiusCharts API. Helper methods here handle
 //! the borrow checker dance of destructuring to access multiple fields.
 #![allow(dead_code)]
 
@@ -11,7 +11,7 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use raycore::{
+use axiuscharts::{
     Bar, ChartEngine, ExecutionMarkHitArea, HitZone, InteractionHandler, MainChartType,
     OverlayRenderer, PriceAxisRenderer, PriceLineHit, PriceLineId, TimeAxisRenderer,
 };
@@ -263,7 +263,7 @@ impl ChartInner {
 
         let event = if let Some(id) = mark_id {
             if let Some(mark) = self.engine.execution_marks.get(id) {
-                raycore::ChartEvent::ExecutionMarkHover {
+                axiuscharts::ChartEvent::ExecutionMarkHover {
                     id: Some(mark.id.clone()),
                     timestamp_ms: Some(mark.timestamp_ms),
                     price: Some(mark.price),
@@ -273,7 +273,7 @@ impl ChartInner {
                     group_id: mark.group_id.clone(),
                 }
             } else {
-                raycore::ChartEvent::ExecutionMarkHover {
+                axiuscharts::ChartEvent::ExecutionMarkHover {
                     id: None,
                     timestamp_ms: None,
                     price: None,
@@ -284,7 +284,7 @@ impl ChartInner {
                 }
             }
         } else {
-            raycore::ChartEvent::ExecutionMarkHover {
+            axiuscharts::ChartEvent::ExecutionMarkHover {
                 id: None,
                 timestamp_ms: None,
                 price: None,
@@ -305,7 +305,7 @@ impl ChartInner {
 
         self.engine
             .event_bus
-            .emit(raycore::ChartEvent::ExecutionMarkClick {
+            .emit(axiuscharts::ChartEvent::ExecutionMarkClick {
                 id: mark.id.clone(),
                 timestamp_ms: mark.timestamp_ms,
                 price: mark.price,
@@ -336,7 +336,7 @@ impl ChartInner {
         {
             self.engine
                 .event_bus
-                .emit(raycore::ChartEvent::VisibleRangeChange {
+                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
                     start_bar: after_start,
                     end_bar: after_end,
                 });
@@ -514,12 +514,12 @@ impl ChartInner {
         if let Some(id) = self.engine.drawings.selected_id {
             if matches!(
                 self.engine.drawings.get(id).map(|d| d.state()),
-                Some(raycore::core::drawings::types::DrawingState::Dragging { .. })
+                Some(axiuscharts::core::drawings::types::DrawingState::Dragging { .. })
             ) {
                 self.engine.drawings.end_drag(id);
             }
         }
-        self.engine.drawings.active_tool = raycore::DrawingTool::None;
+        self.engine.drawings.active_tool = axiuscharts::DrawingTool::None;
         Ok(())
     }
 
@@ -799,11 +799,11 @@ impl ChartInner {
                     let tool = drawings.creation_tool();
                     let should_snap = matches!(
                         tool,
-                        Some(raycore::DrawingTool::TrendLine)
-                            | Some(raycore::DrawingTool::Ray)
-                            | Some(raycore::DrawingTool::Fibonacci)
-                            | Some(raycore::DrawingTool::Scale)
-                            | Some(raycore::DrawingTool::Rectangle)
+                        Some(axiuscharts::DrawingTool::TrendLine)
+                            | Some(axiuscharts::DrawingTool::Ray)
+                            | Some(axiuscharts::DrawingTool::Fibonacci)
+                            | Some(axiuscharts::DrawingTool::Scale)
+                            | Some(axiuscharts::DrawingTool::Rectangle)
                     );
                     if should_snap {
                         if let Some((anchor_bar, anchor_price)) = drawings.creation_first_anchor() {
@@ -822,7 +822,7 @@ impl ChartInner {
             } else if let Some(id) = drawings.selected_id {
                 if matches!(
                     drawings.get(id).map(|d| d.state()),
-                    Some(raycore::core::drawings::types::DrawingState::Dragging { .. })
+                    Some(axiuscharts::core::drawings::types::DrawingState::Dragging { .. })
                 ) {
                     // Apply angle snapping during anchor drag too.
                     // Ctrl+OHLC snap takes precedence over angle snap.
@@ -830,11 +830,11 @@ impl ChartInner {
                         let tool = drawings.tool_of(id);
                         let should_snap = matches!(
                             tool,
-                            Some(raycore::DrawingTool::TrendLine)
-                                | Some(raycore::DrawingTool::Ray)
-                                | Some(raycore::DrawingTool::Fibonacci)
-                                | Some(raycore::DrawingTool::Scale)
-                                | Some(raycore::DrawingTool::Rectangle)
+                            Some(axiuscharts::DrawingTool::TrendLine)
+                                | Some(axiuscharts::DrawingTool::Ray)
+                                | Some(axiuscharts::DrawingTool::Fibonacci)
+                                | Some(axiuscharts::DrawingTool::Scale)
+                                | Some(axiuscharts::DrawingTool::Rectangle)
                         );
                         if should_snap {
                             if let Some((anchor_bar, anchor_price)) =
@@ -865,17 +865,17 @@ impl ChartInner {
             // Hover hit-test for cursor feedback (not during drag/creation, no tool active)
             if !is_drawing_drag
                 && !drawings.is_creating()
-                && drawings.active_tool == raycore::DrawingTool::None
+                && drawings.active_tool == axiuscharts::DrawingTool::None
                 && !(self.replay_active && self.replay_trim_edit_mode)
             {
                 if let Some((hit_id, result)) =
                     drawings.hit_test(x, y, &self.engine.viewport, pw, ph)
                 {
-                    use raycore::core::drawings::types::cursor_for_drawing_hit;
+                    use axiuscharts::core::drawings::types::cursor_for_drawing_hit;
                     let tool = drawings
                         .get(hit_id)
                         .map(|d| d.tool())
-                        .unwrap_or(raycore::DrawingTool::None);
+                        .unwrap_or(axiuscharts::DrawingTool::None);
                     hover_cursor = Some(cursor_for_drawing_hit(tool, result.part, None));
                     drawings.set_hovered(Some(hit_id));
                 } else {
@@ -888,7 +888,7 @@ impl ChartInner {
 
         let can_hover_execution_marks = !is_drawing_drag
             && !self.engine.drawings.is_creating()
-            && self.engine.drawings.active_tool == raycore::DrawingTool::None
+            && self.engine.drawings.active_tool == axiuscharts::DrawingTool::None
             && !(self.replay_active && self.replay_trim_edit_mode);
         let hovered_execution_mark_id = if can_hover_execution_marks {
             self.hovered_execution_mark_id_at(x, y)
@@ -968,7 +968,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(raycore::ChartEvent::VisibleRangeChange {
+                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -991,7 +991,7 @@ impl ChartInner {
                 .bar_index_for_crosshair(engine.crosshair.x, pw)
                 .and_then(|slot| engine.time_scale.resolve_rounded_timestamp(slot as f64))
                 .or_else(|| bar_idx.and_then(|idx| engine.bars.get(idx).map(|b| b.timestamp)));
-            engine.event_bus.emit(raycore::ChartEvent::CrosshairMove {
+            engine.event_bus.emit(axiuscharts::ChartEvent::CrosshairMove {
                 x,
                 y,
                 bar_index: bar_idx,
@@ -1076,11 +1076,11 @@ impl ChartInner {
                     // No tool active: check if user clicked on an existing drawing
                     let hit = drawings.hit_test(x, y, &self.engine.viewport, pw, ph);
                     if let Some((id, result)) = hit {
-                        use raycore::core::drawings::types::{cursor_for_drawing_hit, HitPart};
+                        use axiuscharts::core::drawings::types::{cursor_for_drawing_hit, HitPart};
                         let tool = drawings
                             .get(id)
                             .map(|d| d.tool())
-                            .unwrap_or(raycore::DrawingTool::None);
+                            .unwrap_or(axiuscharts::DrawingTool::None);
                         let anchor_idx = match result.part {
                             HitPart::Anchor(i) => Some(i),
                             _ => None,
@@ -1140,7 +1140,7 @@ impl ChartInner {
                         .find(|d| {
                             matches!(
                                 d.state(),
-                                raycore::core::drawings::types::DrawingState::Creating { .. }
+                                axiuscharts::core::drawings::types::DrawingState::Creating { .. }
                             )
                         })
                         .and_then(|d| {
@@ -1176,7 +1176,7 @@ impl ChartInner {
             if let Some(id) = drawings.selected_id {
                 if matches!(
                     drawings.get(id).map(|d| d.state()),
-                    Some(raycore::core::drawings::types::DrawingState::Dragging { .. })
+                    Some(axiuscharts::core::drawings::types::DrawingState::Dragging { .. })
                 ) {
                     drawings.end_drag(id);
                     ended_drag = true;
@@ -1224,7 +1224,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(raycore::ChartEvent::VisibleRangeChange {
+                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -1238,7 +1238,7 @@ impl ChartInner {
                 .viewport
                 .bar_index_at_pixel(click_x, pw, engine.time_scale.len())
                 .and_then(|slot| engine.time_scale.main_bar_index_at_slot(slot));
-            engine.event_bus.emit(raycore::ChartEvent::Click {
+            engine.event_bus.emit(axiuscharts::ChartEvent::Click {
                 x: click_x,
                 y: click_y,
                 bar_index,
@@ -1285,7 +1285,7 @@ impl ChartInner {
         if let Some(id) = self.engine.drawings.selected_id {
             if matches!(
                 self.engine.drawings.get(id).map(|d| d.state()),
-                Some(raycore::core::drawings::types::DrawingState::Dragging { .. })
+                Some(axiuscharts::core::drawings::types::DrawingState::Dragging { .. })
             ) {
                 self.engine.drawings.end_drag(id);
                 self.engine.stamp_drawing_timestamps();
@@ -1338,7 +1338,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(raycore::ChartEvent::VisibleRangeChange {
+                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -1365,7 +1365,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(raycore::ChartEvent::VisibleRangeChange {
+                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -1391,7 +1391,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(raycore::ChartEvent::VisibleRangeChange {
+                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -1424,7 +1424,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(raycore::ChartEvent::VisibleRangeChange {
+                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -1460,7 +1460,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(raycore::ChartEvent::VisibleRangeChange {
+                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -1514,7 +1514,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(raycore::ChartEvent::VisibleRangeChange {
+                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -1557,7 +1557,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(raycore::ChartEvent::VisibleRangeChange {
+                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -1656,10 +1656,10 @@ fn snap_to_angle_45(
 ///
 /// Finds the O/H/L/C value whose CSS Y is closest to the cursor Y position.
 fn snap_to_ohlc_price(
-    bars: &raycore::BarArray,
+    bars: &axiuscharts::BarArray,
     bar_idx: usize,
     cursor_css_y: f64,
-    viewport: &raycore::Viewport,
+    viewport: &axiuscharts::Viewport,
     pane_css_h: f64,
 ) -> f64 {
     let open = bars.open(bar_idx) as f64;

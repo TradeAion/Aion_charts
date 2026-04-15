@@ -55,8 +55,8 @@ pub struct PaneCanvases {
 
 impl PaneCanvases {
     fn new(doc: &Document) -> Result<Self, JsValue> {
-        let chart = utils::create_canvas(doc, "raycore-pane-chart", 0)?;
-        let top = utils::create_canvas(doc, "raycore-pane-top", 1)?;
+        let chart = utils::create_canvas(doc, "axiuscharts-pane-chart", 0)?;
+        let top = utils::create_canvas(doc, "axiuscharts-pane-top", 1)?;
         Ok(Self { chart, top })
     }
 
@@ -133,7 +133,7 @@ impl WidgetLayout {
         container.append_child(&grid_wrapper)?;
 
         // ── Pane container (chart area) — grid[0,0] ──
-        let pane_container = create_widget_container(&doc, "raycore-pane")?;
+        let pane_container = create_widget_container(&doc, "axiuscharts-pane")?;
         pane_container.style().set_css_text(
             "position:relative;overflow:hidden;\
              grid-column:1;grid-row:1;\
@@ -149,7 +149,7 @@ impl WidgetLayout {
         pane_container.append_child(&pane.top)?;
 
         // ── Price axis container — right side, spans main pane only ──
-        let price_axis_container = create_widget_container(&doc, "raycore-price-axis")?;
+        let price_axis_container = create_widget_container(&doc, "axiuscharts-price-axis")?;
         price_axis_container.style().set_css_text(
             "position:relative;overflow:hidden;\
              grid-column:2;grid-row:1;\
@@ -161,12 +161,12 @@ impl WidgetLayout {
         );
         grid_wrapper.append_child(&price_axis_container)?;
 
-        let price_axis = CanvasPair::new(&doc, "raycore-priceaxis")?;
+        let price_axis = CanvasPair::new(&doc, "axiuscharts-priceaxis")?;
         price_axis_container.append_child(&price_axis.base)?;
         price_axis_container.append_child(&price_axis.top)?;
 
         // ── Time axis container — bottom row, full width (including under right axis) ──
-        let time_axis_container = create_widget_container(&doc, "raycore-time-axis")?;
+        let time_axis_container = create_widget_container(&doc, "axiuscharts-time-axis")?;
         time_axis_container.style().set_css_text(
             "position:relative;overflow:hidden;\
              grid-column:1/3;grid-row:2;\
@@ -178,7 +178,7 @@ impl WidgetLayout {
         );
         grid_wrapper.append_child(&time_axis_container)?;
 
-        let time_axis = CanvasPair::new(&doc, "raycore-timeaxis")?;
+        let time_axis = CanvasPair::new(&doc, "axiuscharts-timeaxis")?;
         time_axis_container.append_child(&time_axis.base)?;
         time_axis_container.append_child(&time_axis.top)?;
 

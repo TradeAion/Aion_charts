@@ -1,6 +1,6 @@
 # Framework Integration Guide
 
-RayCore is framework-agnostic — it works with any JavaScript framework. The key pattern is: **initialize WASM once, mount/unmount chart instances per component lifecycle**.
+AxiusCharts is framework-agnostic — it works with any JavaScript framework. The key pattern is: **initialize WASM once, mount/unmount chart instances per component lifecycle**.
 
 ---
 
@@ -8,7 +8,7 @@ RayCore is framework-agnostic — it works with any JavaScript framework. The ke
 
 ```tsx
 import { useEffect, useRef } from 'react';
-import init, { RayCore } from 'raycore-wasm';
+import init, { AxiusCharts } from 'axiuscharts-wasm';
 
 // Initialize WASM once at module level
 const wasmReady = init();
@@ -21,7 +21,7 @@ interface ChartProps {
 
 export function Chart({ theme = 'dark', symbol = 'BTCUSD', interval = '1m' }: ChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<RayCore | null>(null);
+  const chartRef = useRef<AxiusCharts | null>(null);
 
   // Mount
   useEffect(() => {
@@ -31,7 +31,7 @@ export function Chart({ theme = 'dark', symbol = 'BTCUSD', interval = '1m' }: Ch
       await wasmReady;
       if (disposed || !containerRef.current) return;
 
-      const chart = await RayCore.create_chart(containerRef.current, {
+      const chart = await AxiusCharts.create_chart(containerRef.current, {
         renderer: 'webgpu',
         autoRender: true,
         theme,
@@ -76,18 +76,18 @@ export function Chart({ theme = 'dark', symbol = 'BTCUSD', interval = '1m' }: Ch
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue';
-import init, { RayCore } from 'raycore-wasm';
+import init, { AxiusCharts } from 'axiuscharts-wasm';
 
 const props = defineProps<{ theme?: 'dark' | 'light' }>();
 
 const container = ref<HTMLDivElement>();
-let chart: RayCore | null = null;
+let chart: AxiusCharts | null = null;
 
 onMounted(async () => {
   await init();
   if (!container.value) return;
 
-  chart = await RayCore.create_chart(container.value, {
+  chart = await AxiusCharts.create_chart(container.value, {
     renderer: 'webgpu',
     autoRender: true,
     theme: props.theme ?? 'dark',
@@ -112,16 +112,16 @@ watch(() => props.theme, (t) => {
 ```svelte
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import init, { RayCore } from 'raycore-wasm';
+  import init, { AxiusCharts } from 'axiuscharts-wasm';
 
   export let theme: 'dark' | 'light' = 'dark';
 
   let container: HTMLDivElement;
-  let chart: RayCore | null = null;
+  let chart: AxiusCharts | null = null;
 
   onMount(async () => {
     await init();
-    chart = await RayCore.create_chart(container, {
+    chart = await AxiusCharts.create_chart(container, {
       renderer: 'webgpu',
       autoRender: true,
       theme,
@@ -145,11 +145,11 @@ watch(() => props.theme, (t) => {
 ```html
 <div id="chart" style="width: 100%; height: 400px;"></div>
 <script type="module">
-  import init, { RayCore } from './pkg/raycore_wasm.js';
+  import init, { AxiusCharts } from './pkg/axiuscharts_wasm.js';
 
   await init();
 
-  const chart = await RayCore.create_chart('chart', {
+  const chart = await AxiusCharts.create_chart('chart', {
     renderer: 'webgpu',
     autoRender: true,
     theme: 'dark',
@@ -172,7 +172,7 @@ Vite handles WASM files natively. Just ensure the `.wasm` file is included in th
 // vite.config.ts
 export default defineConfig({
   optimizeDeps: {
-    exclude: ['raycore-wasm'],  // don't pre-bundle WASM
+    exclude: ['axiuscharts-wasm'],  // don't pre-bundle WASM
   },
 });
 ```
@@ -204,7 +204,7 @@ module.exports = {
 
 ## Events
 
-RayCore provides a typed event system:
+AxiusCharts provides a typed event system:
 
 ```ts
 chart.on('crosshairMove', (e) => {

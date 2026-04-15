@@ -1,4 +1,4 @@
-//! Centralized constants for RayCharts.
+//! Centralized constants for AxiusCharts.
 //!
 //! This module eliminates magic numbers scattered throughout the codebase,
 //! improving readability and maintainability. Constants are organized by category.

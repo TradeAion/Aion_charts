@@ -1,4 +1,4 @@
-# RayCharts CI/CD Pipeline
+# AxiusCharts CI/CD Pipeline
 # Runs on pushes to main and selected PR lifecycle events.
 #
 # Jobs:

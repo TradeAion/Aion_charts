@@ -4,8 +4,8 @@
 *.wasm
 
 # Stale root-level wasm-pack outputs (only wasm/pkg/ should have these)
-/raycore_wasm*.js
-/raycore_wasm*.d.ts
+/axiuscharts_wasm*.js
+/axiuscharts_wasm*.d.ts
 /nul
 
 # Debug/log files
@@ -26,7 +26,7 @@ chrome_*.png
 Thumbs.db
 
 # Local paths
-raycore/target/
+axiuscharts/target/
 reference/
 
 /lightweight-charts

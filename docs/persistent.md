@@ -1,6 +1,6 @@
 # Persistent State Guide
 
-How to persist RayCore chart state without hardcoding: drawings, drawing styles, chart styles/theme, viewport, and pane layout.
+How to persist AxiusCharts chart state without hardcoding: drawings, drawing styles, chart styles/theme, viewport, and pane layout.
 
 ---
 
@@ -53,7 +53,7 @@ Use an app-defined `layoutId` and key by user/workspace/context.
 
 ```ts
 const layoutId = activeLayout.id;
-const storageKey = `raycore:persistence:${userId}:${workspaceId}:${symbol}:${interval}:${layoutId}`;
+const storageKey = `axiuscharts:persistence:${userId}:${workspaceId}:${symbol}:${interval}:${layoutId}`;
 
 function saveLocal() {
   localStorage.setItem(storageKey, chart.export_persistence_state(layoutId));
@@ -110,7 +110,7 @@ Also trigger save after your style UI applies options (theme/color/font/line set
 
 ## Postgres Storage Model
 
-Use JSONB so you can store the full snapshot exactly as produced by RayCore.
+Use JSONB so you can store the full snapshot exactly as produced by AxiusCharts.
 
 ```sql
 create table chart_layouts (

@@ -43,7 +43,7 @@ impl GpuContext {
 
         let device_result = adapter
             .request_device(&wgpu::DeviceDescriptor {
-                label: Some("raycore-device"),
+                label: Some("axiuscharts-device"),
                 required_features: wgpu::Features::empty(),
                 required_limits: wgpu::Limits::downlevel_webgl2_defaults()
                     .using_resolution(adapter.limits()),

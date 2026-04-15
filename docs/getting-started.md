@@ -5,18 +5,18 @@
 ### npm / yarn / pnpm
 
 ```bash
-npm install raycore-wasm
+npm install axiuscharts-wasm
 ```
 
 ### Manual (from GitHub release)
 
-Download the latest `raycore-wasm.tar.gz` from [Releases](https://github.com/devrajsingh15/raycore/releases), extract, and place the files in your project.
+Download the latest `axiuscharts-wasm.tar.gz` from [Releases](https://github.com/Axiusflow/Axius_charts/releases), extract, and place the files in your project.
 
 ### CDN (ESM)
 
 ```html
 <script type="module">
-  import init, { RayCore } from 'https://unpkg.com/raycore-wasm/raycore_wasm.js';
+  import init, { AxiusCharts } from 'https://unpkg.com/axiuscharts-wasm/axiuscharts_wasm.js';
 </script>
 ```
 
@@ -28,11 +28,11 @@ Download the latest `raycore-wasm.tar.gz` from [Releases](https://github.com/dev
 <div id="chart" style="width: 100%; height: 400px;"></div>
 
 <script type="module">
-  import init, { RayCore } from './pkg/raycore_wasm.js';
+  import init, { AxiusCharts } from './pkg/axiuscharts_wasm.js';
 
   await init();
 
-  const chart = await RayCore.create_chart('chart', {
+  const chart = await AxiusCharts.create_chart('chart', {
     renderer: 'webgpu',     // default is 'webgpu'; 'auto' also prefers WebGPU
     autoRender: true,        // starts RAF loop automatically
     theme: 'dark',           // 'dark' or 'light'
@@ -56,10 +56,10 @@ Download the latest `raycore-wasm.tar.gz` from [Releases](https://github.com/dev
 
 ## WASM Initialization
 
-RayCore is a WebAssembly module. Before using any API, you must initialize the WASM runtime:
+AxiusCharts is a WebAssembly module. Before using any API, you must initialize the WASM runtime:
 
 ```js
-import init, { RayCore } from 'raycore-wasm';
+import init, { AxiusCharts } from 'axiuscharts-wasm';
 
 // init() fetches and compiles the .wasm file.
 // It is idempotent — safe to call multiple times.
@@ -72,7 +72,7 @@ The `.wasm` file must be served with `Content-Type: application/wasm`. Most dev 
 
 ## Container Requirements
 
-The chart container **must** have explicit dimensions (width and height). RayCore uses a `ResizeObserver` to track size changes, but the container itself must have non-zero dimensions before chart creation:
+The chart container **must** have explicit dimensions (width and height). AxiusCharts uses a `ResizeObserver` to track size changes, but the container itself must have non-zero dimensions before chart creation:
 
 ```css
 /* Good — explicit dimensions */
@@ -88,7 +88,7 @@ The chart container **must** have explicit dimensions (width and height). RayCor
 
 ```js
 // Create
-const chart = await RayCore.create_chart(container, options);
+const chart = await AxiusCharts.create_chart(container, options);
 
 // Use
 chart.set_data_arrays(...);

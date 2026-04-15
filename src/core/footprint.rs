@@ -28,7 +28,7 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use raycore::footprint::*;
+//! use axiuscharts::footprint::*;
 //!
 //! let mut fp_data = FootprintData::new();
 //!

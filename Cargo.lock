@@ -334,6 +334,46 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
+name = "axiuscharts"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "bytemuck",
+ "console_error_panic_hook",
+ "console_log",
+ "criterion",
+ "env_logger",
+ "js-sys",
+ "log",
+ "pollster",
+ "serde",
+ "serde_json",
+ "sha2",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu",
+]
+
+[[package]]
+name = "axiuscharts-wasm"
+version = "0.1.0"
+dependencies = [
+ "axiuscharts",
+ "bytemuck",
+ "console_error_panic_hook",
+ "console_log",
+ "js-sys",
+ "log",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu",
+]
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1500,46 +1540,6 @@ name = "raw-window-handle"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
-
-[[package]]
-name = "raycore"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "bytemuck",
- "console_error_panic_hook",
- "console_log",
- "criterion",
- "env_logger",
- "js-sys",
- "log",
- "pollster",
- "serde",
- "serde_json",
- "sha2",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "wgpu",
-]
-
-[[package]]
-name = "raycore-wasm"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "console_error_panic_hook",
- "console_log",
- "js-sys",
- "log",
- "raycore",
- "serde",
- "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "wgpu",
-]
 
 [[package]]
 name = "rayon"

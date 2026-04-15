@@ -1,12 +1,12 @@
-//! # RayCore — High-Performance GPU Charting Engine
+//! # AxiusCharts — High-Performance GPU Charting Engine
 //!
-//! RayCore is a Rust/WebAssembly financial charting library designed for
+//! AxiusCharts is a Rust/WebAssembly financial charting library designed for
 //! professional-grade performance and visual quality. It supports WebGPU
 //! with Canvas2D fallback on web platforms.
 //!
 //! ## Architecture Overview
 //!
-//! RayCore follows a widget-based architecture similar to TradingView's
+//! AxiusCharts follows a widget-based architecture similar to TradingView's
 //! Lightweight Charts (LWC):
 //!
 //! - **Pane System**: Multiple panes with independent price scales
@@ -17,7 +17,7 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use raycore::{Bar, BarArray, Viewport, ChartEngine};
+//! use axiuscharts::{Bar, BarArray, Viewport, ChartEngine};
 //!
 //! // Create a bar array and populate with data
 //! let mut bars = BarArray::new();

@@ -1,9 +1,9 @@
-RayCharts Proprietary License
-Copyright (c) 2024-2026 RayCharts (https://raycharts.com/). All rights reserved.
+AxiusCharts Proprietary License
+Copyright (c) 2024-2026 AxiusCharts (https://github.com/Axiusflow/Axius_charts/). All rights reserved.
 
 NOTICE: This software and all associated source code, shaders, documentation,
 compiled binaries, and assets (collectively, the "Software") are the exclusive
-intellectual property of RayCharts (https://raycharts.com/).
+intellectual property of AxiusCharts (https://github.com/Axiusflow/Axius_charts/).
 
 RESTRICTIONS — You may NOT, under any circumstances:
 
@@ -14,7 +14,7 @@ RESTRICTIONS — You may NOT, under any circumstances:
    the Software or any derivative works to any third party.
 4. USE the Software, in whole or in part, for any commercial, personal,
    educational, or other purpose without prior written authorization from
-   RayCharts.
+   AxiusCharts.
 5. INCORPORATE any portion of the Software into another product, library,
    framework, or service.
 6. CREATE derivative works based on the Software.
@@ -30,12 +30,12 @@ Software will be pursued to the fullest extent of applicable law, including
 but not limited to civil damages and criminal penalties under copyright,
 trade secret, and intellectual property statutes.
 
-ATTRIBUTION — This library is the original creation of RayCharts
-(https://raycharts.com/). All credit for the design, architecture, and
-implementation belongs solely to RayCharts.
+ATTRIBUTION — This library is the original creation of AxiusCharts
+(https://github.com/Axiusflow/Axius_charts/). All credit for the design, architecture, and
+implementation belongs solely to AxiusCharts.
 
-FOR PERMISSIONS — Contact https://raycharts.com/ for licensing inquiries.
+FOR PERMISSIONS — Contact https://github.com/Axiusflow/Axius_charts/ for licensing inquiries.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED. IN NO EVENT SHALL RAYCHARTS BE LIABLE FOR ANY CLAIM, DAMAGES, OR
+IMPLIED. IN NO EVENT SHALL AXIUSCHARTS BE LIABLE FOR ANY CLAIM, DAMAGES, OR
 OTHER LIABILITY ARISING FROM THE USE OR INABILITY TO USE THE SOFTWARE.

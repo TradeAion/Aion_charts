@@ -1,11 +1,11 @@
 {
-  "name": "raycore-wasm",
+  "name": "axiuscharts-wasm",
   "version": "0.1.0",
   "type": "module",
   "description": "High-performance Canvas2D charting engine — WASM build",
-  "main": "./wasm/pkg/raycore_wasm.js",
-  "module": "./wasm/pkg/raycore_wasm.js",
-  "types": "./wasm/pkg/raycore_wasm.d.ts",
+  "main": "./wasm/pkg/axiuscharts_wasm.js",
+  "module": "./wasm/pkg/axiuscharts_wasm.js",
+  "types": "./wasm/pkg/axiuscharts_wasm.d.ts",
   "scripts": {
     "build": "wasm-pack build --target web wasm",
     "build:release": "wasm-pack build --target web --release wasm",
@@ -14,15 +14,15 @@
   },
   "exports": {
     ".": {
-      "types": "./wasm/pkg/raycore_wasm.d.ts",
-      "import": "./wasm/pkg/raycore_wasm.js"
+      "types": "./wasm/pkg/axiuscharts_wasm.d.ts",
+      "import": "./wasm/pkg/axiuscharts_wasm.js"
     },
-    "./raycore_wasm_bg.wasm": "./wasm/pkg/raycore_wasm_bg.wasm"
+    "./axiuscharts_wasm_bg.wasm": "./wasm/pkg/axiuscharts_wasm_bg.wasm"
   },
   "files": [
-    "wasm/pkg/raycore_wasm_bg.wasm",
-    "wasm/pkg/raycore_wasm.js",
-    "wasm/pkg/raycore_wasm.d.ts"
+    "wasm/pkg/axiuscharts_wasm_bg.wasm",
+    "wasm/pkg/axiuscharts_wasm.js",
+    "wasm/pkg/axiuscharts_wasm.d.ts"
   ],
   "license": "SEE LICENSE IN LICENSE",
   "keywords": [

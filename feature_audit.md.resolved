@@ -1,6 +1,6 @@
-# RayCore Feature Audit — Gap Analysis vs LWC
+# AxiusCharts Feature Audit — Gap Analysis vs LWC
 
-## What RayCore Has Today
+## What AxiusCharts Has Today
 
 | Area | Implemented |
 |---|---|
@@ -21,9 +21,9 @@
 
 ### 🔴 Critical — Series Types
 
-LWC ships **7 series types**. RayCore only has candlestick.
+LWC ships **7 series types**. AxiusCharts only has candlestick.
 
-| Series | LWC | RayCore | Notes |
+| Series | LWC | AxiusCharts | Notes |
 |---|---|---|---|
 | Candlestick | ✅ | ✅ | Done |
 | **Line** | ✅ | ❌ | Essential for overlays, indicators, price lines |
@@ -37,7 +37,7 @@ LWC ships **7 series types**. RayCore only has candlestick.
 
 ### 🔴 Critical — Multi-Series & Multi-Pane
 
-| Feature | LWC | RayCore | Impact |
+| Feature | LWC | AxiusCharts | Impact |
 |---|---|---|---|
 | **Multiple series on one pane** | ✅ | ❌ | Can't overlay MA/EMA on candles |
 | **Multi-pane (stacked)** | ✅ | ❌ | Can't show RSI/MACD in separate panes |
@@ -47,7 +47,7 @@ LWC ships **7 series types**. RayCore only has candlestick.
 
 ### 🔴 Critical — Studies / Indicators
 
-| Feature | LWC | RayCore | Impact |
+| Feature | LWC | AxiusCharts | Impact |
 |---|---|---|---|
 | **Indicator framework** | Plugin-based | Stub only | `studies/` module is empty |
 | **Built-in indicators** (SMA, EMA, etc.) | Via plugins | ❌ | No indicators at all |
@@ -57,7 +57,7 @@ LWC ships **7 series types**. RayCore only has candlestick.
 
 ### 🟡 Important — Price Scale Features
 
-| Feature | LWC | RayCore |
+| Feature | LWC | AxiusCharts |
 |---|---|---|
 | **Logarithmic scale** | ✅ | ❌ |
 | **Percentage scale** | ✅ | ❌ |
@@ -71,9 +71,9 @@ LWC ships **7 series types**. RayCore only has candlestick.
 
 ### 🟡 Important — Data Layer
 
-| Feature | LWC | RayCore |
+| Feature | LWC | AxiusCharts |
 |---|---|---|
-| **Streaming / real-time updates** ([update()](file:///c:/Users/devra/Downloads/raycharts_core/src/core/interaction.rs#241-271)) | ✅ | ❌ — [set_data()](file:///c:/Users/devra/Downloads/raycharts_core/src/core/engine.rs#60-73) replaces all |
+| **Streaming / real-time updates** ([update()](file:///c:/Users/devra/Downloads/Axius_charts/src/core/interaction.rs#241-271)) | ✅ | ❌ — [set_data()](file:///c:/Users/devra/Downloads/Axius_charts/src/core/engine.rs#60-73) replaces all |
 | **Incremental append** | ✅ | ❌ |
 | **Data validation & merging** | ✅ | Basic sanitization |
 | **Time-ordered enforcement** | ✅ | ❌ |
@@ -84,7 +84,7 @@ LWC ships **7 series types**. RayCore only has candlestick.
 
 ### 🟡 Important — Price Lines & Markers
 
-| Feature | LWC | RayCore |
+| Feature | LWC | AxiusCharts |
 |---|---|---|
 | **Horizontal price lines** (`createPriceLine`) | ✅ | ❌ |
 | **Series markers** (arrows, circles on bars) | ✅ | ❌ |
@@ -95,7 +95,7 @@ LWC ships **7 series types**. RayCore only has candlestick.
 
 ### 🟡 Important — Time Scale
 
-| Feature | LWC | RayCore |
+| Feature | LWC | AxiusCharts |
 |---|---|---|
 | **Time scale API** (programmatic scroll/zoom) | ✅ | Limited |
 | **Visible range events** | ✅ | ❌ |
@@ -108,7 +108,7 @@ LWC ships **7 series types**. RayCore only has candlestick.
 
 ### 🟢 Nice-to-Have — UI & Visual
 
-| Feature | LWC | RayCore |
+| Feature | LWC | AxiusCharts |
 |---|---|---|
 | **Watermark** (text/logo behind chart) | ✅ | ❌ |
 | **Legend / tooltip** (OHLCV values) | ✅ | ❌ |
@@ -120,12 +120,12 @@ LWC ships **7 series types**. RayCore only has candlestick.
 
 ### 🟢 Nice-to-Have — API & Events
 
-| Feature | LWC | RayCore |
+| Feature | LWC | AxiusCharts |
 |---|---|---|
 | **Click/crosshair-move callbacks** | ✅ | ❌ |
 | **Subscribe/unsubscribe event system** | ✅ | ❌ |
 | **Screenshot / `takeScreenshot()`** | ✅ | ❌ |
-| **`fitContent()` / `scrollToPosition()`** | ✅ | [zoom_to_range](file:///c:/Users/devra/Downloads/raycharts_core/src/core/engine.rs#81-88) only |
+| **`fitContent()` / `scrollToPosition()`** | ✅ | [zoom_to_range](file:///c:/Users/devra/Downloads/Axius_charts/src/core/engine.rs#81-88) only |
 | **Resize API** | ✅ | Auto via ResizeObserver |
 | **Options API** (`applyOptions`)** | ✅ | ❌ |
 
@@ -133,7 +133,7 @@ LWC ships **7 series types**. RayCore only has candlestick.
 
 ### 🟢 Nice-to-Have — Drawing Tools
 
-| Feature | LWC | RayCore |
+| Feature | LWC | AxiusCharts |
 |---|---|---|
 | **Horizontal line** | Plugin | ❌ |
 | **Vertical line** | Plugin | ❌ |

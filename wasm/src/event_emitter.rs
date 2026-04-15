@@ -87,7 +87,7 @@ impl EventEmitter {
             for (i, entry) in list.iter().enumerate() {
                 if let Err(e) = entry.func.call1(&JsValue::NULL, data) {
                     web_sys::console::error_2(
-                        &JsValue::from_str(&format!("RayCore: Error in '{}' callback:", event)),
+                        &JsValue::from_str(&format!("AxiusCharts: Error in '{}' callback:", event)),
                         &e,
                     );
                 }
@@ -136,7 +136,7 @@ impl Default for EventEmitter {
 ///
 /// Each event type produces a plain JS object with the event's fields
 /// as properties, plus a `type` field with the event name string.
-pub fn chart_event_to_js(event: &raycore::ChartEvent) -> JsValue {
+pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
     let obj = js_sys::Object::new();
     let _ = js_sys::Reflect::set(
         &obj,
@@ -145,7 +145,7 @@ pub fn chart_event_to_js(event: &raycore::ChartEvent) -> JsValue {
     );
 
     match event {
-        raycore::ChartEvent::CrosshairMove {
+        axiuscharts::ChartEvent::CrosshairMove {
             x,
             y,
             bar_index,
@@ -176,7 +176,7 @@ pub fn chart_event_to_js(event: &raycore::ChartEvent) -> JsValue {
                 },
             );
         }
-        raycore::ChartEvent::VisibleRangeChange { start_bar, end_bar } => {
+        axiuscharts::ChartEvent::VisibleRangeChange { start_bar, end_bar } => {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("startBar"),
@@ -188,7 +188,7 @@ pub fn chart_event_to_js(event: &raycore::ChartEvent) -> JsValue {
                 &JsValue::from_f64(*end_bar),
             );
         }
-        raycore::ChartEvent::Click {
+        axiuscharts::ChartEvent::Click {
             x,
             y,
             bar_index,
@@ -210,7 +210,7 @@ pub fn chart_event_to_js(event: &raycore::ChartEvent) -> JsValue {
                 &JsValue::from_f64(*price),
             );
         }
-        raycore::ChartEvent::DrawingCreated { id, tool } => {
+        axiuscharts::ChartEvent::DrawingCreated { id, tool } => {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("id"),
@@ -219,7 +219,7 @@ pub fn chart_event_to_js(event: &raycore::ChartEvent) -> JsValue {
             let _ =
                 js_sys::Reflect::set(&obj, &JsValue::from_str("tool"), &JsValue::from_str(tool));
         }
-        raycore::ChartEvent::DrawingSelected { id } => {
+        axiuscharts::ChartEvent::DrawingSelected { id } => {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("id"),
@@ -229,32 +229,32 @@ pub fn chart_event_to_js(event: &raycore::ChartEvent) -> JsValue {
                 },
             );
         }
-        raycore::ChartEvent::SymbolChange { symbol } => {
+        axiuscharts::ChartEvent::SymbolChange { symbol } => {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("symbol"),
                 &JsValue::from_str(symbol),
             );
         }
-        raycore::ChartEvent::IntervalChange { interval } => {
+        axiuscharts::ChartEvent::IntervalChange { interval } => {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("interval"),
                 &JsValue::from_str(interval),
             );
         }
-        raycore::ChartEvent::PriceScaleChange { mode } => {
+        axiuscharts::ChartEvent::PriceScaleChange { mode } => {
             let _ =
                 js_sys::Reflect::set(&obj, &JsValue::from_str("mode"), &JsValue::from_str(mode));
         }
-        raycore::ChartEvent::ChartTypeChange { chart_type } => {
+        axiuscharts::ChartEvent::ChartTypeChange { chart_type } => {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("chartType"),
                 &JsValue::from_str(chart_type),
             );
         }
-        raycore::ChartEvent::Resize { width, height } => {
+        axiuscharts::ChartEvent::Resize { width, height } => {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("width"),
@@ -266,7 +266,7 @@ pub fn chart_event_to_js(event: &raycore::ChartEvent) -> JsValue {
                 &JsValue::from_f64(*height),
             );
         }
-        raycore::ChartEvent::RendererFallback {
+        axiuscharts::ChartEvent::RendererFallback {
             requested,
             active,
             reason,
@@ -287,14 +287,14 @@ pub fn chart_event_to_js(event: &raycore::ChartEvent) -> JsValue {
                 &JsValue::from_str(reason),
             );
         }
-        raycore::ChartEvent::Error { message } => {
+        axiuscharts::ChartEvent::Error { message } => {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("message"),
                 &JsValue::from_str(message),
             );
         }
-        raycore::ChartEvent::ExecutionMarkClick {
+        axiuscharts::ChartEvent::ExecutionMarkClick {
             id,
             timestamp_ms,
             price,
@@ -332,7 +332,7 @@ pub fn chart_event_to_js(event: &raycore::ChartEvent) -> JsValue {
                 },
             );
         }
-        raycore::ChartEvent::ExecutionMarkHover {
+        axiuscharts::ChartEvent::ExecutionMarkHover {
             id,
             timestamp_ms,
             price,

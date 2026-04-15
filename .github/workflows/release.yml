@@ -1,4 +1,4 @@
-# RayCharts Release Workflow
+# AxiusCharts Release Workflow
 # Triggered manually or on version tags
 #
 # Creates:
@@ -34,16 +34,16 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: raycore-linux-x64
+            artifact: axiuscharts-linux-x64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: raycore-windows-x64
+            artifact: axiuscharts-windows-x64
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact: raycore-macos-x64
+            artifact: axiuscharts-macos-x64
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact: raycore-macos-arm64
+            artifact: axiuscharts-macos-arm64
 
     steps:
       - name: Checkout repository
@@ -61,7 +61,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: target/${{ matrix.target }}/release/libraycore*
+          path: target/${{ matrix.target }}/release/libaxiuscharts*
           retention-days: 7
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -90,13 +90,13 @@ jobs:
       - name: Package WASM
         run: |
           cd wasm/pkg
-          tar -czvf ../../raycore-wasm.tar.gz .
+          tar -czvf ../../axiuscharts-wasm.tar.gz .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: raycore-wasm
-          path: raycore-wasm.tar.gz
+          name: axiuscharts-wasm
+          path: axiuscharts-wasm.tar.gz
           retention-days: 7
 
   # ═══════════════════════════════════════════════════════════════════════════

@@ -16,7 +16,7 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use raycore::MainChartType;
+//! use axiuscharts::MainChartType;
 //!
 //! engine.set_main_chart_type(MainChartType::OhlcBars);
 //! ```
