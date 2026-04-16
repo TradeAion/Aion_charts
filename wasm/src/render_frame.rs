@@ -285,7 +285,7 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
         );
         // Footprint text labels — rendered on overlay for both WebGPU and Canvas2D
         // so text always appears on top of the chart data.
-        overlay.render_footprint_texts(&engine.footprint_texts);
+        overlay.render_footprint_texts(&engine.footprint_texts, &engine.style);
         overlay.render_dashed_series(
             &engine.series,
             &engine.viewport,
@@ -455,8 +455,9 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
             subpanes
                 .iter()
                 .filter_map(|subpane| {
-                    if let Some(study) =
-                        engine.studies.get_study(axiuscharts::StudyId(subpane.study_id))
+                    if let Some(study) = engine
+                        .studies
+                        .get_study(axiuscharts::StudyId(subpane.study_id))
                     {
                         let mut data = Vec::new();
                         for i in 0..study.outputs.len() {
@@ -481,7 +482,9 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
                         .enumerate()
                         .map(|(i, _)| {
                             config.colors.get(i).copied().unwrap_or(
-                                axiuscharts::ThemeConfig::default().indicator_palette.fallback,
+                                axiuscharts::ThemeConfig::default()
+                                    .indicator_palette
+                                    .fallback,
                             )
                         })
                         .collect();

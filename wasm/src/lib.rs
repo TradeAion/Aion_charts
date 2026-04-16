@@ -3307,6 +3307,12 @@ impl AxiusCharts {
                     sp.apply_separator_style(&sep_style);
                 }
             }
+
+            if let Some(family) = layout_font_family.as_ref() {
+                for sp in &mut s.subpanes {
+                    sp.set_font_family(family.clone());
+                }
+            }
         }
 
         let mut css_changed = false;

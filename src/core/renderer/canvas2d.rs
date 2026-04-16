@@ -211,7 +211,7 @@ impl Canvas2DRenderer {
         }
     }
 
-    fn draw_drawing_geometry(&self, geom: &DrawingGeometry) {
+    fn draw_drawing_geometry_with_font(&self, geom: &DrawingGeometry, font_family: &str) {
         for r in &geom.rects {
             if r.w <= 0.0 || r.h <= 0.0 {
                 continue;
@@ -247,11 +247,7 @@ impl Canvas2DRenderer {
         let _ = self.ctx.set_line_dash(&js_sys::Array::new());
 
         for t in &geom.texts {
-            let font = format!(
-                "{}px {}",
-                t.font_size,
-                crate::core::renderer::theme::FONT_FAMILY
-            );
+            let font = format!("{}px {}", t.font_size, font_family);
             self.ctx.set_font(&font);
             self.ctx.set_fill_style_str(&rgba(&[t.r, t.g, t.b, t.a]));
             self.ctx.set_text_align(t.align.as_canvas_str());
@@ -331,7 +327,7 @@ impl ChartRenderer for Canvas2DRenderer {
 
     fn draw_bottom_drawings(&mut self, ctx: &RenderContext) -> Result<(), String> {
         for geom in ctx.bottom_drawings {
-            self.draw_drawing_geometry(geom);
+            self.draw_drawing_geometry_with_font(geom, &ctx.style.font_family);
         }
         Ok(())
     }

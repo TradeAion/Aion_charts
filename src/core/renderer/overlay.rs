@@ -148,19 +148,19 @@ impl OverlayRenderer {
 
         // Draw active/hovered drawings BELOW crosshair
         for geom in top_drawings {
-            self.draw_geometry(geom);
+            self.draw_geometry(geom, style.font_family.as_str());
         }
 
         self.draw_crosshair(crosshair, style, pw, ph);
     }
 
     /// Draw a DrawingGeometry on the overlay canvas.
-    fn draw_geometry(&self, geom: &DrawingGeometry) {
-        Self::draw_geometry_on(&self.ctx, geom);
+    fn draw_geometry(&self, geom: &DrawingGeometry, font_family: &str) {
+        Self::draw_geometry_on(&self.ctx, geom, font_family);
     }
 
     /// Draw a DrawingGeometry (lines, rects, text, anchor circles) on any 2D context.
-    fn draw_geometry_on(ctx: &CanvasRenderingContext2d, geom: &DrawingGeometry) {
+    fn draw_geometry_on(ctx: &CanvasRenderingContext2d, geom: &DrawingGeometry, font_family: &str) {
         // Filled rects
         for r in &geom.rects {
             if r.w <= 0.0 || r.h <= 0.0 {
@@ -199,11 +199,7 @@ impl OverlayRenderer {
 
         // Text labels (in physical pixel coords)
         for t in &geom.texts {
-            let font = format!(
-                "{}px {}",
-                t.font_size,
-                crate::core::renderer::theme::FONT_FAMILY
-            );
+            let font = format!("{}px {}", t.font_size, font_family);
             ctx.set_font(&font);
             ctx.set_fill_style_str(&rgba(&[t.r, t.g, t.b, t.a]));
             ctx.set_text_align(t.align.as_canvas_str());
@@ -236,7 +232,7 @@ impl OverlayRenderer {
             None => return, // base canvas not set up
         };
         for geom in drawings {
-            Self::draw_geometry_on(ctx, geom);
+            Self::draw_geometry_on(ctx, geom, crate::core::renderer::theme::FONT_FAMILY);
         }
     }
 
@@ -1626,12 +1622,16 @@ impl OverlayRenderer {
     /// This is called for **both** Canvas2D and WebGPU backends so the text
     /// always appears on the top-most Canvas2D layer (z-index:2).
     /// Coordinates in `texts` are already in physical pixels.
-    pub fn render_footprint_texts(&self, texts: &[crate::core::renderer::draw_list::DrawText]) {
+    pub fn render_footprint_texts(
+        &self,
+        texts: &[crate::core::renderer::draw_list::DrawText],
+        style: &ChartStyle,
+    ) {
         if texts.is_empty() {
             return;
         }
 
-        let font_family = crate::core::renderer::theme::FONT_FAMILY;
+        let font_family = style.font_family.as_str();
         self.ctx.set_text_baseline("middle");
 
         let mut prev_size: Option<f32> = None;

@@ -78,9 +78,12 @@ pub const CROSSHAIR: [f32; 4] = [ch(0xEB), ch(0xEB), ch(0xEB), 1.0];
 pub const CROSSHAIR_LABEL_BG: [f32; 4] = [ch(0xEB), ch(0xEB), ch(0xEB), 1.0];
 /// Crosshair label text for the dark theme.
 pub const CROSSHAIR_LABEL_TEXT: [f32; 4] = [ch(0x13), ch(0x13), ch(0x15), 1.0];
-/// Font family (LWC default).
+/// Default font family.
+///
+/// This matches the Axiusflow app chart stack so chart text (axes, overlays,
+/// drawing labels) stays visually aligned with the host UI by default.
 pub const FONT_FAMILY: &str =
-    "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
+    "'Geist Sans', 'Noto Sans SC', 'Noto Sans', Roboto, 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif";
 /// Axis label font size in CSS px.
 pub const FONT_SIZE: f32 = 12.0;
 /// Bar width as fraction of bar slot (0.0-1.0).

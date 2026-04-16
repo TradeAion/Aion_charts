@@ -30,7 +30,9 @@ use axiuscharts::core::renderer::traits::{ChartStyle, CrosshairMode, CrosshairSt
 use axiuscharts::core::renderer::value_projection::TimeScaleIndex;
 use axiuscharts::core::series::LineDataArray;
 use axiuscharts::core::viewport::Viewport;
-use axiuscharts::{DrawingManager, PaneId, PaneManager, PaneOptions, PriceAxisRenderer, ScrollState};
+use axiuscharts::{
+    DrawingManager, PaneId, PaneManager, PaneOptions, PriceAxisRenderer, ScrollState,
+};
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -317,6 +319,7 @@ pub struct SubPane {
     pub grid_row: u32,
     separator_bg_css: Rc<RefCell<String>>,
     separator_hover_css: Rc<RefCell<String>>,
+    font_family: String,
 
     // ── Chart canvases (base = data/grid, top = crosshair overlay) ──
     chart_base: HtmlCanvasElement,
@@ -654,6 +657,7 @@ impl SubPane {
             grid_row,
             separator_bg_css,
             separator_hover_css,
+            font_family: _style.font_family.clone(),
             chart_base,
             chart_base_ctx,
             chart_top,
@@ -714,6 +718,10 @@ impl SubPane {
             top = handle_top,
             height = hit_h,
         ));
+    }
+
+    pub fn set_font_family(&mut self, font_family: String) {
+        self.font_family = font_family;
     }
 
     /// Get a clone of the shared height cell (for coordinator integration).
@@ -926,11 +934,11 @@ impl SubPane {
                     .rev()
                     .find(|v| v.is_finite())
                     .copied()?;
-                let color = self
-                    .colors
-                    .get(i)
-                    .copied()
-                    .unwrap_or(axiuscharts::ThemeConfig::default().indicator_palette.fallback);
+                let color = self.colors.get(i).copied().unwrap_or(
+                    axiuscharts::ThemeConfig::default()
+                        .indicator_palette
+                        .fallback,
+                );
                 Some((last_val as f64, color))
             })
             .collect();
@@ -1121,11 +1129,11 @@ impl SubPane {
 
         // Data lines
         for (i, line) in self.data.iter().enumerate() {
-            let color = self
-                .colors
-                .get(i)
-                .copied()
-                .unwrap_or(axiuscharts::ThemeConfig::default().indicator_palette.fallback);
+            let color = self.colors.get(i).copied().unwrap_or(
+                axiuscharts::ThemeConfig::default()
+                    .indicator_palette
+                    .fallback,
+            );
             self.draw_data_line(line, &color, main_viewport, time_scale, css_w, css_h, dpr);
         }
     }
@@ -1248,11 +1256,7 @@ impl SubPane {
 
         // Text labels (in physical pixel coords)
         for t in &geom.texts {
-            let font = format!(
-                "{}px {}",
-                t.font_size,
-                axiuscharts::core::renderer::theme::FONT_FAMILY
-            );
+            let font = format!("{}px {}", t.font_size, self.font_family);
             ctx.set_font(&font);
             ctx.set_fill_style_str(&rgba(&[t.r, t.g, t.b, t.a]));
             ctx.set_text_align(t.align.as_canvas_str());
