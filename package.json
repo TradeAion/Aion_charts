@@ -7,8 +7,9 @@
   "module": "./wasm/pkg/axiuscharts_wasm.js",
   "types": "./wasm/pkg/axiuscharts_wasm.d.ts",
   "scripts": {
-    "build": "wasm-pack build --target web wasm",
-    "build:release": "wasm-pack build --target web --release wasm",
+    "build": "wasm-pack build --target web wasm && node -e \"require('fs').writeFileSync('wasm/pkg/.gitignore', '!axiuscharts_wasm_bg.wasm\\n!axiuscharts_wasm_bg.wasm.d.ts\\n!axiuscharts_wasm.d.ts\\n!axiuscharts_wasm.js\\n!package.json\\n')\"",
+    "build:release": "wasm-pack build --target web --release wasm && node -e \"require('fs').writeFileSync('wasm/pkg/.gitignore', '!axiuscharts_wasm_bg.wasm\\n!axiuscharts_wasm_bg.wasm.d.ts\\n!axiuscharts_wasm.d.ts\\n!axiuscharts_wasm.js\\n!package.json\\n')\"",
+    "prepack": "npm run build",
     "serve": "python serve.py",
     "dev": "python dev.py"
   },
@@ -20,7 +21,10 @@
     "./axiuscharts_wasm_bg.wasm": "./wasm/pkg/axiuscharts_wasm_bg.wasm"
   },
   "files": [
+    "LICENSE",
+    "README.md",
     "wasm/pkg/axiuscharts_wasm_bg.wasm",
+    "wasm/pkg/axiuscharts_wasm_bg.wasm.d.ts",
     "wasm/pkg/axiuscharts_wasm.js",
     "wasm/pkg/axiuscharts_wasm.d.ts"
   ],

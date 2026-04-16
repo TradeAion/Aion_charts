@@ -1,7 +1,8 @@
 # Build artifacts
 /target
 /pkg
-*.wasm
+/wasm/*.wasm
+/wasm/target
 
 # Stale root-level wasm-pack outputs (only wasm/pkg/ should have these)
 /axiuscharts_wasm*.js
