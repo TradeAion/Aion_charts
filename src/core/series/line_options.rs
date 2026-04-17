@@ -4,7 +4,7 @@
 ///
 /// Dash patterns are width-relative per the LWC specification:
 /// - Solid = no dash
-/// - Dotted = [w, w]
+/// - Dotted = [w, 2w]
 /// - Dashed = [2w, 2w]
 /// - LargeDashed = [6w, 6w]
 /// - SparseDotted = [w, 4w]
@@ -31,7 +31,7 @@ impl LineStyle {
     ///
     /// LWC dash table (w = line_width in physical px):
     /// - Solid: (0, 0)
-    /// - Dotted: (w, w)
+    /// - Dotted: (w, 2w)
     /// - Dashed: (2w, 2w)
     /// - LargeDashed: (6w, 6w)
     /// - SparseDotted: (w, 4w)
@@ -39,7 +39,8 @@ impl LineStyle {
         let w = line_width.max(1.0);
         match self {
             Self::Solid => (0.0, 0.0),
-            Self::Dotted => (w, w),
+            // Keep dotted visible but less dense, closer to TradingView spacing.
+            Self::Dotted => (w, 2.0 * w),
             Self::Dashed => (2.0 * w, 2.0 * w),
             Self::LargeDashed => (6.0 * w, 6.0 * w),
             Self::SparseDotted => (w, 4.0 * w),
