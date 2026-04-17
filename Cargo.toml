@@ -12,6 +12,7 @@ description = "AxiusCharts — high-performance GPU-accelerated charting engine"
 [features]
 default = []
 indicator_runtime_v1 = []
+parity-tests = []
 
 [lib]
 name = "axiuscharts"

@@ -52,7 +52,10 @@ pub mod price_axis;
 #[cfg(target_arch = "wasm32")]
 pub mod time_axis;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(
+    target_arch = "wasm32",
+    all(not(target_arch = "wasm32"), feature = "parity-tests")
+))]
 pub mod pipeline_manager;
 
 #[cfg(target_arch = "wasm32")]
@@ -62,3 +65,6 @@ pub mod wgpu_context;
 pub mod wgpu_backend;
 
 pub mod value_projection;
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "parity-tests"))]
+pub mod backend_parity_tests;
