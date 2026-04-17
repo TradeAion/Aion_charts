@@ -3,7 +3,7 @@
 > Started: 2026-02-26 | Status: **ALL PHASES COMPLETE + VERIFIED (final pass)**
 > Previous phases (P0-P3, Phase 5) were COMPLETE — see git history.
 > This document tracks the **API Modernization** effort.
-> Last updated: 2026-03-27 by docs alignment agent.
+> Last updated: 2026-04-17 by migration hardening pass.
 
 ---
 
@@ -39,7 +39,7 @@ wasm-pack build wasm --target web --release                    # build WASM pack
 - [x] Align `ChartGroup` docs/example with runtime signatures
 - [x] Align price-line and marker docs with runtime signatures
 - [x] Normalize event payload field names in docs/examples
-- [ ] Re-audit the remaining docs for any stale snake_case field names
+- [x] Re-audit the remaining docs for any stale snake_case field names
 
 ## 2026-03-27 Interaction/Event Alignment
 
@@ -48,7 +48,16 @@ wasm-pack build wasm --target web --release                    # build WASM pack
 - [x] Keep click bar-index lookup aligned with hover/crosshair slot math
 - [x] Emit `visibleRangeChange` from chart drag, wheel, pinch, and double-click paths
 - [x] Wire draggable price-line interaction at the chart pointer layer
-- [ ] Follow through on the RAF-driven gliding path so momentum scrolls can emit `visibleRangeChange` too
+- [x] Follow through on the RAF-driven gliding path so momentum scrolls can emit `visibleRangeChange` too
+
+## Post-Migration Closure (2026-04-17)
+
+- [x] Move logical price storage, persistence, indicators, and WASM typed-array inputs to `f64`
+- [x] Remove `Bar::_pad`, document the real `Bar` layout, and add `Bar::new(...)`
+- [x] Replace the stale feature audit with `docs/feature-matrix.md`
+- [x] Add version-aware drawing snapshot migration scaffolding via `migrate_snapshot(...)`
+- [x] Add a structural backend parity harness behind `--features parity-tests`
+- [x] Restructure repo documentation around architecture, price domain, events, testing, persistence, and performance
 
 ---
 

@@ -1,31 +1,24 @@
 # Getting Started
 
-## Installation
-
-### npm / yarn / pnpm
+## Install
 
 ```bash
 npm install axiuscharts-wasm
 ```
 
-### Manual (from GitHub release)
+For local development in this repository:
 
-Download the latest `axiuscharts-wasm.tar.gz` from [Releases](https://github.com/Axiusflow/Axius_charts/releases), extract, and place the files in your project.
-
-### CDN (ESM)
-
-```html
-<script type="module">
-  import init, { AxiusCharts } from 'https://unpkg.com/axiuscharts-wasm/axiuscharts_wasm.js';
-</script>
+```bash
+cargo check
+cargo check --target wasm32-unknown-unknown -p axiuscharts-wasm
+cargo test
+wasm-pack build wasm --target web --release
 ```
 
----
-
-## Quick Start
+## Create A Chart
 
 ```html
-<div id="chart" style="width: 100%; height: 400px;"></div>
+<div id="chart" style="width: 100%; height: 420px;"></div>
 
 <script type="module">
   import init, { AxiusCharts } from './pkg/axiuscharts_wasm.js';
@@ -33,79 +26,53 @@ Download the latest `axiuscharts-wasm.tar.gz` from [Releases](https://github.com
   await init();
 
   const chart = await AxiusCharts.create_chart('chart', {
-    renderer: 'webgpu',     // default is 'webgpu'; 'auto' also prefers WebGPU
-    autoRender: true,        // starts RAF loop automatically
-    theme: 'dark',           // 'dark' or 'light'
+    renderer: 'auto',
+    autoRender: true,
+    theme: 'dark',
     symbol: 'BTCUSD',
     interval: '1m',
   });
 
-  // Load OHLCV data (parallel typed arrays)
   chart.set_data_arrays(
-    new Float32Array(opens),
-    new Float32Array(highs),
-    new Float32Array(lows),
-    new Float32Array(closes),
-    new Float32Array(volumes),
-    new BigUint64Array(timestamps),  // millisecond unix timestamps
+    new Float64Array(opens),
+    new Float64Array(highs),
+    new Float64Array(lows),
+    new Float64Array(closes),
+    new Float64Array(volumes),
+    new BigUint64Array(timestamps),
   );
+
+  chart.on('visibleRangeChange', ({ startBar, endBar }) => {
+    console.log('visible range', startBar, endBar);
+  });
 </script>
 ```
 
----
+### Why `Float64Array`?
 
-## WASM Initialization
+Logical prices are stored and processed as `f64` across the engine, persistence layer, studies, and WASM boundary. That preserves values such as `103842.5712345` and `0.00000012345678` exactly through the AxiusCharts data path. Only the final renderer projection converts into single-precision GPU-friendly attributes.
 
-AxiusCharts is a WebAssembly module. Before using any API, you must initialize the WASM runtime:
+## Initialization Rules
 
-```js
-import init, { AxiusCharts } from 'axiuscharts-wasm';
+- Call `init()` before creating any charts.
+- Serve the `.wasm` file with `Content-Type: application/wasm`.
+- Give the container an explicit height before `create_chart(...)`.
+- Call `dispose()` when removing the chart.
 
-// init() fetches and compiles the .wasm file.
-// It is idempotent — safe to call multiple times.
-await init();
+## Manual Rendering
+
+`autoRender` defaults to `true`. When you need explicit frame control:
+
+```ts
+const chart = await AxiusCharts.create_chart(host, { autoRender: false });
+chart.render();
 ```
 
-The `.wasm` file must be served with `Content-Type: application/wasm`. Most dev servers handle this automatically. For production bundlers, see the [Framework Guide](./framework-guide.md).
+Auto-render is invalidation-driven. AxiusCharts schedules a one-shot RAF when state changes; it does not spin a permanent RAF loop.
 
----
+## Common Next Steps
 
-## Container Requirements
-
-The chart container **must** have explicit dimensions (width and height). AxiusCharts uses a `ResizeObserver` to track size changes, but the container itself must have non-zero dimensions before chart creation:
-
-```css
-/* Good — explicit dimensions */
-#chart { width: 100%; height: 400px; }
-
-/* Bad — no height, chart will be 0px tall */
-#chart { width: 100%; }
-```
-
----
-
-## Lifecycle
-
-```js
-// Create
-const chart = await AxiusCharts.create_chart(container, options);
-
-// Use
-chart.set_data_arrays(...);
-chart.set_chart_type('candlestick');
-chart.on('crosshairMove', (e) => console.log(e));
-
-// Cleanup
-chart.dispose();
-```
-
-Always call `dispose()` when removing the chart from the DOM to detach event listeners and free WASM memory.
-
----
-
-## Next Steps
-
-- [API Reference](./api-reference.md) — Complete method documentation
-- [Framework Guide](./framework-guide.md) — React, Vue, Svelte integration
-- [Theming](./theming.md) — Dark/light themes, custom colors, CSS variables
-- [Drawing Tools](./drawing-tools.md) — Interactive drawing tools
+- [API Reference](./api-reference.md)
+- [Events](./events.md)
+- [Framework Guide](./framework-guide.md)
+- [Drawing Persistence](./drawing-persistence.md)

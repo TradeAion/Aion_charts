@@ -1,8 +1,6 @@
 # Framework Integration Guide
 
-AxiusCharts is framework-agnostic — it works with any JavaScript framework. The key pattern is: **initialize WASM once, mount/unmount chart instances per component lifecycle**.
-
----
+AxiusCharts is framework-agnostic. The stable pattern is: initialize WASM once, create one chart per mounted container, dispose on unmount, and feed data through `Float64Array` / `BigUint64Array` without any precision adapters.
 
 ## React
 
@@ -10,20 +8,12 @@ AxiusCharts is framework-agnostic — it works with any JavaScript framework. Th
 import { useEffect, useRef } from 'react';
 import init, { AxiusCharts } from 'axiuscharts-wasm';
 
-// Initialize WASM once at module level
 const wasmReady = init();
 
-interface ChartProps {
-  theme?: 'dark' | 'light';
-  symbol?: string;
-  interval?: string;
-}
-
-export function Chart({ theme = 'dark', symbol = 'BTCUSD', interval = '1m' }: ChartProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+export function Chart() {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<AxiusCharts | null>(null);
 
-  // Mount
   useEffect(() => {
     let disposed = false;
 
@@ -32,14 +22,16 @@ export function Chart({ theme = 'dark', symbol = 'BTCUSD', interval = '1m' }: Ch
       if (disposed || !containerRef.current) return;
 
       const chart = await AxiusCharts.create_chart(containerRef.current, {
-        renderer: 'webgpu',
+        renderer: 'auto',
         autoRender: true,
-        theme,
-        symbol,
-        interval,
+        theme: 'dark',
       });
 
-      if (disposed) { chart.dispose(); return; }
+      if (disposed) {
+        chart.dispose();
+        return;
+      }
+
       chartRef.current = chart;
     })();
 
@@ -48,64 +40,38 @@ export function Chart({ theme = 'dark', symbol = 'BTCUSD', interval = '1m' }: Ch
       chartRef.current?.dispose();
       chartRef.current = null;
     };
-  }, []); // mount once
+  }, []);
 
-  // React to prop changes
-  useEffect(() => {
-    chartRef.current?.apply_options({ theme });
-  }, [theme]);
-
-  return <div ref={containerRef} style={{ width: '100%', height: '400px' }} />;
+  return <div ref={containerRef} style={{ width: '100%', height: 420 }} />;
 }
 ```
 
-### Common React Pitfalls
-
-- **StrictMode double-mount**: React 18 StrictMode mounts/unmounts/remounts in development. The `disposed` flag prevents stale chart references.
-- **HMR cleanup**: Ensure `dispose()` runs on hot reload. The pattern above handles this via the useEffect cleanup.
-- **Container sizing**: The `div` must have explicit height. Flexbox `flex: 1` works if the parent has a defined height.
-
----
-
-## Vue 3 (Composition API)
+## Vue 3
 
 ```vue
 <template>
-  <div ref="container" style="width: 100%; height: 400px" />
+  <div ref="container" style="width: 100%; height: 420px" />
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue';
+import { onMounted, onBeforeUnmount, ref } from 'vue';
 import init, { AxiusCharts } from 'axiuscharts-wasm';
 
-const props = defineProps<{ theme?: 'dark' | 'light' }>();
-
-const container = ref<HTMLDivElement>();
+const container = ref<HTMLDivElement | null>(null);
 let chart: AxiusCharts | null = null;
 
 onMounted(async () => {
   await init();
   if (!container.value) return;
-
-  chart = await AxiusCharts.create_chart(container.value, {
-    renderer: 'webgpu',
-    autoRender: true,
-    theme: props.theme ?? 'dark',
-  });
+  chart = await AxiusCharts.create_chart(container.value, { renderer: 'auto' });
 });
 
 onBeforeUnmount(() => {
   chart?.dispose();
   chart = null;
 });
-
-watch(() => props.theme, (t) => {
-  chart?.apply_options({ theme: t });
-});
 </script>
 ```
-
----
 
 ## Svelte
 
@@ -114,113 +80,40 @@ watch(() => props.theme, (t) => {
   import { onMount, onDestroy } from 'svelte';
   import init, { AxiusCharts } from 'axiuscharts-wasm';
 
-  export let theme: 'dark' | 'light' = 'dark';
-
   let container: HTMLDivElement;
   let chart: AxiusCharts | null = null;
 
   onMount(async () => {
     await init();
-    chart = await AxiusCharts.create_chart(container, {
-      renderer: 'webgpu',
-      autoRender: true,
-      theme,
-    });
+    chart = await AxiusCharts.create_chart(container, { renderer: 'auto' });
   });
 
   onDestroy(() => {
     chart?.dispose();
   });
-
-  $: if (chart) chart.apply_options({ theme });
 </script>
 
-<div bind:this={container} style="width: 100%; height: 400px;" />
+<div bind:this={container} style="width: 100%; height: 420px" />
 ```
 
----
+## Bundlers
 
-## Vanilla JavaScript
-
-```html
-<div id="chart" style="width: 100%; height: 400px;"></div>
-<script type="module">
-  import init, { AxiusCharts } from './pkg/axiuscharts_wasm.js';
-
-  await init();
-
-  const chart = await AxiusCharts.create_chart('chart', {
-    renderer: 'webgpu',
-    autoRender: true,
-    theme: 'dark',
-  });
-
-  // Load data, attach events, etc.
-  chart.demo_mode();
-</script>
-```
-
----
-
-## Bundler Configuration
-
-### Vite
-
-Vite handles WASM files natively. Just ensure the `.wasm` file is included in the build output:
-
-```ts
-// vite.config.ts
-export default defineConfig({
-  optimizeDeps: {
-    exclude: ['axiuscharts-wasm'],  // don't pre-bundle WASM
-  },
-});
-```
-
-### webpack 5
-
-```js
-// webpack.config.js
-module.exports = {
-  experiments: {
-    asyncWebAssembly: true,
-  },
-};
-```
-
-### Next.js
-
-```js
-// next.config.js
-module.exports = {
-  webpack: (config) => {
-    config.experiments = { ...config.experiments, asyncWebAssembly: true };
-    return config;
-  },
-};
-```
-
----
+- Vite: exclude `axiuscharts-wasm` from dependency prebundling if needed
+- webpack 5: enable `experiments.asyncWebAssembly`
+- Next.js: wire async WebAssembly through the webpack config
 
 ## Events
 
-AxiusCharts provides a typed event system:
+AxiusCharts uses camelCase event payload fields:
 
 ```ts
 chart.on('crosshairMove', (e) => {
   console.log(e.price, e.timestamp, e.barIndex);
 });
 
-chart.on('click', (e) => { /* ... */ });
-chart.on('visibleRangeChange', (e) => { /* ... */ });
-chart.on('drawingCreated', (e) => { /* ... */ });
-chart.on('drawingSelected', (e) => { /* ... */ });
-
-// Unsubscribe
-const handler = (e) => { /* ... */ };
-chart.on('crosshairMove', handler);
-chart.off('crosshairMove', handler);
-
-// One-time listener
-chart.once('resize', (e) => { /* ... */ });
+chart.on('visibleRangeChange', ({ startBar, endBar }) => {
+  console.log(startBar, endBar);
+});
 ```
+
+Kinetic glide updates also emit `visibleRangeChange`, so synchronization code does not need a separate "gesture ended" fallback path.

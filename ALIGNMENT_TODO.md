@@ -29,3 +29,4 @@
 - [x] Keep public `barIndex` APIs anchored to real main bars while letting internal rendering/event timestamp paths derive overlay-only logical positions from the merged time scale.
 - [x] Run a browser smoke pass covering page load, pointer drag, wheel zoom, drawing gesture, and viewport resize on the demo app without new console/runtime errors.
 - [x] Extend the browser smoke pass to cover merged-slot-sensitive behavior: wheel zoom, pan, and subpane creation on the demo app without new console/runtime errors.
+- [x] Re-audit the remaining docs for stale snake_case public JS event payload names and align them to camelCase.

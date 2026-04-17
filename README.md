@@ -1,10 +1,8 @@
 # AxiusCharts
 
-**High-performance WebGPU/Canvas2D charting engine built in Rust + WASM.**
+AxiusCharts is a production charting engine built in Rust and shipped through WebAssembly. The core crate (`axiuscharts`) owns data storage, viewport math, geometry generation, render backends, drawings, indicators, and event delivery; the `axiuscharts-wasm` crate is the thin DOM and `wasm-bindgen` bridge.
 
-Created by [AxiusFlow](https://github.com/Axiusflow)
-
----
+The logical price domain is now `f64` end-to-end. Prices remain double precision in storage, math, persistence, indicators, and the JS/WASM boundary, then get projected into single-precision render space only at the renderer seam.
 
 ## Quick Start
 
@@ -12,89 +10,78 @@ Created by [AxiusFlow](https://github.com/Axiusflow)
 npm install axiuscharts-wasm
 ```
 
-```js
+```ts
 import init, { AxiusCharts } from 'axiuscharts-wasm';
 
 await init();
 
-const chartHost = document.getElementById('container');
-if (!chartHost) throw new Error("Missing container element with id 'container'");
+const host = document.getElementById('chart');
+if (!host) throw new Error('Missing chart container');
 
-const chart = await AxiusCharts.create_chart(chartHost, {
-  renderer: 'webgpu',
+const chart = await AxiusCharts.create_chart(host, {
+  renderer: 'auto',
   autoRender: true,
   theme: 'dark',
+  symbol: 'BTCUSD',
+  interval: '1m',
 });
 
-chart.set_data_arrays(opens, highs, lows, closes, volumes, timestamps);
+chart.set_data_arrays(
+  new Float64Array(opens),
+  new Float64Array(highs),
+  new Float64Array(lows),
+  new Float64Array(closes),
+  new Float64Array(volumes),
+  new BigUint64Array(timestamps),
+);
 ```
 
----
+## Implemented Surface
 
-## Features
+- Main chart types: candlestick, OHLC, line, area, Heikin-Ashi, baseline, footprint
+- Overlay series: line, area, histogram, bar, baseline
+- Drawings: trend line, horizontal line, vertical line, ray, rectangle, Fibonacci, scale, brush
+- Built-in studies: SMA, EMA, RSI, MACD, Bollinger Bands, Stochastic, ATR, VWAP
+- Trade annotation: markers, draggable price lines, execution marks
+- Multi-pane and groups: indicator panes, chart groups, synchronized ranges and crosshair state
+- Renderers: WebGPU primary, Canvas2D fallback
+- Events: `crosshairMove`, `click`, `visibleRangeChange`, drawing events, execution mark events, lifecycle events
 
-- **GPU-accelerated rendering** via WebGPU with Canvas2D fallback
-- **6 chart types**: Candlestick, OHLC, Line, Area, Heikin-Ashi, Baseline
-- **8 drawing tools**: Trend Line, Horizontal Line, Vertical Line, Ray, Rectangle, Fibonacci, Scale, Brush
-- **8 built-in studies**: SMA, EMA, RSI, MACD, Bollinger Bands, Stochastic, ATR, VWAP
-- **Overlay series**: Line, Area, Histogram, Bar, Baseline
-- **Series markers**: Arrows, circles, squares at bar indices
-- **Execution marks**: Trade visualization (entry/exit/scale-in/scale-out) with timestamp-based placement
-- **Price lines**: Horizontal price level annotations
-- **Multi-pane**: Indicator sub-panes, synchronized chart groups, split workspaces
-- **Typed event system**: crosshairMove, click, visibleRangeChange, drawing events, execution mark events
-- **Theme system**: Dark/light presets, CSS variable integration
-- **Framework-agnostic**: Works with React, Vue, Svelte, vanilla JS
-
----
+See [docs/feature-matrix.md](./docs/feature-matrix.md) for the verified matrix.
 
 ## Documentation
 
-| Doc | Description |
-|---|---|
-| [Getting Started](./docs/getting-started.md) | Installation, quick start, WASM init |
-| [API Reference](./docs/api-reference.md) | Complete method documentation |
-| [Framework Guide](./docs/framework-guide.md) | React, Vue, Svelte, bundler config |
-| [Theming](./docs/theming.md) | Dark/light, custom colors, CSS variables |
-| [Drawing Tools](./docs/drawing-tools.md) | Interactive drawing tools |
+Start at [docs/README.md](./docs/README.md). The most important documents for this migration are:
 
----
+- [docs/price-domain.md](./docs/price-domain.md)
+- [docs/events.md](./docs/events.md)
+- [docs/drawing-persistence.md](./docs/drawing-persistence.md)
+- [docs/migration-notes.md](./docs/migration-notes.md)
 
-## Build from Source
-
-### Prerequisites
-
-- Rust 1.83+ with `wasm32-unknown-unknown` target
-- [wasm-pack](https://rustwasm.github.io/wasm-pack/)
-
-### Compile
+## Build And Verify
 
 ```bash
-wasm-pack build --target web --out-dir pkg wasm
+cargo check
+cargo check --target wasm32-unknown-unknown -p axiuscharts-wasm
+cargo test
+cargo clippy -- -D warnings
+wasm-pack build wasm --target web --release
 ```
 
-### Run Demo
+Parity harness:
+
+```bash
+cargo test --features parity-tests
+```
+
+## Demo
 
 ```bash
 python serve.py
-# Open http://localhost:8080/demo/
 ```
 
-Use the `Exec` button in the demo toolbar to toggle sample execution marks on the time-based chart modes.
-
----
-
-## Performance
-
-- 10,000+ candles in a single instanced GPU draw call
-- Sub-millisecond frame times on integrated GPUs
-- Zero GC pressure (no JS objects created per frame)
-- Automatic RAF rendering when enabled, with manual `render()` available
-
----
+Open `http://localhost:8080/demo/`.
 
 ## License
 
 Proprietary. All rights reserved. See [LICENSE](./LICENSE).
-
-*Built by [AxiusFlow](https://github.com/Axiusflow)*
