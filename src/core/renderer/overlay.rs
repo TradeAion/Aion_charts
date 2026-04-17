@@ -55,6 +55,17 @@ pub struct OverlayRenderer {
 }
 
 impl OverlayRenderer {
+    /// Convert a CSS-space X coordinate that uses the LWC `-1px` bias
+    /// (`x_css = frac * pane_css_w - 1`) into physical pixels.
+    ///
+    /// Plain `x_css * ratio` is only exact at ratio=1; on fractional DPR it
+    /// introduces a constant offset. This keeps crosshair/marker X perfectly
+    /// aligned with candle geometry generated in physical space.
+    #[inline]
+    fn biased_css_x_to_phys(x_css: f64, h_pixel_ratio: f64) -> f64 {
+        (x_css + 1.0) * h_pixel_ratio - 1.0
+    }
+
     pub fn new(canvas: HtmlCanvasElement, dpr: f64) -> Result<Self, String> {
         let ctx = canvas
             .get_context("2d")
@@ -825,7 +836,7 @@ impl OverlayRenderer {
             return;
         }
 
-        let mx = ch.x * self.h_pixel_ratio;
+        let mx = Self::biased_css_x_to_phys(ch.x, self.h_pixel_ratio);
         let my = ch.y * self.v_pixel_ratio;
 
         let vert_in_bounds = mx >= 0.0 && mx <= pane_w;
@@ -953,7 +964,7 @@ impl OverlayRenderer {
                 continue;
             }
 
-            let x_phys = crosshair.x * dpr;
+            let x_phys = Self::biased_css_x_to_phys(crosshair.x, self.h_pixel_ratio);
 
             // Two-pass rendering: border ring then fill
             // Pass 1: border ring (white or contrasting color)
@@ -1029,9 +1040,9 @@ impl OverlayRenderer {
                 else {
                     continue;
                 };
-                // Calculate X position from bar index
-                let x_css = viewport.bar_center_css(logical_slot as usize, pane_css_w);
-                let x_phys = x_css * dpr;
+                // Calculate X directly in physical space for exact alignment
+                // with candle centers at fractional DPR/zoom levels.
+                let x_phys = bar_to_x(logical_slot + 0.5, viewport, pane_css_w * dpr);
 
                 if x_phys < 0.0 || x_phys > pane_css_w * dpr {
                     continue;
