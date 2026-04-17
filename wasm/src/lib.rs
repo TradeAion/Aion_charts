@@ -3145,6 +3145,10 @@ impl AxiusCharts {
         let chart_type = js_get(options, "chartType")
             .or_else(|| js_get(options, "chart_type"))
             .and_then(|v| v.as_string());
+        // Keep candle border overrides synchronized with bullish/bearish color updates
+        // so borders and last-price visual cues stay color-consistent.
+        let mut sync_up_border_color: Option<[f32; 4]> = None;
+        let mut sync_down_border_color: Option<[f32; 4]> = None;
 
         {
             let mut s = self.inner.borrow_mut();
@@ -3264,15 +3268,19 @@ impl AxiusCharts {
 
                 if let Some(color) = bullish_color {
                     style.bullish_color = color;
+                    sync_up_border_color.get_or_insert(color);
                 }
                 if let Some(color) = bearish_color {
                     style.bearish_color = color;
+                    sync_down_border_color.get_or_insert(color);
                 }
                 if let Some(color) = wick_bullish_color {
                     style.wick_bullish_color = color;
+                    sync_up_border_color = Some(color);
                 }
                 if let Some(color) = wick_bearish_color {
                     style.wick_bearish_color = color;
+                    sync_down_border_color = Some(color);
                 }
                 if let Some(ratio) = bar_width_ratio {
                     style.bar_width_ratio = ratio;
@@ -3314,6 +3322,12 @@ impl AxiusCharts {
             }
             if let Some(width) = area_line_width {
                 s.engine.main_chart_options.line_width = width;
+            }
+            if let Some(color) = sync_up_border_color {
+                s.engine.main_chart_options.up_border_color = Some(color);
+            }
+            if let Some(color) = sync_down_border_color {
+                s.engine.main_chart_options.down_border_color = Some(color);
             }
 
             let mut separator_style_changed = false;
@@ -5161,6 +5175,8 @@ impl AxiusCharts {
         let mut s = self.inner.borrow_mut();
         s.engine.style.bullish_color = [fill_r, fill_g, fill_b, fill_a];
         s.engine.style.wick_bullish_color = [wick_r, wick_g, wick_b, wick_a];
+        // Keep candlestick border in sync with the wick color unless explicitly overridden later.
+        s.engine.main_chart_options.up_border_color = Some([wick_r, wick_g, wick_b, wick_a]);
     }
 
     /// Set bearish (down) candle colors: body fill and wick/border.
@@ -5178,6 +5194,8 @@ impl AxiusCharts {
         let mut s = self.inner.borrow_mut();
         s.engine.style.bearish_color = [fill_r, fill_g, fill_b, fill_a];
         s.engine.style.wick_bearish_color = [wick_r, wick_g, wick_b, wick_a];
+        // Keep candlestick border in sync with the wick color unless explicitly overridden later.
+        s.engine.main_chart_options.down_border_color = Some([wick_r, wick_g, wick_b, wick_a]);
     }
 
     /// Set volume bar colors: bullish and bearish.

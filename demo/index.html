@@ -14,7 +14,7 @@
     html, body { touch-action: none; overscroll-behavior: none; }
     
     body {
-      background: #131316;
+      background: #131315;
       color: #e0e0e0;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       display: flex;
@@ -436,15 +436,15 @@
         <div class="setting-row">
           <span class="setting-label">Bullish</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-bullish-fill" value="#00b562" title="Fill">
-            <input type="color" class="setting-input" id="cfg-bullish-wick" value="#00b562" title="Wick">
+            <input type="color" class="setting-input" id="cfg-bullish-fill" value="#097564" title="Fill">
+            <input type="color" class="setting-input" id="cfg-bullish-wick" value="#097564" title="Wick">
           </div>
         </div>
         <div class="setting-row">
           <span class="setting-label">Bearish</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-bearish-fill" value="#f20751" title="Fill">
-            <input type="color" class="setting-input" id="cfg-bearish-wick" value="#f20751" title="Wick">
+            <input type="color" class="setting-input" id="cfg-bearish-fill" value="#b5343f" title="Fill">
+            <input type="color" class="setting-input" id="cfg-bearish-wick" value="#b5343f" title="Wick">
           </div>
         </div>
         <div class="setting-row">
@@ -462,13 +462,13 @@
         <div class="setting-row">
           <span class="setting-label">Up Volume</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-volume-up" value="#00b562">
+            <input type="color" class="setting-input" id="cfg-volume-up" value="#097564">
           </div>
         </div>
         <div class="setting-row">
           <span class="setting-label">Down Volume</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-volume-down" value="#f20751">
+            <input type="color" class="setting-input" id="cfg-volume-down" value="#b5343f">
           </div>
         </div>
       </div>
@@ -488,7 +488,7 @@
         <div class="setting-row">
           <span class="setting-label">Line Color</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-crosshair-color" value="#ebebeb">
+            <input type="color" class="setting-input" id="cfg-crosshair-color" value="#22262a">
           </div>
         </div>
         <div class="setting-row">
@@ -511,13 +511,13 @@
         <div class="setting-row">
           <span class="setting-label">Label BG</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-crosshair-label-bg" value="#ebebeb">
+            <input type="color" class="setting-input" id="cfg-crosshair-label-bg" value="#22262a">
           </div>
         </div>
         <div class="setting-row">
           <span class="setting-label">Label Text</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-crosshair-label-text" value="#131315">
+            <input type="color" class="setting-input" id="cfg-crosshair-label-text" value="#949698">
           </div>
         </div>
         <div class="setting-row">
@@ -613,7 +613,7 @@
         <div class="setting-row">
           <span class="setting-label">Border Color</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-axis-border-color" value="#2a2a2a">
+            <input type="color" class="setting-input" id="cfg-axis-border-color" value="#22262a">
           </div>
         </div>
         <div class="setting-row">
@@ -635,7 +635,7 @@
         <div class="setting-row">
           <span class="setting-label">Text Color</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-axis-text-color" value="#e7e7e7">
+            <input type="color" class="setting-input" id="cfg-axis-text-color" value="#949698">
           </div>
         </div>
         <div class="setting-row">
@@ -732,18 +732,32 @@
     const themeLinkedSettings = {
       dark: {
         background: '#131315',
-        axisBorder: '#2a2a2a',
-        axisText: '#e7e7e7',
-        crosshair: '#ebebeb',
-        crosshairLabelBg: '#ebebeb',
-        crosshairLabelText: '#131315',
+        bullishFill: '#097564',
+        bullishWick: '#097564',
+        bearishFill: '#b5343f',
+        bearishWick: '#b5343f',
+        volumeUp: '#097564',
+        volumeDown: '#b5343f',
+        axisBorder: '#22262a',
+        axisText: '#949698',
+        crosshair: '#22262a',
+        crosshairStyle: 'dashed',
+        crosshairLabelBg: '#22262a',
+        crosshairLabelText: '#949698',
       },
       light: {
         background: '#ffffff',
+        bullishFill: '#089981',
+        bullishWick: '#089981',
+        bearishFill: '#f20751',
+        bearishWick: '#f20751',
+        volumeUp: '#089981',
+        volumeDown: '#f20751',
         axisBorder: '#f5f5f5',
         axisText: '#131315',
-        crosshair: '#131315',
-        crosshairLabelBg: '#131315',
+        crosshair: '#22262a',
+        crosshairStyle: 'dotted',
+        crosshairLabelBg: '#22262a',
         crosshairLabelText: '#f5f5f5',
       },
     };
@@ -781,9 +795,16 @@
 
     function syncThemeLinkedSettings() {
       const palette = isDark ? themeLinkedSettings.dark : themeLinkedSettings.light;
+      $('cfg-bullish-fill').value = palette.bullishFill;
+      $('cfg-bullish-wick').value = palette.bullishWick;
+      $('cfg-bearish-fill').value = palette.bearishFill;
+      $('cfg-bearish-wick').value = palette.bearishWick;
+      $('cfg-volume-up').value = palette.volumeUp;
+      $('cfg-volume-down').value = palette.volumeDown;
       $('cfg-axis-border-color').value = palette.axisBorder;
       $('cfg-axis-text-color').value = palette.axisText;
       $('cfg-crosshair-color').value = palette.crosshair;
+      $('cfg-crosshair-style').value = palette.crosshairStyle;
       $('cfg-crosshair-label-bg').value = palette.crosshairLabelBg;
       $('cfg-crosshair-label-text').value = palette.crosshairLabelText;
     }

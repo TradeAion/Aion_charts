@@ -1219,10 +1219,10 @@ impl OverlayRenderer {
         let buy_color: [f32; 4] = [41.0 / 255.0, 98.0 / 255.0, 1.0, 1.0]; // #2962FF
         let sell_color: [f32; 4] = [1.0, 74.0 / 255.0, 104.0 / 255.0, 1.0]; // #FF4A68
 
-        // Arrow size
-        let arrow_size = 9.0 * dpr;
+        // Execution markers were visually oversized; tune closer to TV density.
+        let arrow_size = 7.0 * dpr;
         let arrow_gap_css = 8.0;
-        let base_hit_radius_css = arrow_size / dpr + 5.0;
+        let base_hit_radius_css = arrow_size / dpr + 4.0;
 
         let mut renderables: Vec<ExecutionRenderableMark> = Vec::new();
 
@@ -1379,7 +1379,7 @@ impl OverlayRenderer {
                         self.draw_execution_price_chevron(
                             member.x_css * dpr,
                             member.price_y_css * dpr,
-                            15.0 * dpr,
+                            10.0 * dpr,
                             matches!(member.side, ExecutionSide::Buy),
                             &rgba(&member.color),
                         );
@@ -1388,7 +1388,7 @@ impl OverlayRenderer {
                     self.draw_execution_price_chevron(
                         leader.x_css * dpr,
                         leader.price_y_css * dpr,
-                        15.0 * dpr,
+                        10.0 * dpr,
                         matches!(leader.side, ExecutionSide::Buy),
                         &color_str,
                     );
@@ -1465,7 +1465,7 @@ impl OverlayRenderer {
         let pane_pw = pane_css_w * dpr;
         let buy_color = [41.0 / 255.0, 98.0 / 255.0, 1.0, 1.0];
         let sell_color = [1.0, 74.0 / 255.0, 104.0 / 255.0, 1.0];
-        let chevron_size = 13.0 * dpr;
+        let chevron_size = 9.0 * dpr;
 
         self.ctx.save();
         for chevron in plan.chevrons {

@@ -50,34 +50,44 @@ pub const fn ch(v: u8) -> f32 {
 
 /// Main chart & axis background.
 pub const BG: [f32; 4] = [ch(0x13), ch(0x13), ch(0x15), 1.0];
-/// Bullish candle body (#00B562).
-pub const BULLISH: [f32; 4] = [ch(0x00), ch(0xB5), ch(0x62), 1.0];
-/// Bearish candle body (#F20751).
-pub const BEARISH: [f32; 4] = [ch(0xF2), ch(0x07), ch(0x51), 1.0];
+/// Bullish candle body (#097564).
+pub const BULLISH: [f32; 4] = [ch(0x09), ch(0x75), ch(0x64), 1.0];
+/// Bearish candle body (#B5343F).
+pub const BEARISH: [f32; 4] = [ch(0xB5), ch(0x34), ch(0x3F), 1.0];
 /// Bullish volume (same hue, lower alpha).
 pub const BULLISH_VOLUME: [f32; 4] = [ch(0x00), ch(0xB5), ch(0x62), 0.35];
 /// Bearish volume.
 pub const BEARISH_VOLUME: [f32; 4] = [ch(0xF2), ch(0x07), ch(0x51), 0.35];
-/// Bullish wick (#00B562), matching the body fill.
-pub const WICK_BULLISH: [f32; 4] = [ch(0x00), ch(0xB5), ch(0x62), 1.0];
-/// Bearish wick (#F20751), matching the body fill.
-pub const WICK_BEARISH: [f32; 4] = [ch(0xF2), ch(0x07), ch(0x51), 1.0];
-/// Bullish candle border (#008045).
-pub const BORDER_BULLISH: [f32; 4] = [ch(0x00), ch(0x80), ch(0x45), 1.0];
-/// Bearish candle border (#89002B).
-pub const BORDER_BEARISH: [f32; 4] = [ch(0x89), ch(0x00), ch(0x2B), 1.0];
+/// Bullish wick (#097564), matching the body fill.
+pub const WICK_BULLISH: [f32; 4] = [ch(0x09), ch(0x75), ch(0x64), 1.0];
+/// Bearish wick (#B5343F), matching the body fill.
+pub const WICK_BEARISH: [f32; 4] = [ch(0xB5), ch(0x34), ch(0x3F), 1.0];
+/// Bullish candle border (#097564).
+pub const BORDER_BULLISH: [f32; 4] = [ch(0x09), ch(0x75), ch(0x64), 1.0];
+/// Bearish candle border (#B5343F).
+pub const BORDER_BEARISH: [f32; 4] = [ch(0xB5), ch(0x34), ch(0x3F), 1.0];
+/// Light theme bullish candle body (#089981).
+pub const LIGHT_BULLISH: [f32; 4] = [ch(0x08), ch(0x99), ch(0x81), 1.0];
+/// Light theme bullish volume (#089981, alpha 35%).
+pub const LIGHT_BULLISH_VOLUME: [f32; 4] = [ch(0x08), ch(0x99), ch(0x81), 0.35];
+/// Light theme bearish candle body (#F20751).
+pub const LIGHT_BEARISH: [f32; 4] = [ch(0xF2), ch(0x07), ch(0x51), 1.0];
+/// Light theme bullish wick (#089981).
+pub const LIGHT_WICK_BULLISH: [f32; 4] = [ch(0x08), ch(0x99), ch(0x81), 1.0];
+/// Light theme bearish wick (#F20751).
+pub const LIGHT_WICK_BEARISH: [f32; 4] = [ch(0xF2), ch(0x07), ch(0x51), 1.0];
 /// Grid line color.
 pub const GRID: [f32; 4] = [0.2, 0.2, 0.24, 0.4];
-/// Axis border / tick color.
-pub const AXIS_BORDER: [f32; 4] = [ch(0x2A), ch(0x2A), ch(0x2A), 1.0];
-/// Axis label text color.
-pub const AXIS_TEXT: [f32; 4] = [ch(0xE7), ch(0xE7), ch(0xE7), 1.0];
-/// Crosshair line color for the dark theme.
-pub const CROSSHAIR: [f32; 4] = [ch(0xEB), ch(0xEB), ch(0xEB), 1.0];
-/// Crosshair label background for the dark theme.
-pub const CROSSHAIR_LABEL_BG: [f32; 4] = [ch(0xEB), ch(0xEB), ch(0xEB), 1.0];
-/// Crosshair label text for the dark theme.
-pub const CROSSHAIR_LABEL_TEXT: [f32; 4] = [ch(0x13), ch(0x13), ch(0x15), 1.0];
+/// Axis border / tick color (#22262A).
+pub const AXIS_BORDER: [f32; 4] = [ch(0x22), ch(0x26), ch(0x2A), 1.0];
+/// Axis label text color (#949698).
+pub const AXIS_TEXT: [f32; 4] = [ch(0x94), ch(0x96), ch(0x98), 1.0];
+/// Crosshair line color for the dark theme (#22262A).
+pub const CROSSHAIR: [f32; 4] = [ch(0x22), ch(0x26), ch(0x2A), 1.0];
+/// Crosshair label background for both themes (#22262A).
+pub const CROSSHAIR_LABEL_BG: [f32; 4] = [ch(0x22), ch(0x26), ch(0x2A), 1.0];
+/// Crosshair label text for the dark theme (#949698).
+pub const CROSSHAIR_LABEL_TEXT: [f32; 4] = [ch(0x94), ch(0x96), ch(0x98), 1.0];
 /// Default font family.
 ///
 /// This matches the Axiusflow app chart stack so chart text (axes, overlays,
@@ -130,7 +140,7 @@ pub fn default_style() -> ChartStyle {
         crosshair_vert_line: CrosshairLineStyle {
             color: CROSSHAIR,
             width: 1.0,
-            style: LineStyle::Dotted,
+            style: LineStyle::Dashed,
             visible: true,
             label_visible: true,
             label_bg_color: CROSSHAIR_LABEL_BG,
@@ -138,7 +148,7 @@ pub fn default_style() -> ChartStyle {
         crosshair_horz_line: CrosshairLineStyle {
             color: CROSSHAIR,
             width: 1.0,
-            style: LineStyle::Dotted,
+            style: LineStyle::Dashed,
             visible: true,
             label_visible: true,
             label_bg_color: CROSSHAIR_LABEL_BG,
@@ -407,7 +417,7 @@ impl ThemeConfig {
                 label_bg: CROSSHAIR_LABEL_BG,
                 label_text: CROSSHAIR_LABEL_TEXT,
                 line_width: 1.0,
-                line_style: LineStyle::Dotted,
+                line_style: LineStyle::Dashed,
                 vert_visible: true,
                 horz_visible: true,
                 vert_label_visible: true,
@@ -486,24 +496,24 @@ impl ThemeConfig {
     }
 
     /// Light theme preset — TradingView Light reference colors.
-    /// White background, dark text, same bullish/bearish accent colors.
+    /// White background, dark text, legacy bullish/bearish accent colors.
     pub fn light() -> Self {
         Self {
             colors: ThemeColors {
                 background: [1.0, 1.0, 1.0, 1.0], // #FFFFFF
-                bullish: BULLISH,
-                bearish: BEARISH,
-                bullish_volume: BULLISH_VOLUME,
+                bullish: LIGHT_BULLISH,
+                bearish: LIGHT_BEARISH,
+                bullish_volume: LIGHT_BULLISH_VOLUME,
                 bearish_volume: BEARISH_VOLUME,
-                wick_bullish: WICK_BULLISH,
-                wick_bearish: WICK_BEARISH,
+                wick_bullish: LIGHT_WICK_BULLISH,
+                wick_bearish: LIGHT_WICK_BEARISH,
                 grid: [ch(0xE0), ch(0xE3), ch(0xEB), 0.4], // #E0E3EB @ 40%
                 axis_border: [ch(0xF5), ch(0xF5), ch(0xF5), 1.0], // #F5F5F5
                 axis_text: [ch(0x13), ch(0x13), ch(0x15), 1.0], // #131315
             },
             crosshair: ThemeCrosshair {
-                line_color: [ch(0x13), ch(0x13), ch(0x15), 1.0], // #131315
-                label_bg: [ch(0x13), ch(0x13), ch(0x15), 1.0],   // #131315
+                line_color: [ch(0x22), ch(0x26), ch(0x2A), 1.0], // #22262A
+                label_bg: [ch(0x22), ch(0x26), ch(0x2A), 1.0],   // #22262A
                 label_text: [ch(0xF5), ch(0xF5), ch(0xF5), 1.0], // #F5F5F5
                 line_width: 1.0,
                 line_style: LineStyle::Dotted,
@@ -533,11 +543,11 @@ impl ThemeConfig {
                 area_line_color: [0.161, 0.384, 1.0, 1.0],
                 area_top_fill: [0.161, 0.384, 1.0, 0.28],
                 area_bottom_fill: [0.161, 0.384, 1.0, 0.0],
-                histogram_color: BULLISH,
-                bar_up_color: BULLISH,
-                bar_down_color: BEARISH,
-                baseline_top_line: BULLISH,
-                baseline_bottom_line: BEARISH,
+                histogram_color: LIGHT_BULLISH,
+                bar_up_color: LIGHT_BULLISH,
+                bar_down_color: LIGHT_BEARISH,
+                baseline_top_line: LIGHT_BULLISH,
+                baseline_bottom_line: LIGHT_BEARISH,
                 baseline_top_fill_1: [ch(0x35), ch(0x59), ch(0xE9), 0.28],
                 baseline_top_fill_2: [ch(0x35), ch(0x59), ch(0xE9), 0.05],
                 baseline_bottom_fill_1: [ch(0xFB), ch(0x37), ch(0x48), 0.05],
@@ -661,7 +671,7 @@ impl ThemeConfig {
     /// Get the main chart border colors for candlestick/OHLC chart types.
     /// Returns `(up_border_color, down_border_color)`.
     pub fn chart_type_border_colors(&self) -> ([f32; 4], [f32; 4]) {
-        (BORDER_BULLISH, BORDER_BEARISH)
+        (self.colors.wick_bullish, self.colors.wick_bearish)
     }
 
     /// Convert an RGBA [f32; 4] color to a CSS `rgba(...)` string.
@@ -860,8 +870,12 @@ mod tests {
         let dark = ThemeConfig::dark();
         let light = ThemeConfig::light();
 
-        assert_eq!(dark.colors.axis_border, [ch(0x2A), ch(0x2A), ch(0x2A), 1.0]);
-        assert_eq!(dark.colors.axis_text, [ch(0xE7), ch(0xE7), ch(0xE7), 1.0]);
+        assert_eq!(dark.colors.bullish, [ch(0x09), ch(0x75), ch(0x64), 1.0]);
+        assert_eq!(dark.colors.bearish, [ch(0xB5), ch(0x34), ch(0x3F), 1.0]);
+        assert_eq!(light.colors.bullish, [ch(0x08), ch(0x99), ch(0x81), 1.0]);
+        assert_eq!(light.colors.bearish, [ch(0xF2), ch(0x07), ch(0x51), 1.0]);
+        assert_eq!(dark.colors.axis_border, [ch(0x22), ch(0x26), ch(0x2A), 1.0]);
+        assert_eq!(dark.colors.axis_text, [ch(0x94), ch(0x96), ch(0x98), 1.0]);
         assert_eq!(
             light.colors.axis_border,
             [ch(0xF5), ch(0xF5), ch(0xF5), 1.0]
@@ -869,24 +883,29 @@ mod tests {
         assert_eq!(light.colors.axis_text, [ch(0x13), ch(0x13), ch(0x15), 1.0]);
         assert_eq!(
             dark.crosshair.line_color,
-            [ch(0xEB), ch(0xEB), ch(0xEB), 1.0]
+            [ch(0x22), ch(0x26), ch(0x2A), 1.0]
         );
-        assert_eq!(dark.crosshair.label_bg, [ch(0xEB), ch(0xEB), ch(0xEB), 1.0]);
+        assert_eq!(
+            dark.crosshair.label_bg,
+            [ch(0x22), ch(0x26), ch(0x2A), 1.0]
+        );
         assert_eq!(
             dark.crosshair.label_text,
-            [ch(0x13), ch(0x13), ch(0x15), 1.0]
+            [ch(0x94), ch(0x96), ch(0x98), 1.0]
         );
         assert_eq!(
             light.crosshair.line_color,
-            [ch(0x13), ch(0x13), ch(0x15), 1.0]
+            [ch(0x22), ch(0x26), ch(0x2A), 1.0]
         );
         assert_eq!(
             light.crosshair.label_bg,
-            [ch(0x13), ch(0x13), ch(0x15), 1.0]
+            [ch(0x22), ch(0x26), ch(0x2A), 1.0]
         );
         assert_eq!(
             light.crosshair.label_text,
             [ch(0xF5), ch(0xF5), ch(0xF5), 1.0]
         );
+        assert_eq!(dark.crosshair.line_style, LineStyle::Dashed);
+        assert_eq!(light.crosshair.line_style, LineStyle::Dotted);
     }
 }
