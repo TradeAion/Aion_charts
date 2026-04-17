@@ -130,7 +130,7 @@ pub fn default_style() -> ChartStyle {
         crosshair_vert_line: CrosshairLineStyle {
             color: CROSSHAIR,
             width: 1.0,
-            style: LineStyle::LargeDashed,
+            style: LineStyle::Dotted,
             visible: true,
             label_visible: true,
             label_bg_color: CROSSHAIR_LABEL_BG,
@@ -138,7 +138,7 @@ pub fn default_style() -> ChartStyle {
         crosshair_horz_line: CrosshairLineStyle {
             color: CROSSHAIR,
             width: 1.0,
-            style: LineStyle::LargeDashed,
+            style: LineStyle::Dotted,
             visible: true,
             label_visible: true,
             label_bg_color: CROSSHAIR_LABEL_BG,
@@ -407,7 +407,7 @@ impl ThemeConfig {
                 label_bg: CROSSHAIR_LABEL_BG,
                 label_text: CROSSHAIR_LABEL_TEXT,
                 line_width: 1.0,
-                line_style: LineStyle::LargeDashed,
+                line_style: LineStyle::Dotted,
                 vert_visible: true,
                 horz_visible: true,
                 vert_label_visible: true,
@@ -506,7 +506,7 @@ impl ThemeConfig {
                 label_bg: [ch(0x13), ch(0x13), ch(0x15), 1.0],   // #131315
                 label_text: [ch(0xF5), ch(0xF5), ch(0xF5), 1.0], // #F5F5F5
                 line_width: 1.0,
-                line_style: LineStyle::LargeDashed,
+                line_style: LineStyle::Dotted,
                 vert_visible: true,
                 horz_visible: true,
                 vert_label_visible: true,

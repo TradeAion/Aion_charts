@@ -116,10 +116,8 @@ impl Drawing for RayDrawing {
         let c = &self.style.color;
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let lw = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
-        let snap_to_pixel = !matches!(
-            self.state,
-            DrawingState::Dragging { .. } | DrawingState::Creating { .. }
-        );
+        // Keep live preview crisp while creating/dragging too.
+        let snap_to_pixel = true;
 
         let (bx0, by0) = point_to_bitmap(
             &self.anchors[0].point,

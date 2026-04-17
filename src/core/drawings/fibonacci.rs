@@ -137,10 +137,8 @@ impl Drawing for FibonacciDrawing {
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let lw = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
         let fs = (self.style.font_size * avg_ratio) as f32;
-        let snap_to_pixel = !matches!(
-            self.state,
-            DrawingState::Dragging { .. } | DrawingState::Creating { .. }
-        );
+        // Keep live preview crisp while creating/dragging too.
+        let snap_to_pixel = true;
 
         // Compute bitmap X positions of the two anchors — lines are confined
         // to this horizontal span (NOT extended to full pane width).

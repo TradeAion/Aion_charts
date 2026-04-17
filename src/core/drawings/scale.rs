@@ -58,10 +58,8 @@ impl Drawing for ScaleDrawing {
         if self.anchors.len() < 2 {
             return geom;
         }
-        let snap_to_pixel = !matches!(
-            self.state,
-            DrawingState::Dragging { .. } | DrawingState::Creating { .. }
-        );
+        // Keep live preview crisp while creating/dragging too.
+        let snap_to_pixel = true;
 
         let (bx0, by0) = point_to_bitmap(
             &self.anchors[0].point,

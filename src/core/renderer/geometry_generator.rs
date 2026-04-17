@@ -20,6 +20,15 @@ use crate::core::renderer::transforms::{bar_to_x, color4, price_to_y};
 use crate::core::renderer::value_projection::TimeScaleIndex;
 use crate::core::viewport::Viewport;
 
+/// Cap wick thickness to a slimmer CSS width for a TradingView-like look.
+/// Returned value is in physical pixels.
+#[inline]
+fn effective_wick_width(sizing: &CandleSizing) -> f64 {
+    const MAX_WICK_CSS_PX: f64 = 0.8;
+    let max_phys = (MAX_WICK_CSS_PX * sizing.h_pixel_ratio).floor().max(1.0);
+    sizing.wick_width.min(max_phys).max(1.0)
+}
+
 #[inline]
 fn visible_main_bar_range(
     bars: &crate::core::data::BarArray,
@@ -294,7 +303,8 @@ pub fn project_candles(
     }
 
     let half_bar = (sizing.bar_width * 0.5).floor();
-    let wick_offset = (sizing.wick_width * 0.5).floor();
+    let wick_width = effective_wick_width(sizing);
+    let wick_offset = (wick_width * 0.5).floor();
     let mut prev_wick_right: Option<f64> = None;
     let mut prev_bar_right: Option<f64> = None;
 
@@ -314,7 +324,7 @@ pub fn project_candles(
 
         // Wick X edges with anti-overlap clamp.
         let mut wick_left = center_x - wick_offset;
-        let wick_right = wick_left + sizing.wick_width - 1.0;
+        let wick_right = wick_left + wick_width - 1.0;
         if let Some(prev) = prev_wick_right {
             wick_left = wick_left.max(prev + 1.0).min(wick_right);
         }
@@ -576,7 +586,8 @@ fn generate_ohlc_bars_into(
         return;
     }
 
-    let wick_offset = (sizing.wick_width * 0.5).floor();
+    let wick_w = effective_wick_width(sizing);
+    let wick_offset = (wick_w * 0.5).floor();
     let tick_width = (sizing.bar_width * 0.4).max(2.0).floor();
 
     for i in start..end {
@@ -601,7 +612,7 @@ fn generate_ohlc_bars_into(
         rects.push(ColoredRect {
             x: left as f32,
             y: high_y as f32,
-            w: sizing.wick_width as f32,
+            w: wick_w as f32,
             h: (low_y - high_y).max(1.0) as f32,
             r: cr,
             g: cg,
@@ -612,9 +623,9 @@ fn generate_ohlc_bars_into(
         // Open tick (left side)
         rects.push(ColoredRect {
             x: (phys_x - tick_width) as f32,
-            y: (open_y - sizing.wick_width * 0.5).round() as f32,
+            y: (open_y - wick_w * 0.5).round() as f32,
             w: tick_width as f32,
-            h: sizing.wick_width as f32,
+            h: wick_w as f32,
             r: cr,
             g: cg,
             b: cb,
@@ -624,9 +635,9 @@ fn generate_ohlc_bars_into(
         // Close tick (right side)
         rects.push(ColoredRect {
             x: phys_x as f32,
-            y: (close_y - sizing.wick_width * 0.5).round() as f32,
+            y: (close_y - wick_w * 0.5).round() as f32,
             w: tick_width as f32,
-            h: sizing.wick_width as f32,
+            h: wick_w as f32,
             r: cr,
             g: cg,
             b: cb,
@@ -1093,7 +1104,8 @@ fn generate_heikin_ashi_into(
     }
 
     let half_bar = (sizing.bar_width * 0.5).floor();
-    let wick_offset = (sizing.wick_width * 0.5).floor();
+    let wick_w = effective_wick_width(sizing);
+    let wick_offset = (wick_w * 0.5).floor();
 
     // Compute Heikin-Ashi values
     // HA_Close = (O + H + L + C) / 4
@@ -1145,7 +1157,7 @@ fn generate_heikin_ashi_into(
             rects.push(ColoredRect {
                 x: (phys_x - wick_offset) as f32,
                 y: high_y as f32,
-                w: sizing.wick_width as f32,
+                w: wick_w as f32,
                 h: (body_top - high_y) as f32,
                 r: wr,
                 g: wg,
@@ -1159,7 +1171,7 @@ fn generate_heikin_ashi_into(
             rects.push(ColoredRect {
                 x: (phys_x - wick_offset) as f32,
                 y: (body_bottom + 1.0) as f32,
-                w: sizing.wick_width as f32,
+                w: wick_w as f32,
                 h: (low_y - body_bottom) as f32,
                 r: wr,
                 g: wg,

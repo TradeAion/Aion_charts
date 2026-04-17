@@ -170,8 +170,8 @@ impl OverlayRenderer {
         // Lines
         for l in &geom.lines {
             ctx.set_stroke_style_str(&rgba(&[l.r, l.g, l.b, l.a]));
-            ctx.set_line_width(l.width as f64);
-            ctx.set_line_cap("round");
+            let line_w = (l.width as f64).round().max(1.0);
+            ctx.set_line_width(line_w);
             ctx.set_line_join("round");
 
             if l.dash > 0.0 && l.gap > 0.0 {
@@ -185,11 +185,42 @@ impl OverlayRenderer {
 
             // LWC strokeInPixel: add 0.5px offset for odd-width lines
             // to snap to pixel center and prevent blurry sub-pixel rendering
-            let correction = if (l.width as i32) % 2 == 1 { 0.5 } else { 0.0 };
+            let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
+            let mut x0 = l.x0 as f64;
+            let mut y0 = l.y0 as f64;
+            let mut x1 = l.x1 as f64;
+            let mut y1 = l.y1 as f64;
+
+            // Snap axis-aligned drawing edges directly onto device pixels.
+            // This keeps Ctrl/angle-snapped straight lines and rectangle borders crisp.
+            let is_vertical = (x1 - x0).abs() <= f64::EPSILON;
+            let is_horizontal = (y1 - y0).abs() <= f64::EPSILON;
+            if is_vertical {
+                let x = x0.round() + correction;
+                x0 = x;
+                x1 = x;
+                y0 = y0.round();
+                y1 = y1.round();
+                ctx.set_line_cap("butt");
+            } else if is_horizontal {
+                let y = y0.round() + correction;
+                y0 = y;
+                y1 = y;
+                x0 = x0.round();
+                x1 = x1.round();
+                ctx.set_line_cap("butt");
+            } else {
+                // Keep diagonal lines visually smooth while still avoiding subpixel blur.
+                x0 = x0.round() + correction;
+                y0 = y0.round() + correction;
+                x1 = x1.round() + correction;
+                y1 = y1.round() + correction;
+                ctx.set_line_cap("round");
+            }
 
             ctx.begin_path();
-            ctx.move_to(l.x0 as f64 + correction, l.y0 as f64 + correction);
-            ctx.line_to(l.x1 as f64 + correction, l.y1 as f64 + correction);
+            ctx.move_to(x0, y0);
+            ctx.line_to(x1, y1);
             ctx.stroke();
         }
         clear_canvas_line_dash(ctx);
