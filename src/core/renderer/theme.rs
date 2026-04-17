@@ -80,13 +80,13 @@ pub const LIGHT_WICK_BEARISH: [f32; 4] = [ch(0xF2), ch(0x07), ch(0x51), 1.0];
 pub const GRID: [f32; 4] = [0.2, 0.2, 0.24, 0.4];
 /// Axis border / tick color (#22262A).
 pub const AXIS_BORDER: [f32; 4] = [ch(0x22), ch(0x26), ch(0x2A), 1.0];
-/// Axis label text color (#949698).
+/// Axis label text color (#E7E7E7).
 pub const AXIS_TEXT: [f32; 4] = [ch(0x94), ch(0x96), ch(0x98), 1.0];
 /// Crosshair line color for the dark theme (#22262A).
 pub const CROSSHAIR: [f32; 4] = [ch(0x22), ch(0x26), ch(0x2A), 1.0];
 /// Crosshair label background for both themes (#22262A).
 pub const CROSSHAIR_LABEL_BG: [f32; 4] = [ch(0x22), ch(0x26), ch(0x2A), 1.0];
-/// Crosshair label text for the dark theme (#949698).
+/// Crosshair label text for the dark theme (#E7E7E7).
 pub const CROSSHAIR_LABEL_TEXT: [f32; 4] = [ch(0x94), ch(0x96), ch(0x98), 1.0];
 /// Default font family.
 ///
