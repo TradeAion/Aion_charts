@@ -508,8 +508,8 @@ impl ThemeConfig {
                 wick_bullish: LIGHT_WICK_BULLISH,
                 wick_bearish: LIGHT_WICK_BEARISH,
                 grid: [ch(0xE0), ch(0xE3), ch(0xEB), 0.4], // #E0E3EB @ 40%
-                axis_border: [ch(0xF5), ch(0xF5), ch(0xF5), 1.0], // #F5F5F5
-                axis_text: [ch(0x13), ch(0x13), ch(0x15), 1.0], // #131315
+                axis_border: [ch(0xF0), ch(0xF0), ch(0xF0), 1.0], // #F0F0F0
+                axis_text: [ch(0x20), ch(0x20), ch(0x20), 1.0], // #202020
             },
             crosshair: ThemeCrosshair {
                 line_color: [ch(0x22), ch(0x26), ch(0x2A), 1.0], // #22262A
@@ -878,9 +878,9 @@ mod tests {
         assert_eq!(dark.colors.axis_text, [ch(0x94), ch(0x96), ch(0x98), 1.0]);
         assert_eq!(
             light.colors.axis_border,
-            [ch(0xF5), ch(0xF5), ch(0xF5), 1.0]
+            [ch(0xF0), ch(0xF0), ch(0xF0), 1.0]
         );
-        assert_eq!(light.colors.axis_text, [ch(0x13), ch(0x13), ch(0x15), 1.0]);
+        assert_eq!(light.colors.axis_text, [ch(0x20), ch(0x20), ch(0x20), 1.0]);
         assert_eq!(
             dark.crosshair.line_color,
             [ch(0x22), ch(0x26), ch(0x2A), 1.0]
