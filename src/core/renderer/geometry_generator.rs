@@ -493,7 +493,7 @@ fn generate_volume_into(
         return;
     }
 
-    let mut max_vol = 0.0f32;
+    let mut max_vol = 0.0f64;
     for i in start..end {
         max_vol = max_vol.max(bars.volume(i));
     }
@@ -515,7 +515,7 @@ fn generate_volume_into(
         let Some(cx) = main_bar_center_x(i, vp, time_scale, chart_w) else {
             continue;
         };
-        let h = (b.volume as f64 / max_vol as f64) * vol_h;
+        let h = (b.volume / max_vol) * vol_h;
         let top = candle_h + vol_h - h;
 
         let phys_x = cx.round();
@@ -947,7 +947,7 @@ pub fn generate_line_segments(
             g,
             b,
             a,
-            _pad: 0.0,
+            reserved: 0.0,
         });
     }
 
@@ -999,8 +999,8 @@ pub fn generate_area_segments(
             bottom_b: bottom_color[2],
             bottom_a: bottom_color[3],
             gradient_top,
-            _pad1: 0.0,
-            _pad2: 0.0,
+            reserved1: 0.0,
+            reserved2: 0.0,
         });
     }
 
@@ -1043,7 +1043,7 @@ pub fn generate_main_area_line_segments(
             g,
             b,
             a,
-            _pad: 0.0,
+            reserved: 0.0,
         });
     }
     segments
@@ -1101,8 +1101,8 @@ fn generate_heikin_ashi_into(
     // HA_High = max(H, HA_Open, HA_Close)
     // HA_Low = min(L, HA_Open, HA_Close)
 
-    let mut prev_ha_open = 0.0f32;
-    let mut prev_ha_close = 0.0f32;
+    let mut prev_ha_open = 0.0f64;
+    let mut prev_ha_close = 0.0f64;
 
     // Initialize with first bar
     if start < bars.len() {
@@ -1135,10 +1135,10 @@ fn generate_heikin_ashi_into(
         let Some(phys_x) = main_bar_center_x(i, vp, time_scale, chart_w).map(f64::round) else {
             continue;
         };
-        let body_top = price_to_y(ha_open.max(ha_close) as f64, vp, candle_h).round();
-        let body_bottom = price_to_y(ha_open.min(ha_close) as f64, vp, candle_h).round();
-        let high_y = price_to_y(ha_high as f64, vp, candle_h).round();
-        let low_y = price_to_y(ha_low as f64, vp, candle_h).round();
+        let body_top = price_to_y(ha_open.max(ha_close), vp, candle_h).round();
+        let body_bottom = price_to_y(ha_open.min(ha_close), vp, candle_h).round();
+        let high_y = price_to_y(ha_high, vp, candle_h).round();
+        let low_y = price_to_y(ha_low, vp, candle_h).round();
 
         // Wick (high to body top)
         if body_top > high_y {
@@ -1207,7 +1207,6 @@ mod tests {
                 low: 9.0,
                 close: 10.5,
                 volume: 100.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 2,
@@ -1216,7 +1215,6 @@ mod tests {
                 low: 10.0,
                 close: 11.0,
                 volume: 120.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 3,
@@ -1225,7 +1223,6 @@ mod tests {
                 low: 10.4,
                 close: 10.8,
                 volume: 90.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 4,
@@ -1234,7 +1231,6 @@ mod tests {
                 low: 10.2,
                 close: 10.6,
                 volume: 80.0,
-                _pad: 0.0,
             },
         ])
         .expect("sample bars");

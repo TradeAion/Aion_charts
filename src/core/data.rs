@@ -6,8 +6,9 @@
 //!
 //! # Design Principles
 //!
-//! - **Cache-Friendly**: 32-byte aligned structures fit cache lines
-//! - **Precision**: Timestamps are u64 (epoch millis), prices are f32 (7 significant digits)
+//! - **Predictable Layout**: `Bar` uses `#[repr(C)]` and stores 48 bytes per row
+//! - **Precision**: Timestamps are u64 (epoch millis), logical prices use f64 with roughly 16 digits of precision
+//! - **Render Seam**: logical values are projected to single-precision render space only at the renderer seam
 //! - **Streaming-Optimized**: O(1) append operations via pending buffer pattern
 //!
 //! # Performance Characteristics
@@ -30,12 +31,12 @@
 //!
 //! // Bulk load historical data
 //! bars.set(vec![
-//!     Bar { timestamp: 1700000000000, open: 100.0, high: 105.0, low: 98.0, close: 103.0, volume: 1000.0, _pad: 0.0 },
-//!     Bar { timestamp: 1700000060000, open: 103.0, high: 108.0, low: 101.0, close: 106.0, volume: 1200.0, _pad: 0.0 },
+//!     Bar::new(1700000000000, 100.0, 105.0, 98.0, 103.0, 1000.0),
+//!     Bar::new(1700000060000, 103.0, 108.0, 101.0, 106.0, 1200.0),
 //! ]).unwrap();
 //!
 //! // Stream real-time updates (O(1) each)
-//! bars.append(Bar { timestamp: 1700000120000, open: 106.0, high: 110.0, low: 104.0, close: 109.0, volume: 800.0, _pad: 0.0 }).unwrap();
+//! bars.append(Bar::new(1700000120000, 106.0, 110.0, 104.0, 109.0, 800.0)).unwrap();
 //!
 //! // Access data
 //! if let Some(bar) = bars.get(0) {
@@ -43,38 +44,30 @@
 //! }
 //! ```
 
-use arrow::array::{Float32Array, Float32Builder, UInt64Array, UInt64Builder};
+use arrow::array::{Float64Array, Float64Builder, UInt64Array, UInt64Builder};
 
-/// Default chunk size for pending buffer before auto-flush (64 bars = 2KB)
+/// Default chunk size for pending buffer before auto-flush.
 const DEFAULT_CHUNK_SIZE: usize = 64;
 
-/// A single OHLCV bar, 32 bytes, cache-line aligned.
+/// A single OHLCV bar in the logical price domain.
 ///
-/// This struct is designed for cache-friendly access:
-/// - Uses `#[repr(C)]` for predictable memory layout
-/// - 32-byte size aligns with common CPU cache lines
+/// This struct is designed for predictable interop and storage:
+/// - Uses `#[repr(C)]` for stable field ordering
+/// - Occupies 48 bytes with the current `u64 + 5 * f64` layout
+/// - Stores logical prices as `f64`; renderers project to single-precision screen space at the final render seam
 ///
 /// # Fields
 ///
 /// - `timestamp`: Unix epoch milliseconds (u64 for precision past year 2038)
-/// - `open`, `high`, `low`, `close`: Price values as f32 (7 significant digits)
-/// - `volume`: Trading volume as f32
-/// - `_pad`: Padding to maintain 32-byte alignment (must be set to 0.0)
+/// - `open`, `high`, `low`, `close`: Price values as `f64`
+/// - `volume`: Trading volume as `f64`
 ///
 /// # Example
 ///
 /// ```rust
 /// use axiuscharts::Bar;
 ///
-/// let bar = Bar {
-///     timestamp: 1700000000000, // Nov 14, 2023
-///     open: 100.0,
-///     high: 105.0,
-///     low: 98.0,
-///     close: 103.0,
-///     volume: 1000.0,
-///     _pad: 0.0,
-/// };
+/// let bar = Bar::new(1700000000000, 100.0, 105.0, 98.0, 103.0, 1000.0);
 ///
 /// assert!(bar.is_bullish()); // close > open
 /// ```
@@ -84,27 +77,37 @@ pub struct Bar {
     /// Unix timestamp in milliseconds.
     pub timestamp: u64,
     /// Opening price.
-    pub open: f32,
+    pub open: f64,
     /// Highest price during the period.
-    pub high: f32,
+    pub high: f64,
     /// Lowest price during the period.
-    pub low: f32,
+    pub low: f64,
     /// Closing price.
-    pub close: f32,
+    pub close: f64,
     /// Trading volume.
-    pub volume: f32,
-    /// Padding for 32-byte alignment (must be 0.0).
-    pub _pad: f32,
+    pub volume: f64,
 }
 
 impl Bar {
+    #[inline]
+    pub fn new(timestamp: u64, open: f64, high: f64, low: f64, close: f64, volume: f64) -> Self {
+        Self {
+            timestamp,
+            open,
+            high,
+            low,
+            close,
+            volume,
+        }
+    }
+
     #[inline]
     pub fn is_bullish(&self) -> bool {
         self.close >= self.open
     }
 
     #[inline]
-    pub fn body_top(&self) -> f32 {
+    pub fn body_top(&self) -> f64 {
         if self.is_bullish() {
             self.close
         } else {
@@ -113,7 +116,7 @@ impl Bar {
     }
 
     #[inline]
-    pub fn body_bottom(&self) -> f32 {
+    pub fn body_bottom(&self) -> f64 {
         if self.is_bullish() {
             self.open
         } else {
@@ -133,11 +136,11 @@ impl Bar {
 pub struct BarArray {
     // Immutable Arrow arrays (for reads)
     pub timestamps: UInt64Array,
-    pub opens: Float32Array,
-    pub highs: Float32Array,
-    pub lows: Float32Array,
-    pub closes: Float32Array,
-    pub volumes: Float32Array,
+    pub opens: Float64Array,
+    pub highs: Float64Array,
+    pub lows: Float64Array,
+    pub closes: Float64Array,
+    pub volumes: Float64Array,
 
     // Pending buffer for O(1) appends
     pending: Vec<Bar>,
@@ -163,11 +166,11 @@ impl BarArray {
     pub fn with_chunk_size(chunk_size: usize) -> Self {
         Self {
             timestamps: UInt64Array::from(Vec::<u64>::new()),
-            opens: Float32Array::from(Vec::<f32>::new()),
-            highs: Float32Array::from(Vec::<f32>::new()),
-            lows: Float32Array::from(Vec::<f32>::new()),
-            closes: Float32Array::from(Vec::<f32>::new()),
-            volumes: Float32Array::from(Vec::<f32>::new()),
+            opens: Float64Array::from(Vec::<f64>::new()),
+            highs: Float64Array::from(Vec::<f64>::new()),
+            lows: Float64Array::from(Vec::<f64>::new()),
+            closes: Float64Array::from(Vec::<f64>::new()),
+            volumes: Float64Array::from(Vec::<f64>::new()),
             pending: Vec::with_capacity(chunk_size),
             len: 0,
             chunk_size: chunk_size.max(1), // At least 1
@@ -182,11 +185,11 @@ impl BarArray {
 
         let len = bars.len();
         let mut ts = UInt64Builder::with_capacity(len);
-        let mut o = Float32Builder::with_capacity(len);
-        let mut h = Float32Builder::with_capacity(len);
-        let mut l = Float32Builder::with_capacity(len);
-        let mut c = Float32Builder::with_capacity(len);
-        let mut v = Float32Builder::with_capacity(len);
+        let mut o = Float64Builder::with_capacity(len);
+        let mut h = Float64Builder::with_capacity(len);
+        let mut l = Float64Builder::with_capacity(len);
+        let mut c = Float64Builder::with_capacity(len);
+        let mut v = Float64Builder::with_capacity(len);
 
         let mut last_timestamp: Option<u64> = None;
         for (index, bar) in bars.into_iter().enumerate() {
@@ -237,15 +240,14 @@ impl BarArray {
             }
         }
 
-        Ok(Bar {
-            timestamp: bar.timestamp,
-            open: bar.open,
-            high: bar.high.max(bar.open).max(bar.close),
-            low: bar.low.min(bar.open).min(bar.close),
-            close: bar.close,
-            volume: bar.volume.max(0.0),
-            _pad: 0.0,
-        })
+        Ok(Bar::new(
+            bar.timestamp,
+            bar.open,
+            bar.high.max(bar.open).max(bar.close),
+            bar.low.min(bar.open).min(bar.close),
+            bar.close,
+            bar.volume.max(0.0),
+        ))
     }
 
     /// Get a bar at the given index, returns None if out of bounds.
@@ -260,15 +262,14 @@ impl BarArray {
 
         if i < arrow_len {
             // Read from Arrow arrays
-            Some(Bar {
-                timestamp: self.timestamps.value(i),
-                open: self.opens.value(i),
-                high: self.highs.value(i),
-                low: self.lows.value(i),
-                close: self.closes.value(i),
-                volume: self.volumes.value(i),
-                _pad: 0.0,
-            })
+            Some(Bar::new(
+                self.timestamps.value(i),
+                self.opens.value(i),
+                self.highs.value(i),
+                self.lows.value(i),
+                self.closes.value(i),
+                self.volumes.value(i),
+            ))
         } else {
             // Read from pending buffer
             let pending_idx = i - arrow_len;
@@ -286,15 +287,14 @@ impl BarArray {
         let arrow_len = self.timestamps.len();
 
         if i < arrow_len {
-            Bar {
-                timestamp: self.timestamps.value(i),
-                open: self.opens.value(i),
-                high: self.highs.value(i),
-                low: self.lows.value(i),
-                close: self.closes.value(i),
-                volume: self.volumes.value(i),
-                _pad: 0.0,
-            }
+            Bar::new(
+                self.timestamps.value(i),
+                self.opens.value(i),
+                self.highs.value(i),
+                self.lows.value(i),
+                self.closes.value(i),
+                self.volumes.value(i),
+            )
         } else {
             let pending_idx = i - arrow_len;
             self.pending[pending_idx]
@@ -374,11 +374,11 @@ impl BarArray {
         }
 
         let mut ts = UInt64Builder::with_capacity(self.len);
-        let mut o = Float32Builder::with_capacity(self.len);
-        let mut h = Float32Builder::with_capacity(self.len);
-        let mut l = Float32Builder::with_capacity(self.len);
-        let mut c = Float32Builder::with_capacity(self.len);
-        let mut v = Float32Builder::with_capacity(self.len);
+        let mut o = Float64Builder::with_capacity(self.len);
+        let mut h = Float64Builder::with_capacity(self.len);
+        let mut l = Float64Builder::with_capacity(self.len);
+        let mut c = Float64Builder::with_capacity(self.len);
+        let mut v = Float64Builder::with_capacity(self.len);
 
         // Copy all but last
         for i in 0..self.len - 1 {
@@ -416,11 +416,11 @@ impl BarArray {
 
         let new_len = self.timestamps.len() + self.pending.len();
         let mut ts = UInt64Builder::with_capacity(new_len);
-        let mut o = Float32Builder::with_capacity(new_len);
-        let mut h = Float32Builder::with_capacity(new_len);
-        let mut l = Float32Builder::with_capacity(new_len);
-        let mut c = Float32Builder::with_capacity(new_len);
-        let mut v = Float32Builder::with_capacity(new_len);
+        let mut o = Float64Builder::with_capacity(new_len);
+        let mut h = Float64Builder::with_capacity(new_len);
+        let mut l = Float64Builder::with_capacity(new_len);
+        let mut c = Float64Builder::with_capacity(new_len);
+        let mut v = Float64Builder::with_capacity(new_len);
 
         // Copy existing Arrow data
         for i in 0..self.timestamps.len() {
@@ -487,7 +487,7 @@ impl BarArray {
     /// # Panics
     /// Panics if `i >= self.len()`. Use `get()` for safe access with bounds checking.
     #[inline]
-    pub fn open(&self, i: usize) -> f32 {
+    pub fn open(&self, i: usize) -> f64 {
         let arrow_len = self.opens.len();
         if i < arrow_len {
             self.opens.value(i)
@@ -501,7 +501,7 @@ impl BarArray {
     /// # Panics
     /// Panics if `i >= self.len()`. Use `get()` for safe access with bounds checking.
     #[inline]
-    pub fn high(&self, i: usize) -> f32 {
+    pub fn high(&self, i: usize) -> f64 {
         let arrow_len = self.highs.len();
         if i < arrow_len {
             self.highs.value(i)
@@ -515,7 +515,7 @@ impl BarArray {
     /// # Panics
     /// Panics if `i >= self.len()`. Use `get()` for safe access with bounds checking.
     #[inline]
-    pub fn low(&self, i: usize) -> f32 {
+    pub fn low(&self, i: usize) -> f64 {
         let arrow_len = self.lows.len();
         if i < arrow_len {
             self.lows.value(i)
@@ -529,7 +529,7 @@ impl BarArray {
     /// # Panics
     /// Panics if `i >= self.len()`. Use `get()` for safe access with bounds checking.
     #[inline]
-    pub fn close(&self, i: usize) -> f32 {
+    pub fn close(&self, i: usize) -> f64 {
         let arrow_len = self.closes.len();
         if i < arrow_len {
             self.closes.value(i)
@@ -543,7 +543,7 @@ impl BarArray {
     /// # Panics
     /// Panics if `i >= self.len()`. Use `get()` for safe access with bounds checking.
     #[inline]
-    pub fn volume(&self, i: usize) -> f32 {
+    pub fn volume(&self, i: usize) -> f64 {
         let arrow_len = self.volumes.len();
         if i < arrow_len {
             self.volumes.value(i)
@@ -592,20 +592,20 @@ impl BarArray {
             let next_len = next_bucket_end - next_bucket_start;
             for j in next_bucket_start..next_bucket_end {
                 avg_x += j as f64;
-                avg_y += self.close(j) as f64;
+                avg_y += self.close(j);
             }
             avg_x /= next_len as f64;
             avg_y /= next_len as f64;
 
             let point_a_x = a as f64;
-            let point_a_y = self.close(a) as f64;
+            let point_a_y = self.close(a);
 
             let mut max_area = -1.0;
             let mut max_area_idx = bucket_start;
 
             for j in bucket_start..bucket_end {
                 let point_x = j as f64;
-                let point_y = self.close(j) as f64;
+                let point_y = self.close(j);
 
                 let area = ((point_a_x - avg_x) * (point_y - point_a_y)
                     - (point_a_x - point_x) * (avg_y - point_a_y))
@@ -644,69 +644,60 @@ impl BarArray {
 mod tests {
     use super::*;
 
-    fn make_bar(ts: u64, close: f32) -> Bar {
-        Bar {
-            timestamp: ts,
-            open: close - 1.0,
-            high: close + 1.0,
-            low: close - 2.0,
-            close,
-            volume: 100.0,
-            _pad: 0.0,
-        }
+    fn make_bar(ts: u64, close: f64) -> Bar {
+        Bar::new(ts, close - 1.0, close + 1.0, close - 2.0, close, 100.0)
     }
 
     // ── Bar struct tests ──
 
     #[test]
     fn test_bar_is_bullish() {
-        let bullish = Bar {
-            timestamp: 0,
-            open: 100.0,
-            high: 110.0,
-            low: 95.0,
-            close: 105.0,
-            volume: 1000.0,
-            _pad: 0.0,
-        };
+        let bullish = Bar::new(0, 100.0, 110.0, 95.0, 105.0, 1000.0);
         assert!(bullish.is_bullish());
 
-        let bearish = Bar {
-            timestamp: 0,
-            open: 105.0,
-            high: 110.0,
-            low: 95.0,
-            close: 100.0,
-            volume: 1000.0,
-            _pad: 0.0,
-        };
+        let bearish = Bar::new(0, 105.0, 110.0, 95.0, 100.0, 1000.0);
         assert!(!bearish.is_bullish());
 
-        let doji = Bar {
-            timestamp: 0,
-            open: 100.0,
-            high: 110.0,
-            low: 95.0,
-            close: 100.0,
-            volume: 1000.0,
-            _pad: 0.0,
-        };
+        let doji = Bar::new(0, 100.0, 110.0, 95.0, 100.0, 1000.0);
         assert!(doji.is_bullish()); // Equal counts as bullish
     }
 
     #[test]
     fn test_bar_body_metrics() {
-        let bar = Bar {
-            timestamp: 0,
-            open: 100.0,
-            high: 110.0,
-            low: 90.0,
-            close: 105.0,
-            volume: 1000.0,
-            _pad: 0.0,
-        };
+        let bar = Bar::new(0, 100.0, 110.0, 90.0, 105.0, 1000.0);
         assert_eq!(bar.body_top(), 105.0);
         assert_eq!(bar.body_bottom(), 100.0);
+    }
+
+    #[test]
+    fn bar_preserves_crypto_precision() {
+        let bar = Bar::new(
+            1_700_000_000_000,
+            103_842.57_f64,
+            103_842.58_f64,
+            103_842.56_f64,
+            103_842.5712345_f64,
+            1_000.0_f64,
+        );
+        assert_eq!(bar.close, 103_842.5712345_f64);
+        let mut arr = BarArray::new();
+        arr.set(vec![bar]).unwrap();
+        assert_eq!(arr.get(0).unwrap().close, 103_842.5712345_f64);
+    }
+
+    #[test]
+    fn bar_preserves_small_alt_precision() {
+        let bar = Bar::new(
+            1_700_000_000_000,
+            0.0000001234_f64,
+            0.0000001235_f64,
+            0.0000001233_f64,
+            0.00000012345678_f64,
+            1.0_f64,
+        );
+        let mut arr = BarArray::new();
+        arr.set(vec![bar]).unwrap();
+        assert_eq!(arr.get(0).unwrap().close, 0.00000012345678_f64);
     }
 
     // ── BarArray basic operations ──
@@ -797,7 +788,7 @@ mod tests {
 
         // Append exactly chunk_size bars
         for i in 0..4 {
-            arr.append(make_bar(i as u64 * 1000, 50.0 + i as f32))
+            arr.append(make_bar(i as u64 * 1000, 50.0 + i as f64))
                 .unwrap();
         }
 
@@ -869,15 +860,14 @@ mod tests {
     fn test_append_rejects_nan_values() {
         let mut arr = BarArray::new();
         let err = arr
-            .append(Bar {
-                timestamp: 1000,
-                open: f32::NAN,
-                high: f32::NAN,
-                low: f32::NAN,
-                close: f32::NAN,
-                volume: f32::NAN,
-                _pad: 0.0,
-            })
+            .append(Bar::new(
+                1000,
+                f64::NAN,
+                f64::NAN,
+                f64::NAN,
+                f64::NAN,
+                f64::NAN,
+            ))
             .unwrap_err();
         assert!(err.contains("must be finite"));
     }
@@ -886,15 +876,14 @@ mod tests {
     fn test_set_rejects_infinity_values() {
         let mut arr = BarArray::new();
         let err = arr
-            .set(vec![Bar {
-                timestamp: 1000,
-                open: f32::INFINITY,
-                high: f32::NEG_INFINITY,
-                low: f32::INFINITY,
-                close: f32::NEG_INFINITY,
-                volume: f32::INFINITY,
-                _pad: 0.0,
-            }])
+            .set(vec![Bar::new(
+                1000,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::INFINITY,
+            )])
             .unwrap_err();
         assert!(err.contains("must be finite"));
     }
@@ -923,24 +912,8 @@ mod tests {
     fn test_direct_accessors() {
         let mut arr = BarArray::new();
         arr.set(vec![
-            Bar {
-                timestamp: 1000,
-                open: 10.0,
-                high: 15.0,
-                low: 8.0,
-                close: 12.0,
-                volume: 100.0,
-                _pad: 0.0,
-            },
-            Bar {
-                timestamp: 2000,
-                open: 12.0,
-                high: 18.0,
-                low: 11.0,
-                close: 16.0,
-                volume: 200.0,
-                _pad: 0.0,
-            },
+            Bar::new(1000, 10.0, 15.0, 8.0, 12.0, 100.0),
+            Bar::new(2000, 12.0, 18.0, 11.0, 16.0, 200.0),
         ])
         .unwrap();
 
@@ -975,15 +948,7 @@ mod tests {
     #[test]
     fn test_bar_array_normalizes_finite_bounds() {
         let mut arr = BarArray::new();
-        arr.append(Bar {
-            timestamp: 1000,
-            open: 10.0,
-            high: 9.0,
-            low: 12.0,
-            close: 11.0,
-            volume: -5.0,
-            _pad: 0.0,
-        })
+        arr.append(Bar::new(1000, 10.0, 9.0, 12.0, 11.0, -5.0))
         .unwrap();
 
         let bar = arr.get(0).unwrap();

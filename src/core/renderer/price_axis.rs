@@ -276,11 +276,11 @@ impl PriceAxisRenderer {
         self.base_ctx.set_text_align("left");
         self.base_ctx.set_text_baseline("middle");
 
-        let padding_inner_css = style.price_axis_padding_inner();
+        let inner_inset_css = style.price_axis_inset_inner();
         let tick_length_css = style.axis_tick_length as f64;
         // LWC: textLeftX = tickMarkLeftX + tickLength + paddingInner
         // tickMarkLeftX = 0 (at border), so text_x = border + tickLength + paddingInner.
-        let text_x_css = border_size / dpr + tick_length_css + padding_inner_css;
+        let text_x_css = border_size / dpr + tick_length_css + inner_inset_css;
 
         let h_css = h / dpr;
         self.base_ctx
@@ -348,7 +348,7 @@ impl PriceAxisRenderer {
             .ceil();
 
         let metrics = RightAxisLabelMetrics::from_style(style, dpr);
-        let extra_pad = style.crosshair_label_extra_padding() * dpr;
+        let extra_inset = style.crosshair_label_extra_inset() * dpr;
         let geom = match compute_right_axis_label_geometry(
             w,
             pane_limit_h,
@@ -356,7 +356,7 @@ impl PriceAxisRenderer {
             text_w,
             dpr,
             &metrics,
-            extra_pad,
+            extra_inset,
             RightAxisLabelWidthMode::AxisFull,
         ) {
             Some(v) => v,
@@ -779,9 +779,9 @@ fn append_countdown_to_labels(
 #[derive(Debug, Clone, Copy)]
 struct RightAxisLabelMetrics {
     fs: f64,
-    padding_inner: f64,
-    padding_outer: f64,
-    padding_tb: f64,
+    inset_inner: f64,
+    inset_outer: f64,
+    inset_tb: f64,
     tick_size: f64,
     border_size: f64,
     edge_inset: f64,
@@ -792,9 +792,9 @@ impl RightAxisLabelMetrics {
     fn from_style(style: &ChartStyle, dpr: f64) -> Self {
         Self {
             fs: style.font_size as f64 * dpr,
-            padding_inner: style.price_axis_padding_inner() * dpr,
-            padding_outer: style.price_axis_padding_outer() * dpr,
-            padding_tb: style.price_axis_padding_tb() * dpr,
+            inset_inner: style.price_axis_inset_inner() * dpr,
+            inset_outer: style.price_axis_inset_outer() * dpr,
+            inset_tb: style.price_axis_inset_tb() * dpr,
             // Axis tick marks are hidden in compact mode; don't reserve connector width.
             tick_size: 0.0,
             border_size: (style.axis_border_size as f64 * dpr).max(1.0).floor(),
@@ -827,9 +827,9 @@ enum RightAxisLabelWidthMode {
 fn right_axis_label_height_bmp(
     metrics: &RightAxisLabelMetrics,
     dpr: f64,
-    extra_tb_padding: f64,
+    extra_tb_inset: f64,
 ) -> f64 {
-    let total_h = metrics.fs + (metrics.padding_tb + extra_tb_padding) * 2.0;
+    let total_h = metrics.fs + (metrics.inset_tb + extra_tb_inset) * 2.0;
     let tick_h_bmp = dpr.floor().max(1.0) as i32;
     let mut total_h_bmp = total_h.round() as i32;
     if total_h_bmp % 2 != tick_h_bmp % 2 {
@@ -845,17 +845,17 @@ fn compute_right_axis_label_geometry(
     text_w_phys: f64,
     dpr: f64,
     metrics: &RightAxisLabelMetrics,
-    extra_tb_padding: f64,
+    extra_tb_inset: f64,
     width_mode: RightAxisLabelWidthMode,
 ) -> Option<RightAxisLabelGeometry> {
     if axis_w <= 0.0 || pane_h <= 0.0 || dpr <= 0.0 {
         return None;
     }
 
-    let total_h_bmp = right_axis_label_height_bmp(metrics, dpr, extra_tb_padding);
+    let total_h_bmp = right_axis_label_height_bmp(metrics, dpr, extra_tb_inset);
     let total_w_raw = metrics.border_size
-        + metrics.padding_inner
-        + metrics.padding_outer
+        + metrics.inset_inner
+        + metrics.inset_outer
         + text_w_phys
         + metrics.tick_size;
     // Right price scale in LWC uses align='left':
@@ -902,11 +902,11 @@ fn compute_right_axis_label_geometry(
             let center_x_phys = (x_inside + axis_w) / 2.0;
             let text_left_phys = (center_x_phys - text_w_phys / 2.0)
                 // never overlap the tick + inner-padding zone
-                .max(x_inside + metrics.tick_size + metrics.padding_inner);
+                .max(x_inside + metrics.tick_size + metrics.inset_inner);
             (text_left_phys / dpr, false) // "left" align at manually centred position
         }
         RightAxisLabelWidthMode::TextFit => (
-            (x_inside + metrics.tick_size + metrics.padding_inner) / dpr,
+            (x_inside + metrics.tick_size + metrics.inset_inner) / dpr,
             false,
         ),
     };
@@ -1000,7 +1000,7 @@ fn centered_full_width_label_text_x_css(
 ) -> f64 {
     let center_x_phys = (geom.x_inside + geom.x_outside) / 2.0;
     let text_left_phys = (center_x_phys - text_w_phys / 2.0)
-        .max(geom.x_inside + geom.tick_size + metrics.padding_inner);
+        .max(geom.x_inside + geom.tick_size + metrics.inset_inner);
     text_left_phys / dpr
 }
 

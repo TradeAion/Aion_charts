@@ -91,31 +91,31 @@ pub struct ChartStyle {
 }
 
 impl ChartStyle {
-    // ── LWC-derived computed paddings (all in CSS px) ──
+    // ── LWC-derived computed insets (all in CSS px) ──
 
-    /// Compact axis padding target in CSS px.
-    /// Kept as a utility for future use; current axis paddings use LWC formulas.
+    /// Compact axis inset target in CSS px.
+    /// Kept as a utility for future use; current axis insets use LWC formulas.
     #[inline]
     #[allow(dead_code)]
-    fn compact_axis_padding_css(&self) -> f64 {
+    fn compact_axis_inset_css(&self) -> f64 {
         ((2.5 / 12.0) * self.font_size as f64).clamp(2.0, 3.0)
     }
 
-    /// Price axis left padding (inside edge to text).
+    /// Price axis left inset (inside edge to text).
     /// LWC: `paddingInner = fontSize / 12 * tickLength` where tickLength = 5.
     #[inline]
-    pub fn price_axis_padding_inner(&self) -> f64 {
+    pub fn price_axis_inset_inner(&self) -> f64 {
         self.font_size as f64 / 12.0 * self.axis_tick_length as f64
     }
-    /// Price axis right padding (text to outer edge).
+    /// Price axis right inset (text to outer edge).
     /// LWC: `paddingOuter = fontSize / 12 * tickLength`.
     #[inline]
-    pub fn price_axis_padding_outer(&self) -> f64 {
+    pub fn price_axis_inset_outer(&self) -> f64 {
         self.font_size as f64 / 12.0 * self.axis_tick_length as f64
     }
-    /// Price axis paddingTop/Bottom: `2.5/12 * fontSize`.
+    /// Price axis top/bottom inset: `2.5/12 * fontSize`.
     #[inline]
-    pub fn price_axis_padding_tb(&self) -> f64 {
+    pub fn price_axis_inset_tb(&self) -> f64 {
         2.5 / 12.0 * self.font_size as f64
     }
     /// Price axis label offset.
@@ -128,7 +128,7 @@ impl ChartStyle {
     /// Keeps crosshair/live-price labels fully inside at top/bottom edges.
     #[inline]
     pub fn price_axis_label_edge_inset(&self) -> f64 {
-        self.price_axis_padding_tb().ceil() + self.axis_border_size as f64
+        self.price_axis_inset_tb().ceil() + self.axis_border_size as f64
     }
     /// Additional horizontal inset for full-width Y-axis labels (crosshair/live price).
     /// Keeps the label body visually inside the axis rather than riding the separator.
@@ -145,8 +145,8 @@ impl ChartStyle {
     pub fn price_axis_width(&self, max_text_width: f64) -> f64 {
         let raw = self.axis_border_size as f64
             + self.axis_tick_length as f64
-            + self.price_axis_padding_inner()
-            + self.price_axis_padding_outer()
+            + self.price_axis_inset_inner()
+            + self.price_axis_inset_outer()
             + self.price_axis_label_offset()
             + max_text_width;
         // Keep a small practical floor so the axis never collapses on empty data.
@@ -164,26 +164,26 @@ impl ChartStyle {
         self.axis_border_size as f64
             + self.axis_tick_length as f64
             + fs
-            + self.time_axis_padding_top()
-            + self.time_axis_padding_bottom()
+            + self.time_axis_inset_top()
+            + self.time_axis_inset_bottom()
             + self.time_axis_label_bottom_offset()
     }
 
-    /// Time axis top padding.
+    /// Time axis top inset.
     /// LWC: `paddingTop = 3 * fontSize / 12`.
     #[inline]
-    pub fn time_axis_padding_top(&self) -> f64 {
+    pub fn time_axis_inset_top(&self) -> f64 {
         3.0 / 12.0 * self.font_size as f64
     }
-    /// Time axis bottom padding.
+    /// Time axis bottom inset.
     /// LWC: `paddingBottom = 3 * fontSize / 12`.
     #[inline]
-    pub fn time_axis_padding_bottom(&self) -> f64 {
+    pub fn time_axis_inset_bottom(&self) -> f64 {
         3.0 / 12.0 * self.font_size as f64
     }
-    /// Time axis paddingHorizontal: `9 * fontSize / 12`.
+    /// Time axis horizontal inset: `9 * fontSize / 12`.
     #[inline]
-    pub fn time_axis_padding_horizontal(&self) -> f64 {
+    pub fn time_axis_inset_horizontal(&self) -> f64 {
         9.0 * self.font_size as f64 / 12.0
     }
     /// Additional bottom offset under X-axis labels.
@@ -193,9 +193,9 @@ impl ChartStyle {
         4.0 / 12.0 * self.font_size as f64
     }
 
-    /// Crosshair label additional padding (LWC: `2/12 * fontSize`).
+    /// Crosshair label additional inset (LWC: `2/12 * fontSize`).
     #[inline]
-    pub fn crosshair_label_extra_padding(&self) -> f64 {
+    pub fn crosshair_label_extra_inset(&self) -> f64 {
         2.0 / 12.0 * self.font_size as f64
     }
     /// Top inset for X-axis crosshair label box.

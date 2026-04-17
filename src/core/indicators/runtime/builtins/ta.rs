@@ -976,7 +976,6 @@ mod tests {
                 low: 95.0,
                 close: 102.0,
                 volume: 1000.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 2,
@@ -985,7 +984,6 @@ mod tests {
                 low: 96.0,
                 close: 103.0,
                 volume: 1100.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 3,
@@ -994,7 +992,6 @@ mod tests {
                 low: 97.0,
                 close: 104.0,
                 volume: 1200.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 4,
@@ -1003,7 +1000,6 @@ mod tests {
                 low: 98.0,
                 close: 105.0,
                 volume: 1300.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 5,
@@ -1012,7 +1008,6 @@ mod tests {
                 low: 99.0,
                 close: 106.0,
                 volume: 1400.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 6,
@@ -1021,7 +1016,6 @@ mod tests {
                 low: 100.0,
                 close: 107.0,
                 volume: 1500.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 7,
@@ -1030,7 +1024,6 @@ mod tests {
                 low: 101.0,
                 close: 108.0,
                 volume: 1600.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 8,
@@ -1039,7 +1032,6 @@ mod tests {
                 low: 102.0,
                 close: 109.0,
                 volume: 1700.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 9,
@@ -1048,7 +1040,6 @@ mod tests {
                 low: 103.0,
                 close: 110.0,
                 volume: 1800.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 10,
@@ -1057,7 +1048,6 @@ mod tests {
                 low: 104.0,
                 close: 111.0,
                 volume: 1900.0,
-                _pad: 0.0,
             },
         ])
         .unwrap();
@@ -1430,7 +1420,6 @@ mod tests {
                 low: 105.0,
                 close: 110.0,
                 volume: 100.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 2,
@@ -1439,7 +1428,6 @@ mod tests {
                 low: 104.0,
                 close: 109.0,
                 volume: 100.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 3,
@@ -1448,7 +1436,6 @@ mod tests {
                 low: 103.0,
                 close: 108.0,
                 volume: 100.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 4,
@@ -1457,7 +1444,6 @@ mod tests {
                 low: 102.0,
                 close: 107.0,
                 volume: 100.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 5,
@@ -1466,7 +1452,6 @@ mod tests {
                 low: 101.0,
                 close: 106.0,
                 volume: 100.0,
-                _pad: 0.0,
             },
         ])
         .unwrap();

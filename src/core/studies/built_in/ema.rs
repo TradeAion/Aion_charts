@@ -55,7 +55,7 @@ impl StudyCalculator for EmaCalculator {
             let ema = (current_close - prev_ema) * multiplier + prev_ema;
 
             output.data.timestamps[i] = bars.timestamp(i);
-            output.data.values[i] = ema as f32;
+            output.data.values[i] = ema;
         }
     }
 }

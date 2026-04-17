@@ -65,7 +65,7 @@ impl StudyCalculator for VwapCalculator {
 
                 if let Some(output) = study.get_output_mut(0) {
                     output.data.timestamps[i] = ts;
-                    output.data.values[i] = vwap as f32;
+                    output.data.values[i] = vwap;
                 }
             }
         }

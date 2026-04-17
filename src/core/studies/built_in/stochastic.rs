@@ -82,7 +82,7 @@ impl StudyCalculator for StochasticCalculator {
             if i + 1 < k_period + slowing - 1 {
                 if let Some(output) = study.get_output_mut(0) {
                     output.data.timestamps[i] = ts;
-                    output.data.values[i] = f32::NAN;
+                    output.data.values[i] = f64::NAN;
                 }
                 continue;
             }
@@ -101,12 +101,12 @@ impl StudyCalculator for StochasticCalculator {
                 k_values[i] = sum / count as f64;
                 if let Some(output) = study.get_output_mut(0) {
                     output.data.timestamps[i] = ts;
-                    output.data.values[i] = k_values[i] as f32;
+                    output.data.values[i] = k_values[i];
                 }
             } else {
                 if let Some(output) = study.get_output_mut(0) {
                     output.data.timestamps[i] = ts;
-                    output.data.values[i] = f32::NAN;
+                    output.data.values[i] = f64::NAN;
                 }
             }
         }
@@ -118,7 +118,7 @@ impl StudyCalculator for StochasticCalculator {
             if i + 1 < k_period + slowing + d_period - 2 {
                 if let Some(output) = study.get_output_mut(1) {
                     output.data.timestamps[i] = ts;
-                    output.data.values[i] = f32::NAN;
+                    output.data.values[i] = f64::NAN;
                 }
                 continue;
             }
@@ -136,12 +136,12 @@ impl StudyCalculator for StochasticCalculator {
             if count > 0 {
                 if let Some(output) = study.get_output_mut(1) {
                     output.data.timestamps[i] = ts;
-                    output.data.values[i] = (sum / count as f64) as f32;
+                    output.data.values[i] = sum / count as f64;
                 }
             } else {
                 if let Some(output) = study.get_output_mut(1) {
                     output.data.timestamps[i] = ts;
-                    output.data.values[i] = f32::NAN;
+                    output.data.values[i] = f64::NAN;
                 }
             }
         }

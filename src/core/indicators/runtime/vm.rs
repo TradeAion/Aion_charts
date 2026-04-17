@@ -2771,7 +2771,6 @@ mod tests {
                 low: 9.0,
                 close: 11.0,
                 volume: 100.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 2,
@@ -2780,7 +2779,6 @@ mod tests {
                 low: 10.0,
                 close: 12.0,
                 volume: 200.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 3,
@@ -2789,7 +2787,6 @@ mod tests {
                 low: 11.0,
                 close: 13.0,
                 volume: 300.0,
-                _pad: 0.0,
             },
         ])
         .unwrap();
@@ -2806,7 +2803,6 @@ mod tests {
                 low: 9.0,
                 close: 11.0,
                 volume: 100.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 2,
@@ -2815,7 +2811,6 @@ mod tests {
                 low: 10.0,
                 close: 11.0,
                 volume: 120.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 3,
@@ -2824,7 +2819,6 @@ mod tests {
                 low: 10.0,
                 close: 14.0,
                 volume: 140.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 4,
@@ -2833,7 +2827,6 @@ mod tests {
                 low: 12.0,
                 close: 13.0,
                 volume: 160.0,
-                _pad: 0.0,
             },
         ])
         .unwrap();
@@ -3714,7 +3707,6 @@ plot(ta.sma(close, 3))"#;
                 low: 8.0,
                 close: 10.0,
                 volume: 100.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 2,
@@ -3723,7 +3715,6 @@ plot(ta.sma(close, 3))"#;
                 low: 9.0,
                 close: 11.0,
                 volume: 100.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 3,
@@ -3732,7 +3723,6 @@ plot(ta.sma(close, 3))"#;
                 low: 10.0,
                 close: 12.0,
                 volume: 100.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 4,
@@ -3741,7 +3731,6 @@ plot(ta.sma(close, 3))"#;
                 low: 11.0,
                 close: 13.0,
                 volume: 100.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 5,
@@ -3750,7 +3739,6 @@ plot(ta.sma(close, 3))"#;
                 low: 12.0,
                 close: 14.0,
                 volume: 100.0,
-                _pad: 0.0,
             },
         ])
         .unwrap();
@@ -3840,12 +3828,11 @@ plotHistogram(hist)"#;
         let bar_data: Vec<Bar> = (1..=50_u64)
             .map(|i| Bar {
                 timestamp: i,
-                open: 100.0 + (i as f32) * 0.5,
-                high: 105.0 + (i as f32) * 0.5,
-                low: 95.0 + (i as f32) * 0.5,
-                close: 100.0 + (i as f32), // closes: 101, 102, 103, ...
+                open: 100.0 + (i as f64) * 0.5,
+                high: 105.0 + (i as f64) * 0.5,
+                low: 95.0 + (i as f64) * 0.5,
+                close: 100.0 + (i as f64), // closes: 101, 102, 103, ...
                 volume: 1000.0,
-                _pad: 0.0,
             })
             .collect();
         bars.set(bar_data).unwrap();
@@ -3934,7 +3921,6 @@ plotHistogram(h, color = h >= 0 ? color.green : color.red)"#;
                 low: 95.0,
                 close: 102.0,
                 volume: 1000.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 2,
@@ -3943,7 +3929,6 @@ plotHistogram(h, color = h >= 0 ? color.green : color.red)"#;
                 low: 100.0,
                 close: 105.0,
                 volume: 1000.0,
-                _pad: 0.0,
             },
         ])
         .unwrap();
@@ -4031,7 +4016,7 @@ plotHistogram(h, color = h >= 0 ? color.green : color.red)"#;
         let bar_data: Vec<Bar> = (1..=50_u64)
             .map(|i| {
                 // Create prices that trend up, then down to generate both positive and negative histogram values
-                let trend = if i <= 25 { i as f32 } else { (50 - i) as f32 };
+                let trend = if i <= 25 { i as f64 } else { (50 - i) as f64 };
                 Bar {
                     timestamp: i,
                     open: 100.0 + trend,
@@ -4039,7 +4024,6 @@ plotHistogram(h, color = h >= 0 ? color.green : color.red)"#;
                     low: 95.0 + trend,
                     close: 100.0 + trend * 1.1,
                     volume: 1000.0,
-                    _pad: 0.0,
                 }
             })
             .collect();

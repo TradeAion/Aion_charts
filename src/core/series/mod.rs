@@ -166,21 +166,21 @@ impl Series {
                 if self.line_data.is_empty() {
                     None
                 } else {
-                    Some(self.line_data.values[self.line_data.len() - 1] as f64)
+                    Some(self.line_data.values[self.line_data.len() - 1])
                 }
             }
             SeriesType::Histogram => {
                 if self.histogram_data.is_empty() {
                     None
                 } else {
-                    Some(self.histogram_data.values[self.histogram_data.len() - 1] as f64)
+                    Some(self.histogram_data.values[self.histogram_data.len() - 1])
                 }
             }
             SeriesType::Bar => {
                 if self.bar_data.is_empty() {
                     None
                 } else {
-                    Some(self.bar_data.close[self.bar_data.len() - 1] as f64)
+                    Some(self.bar_data.close[self.bar_data.len() - 1])
                 }
             }
             SeriesType::Candlestick => None, // Managed by engine.bars

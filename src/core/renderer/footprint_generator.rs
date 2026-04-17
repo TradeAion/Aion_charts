@@ -205,12 +205,8 @@ pub fn generate_footprint_geometry(
 
         // ── Dynamic aggregation ──
         let natural_cell_h = {
-            let y0 = price_to_y(fp_bar.levels[0].price as f64, viewport, candle_h);
-            let y1 = price_to_y(
-                fp_bar.levels[0].price as f64 + base_tick as f64,
-                viewport,
-                candle_h,
-            );
+            let y0 = price_to_y(fp_bar.levels[0].price, viewport, candle_h);
+            let y1 = price_to_y(fp_bar.levels[0].price + base_tick, viewport, candle_h);
             (y0 - y1).abs()
         };
         let agg_factor =
@@ -219,7 +215,7 @@ pub fn generate_footprint_geometry(
             } else {
                 1
             };
-        let effective_tick = base_tick * agg_factor as f32;
+        let effective_tick = base_tick * agg_factor as f64;
 
         // ── Render candlestick on the left side ──
         // The candle body is snapped to the tick grid so it aligns perfectly
@@ -249,16 +245,16 @@ pub fn generate_footprint_geometry(
 
             // Snap open/close to tick grid boundaries so the candle body
             // aligns exactly with the ladder cell edges.
-            let et = effective_tick as f64;
-            let body_high_price = bar.open.max(bar.close) as f64;
-            let body_low_price = bar.open.min(bar.close) as f64;
+            let et = effective_tick;
+            let body_high_price = bar.open.max(bar.close);
+            let body_low_price = bar.open.min(bar.close);
             let snapped_high = (body_high_price / et).ceil() * et;
             let snapped_low = (body_low_price / et).floor() * et;
 
             let body_top = price_to_y(snapped_high, viewport, candle_h).round();
             let body_bottom = price_to_y(snapped_low, viewport, candle_h).round();
-            let high_y = price_to_y(bar.high as f64, viewport, candle_h).round();
-            let low_y = price_to_y(bar.low as f64, viewport, candle_h).round();
+            let high_y = price_to_y(bar.high, viewport, candle_h).round();
+            let low_y = price_to_y(bar.low, viewport, candle_h).round();
 
             // Wick (1px wide, centered in candle area)
             let wick_w = 1.0_f64.max(sizing.wick_width.min(candle_w * 0.4));
@@ -332,17 +328,17 @@ pub fn generate_footprint_geometry(
         let max_side_vol = levels
             .iter()
             .map(|l| l.bid_volume.max(l.ask_volume))
-            .fold(0.0f32, f32::max)
+            .fold(0.0f64, f64::max)
             .max(1.0);
         let max_total_vol = levels
             .iter()
             .map(|l| l.bid_volume + l.ask_volume)
-            .fold(0.0f32, f32::max)
+            .fold(0.0f64, f64::max)
             .max(1.0);
         let max_delta_abs = levels
             .iter()
             .map(|l| (l.ask_volume - l.bid_volume).abs())
-            .fold(0.0f32, f32::max)
+            .fold(0.0f64, f64::max)
             .max(1.0);
 
         // ── Single background rect for the entire ladder ──
@@ -350,12 +346,12 @@ pub fn generate_footprint_geometry(
             let first_level = &levels[0];
             let last_level = &levels[levels.len() - 1];
             let ladder_top = price_to_y(
-                last_level.price as f64 + effective_tick as f64,
+                last_level.price + effective_tick,
                 viewport,
                 candle_h,
             )
             .round();
-            let ladder_bottom = price_to_y(first_level.price as f64, viewport, candle_h).round();
+            let ladder_bottom = price_to_y(first_level.price, viewport, candle_h).round();
             let ladder_h = (ladder_bottom - ladder_top).max(1.0);
 
             let (cbr, cbg, cbb, _) = color4(&fp_opts.cell_bg_color);
@@ -373,8 +369,8 @@ pub fn generate_footprint_geometry(
 
         // ── Render each (possibly aggregated) price level ──
         for (level_idx, level) in levels.iter().enumerate() {
-            let price_top = level.price as f64 + effective_tick as f64;
-            let price_bottom = level.price as f64;
+            let price_top = level.price + effective_tick;
+            let price_bottom = level.price;
 
             let y_top = price_to_y(price_top, viewport, candle_h).round();
             let y_bottom = price_to_y(price_bottom, viewport, candle_h).round();
@@ -391,7 +387,7 @@ pub fn generate_footprint_geometry(
             let is_poc = poc
                 .map(|(_, poc_lvl)| {
                     let poc_p = poc_lvl.price;
-                    poc_p >= level.price && (poc_p as f64) < price_top
+                    poc_p >= level.price && poc_p < price_top
                 })
                 .unwrap_or(false);
 
@@ -617,16 +613,16 @@ fn render_bid_ask_cell(
     cell_y: f64,
     bar_width: f64,
     cell_h: f64,
-    max_side_vol: f32,
+    max_side_vol: f64,
     font_size: f32,
     imbalance: ImbalanceType,
 ) {
     let half_w = bar_width * 0.5;
-    let padding = opts.cell_padding as f64;
+    let inset = opts.cell_inset as f64;
 
     // Bid (sell) side — left half, bar grows from center to left
     let bid_frac = (level.bid_volume / max_side_vol).clamp(0.0, 1.0);
-    let bid_bar_w = (half_w - padding * 2.0) * bid_frac as f64;
+    let bid_bar_w = (half_w - inset * 2.0) * bid_frac;
     let bid_color = match imbalance {
         ImbalanceType::SellImbalance => opts.sell_imbalance_color,
         _ => opts.sell_color,
@@ -634,13 +630,13 @@ fn render_bid_ask_cell(
     if bid_bar_w > 0.5 {
         push_horizontal_gradient_rects(
             gradient_rects,
-            bar_left + half_w - padding - bid_bar_w,
+            bar_left + half_w - inset - bid_bar_w,
             cell_y + 1.0,
             bid_bar_w,
             (cell_h - 2.0).max(1.0),
             bid_color,
             opts.cell_bg_color,
-            bid_frac,
+            bid_frac as f32,
             &opts.volume_color_intensity,
             opts.gradient_style,
             HorizontalGradientDirection::RightToLeft,
@@ -649,7 +645,7 @@ fn render_bid_ask_cell(
 
     // Ask (buy) side — right half, bar grows from center to right
     let ask_frac = (level.ask_volume / max_side_vol).clamp(0.0, 1.0);
-    let ask_bar_w = (half_w - padding * 2.0) * ask_frac as f64;
+    let ask_bar_w = (half_w - inset * 2.0) * ask_frac;
     let ask_color = match imbalance {
         ImbalanceType::BuyImbalance => opts.buy_imbalance_color,
         _ => opts.buy_color,
@@ -657,13 +653,13 @@ fn render_bid_ask_cell(
     if ask_bar_w > 0.5 {
         push_horizontal_gradient_rects(
             gradient_rects,
-            bar_left + half_w + padding,
+            bar_left + half_w + inset,
             cell_y + 1.0,
             ask_bar_w,
             (cell_h - 2.0).max(1.0),
             ask_color,
             opts.cell_bg_color,
-            ask_frac,
+            ask_frac as f32,
             &opts.volume_color_intensity,
             opts.gradient_style,
             HorizontalGradientDirection::LeftToRight,
@@ -672,7 +668,7 @@ fn render_bid_ask_cell(
 
     // Volume text — adaptive font size to fit cell
     let effective_font = adaptive_font_size(font_size, cell_h);
-    let avail_half_w = half_w - padding * 2.0 - 2.0; // usable text width per side
+    let avail_half_w = half_w - inset * 2.0 - 2.0; // usable text width per side
     let show_half_text = opts.show_volume_text
         && footprint_text_slot_allows_text(
             effective_font,
@@ -729,12 +725,12 @@ fn render_delta_cell(
     cell_y: f64,
     bar_width: f64,
     cell_h: f64,
-    max_delta_abs: f32,
+    max_delta_abs: f64,
     font_size: f32,
 ) {
     let delta = level.delta();
     let delta_frac = (delta.abs() / max_delta_abs).clamp(0.0, 1.0);
-    let padding = opts.cell_padding as f64;
+    let inset = opts.cell_inset as f64;
 
     let color = if delta >= 0.0 {
         opts.positive_delta_color
@@ -743,7 +739,7 @@ fn render_delta_cell(
     };
 
     // Delta bar filling from center
-    let fill_w = (bar_width - padding * 2.0) * delta_frac as f64;
+    let fill_w = (bar_width - inset * 2.0) * delta_frac;
     if fill_w > 0.5 {
         let x = if delta >= 0.0 {
             bar_left + bar_width * 0.5
@@ -758,7 +754,7 @@ fn render_delta_cell(
             (cell_h - 2.0).max(1.0),
             color,
             opts.cell_bg_color,
-            delta_frac,
+            delta_frac as f32,
             &opts.volume_color_intensity,
             opts.gradient_style,
             if delta >= 0.0 {
@@ -771,7 +767,7 @@ fn render_delta_cell(
 
     // Delta text
     let effective_font = adaptive_font_size(font_size, cell_h);
-    let avail_w = bar_width - opts.cell_padding as f64 * 2.0;
+    let avail_w = bar_width - opts.cell_inset as f64 * 2.0;
     if opts.show_volume_text
         && footprint_text_slot_allows_text(
             effective_font,
@@ -810,12 +806,12 @@ fn render_volume_cell(
     cell_y: f64,
     bar_width: f64,
     cell_h: f64,
-    max_total_vol: f32,
+    max_total_vol: f64,
     font_size: f32,
 ) {
     let vol = level.total_volume();
     let vol_frac = (vol / max_total_vol).clamp(0.0, 1.0);
-    let padding = opts.cell_padding as f64;
+    let inset = opts.cell_inset as f64;
 
     let is_bullish = level.ask_volume >= level.bid_volume;
     let base_color = if is_bullish {
@@ -824,17 +820,17 @@ fn render_volume_cell(
         opts.sell_color
     };
     // Volume fill bar
-    let fill_w = (bar_width - padding * 2.0) * vol_frac as f64;
+    let fill_w = (bar_width - inset * 2.0) * vol_frac;
     if fill_w > 0.5 {
         push_horizontal_gradient_rects(
             gradient_rects,
-            bar_left + padding,
+            bar_left + inset,
             cell_y + 1.0,
             fill_w,
             (cell_h - 2.0).max(1.0),
             base_color,
             opts.cell_bg_color,
-            vol_frac,
+            vol_frac as f32,
             &opts.volume_color_intensity,
             opts.gradient_style,
             if is_bullish {
@@ -847,7 +843,7 @@ fn render_volume_cell(
 
     // Volume text
     let effective_font = adaptive_font_size(font_size, cell_h);
-    let avail_w = bar_width - opts.cell_padding as f64 * 2.0;
+    let avail_w = bar_width - opts.cell_inset as f64 * 2.0;
     if opts.show_volume_text
         && footprint_text_slot_allows_text(
             effective_font,
@@ -880,13 +876,13 @@ fn render_delta_profile_cell(
     cell_y: f64,
     bar_width: f64,
     cell_h: f64,
-    max_delta_abs: f32,
+    max_delta_abs: f64,
 ) {
     let delta = level.delta();
     let delta_frac = (delta.abs() / max_delta_abs).clamp(0.0, 1.0);
-    let padding = opts.cell_padding as f64;
-    let max_w = bar_width - padding * 2.0;
-    let fill_w = max_w * delta_frac as f64;
+    let inset = opts.cell_inset as f64;
+    let max_w = bar_width - inset * 2.0;
+    let fill_w = max_w * delta_frac;
 
     let color = if delta >= 0.0 {
         opts.positive_delta_color
@@ -909,7 +905,7 @@ fn render_delta_profile_cell(
             (cell_h - 2.0).max(1.0),
             color,
             opts.cell_bg_color,
-            delta_frac,
+            delta_frac as f32,
             &opts.volume_color_intensity,
             opts.gradient_style,
             if delta >= 0.0 {
@@ -930,13 +926,13 @@ fn render_volume_profile_cell(
     cell_y: f64,
     bar_width: f64,
     cell_h: f64,
-    max_total_vol: f32,
+    max_total_vol: f64,
 ) {
     let vol = level.total_volume();
     let vol_frac = (vol / max_total_vol).clamp(0.0, 1.0);
-    let padding = opts.cell_padding as f64;
-    let max_w = bar_width - padding * 2.0;
-    let fill_w = max_w * vol_frac as f64;
+    let inset = opts.cell_inset as f64;
+    let max_w = bar_width - inset * 2.0;
+    let fill_w = max_w * vol_frac;
 
     let is_bullish = level.ask_volume >= level.bid_volume;
     let color = if is_bullish {
@@ -948,13 +944,13 @@ fn render_volume_profile_cell(
     if fill_w > 0.5 {
         push_horizontal_gradient_rects(
             gradient_rects,
-            bar_left + padding,
+            bar_left + inset,
             cell_y + 1.0,
             fill_w,
             (cell_h - 2.0).max(1.0),
             color,
             opts.cell_bg_color,
-            vol_frac,
+            vol_frac as f32,
             &opts.volume_color_intensity,
             opts.gradient_style,
             if is_bullish {
@@ -1002,7 +998,7 @@ fn render_delta_bar(
 
     // Delta text
     let fs = font_size * 0.9;
-    let avail_w = (bar_width - opts.cell_padding as f64 * 2.0).max(0.0);
+    let avail_w = (bar_width - opts.cell_inset as f64 * 2.0).max(0.0);
     if opts.show_volume_text
         && footprint_text_slot_allows_text(fs, bar_h, avail_w, FootprintTextSlot::Delta)
     {
@@ -1029,10 +1025,10 @@ fn render_delta_bar(
 fn generate_fallback_candle(
     bar_idx: usize,
     time_scale: &TimeScaleIndex,
-    open: f32,
-    high: f32,
-    low: f32,
-    close: f32,
+    open: f64,
+    high: f64,
+    low: f64,
+    close: f64,
     vp: &Viewport,
     style: &ChartStyle,
     chart_w: f64,
@@ -1055,10 +1051,10 @@ fn generate_fallback_candle(
     let Some(center_x) = main_bar_center_x(bar_idx, vp, time_scale, chart_w).map(f64::round) else {
         return;
     };
-    let body_top = price_to_y(open.max(close) as f64, vp, candle_h).round();
-    let body_bottom = price_to_y(open.min(close) as f64, vp, candle_h).round();
-    let high_y = price_to_y(high as f64, vp, candle_h).round();
-    let low_y = price_to_y(low as f64, vp, candle_h).round();
+    let body_top = price_to_y(open.max(close), vp, candle_h).round();
+    let body_bottom = price_to_y(open.min(close), vp, candle_h).round();
+    let high_y = price_to_y(high, vp, candle_h).round();
+    let low_y = price_to_y(low, vp, candle_h).round();
 
     let wick_offset = (sizing.wick_width * 0.5).floor();
     let half_bar = (sizing.bar_width * 0.5).floor();
@@ -1154,7 +1150,7 @@ fn adaptive_font_size(max_font: f32, cell_h: f64) -> f32 {
 }
 
 /// Auto-detect tick size from footprint levels.
-fn auto_tick_size(bar: &FootprintBar) -> f32 {
+fn auto_tick_size(bar: &FootprintBar) -> f64 {
     bar.inferred_tick_size()
 }
 
@@ -1279,7 +1275,7 @@ fn push_horizontal_gradient_rects(
 }
 
 /// Format volume for display (compact notation).
-fn format_volume(vol: f32) -> String {
+fn format_volume(vol: f64) -> String {
     if vol >= 1_000_000.0 {
         format!("{:.1}M", vol / 1_000_000.0)
     } else if vol >= 1_000.0 {
@@ -1294,7 +1290,7 @@ fn format_volume(vol: f32) -> String {
 }
 
 /// Format delta for display (with sign).
-fn format_delta(delta: f32) -> String {
+fn format_delta(delta: f64) -> String {
     let abs = delta.abs();
     let sign = if delta >= 0.0 { "+" } else { "-" };
     if abs >= 1_000_000.0 {
@@ -1341,7 +1337,6 @@ mod tests {
             low: 99.8,
             close: 100.9,
             volume: 50.0,
-            _pad: 0.0,
         }])
         .unwrap();
         bars

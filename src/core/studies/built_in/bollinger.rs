@@ -50,7 +50,7 @@ impl StudyCalculator for BollingerCalculator {
                 for out_idx in 0..3 {
                     if let Some(output) = study.get_output_mut(out_idx) {
                         output.data.timestamps[i] = ts;
-                        output.data.values[i] = f32::NAN;
+                        output.data.values[i] = f64::NAN;
                     }
                 }
                 continue;
@@ -78,15 +78,15 @@ impl StudyCalculator for BollingerCalculator {
             // Set outputs
             if let Some(output) = study.get_output_mut(0) {
                 output.data.timestamps[i] = ts;
-                output.data.values[i] = sma as f32;
+                output.data.values[i] = sma;
             }
             if let Some(output) = study.get_output_mut(1) {
                 output.data.timestamps[i] = ts;
-                output.data.values[i] = upper as f32;
+                output.data.values[i] = upper;
             }
             if let Some(output) = study.get_output_mut(2) {
                 output.data.timestamps[i] = ts;
-                output.data.values[i] = lower as f32;
+                output.data.values[i] = lower;
             }
         }
     }

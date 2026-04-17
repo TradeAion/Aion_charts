@@ -65,8 +65,8 @@ pub struct LineSegment {
     pub g: f32,
     pub b: f32,
     pub a: f32,
-    /// Padding to align to 16-byte boundary.
-    pub _pad: f32,
+    /// Reserved slot to preserve the packed GPU instance layout.
+    pub reserved: f32,
 }
 
 /// An area segment (trapezoid) for smooth area chart fills.
@@ -97,9 +97,9 @@ pub struct AreaSegment {
     pub bottom_a: f32,
     /// Global gradient top Y (same across visible area segments).
     pub gradient_top: f32,
-    /// Padding.
-    pub _pad1: f32,
-    pub _pad2: f32,
+    /// Reserved slots to preserve the packed GPU instance layout.
+    pub reserved1: f32,
+    pub reserved2: f32,
 }
 
 /// A line segment in physical pixel coordinates (for future studies/drawings).

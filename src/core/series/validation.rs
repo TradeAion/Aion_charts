@@ -39,7 +39,7 @@ pub fn ensure_strictly_increasing_timestamps(name: &str, timestamps: &[u64]) -> 
 pub fn ensure_finite_value(
     context: &str,
     field: &str,
-    value: f32,
+    value: f64,
     index: usize,
 ) -> Result<(), String> {
     if value.is_finite() {
@@ -59,7 +59,7 @@ pub fn ensure_finite_color(context: &str, color: [f32; 4], index: usize) -> Resu
         ("b", color[2]),
         ("a", color[3]),
     ] {
-        ensure_finite_value(context, &format!("color.{channel}"), value, index)?;
+        ensure_finite_value(context, &format!("color.{channel}"), value as f64, index)?;
     }
     Ok(())
 }

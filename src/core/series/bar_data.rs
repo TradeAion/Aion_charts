@@ -11,20 +11,20 @@ use crate::core::series::validation::{
 #[derive(Debug, Clone, Copy)]
 pub struct OhlcPoint {
     pub timestamp: u64,
-    pub open: f32,
-    pub high: f32,
-    pub low: f32,
-    pub close: f32,
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
 }
 
 /// Columnar storage for OHLC bar data.
 #[derive(Debug, Clone, Default)]
 pub struct OhlcDataArray {
     pub timestamps: Vec<u64>,
-    pub open: Vec<f32>,
-    pub high: Vec<f32>,
-    pub low: Vec<f32>,
-    pub close: Vec<f32>,
+    pub open: Vec<f64>,
+    pub high: Vec<f64>,
+    pub low: Vec<f64>,
+    pub close: Vec<f64>,
 }
 
 impl OhlcDataArray {
@@ -77,10 +77,10 @@ impl OhlcDataArray {
     pub fn set_from_arrays(
         &mut self,
         timestamps: &[u64],
-        open: &[f32],
-        high: &[f32],
-        low: &[f32],
-        close: &[f32],
+        open: &[f64],
+        high: &[f64],
+        low: &[f64],
+        close: &[f64],
     ) -> Result<(), String> {
         ensure_equal_len("timestamps", timestamps.len(), "open", open.len())?;
         ensure_equal_len("timestamps", timestamps.len(), "high", high.len())?;
@@ -226,10 +226,10 @@ mod tests {
         let err = arr
             .push(OhlcPoint {
                 timestamp: 1,
-                open: f32::NAN,
-                high: f32::NEG_INFINITY,
-                low: f32::INFINITY,
-                close: f32::NAN,
+                open: f64::NAN,
+                high: f64::NEG_INFINITY,
+                low: f64::INFINITY,
+                close: f64::NAN,
             })
             .unwrap_err();
         assert!(err.contains("must be finite"));

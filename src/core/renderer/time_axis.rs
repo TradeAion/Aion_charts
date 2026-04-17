@@ -127,11 +127,11 @@ impl TimeAxisRenderer {
         self.base_ctx.set_text_align("center");
         self.base_ctx.set_text_baseline("middle");
 
-        let padding_top_css = style.time_axis_padding_top();
+        let inset_top_css = style.time_axis_inset_top();
         let tick_length_css = style.axis_tick_length as f64;
         let fs_css = style.font_size as f64;
         // LWC: yText = borderSize + tickLength + paddingTop + fontSize/2
-        let text_y_css = border_size / dpr + tick_length_css + padding_top_css + fs_css / 2.0;
+        let text_y_css = border_size / dpr + tick_length_css + inset_top_css + fs_css / 2.0;
         let pane_css_w_axis = pane_w / dpr;
 
         for t in ticks {
@@ -209,7 +209,7 @@ impl TimeAxisRenderer {
             .text_cache
             .measure(&self.top_ctx, &bar_lbl, &css_font)
             .round();
-        let h_margin = style.time_axis_padding_horizontal();
+        let h_margin = style.time_axis_inset_horizontal();
         let label_w = text_w + 2.0 * h_margin;
         let label_half = label_w / 2.0;
 
@@ -229,13 +229,13 @@ impl TimeAxisRenderer {
         // LWC: y2 = ceil(y1 + borderSize + tickLength + paddingTop + fontSize + paddingBottom)
         let border_size = style.axis_border_size as f64;
         let tick_length = style.axis_tick_length as f64;
-        let padding_top = style.time_axis_padding_top();
-        let padding_bottom = style.time_axis_padding_bottom();
+        let inset_top = style.time_axis_inset_top();
+        let inset_bottom = style.time_axis_inset_bottom();
         let fs = style.font_size as f64;
 
         // LWC: label starts at y=0 (covers border + tick area with its background).
         let by1_css = style.time_axis_crosshair_label_top_inset();
-        let by2_css = (by1_css + border_size + tick_length + padding_top + fs + padding_bottom)
+        let by2_css = (by1_css + border_size + tick_length + inset_top + fs + inset_bottom)
             .ceil()
             .min(h / dpr);
 
@@ -272,7 +272,7 @@ impl TimeAxisRenderer {
         self.top_ctx.set_text_baseline("middle");
         let text_x_css = lx1 + h_margin;
         // LWC: yText = y1 + borderSize + tickLength + paddingTop + fontSize/2
-        let text_y_css = by1_css + border_size + tick_length + padding_top + fs / 2.0;
+        let text_y_css = by1_css + border_size + tick_length + inset_top + fs / 2.0;
         let m = self
             .text_cache
             .measure_full(&self.top_ctx, "Apr0", &css_font);

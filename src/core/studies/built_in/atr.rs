@@ -73,7 +73,7 @@ impl StudyCalculator for AtrCalculator {
 
                 if let Some(output) = study.get_output_mut(0) {
                     output.data.timestamps[i] = ts;
-                    output.data.values[i] = f32::NAN; // Don't show until we have full period
+                    output.data.values[i] = f64::NAN; // Don't show until we have full period
                 }
                 continue;
             }
@@ -93,7 +93,7 @@ impl StudyCalculator for AtrCalculator {
 
             if let Some(output) = study.get_output_mut(0) {
                 output.data.timestamps[i] = ts;
-                output.data.values[i] = atr as f32;
+                output.data.values[i] = atr;
             }
         }
     }

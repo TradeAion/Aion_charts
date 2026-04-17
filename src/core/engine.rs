@@ -17,7 +17,7 @@ use crate::core::constants::{
 use crate::core::data::{Bar, BarArray};
 use crate::core::drawings::types::DrawingGeometry;
 use crate::core::drawings::DrawingManager;
-use crate::core::events::EventBus;
+use crate::core::events::{ChartEvent, EventBus};
 use crate::core::execution_marks::ExecutionMarkManager;
 use crate::core::footprint::{FootprintBar, FootprintData, FootprintDisplayMode, FootprintOptions};
 use crate::core::indicators::IndicatorManager;
@@ -228,6 +228,27 @@ pub struct ChartEngine {
 impl ChartEngine {
     const HIDDEN_VOLUME_DEFAULT_BOTTOM_MARGIN: f64 = 0.04;
     const DEFAULT_MARGIN_EPSILON: f64 = 1e-9;
+
+    pub fn emit_visible_range_change(&mut self) {
+        let start_bar = self.viewport.start_bar;
+        let end_bar = self.viewport.end_bar;
+        self.event_bus
+            .emit(ChartEvent::VisibleRangeChange { start_bar, end_bar });
+    }
+
+    pub fn emit_visible_range_change_if_changed(
+        &mut self,
+        before_start: f64,
+        before_end: f64,
+    ) -> bool {
+        let start_bar = self.viewport.start_bar;
+        let end_bar = self.viewport.end_bar;
+        if (before_start - start_bar).abs() <= 1e-9 && (before_end - end_bar).abs() <= 1e-9 {
+            return false;
+        }
+        self.emit_visible_range_change();
+        true
+    }
 
     fn series_type_name(series_type: SeriesType) -> &'static str {
         match series_type {
@@ -836,7 +857,7 @@ impl ChartEngine {
         &mut self,
         id: SeriesId,
         timestamps: &[u64],
-        values: &[f32],
+        values: &[f64],
     ) -> Result<(), String> {
         if timestamps.len() != values.len() {
             return Err(format!(
@@ -889,10 +910,10 @@ impl ChartEngine {
         &mut self,
         id: SeriesId,
         timestamps: &[u64],
-        open: &[f32],
-        high: &[f32],
-        low: &[f32],
-        close: &[f32],
+        open: &[f64],
+        high: &[f64],
+        low: &[f64],
+        close: &[f64],
     ) -> Result<(), String> {
         let len = timestamps.len();
         if open.len() != len || high.len() != len || low.len() != len || close.len() != len {
@@ -1184,7 +1205,7 @@ impl ChartEngine {
 
     /// Set footprint tick size (price granularity per row).
     /// Pass 0.0 for auto-detection.
-    pub fn set_footprint_tick_size(&mut self, tick_size: f32) {
+    pub fn set_footprint_tick_size(&mut self, tick_size: f64) {
         self.main_chart_options.footprint.tick_size = tick_size;
     }
 
@@ -1240,14 +1261,14 @@ impl ChartEngine {
         let (start, end) = self
             .time_scale
             .visible_main_bar_range(self.viewport.start_bar, self.viewport.end_bar)?;
-        let mut lo = f32::MAX;
-        let mut hi = f32::MIN;
+        let mut lo = f64::MAX;
+        let mut hi = f64::MIN;
         for i in start..end {
             let bar = self.bars.get_unchecked(i);
             lo = lo.min(bar.low);
             hi = hi.max(bar.high);
         }
-        Some((start, lo as f64, hi as f64))
+        Some((start, lo, hi))
     }
 
     fn visible_overlay_internal_bounds(&self) -> Option<(f64, f64)> {
@@ -1915,7 +1936,6 @@ mod tests {
             low: 0.5,
             close: 1.5,
             volume: 1.0,
-            _pad: 0.0,
         }
     }
 
@@ -2049,7 +2069,6 @@ mod tests {
                 low: 100.0,
                 close: 100.0,
                 volume: 1.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 2_000,
@@ -2058,7 +2077,6 @@ mod tests {
                 low: 110.0,
                 close: 110.0,
                 volume: 1.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 3_000,
@@ -2067,7 +2085,6 @@ mod tests {
                 low: 120.0,
                 close: 120.0,
                 volume: 1.0,
-                _pad: 0.0,
             },
         ];
         engine.set_data(bars).unwrap();
@@ -2083,7 +2100,6 @@ mod tests {
                 low: 119.2,
                 close: 119.3,
                 volume: 1.0,
-                _pad: 0.0,
             })
             .unwrap();
 
@@ -2112,7 +2128,6 @@ mod tests {
                     low: 95.0,
                     close: 100.0,
                     volume: 1.0,
-                    _pad: 0.0,
                 },
                 Bar {
                     timestamp: 2_000,
@@ -2121,7 +2136,6 @@ mod tests {
                     low: 96.0,
                     close: 102.0,
                     volume: 1.0,
-                    _pad: 0.0,
                 },
                 Bar {
                     timestamp: 3_000,
@@ -2130,7 +2144,6 @@ mod tests {
                     low: 97.0,
                     close: 103.0,
                     volume: 1.0,
-                    _pad: 0.0,
                 },
             ])
             .unwrap();
@@ -2328,12 +2341,11 @@ mod tests {
         let err = engine
             .set_data(vec![Bar {
                 timestamp: 1_000,
-                open: f32::NAN,
+                open: f64::NAN,
                 high: 2.0,
                 low: 1.0,
                 close: 1.5,
                 volume: 1.0,
-                _pad: 0.0,
             }])
             .unwrap_err();
         assert!(err.contains("must be finite"));
@@ -2352,7 +2364,7 @@ mod tests {
                 line,
                 vec![LinePoint {
                     timestamp: 1_000,
-                    value: f32::NAN,
+                    value: f64::NAN,
                 }],
             )
             .unwrap_err();
@@ -2378,7 +2390,7 @@ mod tests {
                 vec![OhlcPoint {
                     timestamp: 1_000,
                     open: 1.0,
-                    high: f32::NAN,
+                    high: f64::NAN,
                     low: 0.5,
                     close: 0.75,
                 }],
@@ -2407,7 +2419,6 @@ mod tests {
                 low: 90.0,
                 close: 100.0,
                 volume: 1.0,
-                _pad: 0.0,
             })
             .collect();
 
@@ -2416,7 +2427,7 @@ mod tests {
             let mut levels = Vec::new();
             for j in 0..8usize {
                 levels.push(FootprintLevel {
-                    price: 99.0 + (j as f32) * 0.25,
+                    price: 99.0 + (j as f64) * 0.25,
                     bid_volume: 10.0,
                     ask_volume: 10.0,
                 });
@@ -2455,7 +2466,6 @@ mod tests {
                 low: 90.0,
                 close: 100.0,
                 volume: 1.0,
-                _pad: 0.0,
             })
             .collect();
 
@@ -2463,7 +2473,7 @@ mod tests {
         for i in 0..60usize {
             let levels = (0..8usize)
                 .map(|j| FootprintLevel {
-                    price: 99.0 + (j as f32) * 0.25,
+                    price: 99.0 + (j as f64) * 0.25,
                     bid_volume: 10.0,
                     ask_volume: 12.0,
                 })
@@ -2584,12 +2594,11 @@ mod tests {
         let bars: Vec<Bar> = (0..120)
             .map(|i| Bar {
                 timestamp: 1_000 + i,
-                open: 100.0 + i as f32 * 0.1,
-                high: 101.0 + i as f32 * 0.1,
-                low: 99.0 + i as f32 * 0.1,
-                close: 100.5 + i as f32 * 0.1,
+                open: 100.0 + i as f64 * 0.1,
+                high: 101.0 + i as f64 * 0.1,
+                low: 99.0 + i as f64 * 0.1,
+                close: 100.5 + i as f64 * 0.1,
                 volume: 1.0,
-                _pad: 0.0,
             })
             .collect();
         engine.viewport.price_locked = true;
@@ -2669,12 +2678,11 @@ mod tests {
         let bars: Vec<Bar> = (0..120)
             .map(|i| Bar {
                 timestamp: 2_000 + i,
-                open: 200.0 + i as f32 * 0.1,
-                high: 201.0 + i as f32 * 0.1,
-                low: 199.0 + i as f32 * 0.1,
-                close: 200.5 + i as f32 * 0.1,
+                open: 200.0 + i as f64 * 0.1,
+                high: 201.0 + i as f64 * 0.1,
+                low: 199.0 + i as f64 * 0.1,
+                close: 200.5 + i as f64 * 0.1,
                 volume: 1.0,
-                _pad: 0.0,
             })
             .collect();
         engine.set_data(bars).unwrap();
@@ -2697,12 +2705,11 @@ mod tests {
         let bars: Vec<Bar> = (0..120)
             .map(|i| Bar {
                 timestamp: 3_000 + i,
-                open: 300.0 + i as f32 * 0.1,
-                high: 301.0 + i as f32 * 0.1,
-                low: 299.0 + i as f32 * 0.1,
-                close: 300.5 + i as f32 * 0.1,
+                open: 300.0 + i as f64 * 0.1,
+                high: 301.0 + i as f64 * 0.1,
+                low: 299.0 + i as f64 * 0.1,
+                close: 300.5 + i as f64 * 0.1,
                 volume: 1.0,
-                _pad: 0.0,
             })
             .collect();
         engine.set_data(bars).unwrap();
@@ -2741,12 +2748,11 @@ mod tests {
         let bars: Vec<Bar> = (0..120)
             .map(|i| Bar {
                 timestamp: 4_000 + i,
-                open: 400.0 + i as f32 * 0.1,
-                high: 401.0 + i as f32 * 0.1,
-                low: 399.0 + i as f32 * 0.1,
-                close: 400.5 + i as f32 * 0.1,
+                open: 400.0 + i as f64 * 0.1,
+                high: 401.0 + i as f64 * 0.1,
+                low: 399.0 + i as f64 * 0.1,
+                close: 400.5 + i as f64 * 0.1,
                 volume: 1.0,
-                _pad: 0.0,
             })
             .collect();
         engine.set_data(bars).unwrap();
@@ -2769,12 +2775,11 @@ mod tests {
         let bars: Vec<Bar> = (0..120)
             .map(|i| Bar {
                 timestamp: 5_000 + i,
-                open: 500.0 + i as f32 * 0.1,
-                high: 501.0 + i as f32 * 0.1,
-                low: 499.0 + i as f32 * 0.1,
-                close: 500.5 + i as f32 * 0.1,
+                open: 500.0 + i as f64 * 0.1,
+                high: 501.0 + i as f64 * 0.1,
+                low: 499.0 + i as f64 * 0.1,
+                close: 500.5 + i as f64 * 0.1,
                 volume: 1.0,
-                _pad: 0.0,
             })
             .collect();
         engine.set_data(bars).unwrap();
@@ -2840,7 +2845,6 @@ mod tests {
                 low: 99.0,
                 close: 101.0,
                 volume: 1.0,
-                _pad: 0.0,
             })
             .collect();
         engine.set_data(bars).unwrap();
@@ -2877,7 +2881,6 @@ mod tests {
                 low: 99.0,
                 close: 101.0,
                 volume: 1.0,
-                _pad: 0.0,
             })
             .collect();
         engine.set_data(bars).unwrap();
@@ -2919,14 +2922,13 @@ mod tests {
                 low: 90.0,
                 close: 100.0,
                 volume: 1.0,
-                _pad: 0.0,
             })
             .collect();
         let mut fp = FootprintData::new();
         for i in 0..80usize {
             let levels = (0..8usize)
                 .map(|j| FootprintLevel {
-                    price: 99.0 + (j as f32) * 0.25,
+                    price: 99.0 + (j as f64) * 0.25,
                     bid_volume: 8.0,
                     ask_volume: 11.0,
                 })
@@ -2967,7 +2969,6 @@ mod tests {
                 low: 99.0,
                 close: 99.5,
                 volume: 1.0,
-                _pad: 0.0,
             })
             .collect();
         let mut fp = FootprintData::new();

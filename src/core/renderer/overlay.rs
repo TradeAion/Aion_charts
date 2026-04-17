@@ -656,8 +656,8 @@ impl OverlayRenderer {
         // ── Replicate price-axis label height calculation exactly ──
         // (same math as right_axis_label_height_bmp + y_top in price_axis.rs)
         let fs_phys = style.font_size as f64 * dpr;
-        let padding_tb_phys = style.price_axis_padding_tb() * dpr;
-        let total_h_raw = fs_phys + padding_tb_phys * 2.0;
+        let vertical_inset_phys = style.price_axis_inset_tb() * dpr;
+        let total_h_raw = fs_phys + vertical_inset_phys * 2.0;
         let tick_h_bmp = dpr.floor().max(1.0) as i32;
         let mut single_h_bmp = total_h_raw.round() as i32;
         if single_h_bmp % 2 != tick_h_bmp % 2 {

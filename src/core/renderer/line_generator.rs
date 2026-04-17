@@ -144,6 +144,7 @@ pub fn generate_line_segments(
         let (x1, y1) = points[i];
         let (x2, y2) = points[i + 1];
 
+        // SEAM: f64 logical coordinates are projected above; vertex buffers carry render-space values.
         segments.push(LineSegment {
             x1: (x1 + correction) as f32,
             y1: (y1 + correction) as f32,
@@ -154,7 +155,7 @@ pub fn generate_line_segments(
             g,
             b,
             a,
-            _pad: 0.0,
+            reserved: 0.0,
         });
     }
 
@@ -211,7 +212,7 @@ pub fn generate_area_line_segments(
             g,
             b,
             a,
-            _pad: 0.0,
+            reserved: 0.0,
         });
     }
 
@@ -282,7 +283,7 @@ pub fn generate_baseline_line_segments(
                     g: color[1],
                     b: color[2],
                     a: color[3],
-                    _pad: 0.0,
+                    reserved: 0.0,
                 });
             },
         );
@@ -1486,7 +1487,7 @@ fn generate_indicator_instruction_geometry_internal(
                             g: color[1],
                             b: color[2],
                             a: color[3],
-                            _pad: 0.0,
+                            reserved: 0.0,
                         },
                     );
                 }
@@ -1888,7 +1889,7 @@ fn generate_indicator_instruction_geometry_internal(
                             g: color[1],
                             b: color[2],
                             a: color[3],
-                            _pad: 0.0,
+                            reserved: 0.0,
                         },
                     );
                 }
@@ -1929,7 +1930,7 @@ fn generate_indicator_instruction_geometry_internal(
                         g: color[1],
                         b: color[2],
                         a: color[3],
-                        _pad: 0.0,
+                        reserved: 0.0,
                     },
                 );
             }

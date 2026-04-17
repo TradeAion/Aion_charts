@@ -52,7 +52,7 @@ impl StudyCalculator for RsiCalculator {
             if i + 1 < period {
                 // Not enough data
                 output.data.timestamps[i] = bars.timestamp(i);
-                output.data.values[i] = f32::NAN;
+                output.data.values[i] = f64::NAN;
                 continue;
             }
 
@@ -106,7 +106,7 @@ impl StudyCalculator for RsiCalculator {
             let rsi = 100.0 - (100.0 / (1.0 + rs));
 
             output.data.timestamps[i] = bars.timestamp(i);
-            output.data.values[i] = rsi as f32;
+            output.data.values[i] = rsi;
         }
     }
 }

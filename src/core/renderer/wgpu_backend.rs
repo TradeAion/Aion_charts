@@ -192,11 +192,13 @@ impl WgpuRenderer {
             .queue
             .write_buffer(&self.rect_instance_buf, 0, bytemuck::cast_slice(rects));
 
+        // SEAM: f64 logical -> f32 render-space.
+        // All logical price projection must happen before data reaches these GPU buffers.
         let uniform = RectViewportUniform {
             width: phys_w as f32,
             height: phys_h as f32,
-            _pad0: 0.0,
-            _pad1: 0.0,
+            reserved0: 0.0,
+            reserved1: 0.0,
         };
         self.gpu
             .queue
@@ -238,8 +240,8 @@ impl WgpuRenderer {
         let uniform = RectViewportUniform {
             width: phys_w as f32,
             height: phys_h as f32,
-            _pad0: 0.0,
-            _pad1: 0.0,
+            reserved0: 0.0,
+            reserved1: 0.0,
         };
         self.gpu
             .queue
@@ -364,8 +366,8 @@ impl WgpuRenderer {
         let uniform = RectViewportUniform {
             width: phys_w as f32,
             height: phys_h as f32,
-            _pad0: 0.0,
-            _pad1: 0.0,
+            reserved0: 0.0,
+            reserved1: 0.0,
         };
         self.gpu
             .queue
@@ -450,8 +452,8 @@ impl WgpuRenderer {
         let uniform = RectViewportUniform {
             width: phys_w as f32,
             height: phys_h as f32,
-            _pad0: 0.0,
-            _pad1: 0.0,
+            reserved0: 0.0,
+            reserved1: 0.0,
         };
         self.gpu
             .queue
@@ -1007,7 +1009,7 @@ fn push_line_segment(
         g: color[1],
         b: color[2],
         a: color[3],
-        _pad: 0.0,
+        reserved: 0.0,
     });
 }
 

@@ -322,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn timeframe_period_returns_chartTimeframe() {
+    fn timeframe_period_returns_chart_timeframe() {
         let inputs = json!({ "symbol": "BTCUSD", "chartTimeframe": "1h" });
         let ctx = IntrospectionContext::from_inputs(&inputs, 0, 100, true);
         assert_eq!(
@@ -373,20 +373,20 @@ mod tests {
         assert!(!d && !w && !mo);
 
         // Hours
-        let (m, p, intra, d, w, mo) = parse_timeframe("4h");
+        let (m, p, intra, _d, _w, _mo) = parse_timeframe("4h");
         assert_eq!(m, 4);
         assert_eq!(p, "H");
         assert!(intra);
 
         // Daily
-        let (m, p, intra, d, w, mo) = parse_timeframe("1D");
+        let (m, p, intra, d, _w, _mo) = parse_timeframe("1D");
         assert_eq!(m, 1);
         assert_eq!(p, "D");
         assert!(!intra);
         assert!(d);
 
         // Weekly
-        let (m, p, intra, d, w, mo) = parse_timeframe("W");
+        let (m, p, _intra, _d, w, _mo) = parse_timeframe("W");
         assert_eq!(m, 1);
         assert_eq!(p, "W");
         assert!(w);

@@ -32,19 +32,19 @@ impl StudyCalculator for SmaCalculator {
             if i + 1 < period {
                 // Not enough data for this period
                 output.data.timestamps[i] = bars.timestamp(i);
-                output.data.values[i] = f32::NAN;
+                output.data.values[i] = f64::NAN;
                 continue;
             }
 
             // Calculate average of last 'period' closes
             let mut sum = 0.0;
             for j in (i + 1 - period)..=i {
-                sum += bars.close(j) as f64;
+                sum += bars.close(j);
             }
             let avg = sum / period as f64;
 
             output.data.timestamps[i] = bars.timestamp(i);
-            output.data.values[i] = avg as f32;
+            output.data.values[i] = avg;
         }
     }
 }

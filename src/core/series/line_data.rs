@@ -12,14 +12,14 @@ use crate::core::series::validation::{
 #[derive(Debug, Clone, Copy)]
 pub struct LinePoint {
     pub timestamp: u64,
-    pub value: f32,
+    pub value: f64,
 }
 
 /// Columnar storage for line series data.
 #[derive(Debug, Clone)]
 pub struct LineDataArray {
     pub timestamps: Vec<u64>,
-    pub values: Vec<f32>,
+    pub values: Vec<f64>,
     len: usize,
 }
 
@@ -63,7 +63,7 @@ impl LineDataArray {
     }
 
     /// Set data from parallel arrays (used by WASM layer).
-    pub fn set_from_arrays(&mut self, timestamps: &[u64], values: &[f32]) -> Result<(), String> {
+    pub fn set_from_arrays(&mut self, timestamps: &[u64], values: &[f64]) -> Result<(), String> {
         ensure_equal_len("timestamps", timestamps.len(), "values", values.len())?;
         ensure_strictly_increasing_timestamps("line", timestamps)?;
         let len = timestamps.len();
@@ -143,7 +143,7 @@ impl LineDataArray {
     }
 
     #[inline]
-    fn validate_value(context: &str, value: f32, index: usize) -> Result<(), String> {
+    fn validate_value(context: &str, value: f64, index: usize) -> Result<(), String> {
         ensure_finite_value(&format!("line_data::{context}"), "value", value, index)
     }
 }
@@ -174,7 +174,7 @@ mod tests {
         let err = arr
             .set(vec![LinePoint {
                 timestamp: 1,
-                value: f32::NAN,
+                value: f64::NAN,
             }])
             .unwrap_err();
         assert!(err.contains("must be finite"));
@@ -186,7 +186,7 @@ mod tests {
         let err = arr
             .push(LinePoint {
                 timestamp: 1,
-                value: f32::INFINITY,
+                value: f64::INFINITY,
             })
             .unwrap_err();
         assert!(err.contains("must be finite"));
@@ -204,7 +204,7 @@ mod tests {
         let err = arr
             .update_last(LinePoint {
                 timestamp: 1,
-                value: f32::NEG_INFINITY,
+                value: f64::NEG_INFINITY,
             })
             .unwrap_err();
         assert!(err.contains("must be finite"));

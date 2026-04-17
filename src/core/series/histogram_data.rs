@@ -12,7 +12,7 @@ use crate::core::series::validation::{
 #[derive(Debug, Clone, Copy)]
 pub struct HistogramPoint {
     pub timestamp: u64,
-    pub value: f32,
+    pub value: f64,
     /// Optional per-bar color override [R, G, B, A]. If all zeros, use series default.
     pub color: [f32; 4],
 }
@@ -21,7 +21,7 @@ pub struct HistogramPoint {
 #[derive(Debug, Clone, Default)]
 pub struct HistogramDataArray {
     pub timestamps: Vec<u64>,
-    pub values: Vec<f32>,
+    pub values: Vec<f64>,
     /// Per-bar color overrides. Same length as `values`.
     /// `[0,0,0,0]` means "use series default color".
     pub colors: Vec<[f32; 4]>,
@@ -68,7 +68,7 @@ impl HistogramDataArray {
     }
 
     /// Set data from parallel arrays (no per-bar color — all default).
-    pub fn set_from_arrays(&mut self, timestamps: &[u64], values: &[f32]) -> Result<(), String> {
+    pub fn set_from_arrays(&mut self, timestamps: &[u64], values: &[f64]) -> Result<(), String> {
         ensure_equal_len("timestamps", timestamps.len(), "values", values.len())?;
         ensure_strictly_increasing_timestamps("histogram", timestamps)?;
         let count = timestamps.len();
@@ -87,7 +87,7 @@ impl HistogramDataArray {
     pub fn set_from_arrays_with_colors(
         &mut self,
         timestamps: &[u64],
-        values: &[f32],
+        values: &[f64],
         colors: &[[f32; 4]],
     ) -> Result<(), String> {
         ensure_equal_len("timestamps", timestamps.len(), "values", values.len())?;
@@ -182,7 +182,7 @@ impl HistogramDataArray {
     }
 
     #[inline]
-    fn validate_value(context: &str, value: f32, index: usize) -> Result<(), String> {
+    fn validate_value(context: &str, value: f64, index: usize) -> Result<(), String> {
         ensure_finite_value(&format!("histogram_data::{context}"), "value", value, index)
     }
 
@@ -227,7 +227,7 @@ mod tests {
         let err = arr
             .set_data(vec![HistogramPoint {
                 timestamp: 1,
-                value: f32::NAN,
+                value: f64::NAN,
                 color: [0.0; 4],
             }])
             .unwrap_err();

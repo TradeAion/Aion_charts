@@ -14,8 +14,8 @@ use crate::core::renderer::draw_list::{
 pub struct RectViewportUniform {
     pub width: f32,
     pub height: f32,
-    pub _pad0: f32,
-    pub _pad1: f32,
+    pub reserved0: f32,
+    pub reserved1: f32,
 }
 
 pub struct PipelineManager {
@@ -186,7 +186,7 @@ impl PipelineManager {
                         6 => Float32,   // g
                         7 => Float32,   // b
                         8 => Float32,   // a
-                        9 => Float32,   // _pad
+                        9 => Float32,   // reserved
                     ],
                 }],
                 compilation_options: Default::default(),
@@ -246,8 +246,8 @@ impl PipelineManager {
                         11 => Float32,  // bottom_b
                         12 => Float32,  // bottom_a
                         13 => Float32,  // gradient_top
-                        14 => Float32,  // _pad1
-                        15 => Float32,  // _pad2
+                        14 => Float32,  // reserved1
+                        15 => Float32,  // reserved2
                     ],
                 }],
                 compilation_options: Default::default(),

@@ -321,7 +321,6 @@ mod tests {
                 low: 9.0,
                 close: 11.0,
                 volume: 100.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 2000,
@@ -330,7 +329,6 @@ mod tests {
                 low: 10.0,
                 close: 12.0,
                 volume: 110.0,
-                _pad: 0.0,
             },
             Bar {
                 timestamp: 3000,
@@ -339,7 +337,6 @@ mod tests {
                 low: 11.0,
                 close: 13.0,
                 volume: 120.0,
-                _pad: 0.0,
             },
         ])
         .unwrap();

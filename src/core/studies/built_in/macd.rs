@@ -73,7 +73,7 @@ impl StudyCalculator for MacdCalculator {
         for i in start_index..=end_index {
             let macd_value = fast_ema[i] - slow_ema[i];
             study.outputs[0].data.timestamps[i] = bars.timestamp(i);
-            study.outputs[0].data.values[i] = macd_value as f32;
+            study.outputs[0].data.values[i] = macd_value;
         }
 
         // Calculate signal line (EMA of MACD)
@@ -89,7 +89,7 @@ impl StudyCalculator for MacdCalculator {
             let signal_value = (current_macd - prev_signal) * signal_multiplier + prev_signal;
 
             study.outputs[1].data.timestamps[i] = bars.timestamp(i);
-            study.outputs[1].data.values[i] = signal_value as f32;
+            study.outputs[1].data.values[i] = signal_value;
         }
 
         // Calculate histogram (MACD - Signal)

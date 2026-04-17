@@ -125,29 +125,29 @@ pub enum DiagonalImbalanceType {
 #[derive(Debug, Clone, Copy)]
 pub struct FootprintLevel {
     /// Price at this level (lower bound of tick range).
-    pub price: f32,
+    pub price: f64,
     /// Volume traded on the bid side (sellers hitting bids).
-    pub bid_volume: f32,
+    pub bid_volume: f64,
     /// Volume traded on the ask side (buyers lifting asks).
-    pub ask_volume: f32,
+    pub ask_volume: f64,
 }
 
 impl FootprintLevel {
     /// Total volume at this level.
     #[inline]
-    pub fn total_volume(&self) -> f32 {
+    pub fn total_volume(&self) -> f64 {
         self.bid_volume + self.ask_volume
     }
 
     /// Delta at this level (positive = buying pressure).
     #[inline]
-    pub fn delta(&self) -> f32 {
+    pub fn delta(&self) -> f64 {
         self.ask_volume - self.bid_volume
     }
 
     /// Check for imbalance at this level given a ratio threshold.
     /// Typical threshold: 3.0 (300%).
-    pub fn imbalance(&self, ratio: f32) -> ImbalanceType {
+    pub fn imbalance(&self, ratio: f64) -> ImbalanceType {
         if self.bid_volume <= 0.0 && self.ask_volume <= 0.0 {
             return ImbalanceType::None;
         }
@@ -189,22 +189,22 @@ impl FootprintBar {
     }
 
     /// Total volume across all levels.
-    pub fn total_volume(&self) -> f32 {
+    pub fn total_volume(&self) -> f64 {
         self.levels.iter().map(|l| l.total_volume()).sum()
     }
 
     /// Total bid volume.
-    pub fn total_bid(&self) -> f32 {
+    pub fn total_bid(&self) -> f64 {
         self.levels.iter().map(|l| l.bid_volume).sum()
     }
 
     /// Total ask volume.
-    pub fn total_ask(&self) -> f32 {
+    pub fn total_ask(&self) -> f64 {
         self.levels.iter().map(|l| l.ask_volume).sum()
     }
 
     /// Net delta (total ask - total bid). Positive = net buying.
-    pub fn net_delta(&self) -> f32 {
+    pub fn net_delta(&self) -> f64 {
         self.total_ask() - self.total_bid()
     }
 
@@ -212,16 +212,16 @@ impl FootprintBar {
     ///
     /// Uses the median positive level-to-level diff to avoid overreacting to
     /// occasional outlier spacing or floating-point noise.
-    pub fn inferred_tick_size(&self) -> f32 {
+    pub fn inferred_tick_size(&self) -> f64 {
         if self.levels.len() < 2 {
             return 1.0;
         }
-        let mut diffs: Vec<f32> = self
+        let mut diffs: Vec<f64> = self
             .levels
             .windows(2)
             .filter_map(|w| {
                 let d = (w[1].price - w[0].price).abs();
-                if d.is_finite() && d > f32::EPSILON {
+                if d.is_finite() && d > f64::EPSILON {
                     Some(d)
                 } else {
                     None
@@ -246,7 +246,7 @@ impl FootprintBar {
         if self.levels.is_empty() {
             return None;
         }
-        let mut max_vol = 0.0f32;
+        let mut max_vol = 0.0f64;
         let mut max_idx = 0;
         for (i, level) in self.levels.iter().enumerate() {
             let vol = level.total_volume();
@@ -263,7 +263,7 @@ impl FootprintBar {
     ///
     /// Returns (va_low_idx, va_high_idx) inclusive indices into `self.levels`.
     /// Standard value: 0.70 (70%).
-    pub fn value_area(&self, pct: f32) -> Option<(usize, usize)> {
+    pub fn value_area(&self, pct: f64) -> Option<(usize, usize)> {
         if self.levels.is_empty() {
             return None;
         }
@@ -317,7 +317,7 @@ impl FootprintBar {
     /// `min_stack` or more consecutive imbalances.
     pub fn stacked_imbalances(
         &self,
-        ratio: f32,
+        ratio: f64,
         min_stack: usize,
     ) -> Vec<(usize, usize, ImbalanceType)> {
         if self.levels.len() < min_stack {
@@ -352,7 +352,7 @@ impl FootprintBar {
 
     /// Detect diagonal imbalances between adjacent levels.
     /// Compares ask at level N with bid at level N+1 (and vice versa).
-    pub fn diagonal_imbalances(&self, ratio: f32) -> Vec<(usize, DiagonalImbalanceType)> {
+    pub fn diagonal_imbalances(&self, ratio: f64) -> Vec<(usize, DiagonalImbalanceType)> {
         let mut result = Vec::new();
         if self.levels.len() < 2 {
             return result;
@@ -393,27 +393,27 @@ impl FootprintBar {
     }
 
     /// Maximum volume at any single level (for scaling).
-    pub fn max_level_volume(&self) -> f32 {
+    pub fn max_level_volume(&self) -> f64 {
         self.levels
             .iter()
             .map(|l| l.total_volume())
-            .fold(0.0f32, f32::max)
+            .fold(0.0f64, f64::max)
     }
 
     /// Maximum delta absolute value at any level (for scaling).
-    pub fn max_level_delta_abs(&self) -> f32 {
+    pub fn max_level_delta_abs(&self) -> f64 {
         self.levels
             .iter()
             .map(|l| l.delta().abs())
-            .fold(0.0f32, f32::max)
+            .fold(0.0f64, f64::max)
     }
 
     /// Maximum bid or ask volume at any level (for BidAsk mode scaling).
-    pub fn max_side_volume(&self) -> f32 {
+    pub fn max_side_volume(&self) -> f64 {
         self.levels
             .iter()
             .map(|l| l.bid_volume.max(l.ask_volume))
-            .fold(0.0f32, f32::max)
+            .fold(0.0f64, f64::max)
     }
 
     /// Merge every `factor` adjacent levels into one, summing volumes.
@@ -432,8 +432,8 @@ impl FootprintBar {
         let mut out = Vec::with_capacity(self.levels.len() / factor + 1);
         for chunk in self.levels.chunks(factor) {
             let price = chunk[0].price; // lowest price in group (levels sorted asc)
-            let bid: f32 = chunk.iter().map(|l| l.bid_volume).sum();
-            let ask: f32 = chunk.iter().map(|l| l.ask_volume).sum();
+            let bid: f64 = chunk.iter().map(|l| l.bid_volume).sum();
+            let ask: f64 = chunk.iter().map(|l| l.ask_volume).sum();
             out.push(FootprintLevel {
                 price,
                 bid_volume: bid,
@@ -614,12 +614,12 @@ pub struct FootprintOptions {
     /// Tick size — price granularity per row.
     /// E.g., 0.5 means each row covers a $0.50 range.
     /// If 0.0 or negative, auto-calculated from data.
-    pub tick_size: f32,
+    pub tick_size: f64,
 
     // ── Imbalance settings ──
     /// Imbalance ratio threshold (e.g., 3.0 = 300%).
     /// A level is flagged as imbalanced when one side exceeds the other by this ratio.
-    pub imbalance_ratio: f32,
+    pub imbalance_ratio: f64,
     /// Whether to highlight imbalances.
     pub show_imbalances: bool,
     /// Minimum consecutive levels for stacked imbalance detection.
@@ -639,7 +639,7 @@ pub struct FootprintOptions {
     /// Whether to show the Value Area.
     pub show_value_area: bool,
     /// Value Area percentage (0.0-1.0, default 0.70).
-    pub value_area_pct: f32,
+    pub value_area_pct: f64,
     /// Value Area fill color [R, G, B, A].
     pub value_area_color: [f32; 4],
 
@@ -684,8 +684,8 @@ pub struct FootprintOptions {
     // ── Layout ──
     /// Minimum cell height in CSS pixels (default 1).
     pub min_cell_height: f32,
-    /// Cell padding in CSS pixels.
-    pub cell_padding: f32,
+    /// Cell inset in CSS pixels.
+    pub cell_inset: f32,
     /// Font size for volume text in CSS pixels.
     pub font_size: f32,
     /// Whether to show the volume text within cells.
@@ -838,7 +838,7 @@ impl Default for FootprintOptions {
 
             // Layout
             min_cell_height: 1.0,
-            cell_padding: 1.0,
+            cell_inset: 1.0,
             font_size: 10.0,
             show_volume_text: true,
             show_cumulative_delta: false,
@@ -1201,8 +1201,8 @@ mod tests {
         // All levels merge into one
         assert_eq!(agg.len(), 1);
         assert_eq!(agg[0].price, 100.0);
-        let total_bid: f32 = bar.levels.iter().map(|l| l.bid_volume).sum();
-        let total_ask: f32 = bar.levels.iter().map(|l| l.ask_volume).sum();
+        let total_bid: f64 = bar.levels.iter().map(|l| l.bid_volume).sum();
+        let total_ask: f64 = bar.levels.iter().map(|l| l.ask_volume).sum();
         assert_eq!(agg[0].bid_volume, total_bid);
         assert_eq!(agg[0].ask_volume, total_ask);
     }

@@ -267,15 +267,15 @@ impl Viewport {
             return;
         };
 
-        let mut lo = f32::MAX;
-        let mut hi = f32::MIN;
+        let mut lo = f64::MAX;
+        let mut hi = f64::MIN;
         for i in start..end {
             // SAFETY: i is bounded by start..end which are clamped to bars.len()
             let bar = bars.get_unchecked(i);
             lo = lo.min(bar.low);
             hi = hi.max(bar.high);
         }
-        let _ = self.fit_raw_price_bounds(lo as f64, hi as f64, bars.close(start) as f64);
+        let _ = self.fit_raw_price_bounds(lo, hi, bars.close(start));
     }
 
     // --- Coordinate conversion helpers ---

@@ -16,6 +16,41 @@
 //!   - chart_inner: Internal state (ChartInner) and helper methods
 //!   - canvas_manager: DOM layout and canvas management (WidgetLayout)
 //!   - subpane: Indicator subpane management
+#![allow(
+    clippy::borrowed_box,
+    clippy::bind_instead_of_map,
+    clippy::cloned_ref_to_slice_refs,
+    clippy::collapsible_else_if,
+    clippy::collapsible_match,
+    clippy::derivable_impls,
+    clippy::doc_lazy_continuation,
+    clippy::doc_overindented_list_items,
+    clippy::filter_next,
+    clippy::field_reassign_with_default,
+    clippy::if_same_then_else,
+    clippy::len_without_is_empty,
+    clippy::len_zero,
+    clippy::manual_clamp,
+    clippy::manual_contains,
+    clippy::manual_div_ceil,
+    clippy::manual_range_contains,
+    clippy::manual_strip,
+    clippy::map_entry,
+    clippy::match_single_binding,
+    clippy::needless_bool_assign,
+    clippy::needless_lifetimes,
+    clippy::needless_range_loop,
+    clippy::new_without_default,
+    clippy::question_mark,
+    clippy::redundant_pattern_matching,
+    clippy::should_implement_trait,
+    clippy::single_match,
+    clippy::too_many_arguments,
+    clippy::unnecessary_cast,
+    clippy::unnecessary_map_or,
+    clippy::unwrap_or_default,
+    clippy::wrong_self_convention
+)]
 
 use axiuscharts::{
     generate_footprint_sample_data, generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions,
@@ -94,11 +129,7 @@ fn parse_main_viewport_preset(mode: Option<&str>) -> MainViewportPreset {
 }
 
 fn emit_visible_range_change(engine: &mut ChartEngine) {
-    let start_bar = engine.viewport.start_bar;
-    let end_bar = engine.viewport.end_bar;
-    engine
-        .event_bus
-        .emit(axiuscharts::ChartEvent::VisibleRangeChange { start_bar, end_bar });
+    engine.emit_visible_range_change();
 }
 
 fn reset_main_viewport_and_emit(engine: &mut ChartEngine, mode: Option<&str>) {
@@ -981,19 +1012,29 @@ fn ensure_equal_len(name_a: &str, len_a: usize, name_b: &str, len_b: usize) -> R
     }
 }
 
-fn ensure_finite_slice(name: &str, values: &[f32]) -> Result<(), JsValue> {
-    if let Some((idx, value)) = values.iter().enumerate().find(|(_, v)| !v.is_finite()) {
-        return Err(js_err(format!(
-            "{} contains non-finite value at index {}: {}",
-            name, idx, value
-        )));
+fn ensure_finite_slice<T>(name: &str, values: &[T]) -> Result<(), JsValue>
+where
+    T: Copy + Into<f64> + std::fmt::Display,
+{
+    for (idx, value) in values.iter().copied().enumerate() {
+        if !Into::<f64>::into(value).is_finite() {
+            return Err(js_err(format!(
+                "{} contains non-finite value at index {}: {}",
+                name, idx, value
+            )));
+        }
     }
     Ok(())
 }
 
-fn ensure_finite_fields(ctx: &str, fields: &[(&str, f32)]) -> Result<(), JsValue> {
-    if let Some((name, _)) = fields.iter().find(|(_, v)| !v.is_finite()) {
-        return Err(js_err(format!("{}: {} must be finite", ctx, name)));
+fn ensure_finite_fields<T>(ctx: &str, fields: &[(&str, T)]) -> Result<(), JsValue>
+where
+    T: Copy + Into<f64>,
+{
+    for (name, value) in fields.iter().copied() {
+        if !Into::<f64>::into(value).is_finite() {
+            return Err(js_err(format!("{}: {} must be finite", ctx, name)));
+        }
     }
     Ok(())
 }
@@ -1015,11 +1056,11 @@ fn ensure_strictly_increasing_timestamps(ctx: &str, timestamps: &[u64]) -> Resul
 
 fn build_main_bars_from_arrays(
     ctx: &str,
-    open: &[f32],
-    high: &[f32],
-    low: &[f32],
-    close: &[f32],
-    volume: &[f32],
+    open: &[f64],
+    high: &[f64],
+    low: &[f64],
+    close: &[f64],
+    volume: &[f64],
     timestamps: &[u64],
 ) -> Result<Vec<Bar>, JsValue> {
     let count = open.len();
@@ -1036,15 +1077,7 @@ fn build_main_bars_from_arrays(
     ensure_strictly_increasing_timestamps(ctx, timestamps)?;
 
     Ok((0..count)
-        .map(|i| Bar {
-            timestamp: timestamps[i],
-            open: open[i],
-            high: high[i],
-            low: low[i],
-            close: close[i],
-            volume: volume[i],
-            _pad: 0.0,
-        })
+        .map(|i| Bar::new(timestamps[i], open[i], high[i], low[i], close[i], volume[i]))
         .collect())
 }
 
@@ -1074,9 +1107,9 @@ fn ensure_ohlcv_sanity_for_footprint(ctx: &str, bars: &[Bar]) -> Result<(), JsVa
 
 fn build_footprint_levels(
     ctx: &str,
-    prices: &[f32],
-    bid_volumes: &[f32],
-    ask_volumes: &[f32],
+    prices: &[f64],
+    bid_volumes: &[f64],
+    ask_volumes: &[f64],
 ) -> Result<Vec<axiuscharts::FootprintLevel>, JsValue> {
     let len = prices.len();
     ensure_equal_len("prices", len, "bid_volumes", bid_volumes.len())?;
@@ -1158,9 +1191,9 @@ fn build_footprint_data_from_aligned_arrays(
     ctx: &str,
     bars: &[Bar],
     level_offsets: &[u32],
-    prices: &[f32],
-    bid_volumes: &[f32],
-    ask_volumes: &[f32],
+    prices: &[f64],
+    bid_volumes: &[f64],
+    ask_volumes: &[f64],
 ) -> Result<axiuscharts::FootprintData, JsValue> {
     ensure_equal_len("prices", prices.len(), "bid_volumes", bid_volumes.len())?;
     ensure_equal_len("prices", prices.len(), "ask_volumes", ask_volumes.len())?;
@@ -1221,16 +1254,16 @@ fn build_footprint_data_from_aligned_arrays(
 
 fn build_historical_footprint_dataset_from_arrays(
     ctx: &str,
-    open: &[f32],
-    high: &[f32],
-    low: &[f32],
-    close: &[f32],
-    volume: &[f32],
+    open: &[f64],
+    high: &[f64],
+    low: &[f64],
+    close: &[f64],
+    volume: &[f64],
     timestamps: &[u64],
     level_offsets: &[u32],
-    prices: &[f32],
-    bid_volumes: &[f32],
-    ask_volumes: &[f32],
+    prices: &[f64],
+    bid_volumes: &[f64],
+    ask_volumes: &[f64],
 ) -> Result<(Vec<Bar>, axiuscharts::FootprintData), JsValue> {
     let bars = build_main_bars_from_arrays(ctx, open, high, low, close, volume, timestamps)?;
     ensure_ohlcv_sanity_for_footprint(ctx, &bars)?;
@@ -1307,31 +1340,31 @@ fn parse_historical_footprint_json_dataset(
                 "set_data_with_footprint_json: bar {} missing open",
                 bar_index
             ))
-        })? as f32;
+        })?;
         let high = item.get("high").and_then(|v| v.as_f64()).ok_or_else(|| {
             js_err(format!(
                 "set_data_with_footprint_json: bar {} missing high",
                 bar_index
             ))
-        })? as f32;
+        })?;
         let low = item.get("low").and_then(|v| v.as_f64()).ok_or_else(|| {
             js_err(format!(
                 "set_data_with_footprint_json: bar {} missing low",
                 bar_index
             ))
-        })? as f32;
+        })?;
         let close = item.get("close").and_then(|v| v.as_f64()).ok_or_else(|| {
             js_err(format!(
                 "set_data_with_footprint_json: bar {} missing close",
                 bar_index
             ))
-        })? as f32;
+        })?;
         let volume = item.get("volume").and_then(|v| v.as_f64()).ok_or_else(|| {
             js_err(format!(
                 "set_data_with_footprint_json: bar {} missing volume",
                 bar_index
             ))
-        })? as f32;
+        })?;
 
         ensure_finite_fields(
             "set_data_with_footprint_json",
@@ -1344,15 +1377,7 @@ fn parse_historical_footprint_json_dataset(
             ],
         )?;
 
-        let bar = Bar {
-            timestamp,
-            open,
-            high,
-            low,
-            close,
-            volume,
-            _pad: 0.0,
-        };
+        let bar = Bar::new(timestamp, open, high, low, close, volume);
         bars.push(bar);
 
         let levels_arr = item
@@ -1373,7 +1398,7 @@ fn parse_historical_footprint_json_dataset(
                     "set_data_with_footprint_json: bar {} level {} missing price",
                     bar_index, level_index
                 ))
-            })? as f32;
+            })?;
             let bid = level
                 .get("bid")
                 .or_else(|| level.get("bid_volume"))
@@ -1384,7 +1409,7 @@ fn parse_historical_footprint_json_dataset(
                         "set_data_with_footprint_json: bar {} level {} missing bid volume",
                         bar_index, level_index
                     ))
-                })? as f32;
+                })?;
             let ask = level
                 .get("ask")
                 .or_else(|| level.get("ask_volume"))
@@ -1395,7 +1420,7 @@ fn parse_historical_footprint_json_dataset(
                         "set_data_with_footprint_json: bar {} level {} missing ask volume",
                         bar_index, level_index
                     ))
-                })? as f32;
+                })?;
             prices.push(price);
             bids.push(bid);
             asks.push(ask);
@@ -3671,11 +3696,11 @@ impl AxiusCharts {
 
     pub fn set_data_arrays(
         &mut self,
-        open: &[f32],
-        high: &[f32],
-        low: &[f32],
-        close: &[f32],
-        volume: &[f32],
+        open: &[f64],
+        high: &[f64],
+        low: &[f64],
+        close: &[f64],
+        volume: &[f64],
         timestamps: &[u64],
     ) -> Result<(), JsValue> {
         let bars = build_main_bars_from_arrays(
@@ -3710,16 +3735,16 @@ impl AxiusCharts {
     /// length `bars.len() + 1`; sparse bars use empty ranges.
     pub fn set_data_with_footprint_arrays(
         &mut self,
-        open: &[f32],
-        high: &[f32],
-        low: &[f32],
-        close: &[f32],
-        volume: &[f32],
+        open: &[f64],
+        high: &[f64],
+        low: &[f64],
+        close: &[f64],
+        volume: &[f64],
         timestamps: &[u64],
         level_offsets: &[u32],
-        prices: &[f32],
-        bid_volumes: &[f32],
-        ask_volumes: &[f32],
+        prices: &[f64],
+        bid_volumes: &[f64],
+        ask_volumes: &[f64],
     ) -> Result<(), JsValue> {
         let (bars, footprint) = build_historical_footprint_dataset_from_arrays(
             "set_data_with_footprint_arrays",
@@ -3792,9 +3817,9 @@ impl AxiusCharts {
     pub fn set_footprint_bar(
         &mut self,
         bar_index: usize,
-        prices: &[f32],
-        bid_volumes: &[f32],
-        ask_volumes: &[f32],
+        prices: &[f64],
+        bid_volumes: &[f64],
+        ask_volumes: &[f64],
     ) -> Result<(), JsValue> {
         let levels = build_footprint_levels("set_footprint_bar", prices, bid_volumes, ask_volumes)?;
 
@@ -3830,9 +3855,9 @@ impl AxiusCharts {
         &mut self,
         bar_indices: &[u32],
         level_offsets: &[u32],
-        prices: &[f32],
-        bid_volumes: &[f32],
-        ask_volumes: &[f32],
+        prices: &[f64],
+        bid_volumes: &[f64],
+        ask_volumes: &[f64],
     ) -> Result<(), JsValue> {
         ensure_equal_len("prices", prices.len(), "bid_volumes", bid_volumes.len())?;
         ensure_equal_len("prices", prices.len(), "ask_volumes", ask_volumes.len())?;
@@ -3943,22 +3968,19 @@ impl AxiusCharts {
                 let price = level
                     .get("price")
                     .and_then(|v| v.as_f64())
-                    .ok_or_else(|| js_err("set_footprint_data_json: level missing price"))?
-                    as f32;
+                    .ok_or_else(|| js_err("set_footprint_data_json: level missing price"))?;
                 let bid = level
                     .get("bid")
                     .or_else(|| level.get("bid_volume"))
                     .or_else(|| level.get("bidVolume"))
                     .and_then(|v| v.as_f64())
-                    .ok_or_else(|| js_err("set_footprint_data_json: level missing bid volume"))?
-                    as f32;
+                    .ok_or_else(|| js_err("set_footprint_data_json: level missing bid volume"))?;
                 let ask = level
                     .get("ask")
                     .or_else(|| level.get("ask_volume"))
                     .or_else(|| level.get("askVolume"))
                     .and_then(|v| v.as_f64())
-                    .ok_or_else(|| js_err("set_footprint_data_json: level missing ask volume"))?
-                    as f32;
+                    .ok_or_else(|| js_err("set_footprint_data_json: level missing ask volume"))?;
                 prices.push(price);
                 bids.push(bid);
                 asks.push(ask);
@@ -3989,7 +4011,7 @@ impl AxiusCharts {
     }
 
     /// Set footprint tick size (price granularity). Pass 0.0 for auto-detection.
-    pub fn set_footprint_tick_size(&mut self, tick_size: f32) {
+    pub fn set_footprint_tick_size(&mut self, tick_size: f64) {
         self.inner
             .borrow_mut()
             .engine
@@ -4040,7 +4062,7 @@ impl AxiusCharts {
             opts.display_mode = axiuscharts::FootprintDisplayMode::from_str(s);
         }
         if let Some(n) = v["tick_size"].as_f64() {
-            opts.tick_size = n as f32;
+            opts.tick_size = n;
         }
         if let Some(s) = v["palette"].as_str() {
             opts.palette = axiuscharts::FootprintPalette::from_str(s);
@@ -4060,7 +4082,7 @@ impl AxiusCharts {
             refresh_semantic_theme = true;
         }
         if let Some(n) = v["imbalance_ratio"].as_f64() {
-            opts.imbalance_ratio = n as f32;
+            opts.imbalance_ratio = n;
         }
         if let Some(b) = v["show_imbalances"].as_bool() {
             opts.show_imbalances = b;
@@ -4078,7 +4100,7 @@ impl AxiusCharts {
             opts.show_value_area = b;
         }
         if let Some(n) = v["value_area_pct"].as_f64() {
-            opts.value_area_pct = n as f32;
+            opts.value_area_pct = n;
         }
         if let Some(b) = v["show_delta_bar"].as_bool() {
             opts.show_delta_bar = b;
@@ -6082,7 +6104,7 @@ impl AxiusCharts {
     pub fn set_histogram_data(
         &mut self,
         id: u32,
-        values: &[f32],
+        values: &[f64],
         timestamps: &[u64],
         colors_r: &[f32],
         colors_g: &[f32],
@@ -6172,10 +6194,10 @@ impl AxiusCharts {
         &mut self,
         id: u32,
         timestamps: &[u64],
-        open: &[f32],
-        high: &[f32],
-        low: &[f32],
-        close: &[f32],
+        open: &[f64],
+        high: &[f64],
+        low: &[f64],
+        close: &[f64],
     ) -> Result<(), JsValue> {
         ensure_equal_len("timestamps", timestamps.len(), "open", open.len())?;
         ensure_equal_len("timestamps", timestamps.len(), "high", high.len())?;
@@ -6261,7 +6283,7 @@ impl AxiusCharts {
     pub fn set_series_data(
         &mut self,
         id: u32,
-        values: &[f32],
+        values: &[f64],
         timestamps: &[u64],
     ) -> Result<(), JsValue> {
         ensure_equal_len("values", values.len(), "timestamps", timestamps.len())?;
@@ -6349,7 +6371,7 @@ impl AxiusCharts {
         log::info!("set_study_parameter: id={}, {}={}", id, key, value);
     }
 
-    /// Get study output data as a JS object { timestamps: BigUint64Array, values: Float32Array }.
+    /// Get study output data as a JS object { timestamps: BigUint64Array, values: Float64Array }.
     /// Returns null if the study or output index doesn't exist.
     pub fn get_study_output(&self, id: u32, output_index: u32) -> JsValue {
         let s = self.inner.borrow();
@@ -6359,7 +6381,7 @@ impl AxiusCharts {
                 let ts_arr =
                     js_sys::BigUint64Array::new_with_length(output.data.timestamps.len() as u32);
                 let val_arr =
-                    js_sys::Float32Array::new_with_length(output.data.values.len() as u32);
+                    js_sys::Float64Array::new_with_length(output.data.values.len() as u32);
                 // Copy data
                 for i in 0..output.data.timestamps.len() {
                     ts_arr.set_index(i as u32, output.data.timestamps[i]);
@@ -8236,11 +8258,11 @@ impl AxiusCharts {
     pub fn append_bar(
         &self,
         timestamp: u64,
-        open: f32,
-        high: f32,
-        low: f32,
-        close: f32,
-        volume: f32,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
+        volume: f64,
     ) -> Result<(), JsValue> {
         ensure_finite_fields(
             "append_bar",
@@ -8252,15 +8274,7 @@ impl AxiusCharts {
                 ("volume", volume),
             ],
         )?;
-        let bar = Bar {
-            timestamp,
-            open,
-            high,
-            low,
-            close,
-            volume,
-            _pad: 0.0,
-        };
+        let bar = Bar::new(timestamp, open, high, low, close, volume);
         let mut inner = self
             .inner
             .try_borrow_mut()
@@ -8276,11 +8290,11 @@ impl AxiusCharts {
     pub fn update_last_bar(
         &self,
         timestamp: u64,
-        open: f32,
-        high: f32,
-        low: f32,
-        close: f32,
-        volume: f32,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
+        volume: f64,
     ) -> Result<(), JsValue> {
         ensure_finite_fields(
             "update_last_bar",
@@ -8292,15 +8306,7 @@ impl AxiusCharts {
                 ("volume", volume),
             ],
         )?;
-        let bar = Bar {
-            timestamp,
-            open,
-            high,
-            low,
-            close,
-            volume,
-            _pad: 0.0,
-        };
+        let bar = Bar::new(timestamp, open, high, low, close, volume);
         let mut inner = self
             .inner
             .try_borrow_mut()
@@ -8317,11 +8323,11 @@ impl AxiusCharts {
     pub fn upsert_bar(
         &self,
         timestamp: u64,
-        open: f32,
-        high: f32,
-        low: f32,
-        close: f32,
-        volume: f32,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
+        volume: f64,
     ) -> Result<(), JsValue> {
         ensure_finite_fields(
             "upsert_bar",
@@ -8337,15 +8343,7 @@ impl AxiusCharts {
             .inner
             .try_borrow_mut()
             .map_err(|_| js_err("upsert_bar: runtime busy"))?;
-        let bar = Bar {
-            timestamp,
-            open,
-            high,
-            low,
-            close,
-            volume,
-            _pad: 0.0,
-        };
+        let bar = Bar::new(timestamp, open, high, low, close, volume);
         if inner.replay_active {
             inner.replay_buffer_upsert_bar(bar).map_err(js_err)
         } else {
@@ -8360,14 +8358,14 @@ impl AxiusCharts {
     pub fn upsert_bar_with_footprint(
         &self,
         timestamp: u64,
-        open: f32,
-        high: f32,
-        low: f32,
-        close: f32,
-        volume: f32,
-        prices: &[f32],
-        bid_volumes: &[f32],
-        ask_volumes: &[f32],
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
+        volume: f64,
+        prices: &[f64],
+        bid_volumes: &[f64],
+        ask_volumes: &[f64],
     ) -> Result<(), JsValue> {
         ensure_finite_fields(
             "upsert_bar_with_footprint",
@@ -8386,15 +8384,7 @@ impl AxiusCharts {
             ask_volumes,
         )?;
 
-        let bar = Bar {
-            timestamp,
-            open,
-            high,
-            low,
-            close,
-            volume,
-            _pad: 0.0,
-        };
+        let bar = Bar::new(timestamp, open, high, low, close, volume);
         let mut inner = self
             .inner
             .try_borrow_mut()
@@ -8414,7 +8404,7 @@ impl AxiusCharts {
     }
 
     /// Append a single point to a line/area/baseline overlay series.
-    pub fn append_series_point(&self, id: u32, timestamp: u64, value: f32) -> Result<(), JsValue> {
+    pub fn append_series_point(&self, id: u32, timestamp: u64, value: f64) -> Result<(), JsValue> {
         if !value.is_finite() {
             return Err(js_err("append_series_point: value must be finite"));
         }
@@ -8433,7 +8423,7 @@ impl AxiusCharts {
         &self,
         id: u32,
         timestamp: u64,
-        value: f32,
+        value: f64,
     ) -> Result<(), JsValue> {
         if !value.is_finite() {
             return Err(js_err("update_last_series_point: value must be finite"));
@@ -8450,7 +8440,7 @@ impl AxiusCharts {
 
     /// LWC-style update semantics for line/area/baseline overlays:
     /// update last point if timestamp matches, append if timestamp is newer.
-    pub fn upsert_series_point(&self, id: u32, timestamp: u64, value: f32) -> Result<(), JsValue> {
+    pub fn upsert_series_point(&self, id: u32, timestamp: u64, value: f64) -> Result<(), JsValue> {
         if !value.is_finite() {
             return Err(js_err("upsert_series_point: value must be finite"));
         }
@@ -8469,21 +8459,16 @@ impl AxiusCharts {
         &self,
         id: u32,
         timestamp: u64,
-        value: f32,
+        value: f64,
         color_r: f32,
         color_g: f32,
         color_b: f32,
         color_a: f32,
     ) -> Result<(), JsValue> {
-        ensure_finite_fields(
-            "append_histogram_point",
-            &[
-                ("value", value),
-                ("color_r", color_r),
-                ("color_g", color_g),
-                ("color_b", color_b),
-                ("color_a", color_a),
-            ],
+        ensure_finite_fields("append_histogram_point", &[("value", value)])?;
+        ensure_finite_slice(
+            "append_histogram_point colors",
+            &[color_r, color_g, color_b, color_a],
         )?;
         let mut inner = self
             .inner
@@ -8507,21 +8492,16 @@ impl AxiusCharts {
         &self,
         id: u32,
         timestamp: u64,
-        value: f32,
+        value: f64,
         color_r: f32,
         color_g: f32,
         color_b: f32,
         color_a: f32,
     ) -> Result<(), JsValue> {
-        ensure_finite_fields(
-            "update_last_histogram_point",
-            &[
-                ("value", value),
-                ("color_r", color_r),
-                ("color_g", color_g),
-                ("color_b", color_b),
-                ("color_a", color_a),
-            ],
+        ensure_finite_fields("update_last_histogram_point", &[("value", value)])?;
+        ensure_finite_slice(
+            "update_last_histogram_point colors",
+            &[color_r, color_g, color_b, color_a],
         )?;
         let mut inner = self
             .inner
@@ -8546,21 +8526,16 @@ impl AxiusCharts {
         &self,
         id: u32,
         timestamp: u64,
-        value: f32,
+        value: f64,
         color_r: f32,
         color_g: f32,
         color_b: f32,
         color_a: f32,
     ) -> Result<(), JsValue> {
-        ensure_finite_fields(
-            "upsert_histogram_point",
-            &[
-                ("value", value),
-                ("color_r", color_r),
-                ("color_g", color_g),
-                ("color_b", color_b),
-                ("color_a", color_a),
-            ],
+        ensure_finite_fields("upsert_histogram_point", &[("value", value)])?;
+        ensure_finite_slice(
+            "upsert_histogram_point colors",
+            &[color_r, color_g, color_b, color_a],
         )?;
         let mut inner = self
             .inner
@@ -8584,10 +8559,10 @@ impl AxiusCharts {
         &self,
         id: u32,
         timestamp: u64,
-        open: f32,
-        high: f32,
-        low: f32,
-        close: f32,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
     ) -> Result<(), JsValue> {
         ensure_finite_fields(
             "append_bar_series_point",
@@ -8622,10 +8597,10 @@ impl AxiusCharts {
         &self,
         id: u32,
         timestamp: u64,
-        open: f32,
-        high: f32,
-        low: f32,
-        close: f32,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
     ) -> Result<(), JsValue> {
         ensure_finite_fields(
             "update_last_bar_series_point",
@@ -8661,10 +8636,10 @@ impl AxiusCharts {
         &self,
         id: u32,
         timestamp: u64,
-        open: f32,
-        high: f32,
-        low: f32,
-        close: f32,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
     ) -> Result<(), JsValue> {
         ensure_finite_fields(
             "upsert_bar_series_point",
@@ -9050,7 +9025,6 @@ mod tests {
                 low: 99.0 + i as f32 * 0.1,
                 close: 100.5 + i as f32 * 0.1,
                 volume: 1.0,
-                _pad: 0.0,
             })
             .collect()
     }

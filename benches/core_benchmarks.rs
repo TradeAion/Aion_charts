@@ -18,31 +18,29 @@ use axiuscharts::core::viewport::Viewport;
 fn generate_bars(count: usize) -> Vec<Bar> {
     (0..count)
         .map(|i| {
-            let base_price = 100.0 + (i as f32 * 0.1);
-            Bar {
-                timestamp: 1700000000000u64 + (i as u64 * 60000),
-                open: base_price,
-                high: base_price + 2.0,
-                low: base_price - 1.0,
-                close: base_price + 0.5,
-                volume: 1000.0 + (i as f32 * 10.0),
-                _pad: 0.0,
-            }
+            let base_price = 100.0 + (i as f64 * 0.1);
+            Bar::new(
+                1700000000000u64 + (i as u64 * 60000),
+                base_price,
+                base_price + 2.0,
+                base_price - 1.0,
+                base_price + 0.5,
+                1000.0 + (i as f64 * 10.0),
+            )
         })
         .collect()
 }
 
 fn generate_single_bar(idx: usize) -> Bar {
-    let base_price = 100.0 + (idx as f32 * 0.1);
-    Bar {
-        timestamp: 1700000000000u64 + (idx as u64 * 60000),
-        open: base_price,
-        high: base_price + 2.0,
-        low: base_price - 1.0,
-        close: base_price + 0.5,
-        volume: 1000.0 + (idx as f32 * 10.0),
-        _pad: 0.0,
-    }
+    let base_price = 100.0 + (idx as f64 * 0.1);
+    Bar::new(
+        1700000000000u64 + (idx as u64 * 60000),
+        base_price,
+        base_price + 2.0,
+        base_price - 1.0,
+        base_price + 0.5,
+        1000.0 + (idx as f64 * 10.0),
+    )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -59,7 +57,7 @@ fn bench_bar_array_set(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _| {
             b.iter(|| {
                 let mut arr = BarArray::new();
-                arr.set(black_box(bars.clone()));
+                let _ = arr.set(black_box(bars.clone()));
                 arr
             });
         });
@@ -84,12 +82,12 @@ fn bench_bar_array_append(c: &mut Criterion) {
                     || {
                         let mut arr = BarArray::new();
                         if !initial_bars.is_empty() {
-                            arr.set(initial_bars.clone());
+                            let _ = arr.set(initial_bars.clone());
                         }
                         arr
                     },
                     |mut arr| {
-                        arr.append(black_box(new_bar.clone()));
+                        let _ = arr.append(black_box(new_bar.clone()));
                         arr
                     },
                     criterion::BatchSize::SmallInput,
@@ -112,7 +110,7 @@ fn bench_bar_array_append_streaming(c: &mut Criterion) {
         b.iter(|| {
             let mut arr = BarArray::new();
             for bar in bars.iter() {
-                arr.append(black_box(bar.clone()));
+                let _ = arr.append(black_box(*bar));
             }
             arr.flush(); // Ensure all pending are committed
             arr
@@ -127,12 +125,12 @@ fn bench_bar_array_access(c: &mut Criterion) {
 
     let bars = generate_bars(10_000);
     let mut arr = BarArray::new();
-    arr.set(bars);
+    let _ = arr.set(bars);
 
     // Benchmark different access patterns
     group.bench_function("get_checked", |b| {
         b.iter(|| {
-            let mut sum = 0.0f32;
+            let mut sum = 0.0f64;
             for i in 0..arr.len() {
                 if let Some(bar) = arr.get(black_box(i)) {
                     sum += bar.close;
@@ -144,7 +142,7 @@ fn bench_bar_array_access(c: &mut Criterion) {
 
     group.bench_function("get_unchecked", |b| {
         b.iter(|| {
-            let mut sum = 0.0f32;
+            let mut sum = 0.0f64;
             for i in 0..arr.len() {
                 let bar = arr.get_unchecked(black_box(i));
                 sum += bar.close;
@@ -155,7 +153,7 @@ fn bench_bar_array_access(c: &mut Criterion) {
 
     group.bench_function("direct_accessor_close", |b| {
         b.iter(|| {
-            let mut sum = 0.0f32;
+            let mut sum = 0.0f64;
             for i in 0..arr.len() {
                 sum += arr.close(black_box(i));
             }
@@ -171,25 +169,17 @@ fn bench_bar_array_update_last(c: &mut Criterion) {
 
     for size in [100, 1_000, 10_000].iter() {
         let bars = generate_bars(*size);
-        let updated_bar = Bar {
-            timestamp: bars.last().unwrap().timestamp,
-            open: 150.0,
-            high: 155.0,
-            low: 148.0,
-            close: 152.0,
-            volume: 5000.0,
-            _pad: 0.0,
-        };
+        let updated_bar = Bar::new(bars.last().unwrap().timestamp, 150.0, 155.0, 148.0, 152.0, 5000.0);
 
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _| {
             b.iter_batched(
                 || {
                     let mut arr = BarArray::new();
-                    arr.set(bars.clone());
+                    let _ = arr.set(bars.clone());
                     arr
                 },
                 |mut arr| {
-                    arr.update_last(black_box(updated_bar.clone()));
+                    let _ = arr.update_last(black_box(updated_bar));
                     arr
                 },
                 criterion::BatchSize::SmallInput,
@@ -278,7 +268,7 @@ fn bench_viewport_auto_fit_price(c: &mut Criterion) {
     for size in [100, 1_000, 10_000].iter() {
         let bars = generate_bars(*size);
         let mut arr = BarArray::new();
-        arr.set(bars);
+        let _ = arr.set(bars);
 
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter_batched(
@@ -395,7 +385,7 @@ fn bench_viewport_pan(c: &mut Criterion) {
             },
             |mut vp| {
                 // Simulate drag panning
-                for i in 0..100 {
+                for _ in 0..100 {
                     vp.pan_clamped(5.0, 1000);
                 }
                 vp

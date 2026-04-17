@@ -9,6 +9,9 @@
  *   - ChartGroup and ChartWorkspace classes
  *   - JSDoc on every public method
  *
+ * Logical prices use JavaScript `number` / Rust `f64` end-to-end. Single-precision
+ * render attributes are produced only inside the renderer projection seam.
+ *
  * @example
  * ```ts
  * import init, { AxiusCharts } from './pkg/axiuscharts_wasm.js';
@@ -687,6 +690,7 @@ export declare class AxiusCharts {
    * Load OHLCV data from columnar typed arrays.
    * All arrays must have the same length.
    * `timestamps` are Unix milliseconds as `BigUint64Array`.
+   * Logical prices and volume use `Float64Array`.
    *
    * @example
    * ```ts
@@ -694,11 +698,11 @@ export declare class AxiusCharts {
    * ```
    */
   set_data_arrays(
-    open:       Float32Array,
-    high:       Float32Array,
-    low:        Float32Array,
-    close:      Float32Array,
-    volume:     Float32Array,
+    open:       Float64Array,
+    high:       Float64Array,
+    low:        Float64Array,
+    close:      Float64Array,
+    volume:     Float64Array,
     timestamps: BigUint64Array,
   ): void;
 
@@ -708,16 +712,16 @@ export declare class AxiusCharts {
    * `level_offsets.length` must equal `bar_count + 1`.
    */
   set_data_with_footprint_arrays(
-    open:          Float32Array,
-    high:          Float32Array,
-    low:           Float32Array,
-    close:         Float32Array,
-    volume:        Float32Array,
+    open:          Float64Array,
+    high:          Float64Array,
+    low:           Float64Array,
+    close:         Float64Array,
+    volume:        Float64Array,
     timestamps:    BigUint64Array,
     level_offsets: Uint32Array,
-    prices:        Float32Array,
-    bid_volumes:   Float32Array,
-    ask_volumes:   Float32Array,
+    prices:        Float64Array,
+    bid_volumes:   Float64Array,
+    ask_volumes:   Float64Array,
   ): void;
 
   /**
@@ -732,9 +736,9 @@ export declare class AxiusCharts {
    */
   set_footprint_bar(
     bar_index: number,
-    prices: Float32Array,
-    bid_volumes: Float32Array,
-    ask_volumes: Float32Array,
+    prices: Float64Array,
+    bid_volumes: Float64Array,
+    ask_volumes: Float64Array,
   ): void;
 
   /**
@@ -743,9 +747,9 @@ export declare class AxiusCharts {
   set_footprint_data_arrays(
     bar_indices: Uint32Array,
     level_offsets: Uint32Array,
-    prices: Float32Array,
-    bid_volumes: Float32Array,
-    ask_volumes: Float32Array,
+    prices: Float64Array,
+    bid_volumes: Float64Array,
+    ask_volumes: Float64Array,
   ): void;
 
   /**
@@ -810,9 +814,9 @@ export declare class AxiusCharts {
     low: number,
     close: number,
     volume: number,
-    prices: Float32Array,
-    bid_volumes: Float32Array,
-    ask_volumes: Float32Array,
+    prices: Float64Array,
+    bid_volumes: Float64Array,
+    ask_volumes: Float64Array,
   ): void;
 
   /**
@@ -1144,7 +1148,7 @@ export declare class AxiusCharts {
    */
   set_series_data(
     id:         number,
-    values:     Float32Array,
+    values:     Float64Array,
     timestamps: BigUint64Array,
   ): void;
 
@@ -1155,10 +1159,10 @@ export declare class AxiusCharts {
   set_bar_series_data(
     id:         number,
     timestamps: BigUint64Array,
-    open:       Float32Array,
-    high:       Float32Array,
-    low:        Float32Array,
-    close:      Float32Array,
+    open:       Float64Array,
+    high:       Float64Array,
+    low:        Float64Array,
+    close:      Float64Array,
   ): void;
 
   /**
@@ -1168,7 +1172,7 @@ export declare class AxiusCharts {
    */
   set_histogram_data(
     id:         number,
-    values:     Float32Array,
+    values:     Float64Array,
     timestamps: BigUint64Array,
     colors_r:   Float32Array,
     colors_g:   Float32Array,
@@ -1464,12 +1468,12 @@ export declare class AxiusCharts {
 
   /**
    * Get study output data.
-   * @returns `{ timestamps: BigUint64Array, values: Float32Array }` or `null`.
+   * @returns `{ timestamps: BigUint64Array, values: Float64Array }` or `null`.
    */
   get_study_output(
     id:           number,
     output_index: number,
-  ): { timestamps: BigUint64Array; values: Float32Array } | null;
+  ): { timestamps: BigUint64Array; values: Float64Array } | null;
 
   /**
    * Set a study parameter (e.g. `"period"` for SMA/EMA, `"fast_period"` for MACD).

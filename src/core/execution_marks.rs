@@ -438,7 +438,6 @@ mod tests {
             low: 99.0,
             close: 100.5,
             volume: 1000.0,
-            _pad: 0.0,
         }
     }
 

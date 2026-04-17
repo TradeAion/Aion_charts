@@ -32,15 +32,14 @@ pub fn generate_sample_data(n: usize, start_ms: u64, interval_ms: u64) -> Vec<Ba
         let l = o.min(c) - r3 * price * 0.005;
         let vol = 200.0 + r4 * 4000.0;
 
-        bars.push(Bar {
-            timestamp: start_ms + (i as u64) * interval_ms,
-            open: o as f32,
-            high: h as f32,
-            low: l as f32,
-            close: c as f32,
-            volume: vol as f32,
-            _pad: 0.0,
-        });
+        bars.push(Bar::new(
+            start_ms + (i as u64) * interval_ms,
+            o,
+            h,
+            l,
+            c,
+            vol,
+        ));
 
         price = c;
     }
@@ -56,7 +55,7 @@ pub fn generate_footprint_sample_data(
     n: usize,
     start_ms: u64,
     interval_ms: u64,
-    tick_size: f32,
+    tick_size: f64,
 ) -> (Vec<Bar>, FootprintData) {
     let bars = generate_sample_data(n, start_ms, interval_ms);
     let footprint = generate_footprint_from_bars(&bars, tick_size);
@@ -71,7 +70,7 @@ pub fn generate_footprint_sample_data(
 ///
 /// `tick_size`: the price increment per footprint row. If 0.0, auto-calculated
 /// from the average bar range.
-pub fn generate_footprint_from_bars(bars: &[Bar], tick_size: f32) -> FootprintData {
+pub fn generate_footprint_from_bars(bars: &[Bar], tick_size: f64) -> FootprintData {
     let mut fp_data = FootprintData::new();
     if bars.is_empty() {
         return fp_data;
@@ -81,7 +80,7 @@ pub fn generate_footprint_from_bars(bars: &[Bar], tick_size: f32) -> FootprintDa
     let tick = if tick_size > 0.0 {
         tick_size
     } else {
-        let avg_range: f32 = bars.iter().map(|b| b.high - b.low).sum::<f32>() / bars.len() as f32;
+        let avg_range = bars.iter().map(|b| b.high - b.low).sum::<f64>() / bars.len() as f64;
         // Target ~8-15 levels per bar
         let raw = avg_range / 10.0;
         // Round to a nice number
@@ -121,8 +120,8 @@ pub fn generate_footprint_from_bars(bars: &[Bar], tick_size: f32) -> FootprintDa
         let mut weight_sum = 0.0;
 
         for j in 0..num_levels {
-            let price = level_low + j as f32 * tick;
-            let dist = ((price + tick * 0.5 - poc_price) / range).abs() as f64;
+            let price = level_low + j as f64 * tick;
+            let dist = ((price + tick * 0.5 - poc_price) / range).abs();
             // Bell curve: higher weight near POC
             let w = (-dist * dist * 4.0).exp() + 0.05;
             vol_weights.push(w);
@@ -130,13 +129,13 @@ pub fn generate_footprint_from_bars(bars: &[Bar], tick_size: f32) -> FootprintDa
         }
 
         for j in 0..num_levels {
-            let price = level_low + j as f32 * tick;
-            let vol_frac = (vol_weights[j] / weight_sum) as f32;
+            let price = level_low + j as f64 * tick;
+            let vol_frac = vol_weights[j] / weight_sum;
             let level_vol = total_vol * vol_frac;
 
             // Bid/ask split depends on bar direction and position within the bar
             seed = lcg_next(seed);
-            let noise = lcg_f64(seed) as f32 * 0.3; // ±15% noise
+            let noise = lcg_f64(seed) * 0.3; // ±15% noise
 
             let position_frac = if range > 0.0 {
                 ((price - low) / range).clamp(0.0, 1.0)
@@ -184,7 +183,7 @@ pub fn generate_footprint_from_bars(bars: &[Bar], tick_size: f32) -> FootprintDa
 /// recalculating the entire dataset.
 ///
 /// `tick_size`: price granularity per row. Must be > 0.
-pub fn generate_footprint_for_single_bar(bar: &Bar, tick_size: f32) -> FootprintBar {
+pub fn generate_footprint_for_single_bar(bar: &Bar, tick_size: f64) -> FootprintBar {
     let low = bar.low;
     let high = bar.high;
     let range = high - low;
@@ -209,8 +208,8 @@ pub fn generate_footprint_for_single_bar(bar: &Bar, tick_size: f32) -> Footprint
     let mut vol_weights: Vec<f64> = Vec::with_capacity(num_levels);
     let mut weight_sum = 0.0;
     for j in 0..num_levels {
-        let price = level_low + j as f32 * tick_size;
-        let dist = ((price + tick_size * 0.5 - poc_price) / range).abs() as f64;
+        let price = level_low + j as f64 * tick_size;
+        let dist = ((price + tick_size * 0.5 - poc_price) / range).abs();
         let w = (-dist * dist * 4.0).exp() + 0.05;
         vol_weights.push(w);
         weight_sum += w;
@@ -221,12 +220,12 @@ pub fn generate_footprint_for_single_bar(bar: &Bar, tick_size: f32) -> Footprint
 
     let mut levels = Vec::with_capacity(num_levels);
     for j in 0..num_levels {
-        let price = level_low + j as f32 * tick_size;
-        let vol_frac = (vol_weights[j] / weight_sum) as f32;
+        let price = level_low + j as f64 * tick_size;
+        let vol_frac = vol_weights[j] / weight_sum;
         let level_vol = total_vol * vol_frac;
 
         seed = lcg_next(seed);
-        let noise = lcg_f64(seed) as f32 * 0.3;
+        let noise = lcg_f64(seed) * 0.3;
 
         let position_frac = if range > 0.0 {
             ((price - low) / range).clamp(0.0, 1.0)
@@ -257,17 +256,17 @@ pub fn generate_footprint_for_single_bar(bar: &Bar, tick_size: f32) -> Footprint
 }
 
 /// Round a raw tick size to a "nice" number — public wrapper.
-pub fn round_tick_size_pub(raw: f32) -> f32 {
+pub fn round_tick_size_pub(raw: f64) -> f64 {
     round_tick_size(raw)
 }
 
 /// Round a raw tick size to a "nice" number (1, 2, 5, 10, 25, 50, 100, etc.)
-fn round_tick_size(raw: f32) -> f32 {
+fn round_tick_size(raw: f64) -> f64 {
     if raw <= 0.0 {
         return 1.0;
     }
 
-    let magnitude = 10.0_f32.powf(raw.log10().floor());
+    let magnitude = 10.0_f64.powf(raw.log10().floor());
     let normalized = raw / magnitude;
 
     let nice = if normalized < 1.5 {
@@ -280,7 +279,7 @@ fn round_tick_size(raw: f32) -> f32 {
         10.0
     };
 
-    (nice * magnitude).max(f32::EPSILON)
+    (nice * magnitude).max(f64::EPSILON)
 }
 
 /// Linear congruential generator — fast, deterministic pseudo-random.
