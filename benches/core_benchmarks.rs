@@ -87,7 +87,7 @@ fn bench_bar_array_append(c: &mut Criterion) {
                         arr
                     },
                     |mut arr| {
-                        let _ = arr.append(black_box(new_bar.clone()));
+                        let _ = arr.append(black_box(new_bar));
                         arr
                     },
                     criterion::BatchSize::SmallInput,

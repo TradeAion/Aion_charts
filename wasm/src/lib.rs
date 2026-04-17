@@ -51,6 +51,7 @@
     clippy::unwrap_or_default,
     clippy::wrong_self_convention
 )]
+#![cfg(target_arch = "wasm32")]
 
 use axiuscharts::{
     generate_footprint_sample_data, generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions,
@@ -9014,23 +9015,30 @@ mod tests {
         parse_main_viewport_preset, reset_main_viewport_and_emit, resolve_synced_crosshair_state,
     };
     use axiuscharts::core::events::ChartEvent;
-    use axiuscharts::{Bar, ChartEngine, MainViewportPreset, RendererBackend, Viewport};
+    use axiuscharts::core::renderer::value_projection::TimeScaleIndex;
+    use axiuscharts::{Bar, BarArray, ChartEngine, MainViewportPreset, RendererBackend, Viewport};
 
     fn sample_bars(count: usize, start_ts: u64) -> Vec<Bar> {
         (0..count)
-            .map(|i| Bar {
-                timestamp: start_ts + i as u64,
-                open: 100.0 + i as f32 * 0.1,
-                high: 101.0 + i as f32 * 0.1,
-                low: 99.0 + i as f32 * 0.1,
-                close: 100.5 + i as f32 * 0.1,
-                volume: 1.0,
+            .map(|i| {
+                let offset = i as f64 * 0.1;
+                Bar::new(
+                    start_ts + i as u64,
+                    100.0 + offset,
+                    101.0 + offset,
+                    99.0 + offset,
+                    100.5 + offset,
+                    1.0,
+                )
             })
             .collect()
     }
 
     #[test]
     fn synced_crosshair_uses_bar_and_price_projection() {
+        let mut bars = BarArray::new();
+        bars.set(sample_bars(120, 1_000)).unwrap();
+        let time_scale = TimeScaleIndex::from_bars(&bars);
         let mut viewport = Viewport::new(1000, 600);
         viewport.set_range(10.0, 110.0);
         viewport.price_min = 10.0;
@@ -9040,6 +9048,7 @@ mod tests {
 
         let (x, y, bar_index, price) = resolve_synced_crosshair_state(
             &viewport,
+            &time_scale,
             pane_w,
             pane_h,
             0.0,
@@ -9048,14 +9057,18 @@ mod tests {
             Some(80.0),
         );
 
+        let logical_slot = time_scale.logical_index_for_main_bar(59).unwrap() as usize;
         assert_eq!(bar_index, Some(59));
         assert!((price - 80.0).abs() < f64::EPSILON);
-        assert!((x - viewport.bar_center_css(59, pane_w)).abs() < 0.001);
+        assert!((x - viewport.bar_center_css(logical_slot, pane_w)).abs() < 0.001);
         assert!((y - viewport.price_to_css_y(80.0, pane_h)).abs() < 0.001);
     }
 
     #[test]
     fn synced_crosshair_falls_back_to_pixel_inference() {
+        let mut bars = BarArray::new();
+        bars.set(sample_bars(120, 1_000)).unwrap();
+        let time_scale = TimeScaleIndex::from_bars(&bars);
         let mut viewport = Viewport::new(800, 400);
         viewport.set_range(0.0, 100.0);
         viewport.price_min = 0.0;
@@ -9064,7 +9077,14 @@ mod tests {
         let fallback_x = 400.0;
         let fallback_y = 120.0;
         let (x, y, bar_index, price) = resolve_synced_crosshair_state(
-            &viewport, 800.0, 400.0, fallback_x, fallback_y, None, None,
+            &viewport,
+            &time_scale,
+            800.0,
+            400.0,
+            fallback_x,
+            fallback_y,
+            None,
+            None,
         );
 
         assert_eq!(x, fallback_x);

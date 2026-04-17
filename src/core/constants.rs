@@ -211,6 +211,7 @@ pub const PULSE_ALPHA_RANGE: f64 = 0.4;
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[cfg(test)]
+#[allow(clippy::assertions_on_constants)]
 mod tests {
     use super::*;
 
