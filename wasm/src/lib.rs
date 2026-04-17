@@ -275,7 +275,13 @@ fn sync_widget_sizes(s: &mut ChartInner, dpr: f64, prefer_exact: bool) {
         s.engine.v_pixel_ratio = v_ratio;
 
         s.engine.resize(es.pane_pw.max(1), es.pane_ph.max(1), dpr);
-        s.overlay.resize(es.pane_pw.max(1), es.pane_ph.max(1), dpr);
+        s.overlay.resize(
+            es.pane_pw.max(1),
+            es.pane_ph.max(1),
+            dpr,
+            h_ratio,
+            v_ratio,
+        );
         s.price_axis_renderer
             .resize(es.price_axis_pw.max(1), es.price_axis_ph.max(1), dpr);
         s.time_axis_renderer
@@ -291,7 +297,8 @@ fn sync_widget_sizes(s: &mut ChartInner, dpr: f64, prefer_exact: bool) {
     let ppw = (pw * dpr).round() as u32;
     let pph = (ph * dpr).round() as u32;
     s.engine.resize(ppw.max(1), pph.max(1), dpr);
-    s.overlay.resize(ppw.max(1), pph.max(1), dpr);
+    s.overlay
+        .resize(ppw.max(1), pph.max(1), dpr, dpr, dpr);
 
     let (aw, ah) = s.layout.price_axis_css_size();
     s.price_axis_renderer

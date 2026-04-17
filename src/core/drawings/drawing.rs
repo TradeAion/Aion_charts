@@ -206,6 +206,9 @@ pub trait Drawing: std::fmt::Debug {
 /// Convert a logical DrawingPoint to CSS pixel coordinates.
 ///
 /// bar_index is fractional (from `pixel_to_bar`), so NO +0.5 offset is needed.
+/// We still apply the viewport's `-1px` X alignment so a drawing anchor created
+/// from a pointer position round-trips back to the same CSS coordinate used by
+/// the crosshair and time-scale snapping helpers.
 /// Y uses the candle area height (matching `price_to_css_y`) which is consistent
 /// with how prices are recorded when candle_height_frac is applied.
 pub fn point_to_css(
@@ -215,7 +218,7 @@ pub fn point_to_css(
     pane_css_h: f64,
 ) -> (f64, f64) {
     let frac = (pt.bar_index - vp.start_bar) / (vp.end_bar - vp.start_bar);
-    let x = frac * pane_css_w;
+    let x = frac * pane_css_w - 1.0;
     let y = vp.price_to_css_y(pt.price, pane_css_h);
     (x, y)
 }
@@ -279,4 +282,46 @@ pub fn generate_anchor_circles(
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{point_to_css, DrawingPoint};
+    use crate::core::viewport::Viewport;
+
+    fn test_viewport() -> Viewport {
+        let mut vp = Viewport::new(1000, 600);
+        vp.start_bar = 10.0;
+        vp.end_bar = 20.0;
+        vp.price_min = 90.0;
+        vp.price_max = 110.0;
+        vp
+    }
+
+    #[test]
+    fn point_to_css_matches_pixel_to_bar_round_trip() {
+        let vp = test_viewport();
+        let pane_w = 1000.0;
+        let pane_h = 600.0;
+        let pointer_x = 349.0;
+        let logical_bar = vp.pixel_to_bar(pointer_x, pane_w);
+        let point = DrawingPoint::new(logical_bar, 100.0);
+
+        let (x, _y) = point_to_css(&point, &vp, pane_w, pane_h);
+
+        assert!((x - pointer_x).abs() < 1e-9);
+    }
+
+    #[test]
+    fn point_to_css_matches_bar_center_css_for_snapped_bar_centers() {
+        let vp = test_viewport();
+        let pane_w = 1000.0;
+        let pane_h = 600.0;
+        let snapped_slot = 13usize;
+        let point = DrawingPoint::new(snapped_slot as f64 + 0.5, 100.0);
+
+        let (x, _y) = point_to_css(&point, &vp, pane_w, pane_h);
+
+        assert!((x - vp.bar_center_css(snapped_slot, pane_w)).abs() < 1e-9);
+    }
 }

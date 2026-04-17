@@ -48,6 +48,8 @@ pub struct OverlayRenderer {
     pw: u32,
     ph: u32,
     dpr: f64,
+    h_pixel_ratio: f64,
+    v_pixel_ratio: f64,
     /// Shared text width cache for legend measurements.
     text_cache: TextWidthCache,
 }
@@ -72,6 +74,8 @@ impl OverlayRenderer {
             pw,
             ph,
             dpr,
+            h_pixel_ratio: dpr,
+            v_pixel_ratio: dpr,
             text_cache: TextWidthCache::new(50),
         })
     }
@@ -91,16 +95,23 @@ impl OverlayRenderer {
         Ok(())
     }
 
-    pub fn resize(&mut self, pw: u32, ph: u32, dpr: f64) {
+    pub fn resize(&mut self, pw: u32, ph: u32, dpr: f64, h_pixel_ratio: f64, v_pixel_ratio: f64) {
         let pw = pw.max(1);
         let ph = ph.max(1);
-        if self.pw == pw && self.ph == ph && (self.dpr - dpr).abs() < 1e-6 {
+        if self.pw == pw
+            && self.ph == ph
+            && (self.dpr - dpr).abs() < 1e-6
+            && (self.h_pixel_ratio - h_pixel_ratio).abs() < 1e-6
+            && (self.v_pixel_ratio - v_pixel_ratio).abs() < 1e-6
+        {
             return;
         }
 
         self.pw = pw;
         self.ph = ph;
         self.dpr = dpr;
+        self.h_pixel_ratio = h_pixel_ratio;
+        self.v_pixel_ratio = v_pixel_ratio;
         if self.canvas.width() != pw {
             self.canvas.set_width(pw);
         }
@@ -783,9 +794,8 @@ impl OverlayRenderer {
             return;
         }
 
-        let dpr = self.dpr;
-        let mx = ch.x * dpr;
-        let my = ch.y * dpr;
+        let mx = ch.x * self.h_pixel_ratio;
+        let my = ch.y * self.v_pixel_ratio;
 
         let vert_in_bounds = mx >= 0.0 && mx <= pane_w;
         let horz_in_bounds = my >= 0.0 && my <= pane_h;
@@ -796,7 +806,9 @@ impl OverlayRenderer {
         self.ctx.set_line_cap("butt");
 
         if style.crosshair_horz_line.visible && horz_in_bounds {
-            let line_w = (style.crosshair_horz_line.width * dpr).floor().max(1.0);
+            let line_w = (style.crosshair_horz_line.width * self.v_pixel_ratio)
+                .floor()
+                .max(1.0);
             let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
             self.ctx
                 .set_stroke_style_str(&rgba(&style.crosshair_horz_line.color));
@@ -812,7 +824,9 @@ impl OverlayRenderer {
         }
 
         if style.crosshair_vert_line.visible && vert_in_bounds {
-            let line_w = (style.crosshair_vert_line.width * dpr).floor().max(1.0);
+            let line_w = (style.crosshair_vert_line.width * self.h_pixel_ratio)
+                .floor()
+                .max(1.0);
             let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
             self.ctx
                 .set_stroke_style_str(&rgba(&style.crosshair_vert_line.color));

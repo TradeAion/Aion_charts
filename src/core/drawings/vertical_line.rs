@@ -3,7 +3,9 @@
 //! Positioned at a bar index, extends from top to bottom of the chart.
 //! Completes on the first click (1 anchor).
 
-use super::drawing::{generate_anchor_circles, next_drawing_id, point_to_css, Drawing};
+use super::drawing::{
+    generate_anchor_circles, next_drawing_id, point_to_bitmap, point_to_css, Drawing,
+};
 use super::hit_test;
 use super::types::*;
 use crate::core::renderer::draw_list::ColoredLine;
@@ -49,8 +51,7 @@ impl Drawing for VerticalLineDrawing {
             return HitResult::hit(HitPart::Anchor(0), ad);
         }
         // Line body — full-height vertical at anchor bar_index
-        let frac = (self.anchors[0].point.bar_index - vp.start_bar) / (vp.end_bar - vp.start_bar);
-        let line_x = frac * pw;
+        let line_x = ax;
         let d = (cx - line_x).abs();
         if d <= hit_test::HIT_THRESHOLD_CSS {
             return HitResult::hit(HitPart::Body, d);
@@ -80,15 +81,16 @@ impl Drawing for VerticalLineDrawing {
             self.state,
             DrawingState::Dragging { .. } | DrawingState::Creating { .. }
         );
-        let frac = (self.anchors[0].point.bar_index - vp.start_bar) / (vp.end_bar - vp.start_bar);
-        let x = {
-            let value = frac * pw * h_pixel_ratio;
-            if snap_to_pixel {
-                value.round()
-            } else {
-                value
-            }
-        } as f32;
+        let (x, _y) = point_to_bitmap(
+            &self.anchors[0].point,
+            vp,
+            pw,
+            ph,
+            h_pixel_ratio,
+            v_pixel_ratio,
+            snap_to_pixel,
+        );
+        let x = x as f32;
         let pane_ph = (ph * v_pixel_ratio).round() as f32;
 
         let (dash, gap) = self.style.dash.map_or((0.0, 0.0), |d| {
@@ -135,5 +137,45 @@ impl Drawing for VerticalLineDrawing {
         if let Some(a) = self.anchors.get_mut(index) {
             a.point.bar_index = bar_index;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_viewport() -> Viewport {
+        let mut vp = Viewport::new(1000, 600);
+        vp.start_bar = 10.0;
+        vp.end_bar = 20.0;
+        vp.price_min = 90.0;
+        vp.price_max = 110.0;
+        vp
+    }
+
+    #[test]
+    fn vertical_line_hit_test_uses_shared_x_alignment() {
+        let vp = test_viewport();
+        let drawing = VerticalLineDrawing::new(14.5, 100.0);
+
+        let (expected_x, _expected_y) = point_to_css(&drawing.anchors[0].point, &vp, 1000.0, 600.0);
+        let hit = drawing.hit_test(expected_x, 200.0, &vp, 1000.0, 600.0);
+
+        assert!(hit.is_hit());
+    }
+
+    #[test]
+    fn vertical_line_geometry_uses_shared_bitmap_alignment() {
+        let vp = test_viewport();
+        let mut drawing = VerticalLineDrawing::new(14.5, 100.0);
+        drawing.set_state(DrawingState::Idle);
+
+        let geom = drawing.generate_geometry(&vp, 1000.0, 600.0, 1.0, 1.0, 1.0, false);
+        let (expected_x, _expected_y) =
+            point_to_bitmap(&drawing.anchors[0].point, &vp, 1000.0, 600.0, 1.0, 1.0, true);
+
+        assert_eq!(geom.lines.len(), 1);
+        assert!((geom.lines[0].x0 as f64 - expected_x).abs() < 1e-9);
+        assert!((geom.lines[0].x1 as f64 - expected_x).abs() < 1e-9);
     }
 }

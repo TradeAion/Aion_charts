@@ -818,7 +818,15 @@ impl ChartInner {
                     );
                     if should_snap {
                         if let Some((anchor_bar, anchor_price)) = drawings.creation_first_anchor() {
-                            snap_to_angle_45(anchor_bar, anchor_price, bar, price, pw, candle_css_h)
+                            snap_to_angle_45(
+                                anchor_bar,
+                                anchor_price,
+                                bar,
+                                price,
+                                &self.engine.viewport,
+                                pw,
+                                candle_css_h,
+                            )
                         } else {
                             (bar, price)
                         }
@@ -856,6 +864,7 @@ impl ChartInner {
                                     anchor_price,
                                     bar,
                                     price,
+                                    &self.engine.viewport,
                                     pw,
                                     candle_css_h,
                                 )
@@ -1630,23 +1639,24 @@ fn snap_to_angle_45(
     anchor_price: f64,
     target_bar: f64,
     target_price: f64,
+    viewport: &axiuscharts::Viewport,
     pane_css_w: f64,
     candle_css_h: f64,
 ) -> (f64, f64) {
-    // We need to work in a normalized coordinate space where 1 unit in X
-    // equals 1 unit in Y visually. Otherwise angles would be skewed.
-    // Use the pane aspect ratio to normalize.
-
-    let bar_range = 100.0; // Approximate visible bars (scale factor, cancels out)
-    let price_range = 1000.0; // Approximate visible price range (cancels out)
-
-    // Compute aspect ratio: pixels per bar vs pixels per price unit
-    let px_per_bar = pane_css_w / bar_range;
-    let px_per_price = candle_css_h / price_range;
+    // Work in true screen-space using the current viewport scale. Using fake bar/price
+    // ranges makes the snapped angle only accidentally correct and causes "straight"
+    // lines to miss exact horizontal/vertical pixel alignment.
+    let visible_bar_span = (viewport.end_bar - viewport.start_bar).abs().max(1e-9);
+    let visible_internal_price_span = (viewport.price_max - viewport.price_min).abs().max(1e-9);
+    let px_per_bar = pane_css_w / visible_bar_span;
+    let px_per_internal_price = candle_css_h / visible_internal_price_span;
+    let anchor_internal_price = viewport.price_to_internal(anchor_price);
+    let target_internal_price = viewport.price_to_internal(target_price);
 
     // Convert to normalized screen space
     let dx_screen = (target_bar - anchor_bar) * px_per_bar;
-    let dy_screen = (anchor_price - target_price) * px_per_price; // Y inverted in screen space
+    let dy_screen =
+        (anchor_internal_price - target_internal_price) * px_per_internal_price; // Y inverted in screen space
 
     // Calculate angle and snap to nearest 45°
     let angle = dy_screen.atan2(dx_screen);
@@ -1661,9 +1671,48 @@ fn snap_to_angle_45(
 
     // Convert back to bar/price coordinates
     let snapped_bar = anchor_bar + snapped_dx_screen / px_per_bar;
-    let snapped_price = anchor_price - snapped_dy_screen / px_per_price; // Y inverted
+    let snapped_internal_price =
+        anchor_internal_price - snapped_dy_screen / px_per_internal_price; // Y inverted
+    let snapped_price = viewport.internal_to_price(snapped_internal_price);
 
     (snapped_bar, snapped_price)
+}
+
+#[cfg(test)]
+mod chart_inner_tests {
+    use super::snap_to_angle_45;
+
+    #[test]
+    fn angle_snap_uses_current_viewport_scale_for_horizontal_snap() {
+        let mut viewport = axiuscharts::Viewport::new(1000, 600);
+        viewport.start_bar = 100.0;
+        viewport.end_bar = 120.0;
+        viewport.price_min = 100.0;
+        viewport.price_max = 110.0;
+        let candle_css_h = 600.0 * viewport.candle_height_frac();
+
+        let (bar, price) =
+            snap_to_angle_45(105.0, 105.0, 110.0, 104.8, &viewport, 1000.0, candle_css_h);
+
+        assert!((bar - 110.00399840095935).abs() < 1e-9);
+        assert!((price - 105.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn angle_snap_uses_current_viewport_scale_for_vertical_snap() {
+        let mut viewport = axiuscharts::Viewport::new(1000, 600);
+        viewport.start_bar = 100.0;
+        viewport.end_bar = 120.0;
+        viewport.price_min = 100.0;
+        viewport.price_max = 110.0;
+        let candle_css_h = 600.0 * viewport.candle_height_frac();
+
+        let (bar, price) =
+            snap_to_angle_45(105.0, 105.0, 105.2, 101.0, &viewport, 1000.0, candle_css_h);
+
+        assert!((bar - 105.0).abs() < 1e-9);
+        assert!((price - 100.99214698045395).abs() < 1e-9);
+    }
 }
 
 /// Snap to nearest OHLC price for a given bar index.
