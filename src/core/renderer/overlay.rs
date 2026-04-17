@@ -1322,9 +1322,9 @@ impl OverlayRenderer {
             + 0.7152 * style.bg_color[1] as f64
             + 0.0722 * style.bg_color[2] as f64;
         let execution_text_color = if background_luminance < 0.5 {
-            "#F7F7F7".to_string()
+            "#E7E7E7".to_string()
         } else {
-            rgba(&style.axis_text_color)
+            "#202020".to_string()
         };
 
         // ═══════════════════════════════════════════════════════════════════
@@ -1662,7 +1662,16 @@ impl OverlayRenderer {
         match mark.realized_pnl.unwrap_or(0.0).partial_cmp(&0.0) {
             Some(std::cmp::Ordering::Greater) => "#26A69A".to_string(),
             Some(std::cmp::Ordering::Less) => "#EF5350".to_string(),
-            _ => rgba(&style.axis_text_color),
+            _ => {
+                let background_luminance = 0.2126 * style.bg_color[0] as f64
+                    + 0.7152 * style.bg_color[1] as f64
+                    + 0.0722 * style.bg_color[2] as f64;
+                if background_luminance < 0.5 {
+                    "#E7E7E7".to_string()
+                } else {
+                    "#202020".to_string()
+                }
+            }
         }
     }
 

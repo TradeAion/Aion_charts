@@ -3728,7 +3728,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_2370(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_2371(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -4438,8 +4438,8 @@ function __wasm_bindgen_func_elem_436(arg0, arg1, arg2) {
     wasm.__wasm_bindgen_func_elem_436(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_2370(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_2370(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_2371(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_2371(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 function __wasm_bindgen_func_elem_443(arg0, arg1, arg2) {

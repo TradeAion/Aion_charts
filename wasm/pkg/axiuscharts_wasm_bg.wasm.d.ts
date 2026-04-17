@@ -226,7 +226,7 @@ export const chartworkspace_split_pane: (a: number, b: number, c: number, d: num
 export const chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
 export const __wasm_bindgen_func_elem_432: (a: number, b: number) => void;
 export const __wasm_bindgen_func_elem_443: (a: number, b: number, c: number) => void;
-export const __wasm_bindgen_func_elem_2370: (a: number, b: number, c: number, d: number) => void;
+export const __wasm_bindgen_func_elem_2371: (a: number, b: number, c: number, d: number) => void;
 export const __wasm_bindgen_func_elem_433: (a: number, b: number, c: number) => void;
 export const __wasm_bindgen_func_elem_436: (a: number, b: number, c: number) => void;
 export const __wasm_bindgen_func_elem_441: (a: number, b: number) => void;
