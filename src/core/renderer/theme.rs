@@ -52,28 +52,28 @@ pub const fn ch(v: u8) -> f32 {
 pub const BG: [f32; 4] = [ch(0x13), ch(0x13), ch(0x15), 1.0];
 /// Bullish candle body (#097564).
 pub const BULLISH: [f32; 4] = [ch(0x09), ch(0x75), ch(0x64), 1.0];
-/// Bearish candle body (#B5343F).
-pub const BEARISH: [f32; 4] = [ch(0xB5), ch(0x34), ch(0x3F), 1.0];
+/// Bearish candle body (#A70B3C).
+pub const BEARISH: [f32; 4] = [ch(0xA7), ch(0x0B), ch(0x3C), 1.0];
 /// Bullish volume (same hue, lower alpha).
-pub const BULLISH_VOLUME: [f32; 4] = [ch(0x00), ch(0xB5), ch(0x62), 0.35];
+pub const BULLISH_VOLUME: [f32; 4] = [ch(0x09), ch(0x75), ch(0x64), 0.35];
 /// Bearish volume.
-pub const BEARISH_VOLUME: [f32; 4] = [ch(0xF2), ch(0x07), ch(0x51), 0.35];
+pub const BEARISH_VOLUME: [f32; 4] = [ch(0xA7), ch(0x0B), ch(0x3C), 0.35];
 /// Bullish wick (#097564), matching the body fill.
 pub const WICK_BULLISH: [f32; 4] = [ch(0x09), ch(0x75), ch(0x64), 1.0];
-/// Bearish wick (#B5343F), matching the body fill.
-pub const WICK_BEARISH: [f32; 4] = [ch(0xB5), ch(0x34), ch(0x3F), 1.0];
+/// Bearish wick (#A70B3C), matching the body fill.
+pub const WICK_BEARISH: [f32; 4] = [ch(0xA7), ch(0x0B), ch(0x3C), 1.0];
 /// Bullish candle border (#097564).
 pub const BORDER_BULLISH: [f32; 4] = [ch(0x09), ch(0x75), ch(0x64), 1.0];
-/// Bearish candle border (#B5343F).
-pub const BORDER_BEARISH: [f32; 4] = [ch(0xB5), ch(0x34), ch(0x3F), 1.0];
-/// Light theme bullish candle body (#089981).
-pub const LIGHT_BULLISH: [f32; 4] = [ch(0x08), ch(0x99), ch(0x81), 1.0];
-/// Light theme bullish volume (#089981, alpha 35%).
-pub const LIGHT_BULLISH_VOLUME: [f32; 4] = [ch(0x08), ch(0x99), ch(0x81), 0.35];
+/// Bearish candle border (#A70B3C).
+pub const BORDER_BEARISH: [f32; 4] = [ch(0xA7), ch(0x0B), ch(0x3C), 1.0];
+/// Light theme bullish candle body (#01A88C).
+pub const LIGHT_BULLISH: [f32; 4] = [ch(0x01), ch(0xA8), ch(0x8C), 1.0];
+/// Light theme bullish volume (#01A88C, alpha 35%).
+pub const LIGHT_BULLISH_VOLUME: [f32; 4] = [ch(0x01), ch(0xA8), ch(0x8C), 0.35];
 /// Light theme bearish candle body (#F20751).
 pub const LIGHT_BEARISH: [f32; 4] = [ch(0xF2), ch(0x07), ch(0x51), 1.0];
-/// Light theme bullish wick (#089981).
-pub const LIGHT_WICK_BULLISH: [f32; 4] = [ch(0x08), ch(0x99), ch(0x81), 1.0];
+/// Light theme bullish wick (#01A88C).
+pub const LIGHT_WICK_BULLISH: [f32; 4] = [ch(0x01), ch(0xA8), ch(0x8C), 1.0];
 /// Light theme bearish wick (#F20751).
 pub const LIGHT_WICK_BEARISH: [f32; 4] = [ch(0xF2), ch(0x07), ch(0x51), 1.0];
 /// Grid line color.
@@ -871,8 +871,8 @@ mod tests {
         let light = ThemeConfig::light();
 
         assert_eq!(dark.colors.bullish, [ch(0x09), ch(0x75), ch(0x64), 1.0]);
-        assert_eq!(dark.colors.bearish, [ch(0xB5), ch(0x34), ch(0x3F), 1.0]);
-        assert_eq!(light.colors.bullish, [ch(0x08), ch(0x99), ch(0x81), 1.0]);
+        assert_eq!(dark.colors.bearish, [ch(0xA7), ch(0x0B), ch(0x3C), 1.0]);
+        assert_eq!(light.colors.bullish, [ch(0x01), ch(0xA8), ch(0x8C), 1.0]);
         assert_eq!(light.colors.bearish, [ch(0xF2), ch(0x07), ch(0x51), 1.0]);
         assert_eq!(dark.colors.axis_border, [ch(0x22), ch(0x26), ch(0x2A), 1.0]);
         assert_eq!(dark.colors.axis_text, [ch(0x94), ch(0x96), ch(0x98), 1.0]);
