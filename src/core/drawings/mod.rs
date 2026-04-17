@@ -26,8 +26,9 @@ use crate::core::renderer::value_projection::TimeScaleIndex;
 use crate::core::viewport::Viewport;
 use drawing::{ensure_next_drawing_id_at_least, Drawing};
 use persistence::{
-    drawing_tool_from_key, drawing_tool_to_key, DrawingSnapshot, SerializedAnchorPoint,
-    SerializedDrawing, SerializedDrawingPoint, DRAWINGS_SNAPSHOT_VERSION,
+    drawing_tool_from_key, drawing_tool_to_key, migrate_snapshot, DrawingSnapshot,
+    SerializedAnchorPoint, SerializedDrawing, SerializedDrawingPoint,
+    DRAWINGS_SNAPSHOT_VERSION,
 };
 use types::*;
 
@@ -592,8 +593,10 @@ impl DrawingManager {
 
     /// Replace current drawings from a JSON snapshot.
     pub fn replace_from_json(&mut self, json: &str) -> Result<(), String> {
-        let snapshot: DrawingSnapshot =
+        let payload: serde_json::Value =
             serde_json::from_str(json).map_err(|e| format!("Invalid drawing JSON: {e}"))?;
+        let snapshot = migrate_snapshot(&payload)
+            .map_err(|e| format!("Invalid drawing snapshot migration: {e}"))?;
         self.replace_from_snapshot(snapshot)
     }
 

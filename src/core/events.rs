@@ -306,6 +306,20 @@ impl Default for EventBus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::constants::PHYSICS_FRAME_MS;
+    use crate::core::data::Bar;
+    use crate::core::engine::ChartEngine;
+    use crate::core::interaction::InteractionHandler;
+    use crate::core::renderer::traits::RendererBackend;
+
+    fn sample_bars(count: usize) -> Vec<Bar> {
+        (0..count)
+            .map(|i| {
+                let base = 100.0 + i as f64 * 0.5;
+                Bar::new(1_000 + i as u64, base, base + 1.0, base - 1.0, base + 0.25, 10.0)
+            })
+            .collect()
+    }
 
     #[test]
     fn emit_and_drain() {
@@ -392,5 +406,47 @@ mod tests {
         assert!(bus.has_pending());
         bus.clear();
         assert!(!bus.has_pending());
+    }
+
+    #[test]
+    fn glide_tick_emits_visible_range_change_while_animation_is_active() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        engine.set_data(sample_bars(120)).unwrap();
+        engine.viewport.set_range(20.0, 80.0);
+        engine.event_bus.clear();
+
+        let mut interaction = InteractionHandler::new();
+        let visible_span = engine.viewport.end_bar - engine.viewport.start_bar;
+        interaction.start_horizontal_glide_by_bars(10.0, 800.0, visible_span);
+        interaction.last_move_time -= PHYSICS_FRAME_MS;
+
+        let before_start = engine.viewport.start_bar;
+        let before_end = engine.viewport.end_bar;
+        let still_gliding = interaction.update_gliding(
+            800.0,
+            400.0,
+            &mut engine.viewport,
+            &engine.bars,
+            engine.bars.len(),
+        );
+
+        assert!(still_gliding, "glide tick should still be active mid-animation");
+        assert!(
+            engine.emit_visible_range_change_if_changed(before_start, before_end),
+            "glide tick should emit when the visible bar range changes"
+        );
+
+        let events: Vec<_> = engine.event_bus.drain().collect();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ChartEvent::VisibleRangeChange { start_bar, end_bar } => {
+                assert!(*end_bar > *start_bar);
+                assert!(
+                    (start_bar - before_start).abs() > 1e-9
+                        || (end_bar - before_end).abs() > 1e-9
+                );
+            }
+            other => panic!("expected VisibleRangeChange, got {other:?}"),
+        }
     }
 }

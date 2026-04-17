@@ -1079,15 +1079,14 @@ mod tests {
     fn mk_bars(len: usize) -> BarArray {
         let mut out = Vec::with_capacity(len);
         for i in 0..len {
-            let base = 100.0 + i as f32 * 0.25;
+            let base = 100.0 + i as f64 * 0.25;
             out.push(Bar {
                 timestamp: i as u64 + 1,
                 open: base,
                 high: base + 1.0,
                 low: base - 1.0,
                 close: base + 0.2,
-                volume: 10.0 + i as f32,
-                _pad: 0.0,
+                volume: 10.0 + i as f64,
             });
         }
         let mut bars = BarArray::new();

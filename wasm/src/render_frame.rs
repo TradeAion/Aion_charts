@@ -76,8 +76,6 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
     let (pane_css_w_pre, pane_css_h_pre) = s.layout.pane_css_size();
     let before_start = s.engine.viewport.start_bar;
     let before_end = s.engine.viewport.end_bar;
-    let before_price_min = s.engine.viewport.price_min;
-    let before_price_max = s.engine.viewport.price_max;
 
     // Update main chart kinetic scrolling
     {
@@ -115,17 +113,8 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
         }
     }
 
-    if (before_start - s.engine.viewport.start_bar).abs() > 1e-9
-        || (before_end - s.engine.viewport.end_bar).abs() > 1e-9
-        || (before_price_min - s.engine.viewport.price_min).abs() > 1e-9
-        || (before_price_max - s.engine.viewport.price_max).abs() > 1e-9
-    {
-        let start_bar = s.engine.viewport.start_bar;
-        let end_bar = s.engine.viewport.end_bar;
-        s.engine
-            .event_bus
-            .emit(axiuscharts::ChartEvent::VisibleRangeChange { start_bar, end_bar });
-    }
+    s.engine
+        .emit_visible_range_change_if_changed(before_start, before_end);
 
     // 1. Provisional ticks from current pane size (for axis-width estimation).
     let mut pane_pw = s.engine.viewport.width as f64;

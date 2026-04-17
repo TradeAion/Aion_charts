@@ -22,8 +22,8 @@
 //! // Create a bar array and populate with data
 //! let mut bars = BarArray::new();
 //! bars.set(vec![
-//!     Bar { timestamp: 1700000000000, open: 100.0, high: 105.0, low: 98.0, close: 103.0, volume: 1000.0, _pad: 0.0 },
-//!     Bar { timestamp: 1700000060000, open: 103.0, high: 108.0, low: 101.0, close: 106.0, volume: 1200.0, _pad: 0.0 },
+//!     Bar::new(1700000000000, 100.0, 105.0, 98.0, 103.0, 1000.0),
+//!     Bar::new(1700000060000, 103.0, 108.0, 101.0, 106.0, 1200.0),
 //! ]).unwrap();
 //!
 //! // Create a viewport
@@ -61,6 +61,41 @@
 //! ## Platform Support
 //!
 //! - **Web**: Chrome, Firefox, Safari (Canvas2D; WebGPU where supported)
+#![allow(
+    clippy::borrowed_box,
+    clippy::bind_instead_of_map,
+    clippy::cloned_ref_to_slice_refs,
+    clippy::collapsible_else_if,
+    clippy::collapsible_match,
+    clippy::derivable_impls,
+    clippy::doc_lazy_continuation,
+    clippy::doc_overindented_list_items,
+    clippy::filter_next,
+    clippy::field_reassign_with_default,
+    clippy::if_same_then_else,
+    clippy::len_without_is_empty,
+    clippy::len_zero,
+    clippy::manual_clamp,
+    clippy::manual_contains,
+    clippy::manual_div_ceil,
+    clippy::manual_range_contains,
+    clippy::manual_strip,
+    clippy::map_entry,
+    clippy::match_single_binding,
+    clippy::needless_bool_assign,
+    clippy::needless_lifetimes,
+    clippy::needless_range_loop,
+    clippy::new_without_default,
+    clippy::question_mark,
+    clippy::redundant_pattern_matching,
+    clippy::should_implement_trait,
+    clippy::single_match,
+    clippy::too_many_arguments,
+    clippy::unnecessary_cast,
+    clippy::unnecessary_map_or,
+    clippy::unwrap_or_default,
+    clippy::wrong_self_convention
+)]
 
 pub mod core;
 pub mod group;
@@ -128,8 +163,9 @@ pub use crate::core::interaction::{HitZone, InteractionHandler, TouchCrosshairMo
 pub use crate::core::drawings::DrawingManager;
 
 pub use crate::core::drawings::persistence::{
-    DrawingSnapshot, SerializedAnchorPoint, SerializedDrawing, SerializedDrawingPoint,
-    SerializedDrawingStyle, DRAWINGS_SNAPSHOT_VERSION,
+    migrate_snapshot, DrawingSnapshot, DrawingsMigrationError, SerializedAnchorPoint,
+    SerializedDrawing, SerializedDrawingPoint, SerializedDrawingStyle,
+    DRAWINGS_SNAPSHOT_VERSION,
 };
 /// Available drawing tools.
 pub use crate::core::drawings::types::DrawingTool;

@@ -164,7 +164,7 @@ impl Drawing for FibonacciDrawing {
         );
         let left_x = (bx0.min(bx1)) as f32;
         let right_x = (bx0.max(bx1)) as f32;
-        let h_pad = (5.0 * h_pixel_ratio) as f32;
+        let h_inset = (5.0 * h_pixel_ratio) as f32;
 
         for &(level, label_text) in FIB_LEVELS {
             let price = self.level_price(level);
@@ -194,8 +194,8 @@ impl Drawing for FibonacciDrawing {
 
             // Label x position and alignment driven by self.label_align
             let label_x = match self.label_align {
-                TextAlign::Left => left_x + h_pad,
-                TextAlign::Right => right_x - h_pad,
+                TextAlign::Left => left_x + h_inset,
+                TextAlign::Right => right_x - h_inset,
                 TextAlign::Center => (left_x + right_x) * 0.5,
             };
 
