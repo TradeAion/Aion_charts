@@ -149,6 +149,14 @@ pub enum ChartEvent {
         group_id: Option<String>,
     },
 
+    /// User clicked on a clustered execution-mark arrow.
+    ExecutionClusterClick {
+        /// Leading mark ID for the cluster.
+        leader_id: String,
+        /// All member IDs collapsed into the cluster.
+        member_ids: Vec<String>,
+    },
+
     /// User hovered over an execution mark.
     ExecutionMarkHover {
         /// Unique ID of the execution mark, or None when leaving.
@@ -187,6 +195,7 @@ impl ChartEvent {
             Self::RendererFallback { .. } => "rendererFallback",
             Self::Error { .. } => "error",
             Self::ExecutionMarkClick { .. } => "executionMarkClick",
+            Self::ExecutionClusterClick { .. } => "executionClusterClick",
             Self::ExecutionMarkHover { .. } => "executionMarkHover",
         }
     }
@@ -206,6 +215,7 @@ impl ChartEvent {
         "rendererFallback",
         "error",
         "executionMarkClick",
+        "executionClusterClick",
         "executionMarkHover",
     ];
 }
@@ -388,11 +398,12 @@ mod tests {
 
     #[test]
     fn all_event_names_are_valid() {
-        assert_eq!(ChartEvent::ALL_EVENT_NAMES.len(), 14);
+        assert_eq!(ChartEvent::ALL_EVENT_NAMES.len(), 15);
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"crosshairMove"));
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"error"));
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"rendererFallback"));
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"executionMarkClick"));
+        assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"executionClusterClick"));
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"executionMarkHover"));
     }
 

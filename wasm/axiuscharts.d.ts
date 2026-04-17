@@ -282,6 +282,14 @@ export interface ExecutionMarkClickEvent extends BaseChartEvent {
   groupId: string | null;
 }
 
+export interface ExecutionClusterClickEvent extends BaseChartEvent {
+  type: 'executionClusterClick';
+  /** Leading mark ID for the rendered cluster. */
+  leaderId: string;
+  /** All execution mark IDs collapsed into the clicked cluster. */
+  memberIds: string[];
+}
+
 export interface ExecutionMarkHoverEvent extends BaseChartEvent {
   type: 'executionMarkHover';
   /** Unique ID of the execution mark, or null when leaving. */
@@ -314,6 +322,7 @@ export interface ChartEventMap {
   drawingCreated:       DrawingCreatedEvent;
   drawingSelected:      DrawingSelectedEvent;
   error:                ErrorEvent;
+  executionClusterClick: ExecutionClusterClickEvent;
   executionMarkClick:   ExecutionMarkClickEvent;
   executionMarkHover:   ExecutionMarkHoverEvent;
 }
@@ -1358,20 +1367,68 @@ export declare class AxiusCharts {
     realized_pnl: number,
   ): void;
 
+  /** Clear all execution marks. */
+  clear_execution_marks(): void;
+
+  /** Clear the selected execution mark. */
+  clear_selected_execution_mark(): void;
+
+  /** Number of execution marks. */
+  execution_mark_count(): number;
+
+  /**
+   * Expand the currently rendered cluster for a given leader ID.
+   *
+   * @example
+   * ```ts
+   * const members = chart.expand_execution_cluster('exec-1');
+   * ```
+   */
+  expand_execution_cluster(leader_id: string): string[];
+
+  /** Get the chart-wide execution label mode. */
+  get_execution_label_mode(): 'side' | 'role' | 'side_and_role' | string;
+
+  /** Whether execution mark text labels are currently rendered. */
+  get_execution_mark_text_visible(): boolean;
+
+  /**
+   * Serialize all execution marks to JSON.
+   *
+   * Returns the wrapped snapshot shape:
+   * `{ "version": 1, "marks": [...] }`
+   */
+  get_execution_marks_json(): string;
+
+  /** Whether realized P&L text is currently rendered for eligible execution marks. */
+  get_execution_pnl_visible(): boolean;
+
+  /** Get the currently selected execution mark ID, or `null` if none. */
+  get_selected_execution_mark(): string | null;
+
   /**
    * Remove an execution mark by ID.
    * @returns `true` if found and removed.
    */
   remove_execution_mark(id: string): boolean;
 
-  /** Clear all execution marks. */
-  clear_execution_marks(): void;
+  /** Set the CSS-pixel clustering threshold for dense execution marks. */
+  set_execution_cluster_threshold_px(threshold_px: number): void;
+
+  /**
+   * Set the chart-wide execution label mode.
+   *
+   * Accepted values: `"side"`, `"role"`, `"side_and_role"` (case-insensitive).
+   *
+   * @example
+   * ```ts
+   * chart.set_execution_label_mode('side_and_role');
+   * ```
+   */
+  set_execution_label_mode(mode: string): void;
 
   /** Show or hide execution mark text labels. */
   set_execution_mark_text_visible(visible: boolean): void;
-
-  /** Whether execution mark text labels are currently rendered. */
-  get_execution_mark_text_visible(): boolean;
 
   /**
    * Set multiple execution marks at once (replaces existing).
@@ -1397,40 +1454,48 @@ export declare class AxiusCharts {
   /**
    * Set execution marks from a JSON string.
    *
-   * Expected format:
+   * Accepts either the wrapped snapshot format or the legacy bare-array format.
+   *
+   * Preferred wrapped format:
    * ```json
-   * [
-   *   {
-   *     "id": "exec-1",
-   *     "timestamp_ms": 1234567890000,
-   *     "price": 100.5,
-   *     "quantity": 1.0,
-   *     "side": "buy",
-   *     "role": "entry",
-   *     "order_type": "market",
-   *     "label": "Entry Long",
-   *     "group_id": "trade-1",
-   *     "color": [0.2, 0.8, 0.4, 1.0],
-   *     "realized_pnl": 0.0
-   *   }
-   * ]
+   * {
+   *   "version": 1,
+   *   "marks": [
+   *     {
+   *       "id": "exec-1",
+   *       "timestamp_ms": 1234567890000,
+   *       "price": 100.5,
+   *       "quantity": 1.0,
+   *       "side": "buy",
+   *       "role": "entry",
+   *       "order_type": "market",
+   *       "label": "Entry Long",
+   *       "group_id": "trade-1",
+   *       "color": [0.2, 0.8, 0.4, 1.0],
+   *       "realized_pnl": 0.0
+   *     }
+   *   ]
+   * }
    * ```
    *
    * @example
    * ```ts
-   * chart.set_execution_marks_json(JSON.stringify([
-   *   { id: 'e1', timestamp_ms: Date.now(), price: 45000, quantity: 0.1, side: 'buy', role: 'entry' },
-   *   { id: 'e2', timestamp_ms: Date.now() + 60000, price: 46000, quantity: 0.1, side: 'sell', role: 'exit' },
-   * ]));
+   * chart.set_execution_marks_json(JSON.stringify({
+   *   version: 1,
+   *   marks: [
+   *     { id: 'e1', timestamp_ms: Date.now(), price: 45000, quantity: 0.1, side: 'buy', role: 'entry' },
+   *     { id: 'e2', timestamp_ms: Date.now() + 60000, price: 46000, quantity: 0.1, side: 'sell', role: 'exit', realized_pnl: 150.0 },
+   *   ],
+   * }));
    * ```
    */
   set_execution_marks_json(json: string): void;
 
-  /** Number of execution marks. */
-  execution_mark_count(): number;
+  /** Show or hide realized P&L text for eligible execution marks. */
+  set_execution_pnl_visible(visible: boolean): void;
 
-  /** Serialize all execution marks to JSON. */
-  get_execution_marks_json(): string;
+  /** Set the selected execution mark ID (shows selected-trade locators). */
+  set_selected_execution_mark(mark_id: string | null): void;
 
   /**
    * Convert a timestamp (milliseconds) to a bar index.

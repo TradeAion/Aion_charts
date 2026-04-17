@@ -8,6 +8,10 @@
 //! - Price auto-fit calculations
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use axiuscharts::{
+    cluster_execution_mark_renderables, hit_test_execution_mark_hit_areas, ExecutionMarkHitArea,
+    ExecutionRenderableMark, ExecutionRole, ExecutionSide,
+};
 use axiuscharts::core::data::{Bar, BarArray};
 use axiuscharts::core::viewport::Viewport;
 
@@ -41,6 +45,54 @@ fn generate_single_bar(idx: usize) -> Bar {
         base_price + 0.5,
         1000.0 + (idx as f64 * 10.0),
     )
+}
+
+fn generate_execution_renderables(count: usize, same_side: bool) -> Vec<ExecutionRenderableMark> {
+    (0..count)
+        .map(|i| {
+            let x_css = 100.0 + ((i % 20) as f64 * 2.0);
+            let price = 100.0 + (i as f64 * 0.01);
+            let side = if same_side || i % 2 == 0 {
+                ExecutionSide::Buy
+            } else {
+                ExecutionSide::Sell
+            };
+            ExecutionRenderableMark {
+                id: format!("exec-{i}"),
+                timestamp_ms: 1_700_000_000_000 + i as u64,
+                price,
+                quantity: 1.0 + (i % 4) as f64,
+                side,
+                role: if i % 3 == 0 {
+                    ExecutionRole::Entry
+                } else {
+                    ExecutionRole::Exit
+                },
+                label: None,
+                realized_pnl: if i % 3 == 0 { None } else { Some(10.0) },
+                color: [0.2, 0.4, 0.8, 1.0],
+                group_id: Some("trade-1".to_string()),
+                x_css,
+                arrow_y_css: 40.0,
+                price_y_css: 120.0 + (i as f64 * 0.25),
+            }
+        })
+        .collect()
+}
+
+fn generate_execution_hit_areas(count: usize) -> Vec<ExecutionMarkHitArea> {
+    (0..count)
+        .map(|i| {
+            let id = format!("exec-{i}");
+            ExecutionMarkHitArea::new(
+                id.clone(),
+                vec![id],
+                100.0 + ((i % 32) as f64 * 8.0),
+                80.0 + ((i / 32) as f64 * 6.0),
+                10.0,
+            )
+        })
+        .collect()
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -397,6 +449,47 @@ fn bench_viewport_pan(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_execution_mark_clustering(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ExecutionMarks::cluster");
+
+    for size in [20usize, 100, 1_000].iter() {
+        let renderables = generate_execution_renderables(*size, true);
+        group.throughput(Throughput::Elements(*size as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _| {
+            b.iter(|| {
+                cluster_execution_mark_renderables(
+                    black_box(&renderables),
+                    black_box(14.0),
+                    black_box(14.0),
+                )
+            });
+        });
+    }
+
+    group.finish();
+}
+
+fn bench_execution_mark_hit_test(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ExecutionMarks::hit_test");
+
+    for size in [1_000usize, 10_000, 50_000, 100_000].iter() {
+        let hit_areas = generate_execution_hit_areas(*size);
+        group.throughput(Throughput::Elements(*size as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _| {
+            b.iter(|| {
+                hit_test_execution_mark_hit_areas(
+                    black_box(&hit_areas),
+                    black_box(132.0),
+                    black_box(140.0),
+                )
+                .map(|hit_area| hit_area.id.as_str())
+            });
+        });
+    }
+
+    group.finish();
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Criterion Groups
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -418,4 +511,10 @@ criterion_group!(
     bench_viewport_pan,
 );
 
-criterion_main!(bar_array_benches, viewport_benches);
+criterion_group!(
+    execution_mark_benches,
+    bench_execution_mark_clustering,
+    bench_execution_mark_hit_test,
+);
+
+criterion_main!(bar_array_benches, viewport_benches, execution_mark_benches);

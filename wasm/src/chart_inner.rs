@@ -12,8 +12,9 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use axiuscharts::{
-    Bar, ChartEngine, ExecutionMarkHitArea, HitZone, InteractionHandler, MainChartType,
-    OverlayRenderer, PriceAxisRenderer, PriceLineHit, PriceLineId, TimeAxisRenderer,
+    hit_test_execution_mark_hit_areas, Bar, ChartEngine, ExecutionMarkHitArea, HitZone,
+    InteractionHandler, MainChartType, OverlayRenderer, PriceAxisRenderer, PriceLineHit,
+    PriceLineId, TimeAxisRenderer,
 };
 
 use crate::canvas_manager::WidgetLayout;
@@ -246,12 +247,13 @@ impl ReplayEdgeBehavior {
 /// Helper methods that destructure `self` to satisfy the borrow checker.
 /// Each method borrows `interaction` and `engine` fields separately.
 impl ChartInner {
+    fn execution_mark_hit_area_at(&self, x_css: f64, y_css: f64) -> Option<ExecutionMarkHitArea> {
+        hit_test_execution_mark_hit_areas(&self.execution_mark_hit_areas, x_css, y_css).cloned()
+    }
+
     fn hovered_execution_mark_id_at(&self, x_css: f64, y_css: f64) -> Option<String> {
-        self.execution_mark_hit_areas
-            .iter()
-            .rev()
-            .find(|hit| hit.contains(x_css, y_css))
-            .map(|hit| hit.id.clone())
+        self.execution_mark_hit_area_at(x_css, y_css)
+            .map(|hit_area| hit_area.id)
     }
 
     fn emit_execution_mark_hover_event(&mut self, mark_id: Option<&str>) {
@@ -313,6 +315,15 @@ impl ChartInner {
                 role: mark.role.as_str().to_string(),
                 quantity: mark.quantity,
                 group_id: mark.group_id.clone(),
+            });
+    }
+
+    fn emit_execution_cluster_click_event(&mut self, leader_id: &str, member_ids: &[String]) {
+        self.engine
+            .event_bus
+            .emit(axiuscharts::ChartEvent::ExecutionClusterClick {
+                leader_id: leader_id.to_string(),
+                member_ids: member_ids.to_vec(),
             });
     }
 
@@ -1245,13 +1256,16 @@ impl ChartInner {
                 price,
             });
 
-            if let Some(mark_id) = self.hovered_execution_mark_id_at(click_x, click_y) {
-                self.emit_execution_mark_click_event(&mark_id);
+            if let Some(hit_area) = self.execution_mark_hit_area_at(click_x, click_y) {
+                self.emit_execution_mark_click_event(&hit_area.id);
+                if hit_area.is_cluster() {
+                    self.emit_execution_cluster_click_event(&hit_area.id, &hit_area.member_ids);
+                }
                 // Toggle selection - if clicking the same mark, deselect it
-                if self.selected_execution_mark_id.as_deref() == Some(&mark_id) {
+                if self.selected_execution_mark_id.as_deref() == Some(hit_area.id.as_str()) {
                     self.selected_execution_mark_id = None;
                 } else {
-                    self.selected_execution_mark_id = Some(mark_id);
+                    self.selected_execution_mark_id = Some(hit_area.id);
                 }
             } else {
                 // Clicked elsewhere, deselect any selected execution mark

@@ -59,6 +59,14 @@ wasm-pack build wasm --target web --release                    # build WASM pack
 - [x] Add a structural backend parity harness behind `--features parity-tests`
 - [x] Restructure repo documentation around architecture, price domain, events, testing, persistence, and performance
 
+## Execution Marks Hardening (2026-04-17)
+
+- [x] Add role-aware execution label modes with chart-level configuration
+- [x] Render realized P&L for eligible execution marks and expose a chart-level visibility toggle
+- [x] Cluster dense execution marks at render time and emit `executionClusterClick`
+- [x] Version execution-mark JSON snapshots and keep legacy bare-array import compatibility
+- [ ] Implement the execution-mark hit-test Worker offload plan described in `docs/execution-marks-worker-plan.md`
+
 ---
 
 ## Phase Completion Summary

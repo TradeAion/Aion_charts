@@ -18,7 +18,7 @@ use crate::core::data::{Bar, BarArray};
 use crate::core::drawings::types::DrawingGeometry;
 use crate::core::drawings::DrawingManager;
 use crate::core::events::{ChartEvent, EventBus};
-use crate::core::execution_marks::ExecutionMarkManager;
+use crate::core::execution_marks::{ExecutionLabelMode, ExecutionMarkManager};
 use crate::core::footprint::{FootprintBar, FootprintData, FootprintDisplayMode, FootprintOptions};
 use crate::core::indicators::IndicatorManager;
 use crate::core::markers::MarkerManager;
@@ -223,6 +223,12 @@ pub struct ChartEngine {
     pub event_bus: EventBus,
     /// Whether execution mark text labels are rendered.
     execution_mark_text_visible: bool,
+    /// Chart-wide execution label rendering mode.
+    execution_label_mode: ExecutionLabelMode,
+    /// Whether realized P&L lines are rendered for eligible execution marks.
+    execution_pnl_visible: bool,
+    /// CSS-pixel clustering threshold for dense execution marks.
+    execution_cluster_threshold_px: f64,
 }
 
 impl ChartEngine {
@@ -385,6 +391,9 @@ impl ChartEngine {
             hidden_volume_default_margins_applied: false,
             event_bus: EventBus::new(),
             execution_mark_text_visible: true,
+            execution_label_mode: ExecutionLabelMode::SideOnly,
+            execution_pnl_visible: true,
+            execution_cluster_threshold_px: 14.0,
         }
     }
 
@@ -465,6 +474,30 @@ impl ChartEngine {
 
     pub fn execution_mark_text_visible(&self) -> bool {
         self.execution_mark_text_visible
+    }
+
+    pub fn set_execution_label_mode(&mut self, mode: ExecutionLabelMode) {
+        self.execution_label_mode = mode;
+    }
+
+    pub fn execution_label_mode(&self) -> ExecutionLabelMode {
+        self.execution_label_mode
+    }
+
+    pub fn set_execution_pnl_visible(&mut self, visible: bool) {
+        self.execution_pnl_visible = visible;
+    }
+
+    pub fn execution_pnl_visible(&self) -> bool {
+        self.execution_pnl_visible
+    }
+
+    pub fn set_execution_cluster_threshold_px(&mut self, threshold_px: f64) {
+        self.execution_cluster_threshold_px = threshold_px.max(0.0);
+    }
+
+    pub fn execution_cluster_threshold_px(&self) -> f64 {
+        self.execution_cluster_threshold_px
     }
 
     pub fn set_price_scale_margins(&mut self, top: f64, bottom: f64) {

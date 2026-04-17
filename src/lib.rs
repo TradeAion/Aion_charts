@@ -235,13 +235,14 @@ pub use crate::core::markers::{
 
 /// Execution marks (trade executions).
 pub use crate::core::execution_marks::{
-    bar_index_to_timestamp, timestamp_to_bar_index, ExecutionMark, ExecutionMarkManager,
-    ExecutionRole, ExecutionSide,
+    bar_index_to_timestamp, build_execution_text_lines, build_selected_trade_locator_plan,
+    cluster_execution_mark_renderables, execution_marks_snapshot, format_execution_label,
+    format_execution_pnl, hit_test_execution_mark_hit_areas, migrate_execution_marks_snapshot,
+    parse_execution_marks_snapshot_value, timestamp_to_bar_index, ExecutionCluster,
+    ExecutionLabelMode, ExecutionLocatorPlan, ExecutionMark, ExecutionMarkHitArea,
+    ExecutionMarkManager, ExecutionMarksSnapshot, ExecutionRenderableMark, ExecutionRole,
+    ExecutionSide, SerializedExecutionMark, EXECUTION_MARKS_SNAPSHOT_VERSION,
 };
-
-/// Screen-space hit areas for execution mark interaction.
-#[cfg(target_arch = "wasm32")]
-pub use crate::core::renderer::overlay::ExecutionMarkHitArea;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Re-exports: Event System

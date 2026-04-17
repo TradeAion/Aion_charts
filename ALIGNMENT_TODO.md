@@ -27,6 +27,7 @@
 - [x] Build one shared per-frame `TimeScaleIndex` and reuse it across renderer, overlay, and execution-mark timestamp lookups instead of rebuilding ad hoc timestamp vectors.
 - [x] Promote the shared `TimeScaleIndex` into the main time-axis contract so main-series geometry, markers, crosshair snapping, synced crosshair projection, execution marks, and subpane indicator lines all resolve through merged logical slots instead of raw bar indices.
 - [x] Keep public `barIndex` APIs anchored to real main bars while letting internal rendering/event timestamp paths derive overlay-only logical positions from the merged time scale.
+- [x] Keep execution-mark rendering role-aware, cluster-aware, and snapshot-versioned without regressing the shared time-scale contract or reintroducing grouped-fill connector lines.
 - [x] Run a browser smoke pass covering page load, pointer drag, wheel zoom, drawing gesture, and viewport resize on the demo app without new console/runtime errors.
 - [x] Extend the browser smoke pass to cover merged-slot-sensitive behavior: wheel zoom, pan, and subpane creation on the demo app without new console/runtime errors.
 - [x] Re-audit the remaining docs for stale snake_case public JS event payload names and align them to camelCase.

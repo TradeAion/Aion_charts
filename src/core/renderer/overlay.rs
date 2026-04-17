@@ -7,11 +7,18 @@
 
 #![cfg(target_arch = "wasm32")]
 
+use std::collections::HashMap;
+
 use crate::core::chart_type::MainChartType;
 use crate::core::data::BarArray;
 use crate::core::drawings::types::DrawingGeometry;
+use crate::core::execution_marks::{
+    build_execution_text_lines, build_selected_trade_locator_plan,
+    cluster_execution_mark_renderables, ExecutionLabelMode, ExecutionMarkHitArea,
+    ExecutionRenderableMark, ExecutionSide,
+};
 use crate::core::footprint::{FootprintData, FootprintOptions};
-use crate::core::formatters::{format_price, format_qty, format_volume};
+use crate::core::formatters::{format_price, format_volume};
 use crate::core::indicators::render::types::DrawInstruction;
 use crate::core::markers::{MarkerManager, MarkerPosition, MarkerShape};
 use crate::core::price_line::PriceLineManager;
@@ -43,27 +50,6 @@ pub struct OverlayRenderer {
     dpr: f64,
     /// Shared text width cache for legend measurements.
     text_cache: TextWidthCache,
-}
-
-/// Screen-space hit area for a rendered execution mark.
-///
-/// The WASM host stores these after each frame so pointer handlers can emit
-/// execution mark hover/click events without re-projecting every mark on move.
-#[derive(Debug, Clone)]
-pub struct ExecutionMarkHitArea {
-    pub id: String,
-    pub x_css: f64,
-    pub y_css: f64,
-    pub radius_css: f64,
-}
-
-impl ExecutionMarkHitArea {
-    pub fn contains(&self, x_css: f64, y_css: f64) -> bool {
-        let dx = x_css - self.x_css;
-        let dy = y_css - self.y_css;
-        let radius = self.radius_css.max(1.0);
-        (dx * dx) + (dy * dy) <= radius * radius
-    }
 }
 
 impl OverlayRenderer {
@@ -1149,13 +1135,14 @@ impl OverlayRenderer {
         viewport: &Viewport,
         style: &ChartStyle,
         show_text: bool,
+        label_mode: ExecutionLabelMode,
+        pnl_visible: bool,
+        cluster_threshold_px: f64,
         hovered_execution_mark_id: Option<&str>,
         selected_execution_mark_id: Option<&str>,
         pane_css_w: f64,
         pane_css_h: f64,
     ) -> Vec<ExecutionMarkHitArea> {
-        use crate::core::execution_marks::ExecutionSide;
-
         let dpr = self.dpr;
         let pane_pw = pane_css_w * dpr;
         let pane_ph = pane_css_h * dpr;
@@ -1176,22 +1163,12 @@ impl OverlayRenderer {
         let buy_color: [f32; 4] = [41.0 / 255.0, 98.0 / 255.0, 1.0, 1.0]; // #2962FF
         let sell_color: [f32; 4] = [1.0, 74.0 / 255.0, 104.0 / 255.0, 1.0]; // #FF4A68
 
-        struct ExecutionMarkDraw<'a> {
-            mark: &'a crate::core::execution_marks::ExecutionMark,
-            x_phys: f64,
-            arrow_y_phys: f64, // Primary arrow position near candle high/low
-            price_y_phys: f64, // Exact execution price for hover locator
-            color: [f32; 4],
-            size: f64,
-            hovered: bool,
-        }
-
-        let mut to_draw: Vec<ExecutionMarkDraw> = Vec::new();
-        let mut hit_areas: Vec<ExecutionMarkHitArea> = Vec::new();
-
         // Arrow size
         let arrow_size = 9.0 * dpr;
         let arrow_gap_css = 8.0;
+        let base_hit_radius_css = arrow_size / dpr + 5.0;
+
+        let mut renderables: Vec<ExecutionRenderableMark> = Vec::new();
 
         for mark in visible_marks {
             let Some(time_index) = mark.resolved_time_index else {
@@ -1243,25 +1220,34 @@ impl OverlayRenderer {
                 ExecutionSide::Buy => buy_color,
                 ExecutionSide::Sell => sell_color,
             });
-
-            // Record hit area for interaction
-            hit_areas.push(ExecutionMarkHitArea {
+            renderables.push(ExecutionRenderableMark {
                 id: mark.id.clone(),
-                x_css,
-                y_css: arrow_y_css,
-                radius_css: arrow_size / dpr + 5.0,
-            });
-
-            to_draw.push(ExecutionMarkDraw {
-                mark,
-                x_phys,
-                arrow_y_phys,
-                price_y_phys,
+                timestamp_ms: mark.timestamp_ms,
+                price: mark.price,
+                quantity: mark.quantity,
+                side: mark.side,
+                role: mark.role,
+                label: mark.label.clone(),
+                realized_pnl: mark.realized_pnl,
                 color,
-                size: arrow_size,
-                hovered: hovered_execution_mark_id == Some(mark.id.as_str()),
+                group_id: mark.group_id.clone(),
+                x_css,
+                arrow_y_css,
+                price_y_css: price_y_phys / dpr,
             });
         }
+        if renderables.is_empty() {
+            return Vec::new();
+        }
+
+        let renderables_by_id: HashMap<&str, &ExecutionRenderableMark> = renderables
+            .iter()
+            .map(|renderable| (renderable.id.as_str(), renderable))
+            .collect();
+        let clusters =
+            cluster_execution_mark_renderables(&renderables, cluster_threshold_px, base_hit_radius_css);
+        let hit_areas: Vec<ExecutionMarkHitArea> =
+            clusters.iter().map(|cluster| cluster.hit_area.clone()).collect();
 
         // Calculate price step for formatting
         let price_range = (viewport.price_max - viewport.price_min).abs();
@@ -1288,72 +1274,114 @@ impl OverlayRenderer {
         // ═══════════════════════════════════════════════════════════════════
         // Draw each execution mark
         // ═══════════════════════════════════════════════════════════════════
-        for m in &to_draw {
-            let color_str = rgba(&m.color);
+        for cluster in &clusters {
+            let Some(leader) = renderables_by_id.get(cluster.leader_id.as_str()) else {
+                continue;
+            };
+            let is_cluster = cluster.is_cluster();
+            let color_str = rgba(&leader.color);
+            let x_phys = cluster.x_css * dpr;
+            let arrow_y_css = if is_cluster {
+                viewport.price_to_css_y(cluster.vwap_price, pane_css_h)
+            } else {
+                leader.arrow_y_css
+            };
+            let arrow_y_phys = arrow_y_css * dpr;
 
             // Primary execution marker: true arrow near the candle.
             self.draw_execution_arrow(
-                m.x_phys,
-                m.arrow_y_phys,
-                m.size,
-                matches!(m.mark.side, ExecutionSide::Buy),
+                x_phys,
+                arrow_y_phys,
+                arrow_size,
+                matches!(leader.side, ExecutionSide::Buy),
                 &color_str,
             );
+            if is_cluster {
+                self.draw_execution_cluster_badge(
+                    x_phys,
+                    arrow_y_phys,
+                    arrow_size,
+                    cluster.member_ids.len(),
+                    leader.color,
+                );
+            }
 
             // Hover should reveal only the precise execution location. Once a
             // mark is selected, the selected-trade locator pass owns the
             // chevron rendering for that trade group.
-            if m.hovered && selected_execution_mark_id.is_none() {
-                self.draw_execution_price_chevron(
-                    m.x_phys,
-                    m.price_y_phys,
-                    15.0 * dpr,
-                    matches!(m.mark.side, ExecutionSide::Buy),
-                    &color_str,
-                );
+            let hovered_cluster = hovered_execution_mark_id.is_some_and(|hovered_id| {
+                cluster
+                    .member_ids
+                    .iter()
+                    .any(|member_id| member_id == hovered_id)
+            });
+            if hovered_cluster && selected_execution_mark_id.is_none() {
+                if is_cluster {
+                    for member in cluster.member_ids.iter().filter_map(|member_id| {
+                        renderables_by_id.get(member_id.as_str()).copied()
+                    }) {
+                        self.draw_execution_price_chevron(
+                            member.x_css * dpr,
+                            member.price_y_css * dpr,
+                            15.0 * dpr,
+                            matches!(member.side, ExecutionSide::Buy),
+                            &rgba(&member.color),
+                        );
+                    }
+                } else {
+                    self.draw_execution_price_chevron(
+                        leader.x_css * dpr,
+                        leader.price_y_css * dpr,
+                        15.0 * dpr,
+                        matches!(leader.side, ExecutionSide::Buy),
+                        &color_str,
+                    );
+                }
             }
 
-            if show_text {
-                // Keep the rendered label side-only so the chart stays visually
-                // unambiguous even when richer execution-role metadata exists.
-                let display_label = match m.mark.side {
-                    ExecutionSide::Buy => "BUY",
-                    ExecutionSide::Sell => "SELL",
+            if show_text && !is_cluster {
+                let mark = execution_marks.get(&leader.id);
+                let Some(mark) = mark else {
+                    continue;
                 };
+                let text_lines =
+                    build_execution_text_lines(mark, label_mode, pnl_visible, price_step);
+                let display_label = &text_lines[0];
+                let qty_text = &text_lines[1];
+                let pnl_line = text_lines.get(2).cloned();
 
-                // Format: "Label\nQty @ Price"
-                let price_text = format_price(m.mark.price, price_step);
-                let qty_text = if m.mark.quantity > 0.0 {
-                    format!("{} @ {}", format_qty(m.mark.quantity), price_text)
-                } else {
-                    format!("@ {}", price_text)
-                };
-
-                // Draw text labels (no background, just text like in reference)
                 self.ctx.set_font(&font);
-                self.ctx.set_fill_style_str(&execution_text_color);
                 self.ctx.set_text_align("center");
-
                 let line_height = font_size * 1.2;
 
-                match m.mark.side {
+                match leader.side {
                     ExecutionSide::Buy => {
-                        // Text below the arrow
                         self.ctx.set_text_baseline("top");
-                        let text_y = m.arrow_y_phys + (m.size * 2.35) + 3.0 * dpr;
-                        let _ = self.ctx.fill_text(display_label, m.x_phys, text_y);
-                        let _ = self
-                            .ctx
-                            .fill_text(&qty_text, m.x_phys, text_y + line_height);
+                        let text_y = arrow_y_phys + (arrow_size * 2.35) + 3.0 * dpr;
+                        self.ctx.set_fill_style_str(&execution_text_color);
+                        let _ = self.ctx.fill_text(display_label, x_phys, text_y);
+                        let _ = self.ctx.fill_text(qty_text, x_phys, text_y + line_height);
+                        if let Some(pnl_line) = pnl_line {
+                            self.ctx
+                                .set_fill_style_str(&self.execution_pnl_text_color(mark, style));
+                            let _ = self
+                                .ctx
+                                .fill_text(&pnl_line, x_phys, text_y + (line_height * 2.0));
+                        }
                     }
                     ExecutionSide::Sell => {
-                        // Text above the arrow
                         self.ctx.set_text_baseline("bottom");
-                        let text_y = m.arrow_y_phys - (m.size * 2.35) - 3.0 * dpr;
-                        let _ = self.ctx.fill_text(&qty_text, m.x_phys, text_y);
-                        let _ = self
-                            .ctx
-                            .fill_text(display_label, m.x_phys, text_y - line_height);
+                        let text_y = arrow_y_phys - (arrow_size * 2.35) - 3.0 * dpr;
+                        if let Some(pnl_line) = pnl_line {
+                            self.ctx
+                                .set_fill_style_str(&self.execution_pnl_text_color(mark, style));
+                            let _ = self
+                                .ctx
+                                .fill_text(&pnl_line, x_phys, text_y - (line_height * 2.0));
+                        }
+                        self.ctx.set_fill_style_str(&execution_text_color);
+                        let _ = self.ctx.fill_text(qty_text, x_phys, text_y);
+                        let _ = self.ctx.fill_text(display_label, x_phys, text_y - line_height);
                     }
                 }
             }
@@ -1372,91 +1400,33 @@ impl OverlayRenderer {
         pane_css_w: f64,
         pane_css_h: f64,
     ) {
-        use crate::core::execution_marks::ExecutionRole;
-
-        let Some(selected_id) = selected_mark_id else {
-            return;
-        };
-
-        let Some(selected_mark) = execution_marks.get(selected_id) else {
-            return;
-        };
-
-        // Get all marks in the same group
-        let Some(ref group_id) = selected_mark.group_id else {
-            return;
-        };
-
-        let group_marks = execution_marks.by_group(group_id);
-        if group_marks.len() < 2 {
+        let plan = build_selected_trade_locator_plan(execution_marks, selected_mark_id);
+        if plan.chevrons.is_empty() {
             return;
         }
 
-        // Find entry and exit marks
-        let entry_mark = group_marks.iter().find(|m| m.role == ExecutionRole::Entry);
-        let exit_mark = group_marks.iter().find(|m| m.role == ExecutionRole::Exit);
-
-        let (entry, exit) = match (entry_mark, exit_mark) {
-            (Some(e), Some(x)) => (e, x),
-            _ => return,
-        };
-
-        // Both marks need resolved bar indices
-        let (Some(entry_time_index), Some(exit_time_index)) =
-            (entry.resolved_time_index, exit.resolved_time_index)
-        else {
-            return;
-        };
-
         let dpr = self.dpr;
-
-        // Calculate positions at the execution prices
         let pane_pw = pane_css_w * dpr;
-        let entry_x = bar_to_x(entry_time_index + 0.5, viewport, pane_pw);
-        let entry_y = viewport.price_to_css_y(entry.price, pane_css_h) * dpr;
-
-        let exit_x = bar_to_x(exit_time_index + 0.5, viewport, pane_pw);
-        let exit_y = viewport.price_to_css_y(exit.price, pane_css_h) * dpr;
-
-        // Colors for entry/exit markers match the execution palette unless overridden.
         let buy_color = [41.0 / 255.0, 98.0 / 255.0, 1.0, 1.0];
         let sell_color = [1.0, 74.0 / 255.0, 104.0 / 255.0, 1.0];
-        let entry_color = entry.color.unwrap_or(match entry.side {
-            crate::core::execution_marks::ExecutionSide::Buy => buy_color,
-            crate::core::execution_marks::ExecutionSide::Sell => sell_color,
-        });
-        let exit_color = exit.color.unwrap_or(match exit.side {
-            crate::core::execution_marks::ExecutionSide::Buy => buy_color,
-            crate::core::execution_marks::ExecutionSide::Sell => sell_color,
-        });
-
-        // Selected-trade line marker size
         let chevron_size = 13.0 * dpr;
 
         self.ctx.save();
-
-        // ═══════════════════════════════════════════════════════════════════
-        // Draw entry marker at the exact execution price.
-        // ═══════════════════════════════════════════════════════════════════
-        self.draw_execution_price_chevron(
-            entry_x,
-            entry_y,
-            chevron_size,
-            matches!(entry.side, crate::core::execution_marks::ExecutionSide::Buy),
-            &rgba(&entry_color),
-        );
-
-        // ═══════════════════════════════════════════════════════════════════
-        // Draw exit marker at the exact execution price.
-        // ═══════════════════════════════════════════════════════════════════
-        self.draw_execution_price_chevron(
-            exit_x,
-            exit_y,
-            chevron_size,
-            matches!(exit.side, crate::core::execution_marks::ExecutionSide::Buy),
-            &rgba(&exit_color),
-        );
-
+        for chevron in plan.chevrons {
+            let x = bar_to_x(chevron.time_index + 0.5, viewport, pane_pw);
+            let y = viewport.price_to_css_y(chevron.price, pane_css_h) * dpr;
+            let color = chevron.color.unwrap_or(match chevron.side {
+                ExecutionSide::Buy => buy_color,
+                ExecutionSide::Sell => sell_color,
+            });
+            self.draw_execution_price_chevron(
+                x,
+                y,
+                chevron_size,
+                matches!(chevron.side, ExecutionSide::Buy),
+                &rgba(&color),
+            );
+        }
         self.ctx.restore();
     }
 
@@ -1559,6 +1529,85 @@ impl OverlayRenderer {
         self.ctx.stroke();
 
         self.ctx.restore();
+    }
+
+    fn draw_execution_cluster_badge(
+        &self,
+        x: f64,
+        y: f64,
+        arrow_size: f64,
+        count: usize,
+        arrow_color: [f32; 4],
+    ) {
+        let text = format!("×{}", count);
+        let font_size = (8.5 * self.dpr).max(7.0);
+        let font = format!("{}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", font_size);
+        self.ctx.save();
+        self.ctx.set_font(&font);
+        self.ctx.set_text_align("center");
+        self.ctx.set_text_baseline("middle");
+
+        let text_width = self
+            .ctx
+            .measure_text(&text)
+            .ok()
+            .map(|metrics| metrics.width())
+            .unwrap_or(font_size * 2.0);
+        let padding_x = 5.0 * self.dpr;
+        let padding_y = 3.0 * self.dpr;
+        let badge_w = text_width + padding_x * 2.0;
+        let badge_h = font_size + padding_y * 2.0;
+        let radius = (badge_h * 0.5).min(8.0 * self.dpr);
+        let badge_x = x + arrow_size * 0.95;
+        let badge_y = y - arrow_size * 0.95;
+        let left = badge_x - badge_w * 0.5;
+        let top = badge_y - badge_h * 0.5;
+
+        self.trace_rounded_rect(left, top, badge_w, badge_h, radius);
+        self.ctx.set_fill_style_str(&rgba(&arrow_color));
+        self.ctx.fill();
+
+        self.trace_rounded_rect(left, top, badge_w, badge_h, radius);
+        self.ctx
+            .set_stroke_style_str("rgba(9, 12, 18, 0.42)");
+        self.ctx
+            .set_line_width((0.22 * self.dpr).clamp(0.2, 0.38));
+        self.ctx.stroke();
+
+        let text_color = contrast_text_color(arrow_color);
+        self.ctx.set_fill_style_str(&rgba(&text_color));
+        let _ = self.ctx.fill_text(&text, badge_x, badge_y);
+        self.ctx.restore();
+    }
+
+    fn trace_rounded_rect(&self, x: f64, y: f64, width: f64, height: f64, radius: f64) {
+        let right = x + width;
+        let bottom = y + height;
+        let radius = radius.min(width * 0.5).min(height * 0.5);
+        self.ctx.begin_path();
+        self.ctx.move_to(x + radius, y);
+        self.ctx.line_to(right - radius, y);
+        self.ctx.quadratic_curve_to(right, y, right, y + radius);
+        self.ctx.line_to(right, bottom - radius);
+        self.ctx
+            .quadratic_curve_to(right, bottom, right - radius, bottom);
+        self.ctx.line_to(x + radius, bottom);
+        self.ctx.quadratic_curve_to(x, bottom, x, bottom - radius);
+        self.ctx.line_to(x, y + radius);
+        self.ctx.quadratic_curve_to(x, y, x + radius, y);
+        self.ctx.close_path();
+    }
+
+    fn execution_pnl_text_color(
+        &self,
+        mark: &crate::core::execution_marks::ExecutionMark,
+        style: &ChartStyle,
+    ) -> String {
+        match mark.realized_pnl.unwrap_or(0.0).partial_cmp(&0.0) {
+            Some(std::cmp::Ordering::Greater) => "#26A69A".to_string(),
+            Some(std::cmp::Ordering::Less) => "#EF5350".to_string(),
+            _ => rgba(&style.axis_text_color),
+        }
     }
 
     /// Render persistent indicator labels emitted as `DrawInstruction::DrawLabel`.

@@ -332,6 +332,25 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
                 },
             );
         }
+        axiuscharts::ChartEvent::ExecutionClusterClick {
+            leader_id,
+            member_ids,
+        } => {
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("leaderId"),
+                &JsValue::from_str(leader_id),
+            );
+            let member_array = js_sys::Array::new();
+            for member_id in member_ids {
+                member_array.push(&JsValue::from_str(member_id));
+            }
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("memberIds"),
+                &member_array.into(),
+            );
+        }
         axiuscharts::ChartEvent::ExecutionMarkHover {
             id,
             timestamp_ms,

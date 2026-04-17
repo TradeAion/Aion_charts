@@ -34,6 +34,7 @@ chart.once('click', ({ price }) => console.log(price));
 | `rendererFallback` | `type`, `requested`, `active`, `reason` |
 | `drawingCreated` | `type`, `id`, `tool` |
 | `drawingSelected` | `type`, `id` |
+| `executionClusterClick` | `type`, `leaderId`, `memberIds` |
 | `executionMarkClick` | `type`, `id`, `timestampMs`, `price`, `side`, `role`, `quantity`, `groupId` |
 | `executionMarkHover` | `type`, `id`, `timestampMs`, `price`, `side`, `role`, `quantity`, `groupId` |
 | `error` | `type`, `message` |
@@ -44,6 +45,7 @@ chart.once('click', ({ price }) => console.log(price));
 - `visibleRangeChange` is at most once per RAF frame.
 - `visibleRangeChange` is emitted during drag, wheel, pinch, reset, and kinetic glide when the logical visible range changes.
 - No duplicate `visibleRangeChange` is emitted for a glide frame that leaves the range unchanged.
+- `executionClusterClick` is emitted only when the clicked hit area represents two or more clustered execution marks.
 
 ## Public Naming Notes
 

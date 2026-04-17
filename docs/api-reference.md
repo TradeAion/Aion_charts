@@ -109,9 +109,12 @@ Aliases such as `candles`, `bars`, `ha`, `fp`, and `order_flow` are preserved.
 - Persistence: `export_drawings`, `import_drawings`, `export_persistence_state`, `import_persistence_state`
 - Price lines: `create_price_line`, `set_price_line_price`, `set_price_line_label`, `set_price_line_visible`, `remove_price_line`
 - Markers: `add_marker`, `set_markers`, `remove_marker`, `clear_markers`, `clear_all_markers`
-- Execution marks: `add_execution_mark`, `add_execution_mark_full`, `set_execution_marks`, `set_execution_marks_json`, `get_execution_marks_json`
+- Execution marks: `add_execution_mark`, `add_execution_mark_full`, `set_execution_marks`, `set_execution_marks_json`, `get_execution_marks_json`, `set_execution_label_mode`, `get_execution_label_mode`, `set_execution_pnl_visible`, `get_execution_pnl_visible`, `set_execution_cluster_threshold_px`, `expand_execution_cluster`
 
 Execution mark prices are `number` values in the same logical-domain double-precision price space as bars and studies.
+Execution-mark JSON snapshots now serialize as `{ version, marks }`, while legacy bare arrays remain accepted on import.
+
+See [execution-marks.md](./execution-marks.md) and [execution-marks-persistence.md](./execution-marks-persistence.md) for the execution-specific contract.
 
 ## Indicators And Panes
 

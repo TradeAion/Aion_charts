@@ -9,6 +9,9 @@ This directory is the working documentation set for the AxiusCharts repository. 
 | [framework-guide.md](./framework-guide.md) | React, Vue, Svelte, vanilla JS, and bundler integration patterns. |
 | [theming.md](./theming.md) | Theme presets, custom theme objects, CSS variables, and targeted visual overrides. |
 | [drawing-tools.md](./drawing-tools.md) | Interactive drawing tools, workflow, keyboard handling, and persistence entry points. |
+| [execution-marks.md](./execution-marks.md) | Execution-mark data model, label modes, P&L rendering, clustering, selection, and events. |
+| [execution-marks-persistence.md](./execution-marks-persistence.md) | Versioned execution-mark snapshot shape, import compatibility, and migration policy. |
+| [execution-marks-worker-plan.md](./execution-marks-worker-plan.md) | Worker-offload plan for high-volume execution-mark hit-testing and its measured thresholds. |
 | [architecture.md](./architecture.md) | Crate layout, module map, data flow, event flow, invalidation pipeline, and threading model. |
 | [price-domain.md](./price-domain.md) | The logical `f64` price domain, render seam, precision guarantees, and prohibited casts. |
 | [charting-engine.md](./charting-engine.md) | What the engine owns, renderer selection, browser support expectations, and product boundaries. |

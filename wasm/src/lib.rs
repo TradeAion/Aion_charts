@@ -5649,7 +5649,9 @@ impl AxiusCharts {
         let mut s = self.inner.borrow_mut();
         let engine = &mut s.engine;
         engine.execution_marks.add(mark);
-        engine.execution_marks.resolve_bar_indices(&engine.bars);
+        engine
+            .execution_marks
+            .resolve_time_scale_indices(&engine.time_scale);
 
         log::info!(
             "add_execution_mark: id={}, ts={}, price={}, side={}, role={}",
@@ -5717,7 +5719,9 @@ impl AxiusCharts {
         let mut s = self.inner.borrow_mut();
         let engine = &mut s.engine;
         engine.execution_marks.add(mark);
-        engine.execution_marks.resolve_bar_indices(&engine.bars);
+        engine
+            .execution_marks
+            .resolve_time_scale_indices(&engine.time_scale);
     }
 
     /// Remove an execution mark by ID.
@@ -5743,32 +5747,53 @@ impl AxiusCharts {
         self.inner.borrow().engine.execution_mark_text_visible()
     }
 
-    /// Serialize all execution marks to JSON.
-    pub fn get_execution_marks_json(&self) -> String {
-        let marks: Vec<_> = self
-            .inner
+    /// Set the chart-wide execution label mode.
+    ///
+    /// Accepted values: `"side"`, `"role"`, `"side_and_role"` (case-insensitive).
+    pub fn set_execution_label_mode(&mut self, mode: &str) -> Result<(), JsValue> {
+        let parsed = axiuscharts::ExecutionLabelMode::from_str(mode).ok_or_else(|| {
+            js_err(format!(
+                "Invalid execution label mode '{}'; expected side, role, or side_and_role",
+                mode
+            ))
+        })?;
+        self.inner.borrow_mut().engine.set_execution_label_mode(parsed);
+        Ok(())
+    }
+
+    /// Get the chart-wide execution label mode.
+    pub fn get_execution_label_mode(&self) -> String {
+        self.inner
             .borrow()
             .engine
-            .execution_marks
-            .iter()
-            .map(|mark| {
-                serde_json::json!({
-                    "id": mark.id,
-                    "timestamp_ms": mark.timestamp_ms,
-                    "price": mark.price,
-                    "quantity": mark.quantity,
-                    "side": mark.side.as_str(),
-                    "role": mark.role.as_str(),
-                    "order_type": mark.order_type,
-                    "realized_pnl": mark.realized_pnl,
-                    "label": mark.label,
-                    "color": mark.color,
-                    "group_id": mark.group_id,
-                })
-            })
-            .collect();
+            .execution_label_mode()
+            .as_str()
+            .to_string()
+    }
 
-        serde_json::to_string(&marks).unwrap_or_else(|_| "[]".to_string())
+    /// Show or hide realized P&L text for eligible execution marks.
+    pub fn set_execution_pnl_visible(&mut self, visible: bool) {
+        self.inner.borrow_mut().engine.set_execution_pnl_visible(visible);
+    }
+
+    /// Whether realized P&L text is currently rendered for eligible execution marks.
+    pub fn get_execution_pnl_visible(&self) -> bool {
+        self.inner.borrow().engine.execution_pnl_visible()
+    }
+
+    /// Set the CSS-pixel clustering threshold for dense execution marks.
+    pub fn set_execution_cluster_threshold_px(&mut self, threshold_px: f64) {
+        self.inner
+            .borrow_mut()
+            .engine
+            .set_execution_cluster_threshold_px(threshold_px);
+    }
+
+    /// Serialize all execution marks to JSON.
+    pub fn get_execution_marks_json(&self) -> String {
+        let s = self.inner.borrow();
+        serde_json::to_string(&axiuscharts::execution_marks_snapshot(&s.engine.execution_marks))
+            .unwrap_or_else(|_| "{\"version\":1,\"marks\":[]}".to_string())
     }
 
     /// Set multiple execution marks at once (replaces existing).
@@ -5823,7 +5848,9 @@ impl AxiusCharts {
         let mut s = self.inner.borrow_mut();
         let engine = &mut s.engine;
         engine.execution_marks.set(marks);
-        engine.execution_marks.resolve_bar_indices(&engine.bars);
+        engine
+            .execution_marks
+            .resolve_time_scale_indices(&engine.time_scale);
 
         log::info!("set_execution_marks: count={}", expected_count);
     }
@@ -5832,107 +5859,48 @@ impl AxiusCharts {
     ///
     /// Expected format:
     /// ```json
-    /// [
-    ///   {
-    ///     "id": "exec-1",
-    ///     "timestamp_ms": 1234567890000,
-    ///     "price": 100.5,
-    ///     "quantity": 1.0,
-    ///     "side": "buy",
-    ///     "role": "entry",
-    ///     "order_type": "market",
-    ///     "label": "Entry Long",
-    ///     "group_id": "trade-1",
-    ///     "color": [0.2, 0.8, 0.4, 1.0],
-    ///     "realized_pnl": 0.0
-    ///   },
-    ///   ...
-    /// ]
+    /// {
+    ///   "version": 1,
+    ///   "marks": [
+    ///     {
+    ///       "id": "exec-1",
+    ///       "timestamp_ms": 1234567890000,
+    ///       "price": 100.5,
+    ///       "quantity": 1.0,
+    ///       "side": "buy",
+    ///       "role": "entry",
+    ///       "order_type": "market",
+    ///       "label": "Entry Long",
+    ///       "group_id": "trade-1",
+    ///       "color": [0.2, 0.8, 0.4, 1.0],
+    ///       "realized_pnl": 0.0
+    ///     }
+    ///   ]
+    /// }
     /// ```
     pub fn set_execution_marks_json(&mut self, json: &str) -> Result<(), JsValue> {
-        use axiuscharts::{ExecutionMark, ExecutionRole, ExecutionSide};
-
-        let items: Vec<serde_json::Value> = serde_json::from_str(json)
+        let payload: serde_json::Value = serde_json::from_str(json)
             .map_err(|e| js_err(format!("Invalid execution marks JSON: {}", e)))?;
-
-        let mut marks = Vec::with_capacity(items.len());
-        for (i, item) in items.iter().enumerate() {
-            let id = item
-                .get("id")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| js_err(format!("execution mark {} missing id", i)))?;
-            let timestamp_ms = item
-                .get("timestamp_ms")
-                .or_else(|| item.get("timestampMs"))
-                .or_else(|| item.get("timestamp"))
-                .and_then(|v| v.as_u64())
-                .ok_or_else(|| js_err(format!("execution mark {} missing timestamp_ms", i)))?;
-            let price = item
-                .get("price")
-                .and_then(|v| v.as_f64())
-                .ok_or_else(|| js_err(format!("execution mark {} missing price", i)))?;
-            let quantity = item
-                .get("quantity")
-                .or_else(|| item.get("qty"))
-                .and_then(|v| v.as_f64())
-                .unwrap_or(1.0);
-            let side = item
-                .get("side")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| js_err(format!("execution mark {} missing side", i)))?;
-            let role = item
-                .get("role")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| js_err(format!("execution mark {} missing role", i)))?;
-
-            let mut mark = ExecutionMark::new(
-                id,
-                timestamp_ms,
-                price,
-                quantity,
-                ExecutionSide::from_str(side),
-                ExecutionRole::from_str(role),
-            );
-
-            if let Some(order_type) = item
-                .get("order_type")
-                .or_else(|| item.get("orderType"))
-                .and_then(|v| v.as_str())
-            {
-                mark = mark.with_order_type(order_type);
-            }
-            if let Some(label) = item.get("label").and_then(|v| v.as_str()) {
-                mark = mark.with_label(label);
-            }
-            if let Some(group_id) = item
-                .get("group_id")
-                .or_else(|| item.get("groupId"))
-                .and_then(|v| v.as_str())
-            {
-                mark = mark.with_group_id(group_id);
-            }
-            if let Some(color) =
-                parse_color_json_value(item.get("color").unwrap_or(&serde_json::Value::Null))
-            {
-                mark = mark.with_color(color);
-            }
-            if let Some(pnl) = item
-                .get("realized_pnl")
-                .or_else(|| item.get("realizedPnl"))
-                .and_then(|v| v.as_f64())
-            {
-                mark = mark.with_realized_pnl(pnl);
-            }
-
-            marks.push(mark);
-        }
+        let snapshot = axiuscharts::parse_execution_marks_snapshot_value(&payload)
+            .map_err(js_err)?;
+        let marks: Vec<_> = snapshot
+            .marks
+            .into_iter()
+            .map(axiuscharts::SerializedExecutionMark::into_mark)
+            .collect();
 
         let mut s = self.inner.borrow_mut();
         let engine = &mut s.engine;
         engine.execution_marks.set(marks);
-        engine.execution_marks.resolve_bar_indices(&engine.bars);
+        engine
+            .execution_marks
+            .resolve_time_scale_indices(&engine.time_scale);
 
-        log::info!("set_execution_marks_json: count={}", items.len());
+        log::info!(
+            "set_execution_marks_json: version={}, count={}",
+            snapshot.version,
+            engine.execution_marks.len()
+        );
         Ok(())
     }
 
@@ -5956,6 +5924,23 @@ impl AxiusCharts {
     /// Clear the selected execution mark.
     pub fn clear_selected_execution_mark(&mut self) {
         self.inner.borrow_mut().selected_execution_mark_id = None;
+    }
+
+    /// Expand the currently rendered execution cluster for a given leader ID.
+    pub fn expand_execution_cluster(&self, leader_id: &str) -> Vec<String> {
+        let s = self.inner.borrow();
+        if let Some(hit_area) = s
+            .execution_mark_hit_areas
+            .iter()
+            .find(|hit_area| hit_area.id == leader_id)
+        {
+            return hit_area.member_ids.clone();
+        }
+        if s.engine.execution_marks.get(leader_id).is_some() {
+            vec![leader_id.to_string()]
+        } else {
+            Vec::new()
+        }
     }
 
     /// Convert a timestamp (in milliseconds) to a bar index.

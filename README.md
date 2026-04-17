@@ -45,7 +45,7 @@ chart.set_data_arrays(
 - Trade annotation: markers, draggable price lines, execution marks
 - Multi-pane and groups: indicator panes, chart groups, synchronized ranges and crosshair state
 - Renderers: WebGPU primary, Canvas2D fallback
-- Events: `crosshairMove`, `click`, `visibleRangeChange`, drawing events, execution mark events, lifecycle events
+- Events: `crosshairMove`, `click`, `visibleRangeChange`, drawing events, execution mark events, execution cluster events, lifecycle events
 
 See [docs/feature-matrix.md](./docs/feature-matrix.md) for the verified matrix.
 
@@ -55,6 +55,8 @@ Start at [docs/README.md](./docs/README.md). The most important documents for th
 
 - [docs/price-domain.md](./docs/price-domain.md)
 - [docs/events.md](./docs/events.md)
+- [docs/execution-marks.md](./docs/execution-marks.md)
+- [docs/execution-marks-persistence.md](./docs/execution-marks-persistence.md)
 - [docs/drawing-persistence.md](./docs/drawing-persistence.md)
 - [docs/migration-notes.md](./docs/migration-notes.md)
 
