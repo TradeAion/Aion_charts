@@ -1,8 +1,9 @@
 //! Rectangle drawing — 2-anchor filled rectangle with border.
 
 use super::drawing::{
-    next_drawing_id, optical_middle_top, point_to_bitmap, point_to_css, prepare_text_block,
-    push_text_block, rect_text_anchor, Drawing, TEXT_DRAWING_GAP_CSS,
+    line_label_placement, line_middle_gap_range, next_drawing_id, optical_middle_top,
+    point_to_bitmap, point_to_css, prepare_text_block, push_line_with_gap_range,
+    push_rotated_text_block, push_text_block, rect_text_anchor, Drawing, TEXT_DRAWING_GAP_CSS,
 };
 use super::hit_test;
 use super::types::*;
@@ -385,63 +386,111 @@ impl Drawing for RectangleDrawing {
 
         // Optional horizontal middle line (TradingView-style). Independent of
         // the rectangle's border style — uses its own color, width, and dash.
+        // When the midline is enabled, the rectangle's text rides ALONG the
+        // midline (like horizontal-line text) instead of being centered inside
+        // the rect, so labels never overlap the line.
+        let mid_y = (py0 + py1) * 0.5;
+        let midline_enabled = self.middle_line.is_some();
+        let mut midline_gap_range: Option<(f64, f64)> = None;
+        let mut midline_text_pushed = false;
+
+        if midline_enabled {
+            if let Some(block) = prepare_text_block(&self.text.value, fs) {
+                // Same inset/gap conventions as horizontal_line: 2 px breathing
+                // room on the ends, 2 px perpendicular gap above/below the line.
+                let inset = TEXT_DRAWING_GAP_CSS * avg_ratio;
+                let gap_css = TEXT_DRAWING_GAP_CSS * avg_ratio;
+                let placement = line_label_placement(
+                    px0 as f64,
+                    mid_y as f64,
+                    px1 as f64,
+                    mid_y as f64,
+                    self.text.horizontal_align,
+                    self.text.vertical_align,
+                    &block,
+                    fs,
+                    inset,
+                    gap_css,
+                );
+                if self.text.vertical_align
+                    == crate::core::renderer::draw_list::TextVerticalAlign::Middle
+                {
+                    midline_gap_range = line_middle_gap_range(&placement, &block, avg_ratio as f32);
+                }
+                push_rotated_text_block(
+                    &mut geom.texts,
+                    &block,
+                    placement.anchor_x,
+                    placement.anchor_y,
+                    placement.top_local_y,
+                    fs,
+                    600,
+                    self.text.style.italic,
+                    text_color,
+                    placement.align,
+                    placement.rotation_rad,
+                );
+                midline_text_pushed = true;
+            }
+        }
+
         if let Some(ml) = self.middle_line.as_ref() {
             let ml_lw = (ml.line_width * avg_ratio).floor().max(1.0) as f32;
             let ml_d = ml.dash.map_or(0.0, |dd| (dd[0] * avg_ratio) as f32);
             let ml_g = ml.dash.map_or(0.0, |dd| (dd[1] * avg_ratio) as f32);
-            let mid_y = (py0 + py1) * 0.5;
-            geom.lines.push(ColoredLine {
-                x0: px0,
-                y0: mid_y,
-                x1: px1,
-                y1: mid_y,
-                width: ml_lw,
-                r: ml.color[0],
-                g: ml.color[1],
-                b: ml.color[2],
-                a: ml.color[3],
-                dash: ml_d,
-                gap: ml_g,
-            });
+            push_line_with_gap_range(
+                &mut geom.lines,
+                px0 as f64,
+                mid_y as f64,
+                px1 as f64,
+                mid_y as f64,
+                ml_lw,
+                ml.color,
+                ml_d,
+                ml_g,
+                midline_gap_range,
+            );
         }
 
-        if let Some(block) = prepare_text_block(&self.text.value, fs) {
-            // Horizontal inset (Left/Right alignment) keeps a small breathing
-            // room from the rect edge; vertical inset is the universal 2px gap
-            // applied OUTSIDE the rect for Top/Bottom and ignored for Middle
-            // (rect_text_anchor centers Middle inside the rect).
-            let inset_x = TEXT_DRAWING_GAP_CSS * avg_ratio;
-            let inset_y = TEXT_DRAWING_GAP_CSS * avg_ratio;
-            let (text_x, text_y, text_align, vertical_align) = rect_text_anchor(
-                px0 as f64,
-                py0 as f64,
-                px1 as f64,
-                py1 as f64,
-                self.text.horizontal_align,
-                self.text.vertical_align,
-                inset_x,
-                inset_y,
-            );
-            let top_y = match vertical_align {
-                crate::core::renderer::draw_list::TextVerticalAlign::Top => {
-                    text_y as f32 - block.total_height
-                }
-                crate::core::renderer::draw_list::TextVerticalAlign::Middle => {
-                    optical_middle_top(text_y as f32, &block, fs)
-                }
-                crate::core::renderer::draw_list::TextVerticalAlign::Bottom => text_y as f32,
-            };
-            push_text_block(
-                &mut geom.texts,
-                &block,
-                text_x as f32,
-                top_y,
-                fs,
-                600,
-                self.text.style.italic,
-                text_color,
-                text_align,
-            );
+        if !midline_text_pushed {
+            if let Some(block) = prepare_text_block(&self.text.value, fs) {
+                // Horizontal inset (Left/Right alignment) keeps a small breathing
+                // room from the rect edge; vertical inset is the universal 2px gap
+                // applied OUTSIDE the rect for Top/Bottom and ignored for Middle
+                // (rect_text_anchor centers Middle inside the rect).
+                let inset_x = TEXT_DRAWING_GAP_CSS * avg_ratio;
+                let inset_y = TEXT_DRAWING_GAP_CSS * avg_ratio;
+                let (text_x, text_y, text_align, vertical_align) = rect_text_anchor(
+                    px0 as f64,
+                    py0 as f64,
+                    px1 as f64,
+                    py1 as f64,
+                    self.text.horizontal_align,
+                    self.text.vertical_align,
+                    inset_x,
+                    inset_y,
+                );
+                let top_y = match vertical_align {
+                    crate::core::renderer::draw_list::TextVerticalAlign::Top => {
+                        text_y as f32 - block.total_height
+                    }
+                    crate::core::renderer::draw_list::TextVerticalAlign::Middle => {
+                        optical_middle_top(text_y as f32, &block, fs)
+                    }
+                    crate::core::renderer::draw_list::TextVerticalAlign::Bottom => text_y as f32,
+                };
+                push_text_block(
+                    &mut geom.texts,
+                    &block,
+                    text_x as f32,
+                    top_y,
+                    fs,
+                    600,
+                    self.text.style.italic,
+                    text_color,
+                    text_align,
+                );
+            }
         }
 
         if show_anchors {
