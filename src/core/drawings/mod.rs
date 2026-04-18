@@ -444,22 +444,23 @@ impl DrawingManager {
             }
         }
 
-        // Anchor the placeholder at the SAME point where the first typed
-        // character will land — i.e., the caret position. We get this by sizing
-        // the editor target with the collapsed (1px-wide) anchor, regardless
-        // of the drawing's horizontal alignment. This way:
-        //   - Right-aligned drawing: placeholder appears just inside the line's
-        //     right endpoint (where typed text begins flowing leftward in the
-        //     reader's eye), not 70px to the left where its left edge would be.
-        //   - Left-aligned: identical to before (anchor IS the left edge).
-        //   - Center-aligned: placeholder starts at the line's center.
-        // The placeholder always renders left-to-right starting from the caret,
-        // so its width no longer affects placement.
-        let Some(target) =
-            Self::editor_target_for_drawing_sized(drawing, vp, pane_css_w, pane_css_h, false)
+        // Use the placeholder-sized editor target so the placeholder respects
+        // the drawing's horizontal alignment (e.g., right-aligned drawings get
+        // a placeholder whose right edge sits at the line's right endpoint —
+        // the same place typed text will end). The horizontal "jump" between
+        // a long placeholder and shorter typed text is intrinsic to right/
+        // center alignment and matches TradingView's behavior.
+        let Some(target) = Self::editor_target_for_drawing(drawing, vp, pane_css_w, pane_css_h)
         else {
             return;
         };
+
+        // Resolve the drawing's actual horizontal/vertical alignment so the
+        // placeholder renders identically to typed text (any descender/ascender
+        // gap, any horizontal anchoring).
+        let (h_align, v_align) = Self::drawing_text_ref(drawing)
+            .map(|t| (t.horizontal_align, t.vertical_align))
+            .unwrap_or((TextAlign::Left, TextVerticalAlign::Top));
 
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let style = Self::drawing_text_style_ref(drawing);
@@ -469,7 +470,15 @@ impl DrawingManager {
         // Drawing labels are always italic — placeholder included so it visually
         // matches the typed text the user is about to enter.
         let italic = true;
-        let x = ((target.left + 1.0) * h_pixel_ratio - 1.0) as f32;
+        // For non-Left alignments, anchor the rendered text at the right edge
+        // (Right) or center (Center) of the editor target rather than its
+        // left edge — that's where the alignment math expects the anchor.
+        let anchor_x_css = match h_align {
+            TextAlign::Left => target.left,
+            TextAlign::Center => target.left + target.width * 0.5,
+            TextAlign::Right => target.left + target.width,
+        };
+        let x = ((anchor_x_css + 1.0) * h_pixel_ratio - 1.0) as f32;
         let y = (target.top * v_pixel_ratio) as f32;
 
         // Editing-with-empty-text: render at ~35% opacity so it reads as a
@@ -494,8 +503,8 @@ impl DrawingManager {
             g: drawing.style().color[1],
             b: drawing.style().color[2],
             a: alpha,
-            align: TextAlign::Left,
-            vertical_align: TextVerticalAlign::Top,
+            align: h_align,
+            vertical_align: v_align,
         });
     }
 

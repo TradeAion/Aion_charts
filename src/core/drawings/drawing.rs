@@ -674,16 +674,14 @@ pub fn line_label_placement(
     let anchor_x = (x0 + ux * anchor_t) as f32;
     let anchor_y = (y0 + uy * anchor_t) as f32;
     let top_local_y = match vertical_align {
-        // Visually-tight gap: subtract the font's internal leading (~20% of
-        // font_size sits as empty whitespace at the top of every glyph box).
-        // Without this compensation the label looks like it's floating well
-        // above the line even with side_gap=2px. Matches TradingView density.
-        TextVerticalAlign::Top => {
-            let internal_leading = font_size * 0.2;
-            -side_gap as f32 - block.total_height + internal_leading
-        }
+        // Place the bottom of the text's metric box `side_gap` above the line.
+        // `total_height` already accounts for ascender + descender, so italic
+        // descenders (j, g, y, p, q) clear the line. A previous attempt to
+        // tighten this with internal-leading compensation caused descenders to
+        // collide with the line — keep the full metric height.
+        TextVerticalAlign::Top => -side_gap as f32 - block.total_height,
         TextVerticalAlign::Middle => optical_middle_local_top(block, font_size),
-        TextVerticalAlign::Bottom => side_gap as f32 - (font_size * 0.15),
+        TextVerticalAlign::Bottom => side_gap as f32,
     };
 
     LineLabelPlacement {
