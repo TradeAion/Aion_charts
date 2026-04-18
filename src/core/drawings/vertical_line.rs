@@ -169,8 +169,15 @@ mod tests {
         drawing.set_state(DrawingState::Idle);
 
         let geom = drawing.generate_geometry(&vp, 1000.0, 600.0, 1.0, 1.0, 1.0, false);
-        let (expected_x, _expected_y) =
-            point_to_bitmap(&drawing.anchors[0].point, &vp, 1000.0, 600.0, 1.0, 1.0, true);
+        let (expected_x, _expected_y) = point_to_bitmap(
+            &drawing.anchors[0].point,
+            &vp,
+            1000.0,
+            600.0,
+            1.0,
+            1.0,
+            true,
+        );
 
         assert_eq!(geom.lines.len(), 1);
         assert!((geom.lines[0].x0 as f64 - expected_x).abs() < 1e-9);

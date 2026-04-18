@@ -209,8 +209,9 @@ pub trait Drawing: std::fmt::Debug {
 /// We still apply the viewport's `-1px` X alignment so a drawing anchor created
 /// from a pointer position round-trips back to the same CSS coordinate used by
 /// the crosshair and time-scale snapping helpers.
-/// Y uses the candle area height (matching `price_to_css_y`) which is consistent
-/// with how prices are recorded when candle_height_frac is applied.
+/// Y uses the pane height and relies on `Viewport::price_to_css_y()` to apply
+/// the candle-area fraction internally, keeping drawings locked to the price
+/// pane even when the main pane reserves space for volume below.
 pub fn point_to_css(
     pt: &DrawingPoint,
     vp: &Viewport,
@@ -237,7 +238,9 @@ pub fn point_to_bitmap(
     snap_to_pixel: bool,
 ) -> (f64, f64) {
     let (cx, cy) = point_to_css(pt, vp, pane_css_w, pane_css_h);
-    let bx = cx * h_pixel_ratio;
+    // Match the renderer's LWC-style `-1px` X bias in physical space too.
+    // Plain `cx * ratio` drifts on fractional DPR / exact bitmap sizing.
+    let bx = (cx + 1.0) * h_pixel_ratio - 1.0;
     let by = cy * v_pixel_ratio;
     if snap_to_pixel {
         (bx.round(), by.round())
@@ -286,7 +289,8 @@ pub fn generate_anchor_circles(
 
 #[cfg(test)]
 mod tests {
-    use super::{point_to_css, DrawingPoint};
+    use super::{point_to_bitmap, point_to_css, DrawingPoint};
+    use crate::core::renderer::transforms::bar_to_x;
     use crate::core::viewport::Viewport;
 
     fn test_viewport() -> Viewport {
@@ -323,5 +327,40 @@ mod tests {
         let (x, _y) = point_to_css(&point, &vp, pane_w, pane_h);
 
         assert!((x - vp.bar_center_css(snapped_slot, pane_w)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn point_to_bitmap_matches_physical_bar_projection_for_fractional_ratio() {
+        let vp = test_viewport();
+        let pane_css_w = 1000.0;
+        let pane_css_h = 600.0;
+        let h_ratio = 1.25;
+        let point = DrawingPoint::new(13.5, 100.0);
+
+        let (x, _y) = point_to_bitmap(&point, &vp, pane_css_w, pane_css_h, h_ratio, 1.0, false);
+
+        let expected_x = bar_to_x(point.bar_index, &vp, pane_css_w * h_ratio);
+        assert!(
+            (x - expected_x).abs() < 1e-9,
+            "expected physical projection {expected_x}, got {x}"
+        );
+    }
+
+    #[test]
+    fn point_to_css_round_trips_pointer_price_when_volume_area_is_visible() {
+        let mut vp = test_viewport();
+        vp.volume_height_ratio = 0.15;
+        let pane_css_h = 600.0;
+        let candle_css_h = pane_css_h * vp.candle_height_frac();
+        let y_css = 240.0;
+        let price = vp.pixel_to_price(y_css, candle_css_h);
+        let point = DrawingPoint::new(13.5, price);
+
+        let (_x, projected_y) = point_to_css(&point, &vp, 1000.0, pane_css_h);
+
+        assert!(
+            (projected_y - y_css).abs() < 1e-9,
+            "expected projected y {y_css}, got {projected_y}"
+        );
     }
 }

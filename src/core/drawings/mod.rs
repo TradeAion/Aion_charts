@@ -27,8 +27,7 @@ use crate::core::viewport::Viewport;
 use drawing::{ensure_next_drawing_id_at_least, Drawing};
 use persistence::{
     drawing_tool_from_key, drawing_tool_to_key, migrate_snapshot, DrawingSnapshot,
-    SerializedAnchorPoint, SerializedDrawing, SerializedDrawingPoint,
-    DRAWINGS_SNAPSHOT_VERSION,
+    SerializedAnchorPoint, SerializedDrawing, SerializedDrawingPoint, DRAWINGS_SNAPSHOT_VERSION,
 };
 use types::*;
 
@@ -118,7 +117,7 @@ impl DrawingManager {
     }
 
     #[inline]
-    fn drawing_renders_on_top(&self, drawing: &dyn Drawing) -> bool {
+    fn drawing_has_hit_test_priority(&self, drawing: &dyn Drawing) -> bool {
         let is_hovered = self.hovered_id == Some(drawing.id());
         let is_active = matches!(
             drawing.state(),
@@ -205,7 +204,7 @@ impl DrawingManager {
 
         for top_bucket in [false, true] {
             for d in &self.drawings {
-                if self.drawing_renders_on_top(d.as_ref()) != top_bucket {
+                if self.drawing_has_hit_test_priority(d.as_ref()) != top_bucket {
                     continue;
                 }
                 let result = d.hit_test(cursor_css_x, cursor_css_y, vp, pane_css_w, pane_css_h);
@@ -282,20 +281,29 @@ impl DrawingManager {
         self.get(id).map(|d| d.tool())
     }
 
-    /// Get the "opposite" anchor for angle snapping during single-anchor drag.
-    /// When dragging anchor N, returns anchor 0 if N > 0, else anchor 1.
-    /// Returns None if not dragging a single anchor or drawing has < 2 anchors.
+    /// Get the fixed reference point for angle snapping during single-anchor drag.
+    /// Returns None if not dragging a single anchor or the tool has no stable
+    /// opposite point for the current handle.
     pub fn drag_opposite_anchor(&self, id: u64) -> Option<(f64, f64)> {
         let d = self.get(id)?;
-        let anchors = d.anchors();
-        if anchors.len() < 2 {
-            return None;
-        }
         match d.state() {
             DrawingState::Dragging {
                 anchor_index: Some(ai),
                 ..
             } => {
+                if d.tool() == DrawingTool::Rectangle {
+                    let rect = d.as_any().downcast_ref::<rectangle::RectangleDrawing>()?;
+                    return if rectangle::RectangleDrawing::is_corner_anchor(ai) {
+                        rect.opposite_corner(ai)
+                    } else {
+                        None
+                    };
+                }
+
+                let anchors = d.anchors();
+                if anchors.len() < 2 {
+                    return None;
+                }
                 // Return the "other" anchor for angle reference
                 let other_idx = if ai == 0 { 1 } else { 0 };
                 if other_idx < anchors.len() {
@@ -360,10 +368,7 @@ impl DrawingManager {
     /// Start dragging a selected drawing (or one of its anchors).
     pub fn start_drag(&mut self, id: u64, anchor_index: Option<usize>, bar_index: f64, price: f64) {
         if let Some(d) = self.get_mut(id) {
-            let (initial_bar, initial_price) = anchor_index
-                .and_then(|ai| d.anchors().get(ai))
-                .map(|anchor| (anchor.point.bar_index, anchor.point.price))
-                .unwrap_or((bar_index, price));
+            let (initial_bar, initial_price) = (bar_index, price);
 
             // For rectangle corner/edge drag, pin the opposite reference for the
             // entire gesture so crossing over flips naturally instead of "pushing" sides.
@@ -403,14 +408,14 @@ impl DrawingManager {
                     anchor_index,
                     start_bar,
                     start_price,
-                    initial_bar,
-                    initial_price,
+                    initial_bar: _initial_bar,
+                    initial_price: _initial_price,
                     fixed_bar,
                     fixed_price,
                 } => {
                     if let Some(ai) = anchor_index {
-                        let target_bar = initial_bar + (bar_index - start_bar);
-                        let target_price = initial_price + (price - start_price);
+                        let target_bar = bar_index;
+                        let target_price = price;
                         // Move single anchor.
                         if d.tool() == DrawingTool::Rectangle {
                             if rectangle::RectangleDrawing::is_corner_anchor(ai)
@@ -464,7 +469,8 @@ impl DrawingManager {
     }
 
     /// Generate all drawing geometry for rendering.
-    /// Splits into base-layer (idle, non-hovered) and top-layer (hovered/active).
+    /// Returns `(base, overlay)` buckets; drawings now stay on the overlay bucket
+    /// by default so idle drawings do not fall behind the series layer.
     pub fn generate_all_geometry(
         &self,
         vp: &Viewport,
@@ -474,7 +480,7 @@ impl DrawingManager {
         h_pixel_ratio: f64,
         v_pixel_ratio: f64,
     ) -> (Vec<DrawingGeometry>, Vec<DrawingGeometry>) {
-        let mut base = Vec::new();
+        let base = Vec::new();
         let mut top = Vec::new();
 
         for d in &self.drawings {
@@ -495,11 +501,7 @@ impl DrawingManager {
                 continue;
             }
 
-            if self.drawing_renders_on_top(d.as_ref()) {
-                top.push(geom);
-            } else {
-                base.push(geom);
-            }
+            top.push(geom);
         }
 
         (base, top)
@@ -870,7 +872,7 @@ mod tests {
     }
 
     #[test]
-    fn idle_non_hovered_drawing_goes_to_bottom_bucket() {
+    fn idle_non_hovered_drawing_stays_in_overlay_bucket() {
         let mut manager = DrawingManager::new();
         let id = complete_trend_line(&mut manager);
         manager.deselect_all();
@@ -880,12 +882,12 @@ mod tests {
 
         let vp = test_viewport();
         let (bottom, top) = manager.generate_all_geometry(&vp, 800.0, 600.0, 1.0, 1.0, 1.0);
-        assert_eq!(bottom.len(), 1);
-        assert_eq!(top.len(), 0);
+        assert_eq!(bottom.len(), 0);
+        assert_eq!(top.len(), 1);
     }
 
     #[test]
-    fn hovered_idle_drawing_is_promoted_to_top_bucket() {
+    fn hovered_idle_drawing_stays_in_overlay_bucket() {
         let mut manager = DrawingManager::new();
         let id = complete_trend_line(&mut manager);
         manager.deselect_all();
@@ -898,7 +900,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_creating_and_dragging_drawings_stay_in_top_bucket() {
+    fn selected_creating_and_dragging_drawings_stay_in_overlay_bucket() {
         let vp = test_viewport();
 
         // Selected
@@ -1135,7 +1137,7 @@ mod tests {
     }
 
     #[test]
-    fn anchor_drag_preserves_initial_grab_offset() {
+    fn anchor_drag_tracks_cursor_exactly_for_existing_drawings() {
         let mut manager = DrawingManager::new();
         let id = complete_trend_line(&mut manager);
 
@@ -1145,7 +1147,40 @@ mod tests {
 
         let drawing = manager.get(id).expect("trend line drawing");
         let first_anchor = drawing.anchors()[0].point;
-        assert!(approx_eq(first_anchor.bar_index, 12.0));
-        assert!(approx_eq(first_anchor.price, 103.0));
+        assert!(approx_eq(first_anchor.bar_index, 14.0));
+        assert!(approx_eq(first_anchor.price, 105.0));
+    }
+
+    #[test]
+    fn rectangle_corner_drag_uses_normalized_handle_position() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Rectangle;
+        let id = manager.start_creating(10.0, 100.0).expect("rectangle id");
+        manager.finalize_creation_step(20.0, 110.0);
+
+        // Drag the normalized top-left handle. The stored logical anchors are
+        // bottom-left + top-right here, so using raw anchor[0] would jump.
+        manager.start_drag(id, Some(0), 10.0, 110.0);
+        manager.update_drag(id, 12.0, 108.0);
+
+        let drawing = manager.get(id).expect("rectangle drawing");
+        let anchors = drawing.anchors();
+        let (left, right, top, bottom) = bounds(anchors);
+        assert!(approx_eq(left, 12.0));
+        assert!(approx_eq(right, 20.0));
+        assert!(approx_eq(top, 108.0));
+        assert!(approx_eq(bottom, 100.0));
+    }
+
+    #[test]
+    fn rectangle_drag_opposite_anchor_uses_normalized_opposite_corner() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Rectangle;
+        let id = manager.start_creating(10.0, 100.0).expect("rectangle id");
+        manager.finalize_creation_step(20.0, 110.0);
+
+        manager.start_drag(id, Some(0), 10.0, 110.0);
+
+        assert_eq!(manager.drag_opposite_anchor(id), Some((20.0, 100.0)));
     }
 }

@@ -903,7 +903,8 @@ impl SubPane {
             self.auto_scale_price_visible(main_viewport.start_bar, main_viewport.end_bar);
         }
 
-        // Subpanes have no volume area, so pane_h == candle_h
+        // Subpanes have no volume area, so pane_h == candle_h.
+        // Drawings now stay on the overlay bucket by default.
         let y_ticks = compute_y_ticks(&self.viewport, ph, ph, dpr, style);
         let (bottom_drawings, top_drawings) = self.generate_drawing_geometry(main_viewport);
 
@@ -1100,7 +1101,7 @@ impl SubPane {
             );
         }
 
-        // Idle/non-hovered drawings are rendered below indicator series.
+        // Base-bucket drawings remain on the chart canvas when present.
         self.render_drawings_on_ctx(&self.chart_base_ctx, bottom_drawings);
 
         // Reference lines from config (e.g. RSI 30/70, Stochastic 20/80, MACD 0)
@@ -1179,7 +1180,8 @@ impl SubPane {
     }
 
     /// Generate drawing geometry for this subpane.
-    /// Uses main viewport's time range with subpane's price range.
+    /// Uses main viewport's time range with subpane's price range and returns
+    /// `(base, overlay)` buckets.
     pub fn generate_drawing_geometry(
         &self,
         main_viewport: &Viewport,
@@ -1187,8 +1189,11 @@ impl SubPane {
         let dpr = self.dpr;
         let pw = self.chart_base.width() as f64;
         let ph = self.chart_base.height() as f64;
-        let css_w = if dpr > 0.0 { pw / dpr } else { 0.0 };
-        let css_h = if dpr > 0.0 { ph / dpr } else { 0.0 };
+        let chart_rect = self.chart_container.get_bounding_client_rect();
+        let css_w = chart_rect.width();
+        let css_h = chart_rect.height();
+        let h_pixel_ratio = if css_w > 0.0 { pw / css_w } else { dpr };
+        let v_pixel_ratio = if css_h > 0.0 { ph / css_h } else { dpr };
 
         // Create a hybrid viewport:
         // - Time axis (bar range) from main viewport (shared across all panes)
@@ -1201,11 +1206,17 @@ impl SubPane {
         hybrid_viewport.price_max = self.viewport.price_max;
         hybrid_viewport.volume_height_ratio = 0.0; // Subpanes don't have volume
 
-        self.drawings
-            .generate_all_geometry(&hybrid_viewport, css_w, css_h, dpr, 1.0, 1.0)
+        self.drawings.generate_all_geometry(
+            &hybrid_viewport,
+            css_w,
+            css_h,
+            dpr,
+            h_pixel_ratio,
+            v_pixel_ratio,
+        )
     }
 
-    /// Render top-layer drawings on the chart top canvas.
+    /// Render overlay-bucket drawings on the chart top canvas.
     /// Call before crosshair rendering so crosshair remains visible above drawings.
     pub fn render_top_drawings(&self, drawings: &[DrawingGeometry]) {
         self.render_drawings_on_ctx(&self.chart_top_ctx, drawings);

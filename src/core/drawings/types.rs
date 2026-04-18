@@ -220,7 +220,7 @@ impl DrawingStyle {
     pub fn from_theme(theme: &crate::core::renderer::theme::ThemeConfig) -> Self {
         Self {
             color: theme.drawing_defaults.color,
-            line_width: 1.0,
+            line_width: 2.0,
             fill_color: None,
             dash: None,
             font_size: theme.drawing_defaults.font_size,
@@ -244,7 +244,7 @@ impl DrawingStyle {
     pub fn fibonacci_from_theme(theme: &crate::core::renderer::theme::ThemeConfig) -> Self {
         Self {
             color: theme.drawing_defaults.fibonacci_color,
-            line_width: 1.0,
+            line_width: 2.0,
             fill_color: None,
             dash: None,
             font_size: theme.drawing_defaults.fibonacci_font_size,
@@ -260,6 +260,28 @@ impl DrawingStyle {
             dash: None,
             font_size: theme.drawing_defaults.font_size,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DrawingStyle;
+    use crate::core::renderer::theme::ThemeConfig;
+
+    #[test]
+    fn default_line_based_drawing_style_uses_two_pixel_width() {
+        let theme = ThemeConfig::default();
+        let style = DrawingStyle::from_theme(&theme);
+
+        assert_eq!(style.line_width, 2.0);
+    }
+
+    #[test]
+    fn fibonacci_drawing_style_uses_two_pixel_width() {
+        let theme = ThemeConfig::default();
+        let style = DrawingStyle::fibonacci_from_theme(&theme);
+
+        assert_eq!(style.line_width, 2.0);
     }
 }
 

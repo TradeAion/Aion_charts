@@ -194,7 +194,8 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
         tick_marks::compute_x_ticks(&s.engine.viewport, &s.engine.time_scale, pane_pw, dpr);
     let time_scale = s.engine.time_scale.clone();
 
-    // 5. Generate drawing geometry (bottom = idle/non-hovered, top = hovered/active).
+    // 5. Generate drawing geometry. Drawings now stay on the overlay bucket by
+    // default; the base bucket remains for compatibility with the engine render path.
     let (mut base_drawings, mut top_drawings) = s.engine.drawings.generate_all_geometry(
         &s.engine.viewport,
         pane_css_w,
@@ -206,10 +207,8 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
 
     let webgpu_backend = s.engine.renderer_name() == "webgpu";
     if webgpu_backend {
-        // WebGPU idle drawings: promote fills and texts to the overlay so
-        // they render above candles.  Lines stay in the bottom layer for
-        // z-order behaviour.  Fill alpha is kept as-is so it matches the
-        // hovered/active state (no visible opacity pop on hover).
+        // If any drawings remain in the base bucket, promote fills and texts to
+        // the overlay for WebGPU parity.
         for geom in &mut base_drawings {
             if !geom.rects.is_empty() {
                 let mut fill_only = geom.clone();
@@ -232,7 +231,7 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
         }
     }
 
-    // 5b. Engine render — grid + bottom drawings + data series on pane base canvas.
+    // 5b. Engine render — grid + base-bucket drawings + data series on pane base canvas.
     if let Err(e) = s
         .engine
         .render(&time_scale, &y_ticks, &x_ticks, &base_drawings)
@@ -265,7 +264,7 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
             .as_ref()
             .unwrap_or(&engine.style);
 
-        // Canvas2D path: base-layer drawings on base canvas, top-layer on overlay
+        // Drawings render on the overlay; any base-bucket drawings remain on the pane canvas.
         overlay.render_with_drawings(
             &main_crosshair,
             crosshair_style,
