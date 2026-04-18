@@ -417,7 +417,7 @@ impl Drawing for RectangleDrawing {
                     inset,
                     gap_css,
                 );
-                midline_gap_range = line_middle_gap_range(&placement, &block, 0.0);
+                midline_gap_range = line_middle_gap_range(&placement, &block, -avg_ratio as f32);
                 push_rotated_text_block(
                     &mut geom.texts,
                     &block,
