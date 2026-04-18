@@ -129,7 +129,7 @@ impl Drawing for HorizontalLineDrawing {
             if self.text.vertical_align
                 == crate::core::renderer::draw_list::TextVerticalAlign::Middle
             {
-                line_gap_range = line_middle_gap_range(&placement, &block, avg_ratio as f32);
+                line_gap_range = line_middle_gap_range(&placement, &block, 0.0);
             }
             push_rotated_text_block(
                 &mut geom.texts,
