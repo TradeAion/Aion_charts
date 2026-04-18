@@ -524,6 +524,7 @@
       <button class="btn" id="draw-vline">V-Line</button>
       <button class="btn" id="draw-ray">Ray</button>
       <button class="btn" id="draw-rectangle">Rect</button>
+      <button class="btn" id="draw-text">Text</button>
       <button class="btn" id="draw-fibonacci">Fib</button>
       <button class="btn" id="draw-brush">Brush</button>
       <button class="btn" id="draw-clear">Clear</button>
@@ -608,7 +609,6 @@
         <span class="shortcut-key">←→</span> Scroll · <span class="shortcut-key">+−</span> Zoom · <span class="shortcut-key">0</span> Fit All
       </div>
     </div>
-
     <div id="drawing-placeholder" role="button" tabindex="0">+ Add text</div>
     <textarea id="drawing-text-editor" spellcheck="false"></textarea>
     <div id="drawing-panel">
@@ -653,10 +653,7 @@
         <span class="drawing-panel-label">Color</span>
         <div class="drawing-panel-inline">
           <input class="drawing-panel-input" id="drawing-text-color" type="color" value="#D97706">
-          <label class="drawing-panel-check">
-            <input id="drawing-text-follow-color" type="checkbox" checked>
-            Follow Drawing
-          </label>
+          <button class="btn" id="drawing-text-color-reset" type="button" title="Reset text color to follow the drawing color">Reset</button>
         </div>
       </div>
       <div id="drawing-fib-controls" style="display:none">
@@ -692,6 +689,43 @@
           <div class="drawing-panel-inline">
             <input class="drawing-panel-input" id="drawing-rect-middle-dash-on" type="number" min="0" max="40" step="1" value="0" title="Dash on (0 = solid)">
             <input class="drawing-panel-input" id="drawing-rect-middle-dash-off" type="number" min="0" max="40" step="1" value="0" title="Dash off (0 = solid)">
+          </div>
+        </div>
+      </div>
+      <div id="drawing-text-controls" style="display:none">
+        <div class="drawing-panel-row">
+          <span class="drawing-panel-label">Border</span>
+          <label class="drawing-panel-check">
+            <input id="drawing-text-border-enable" type="checkbox">
+            Enable
+          </label>
+        </div>
+        <div class="drawing-panel-row">
+          <span class="drawing-panel-label">B Color</span>
+          <div class="drawing-panel-inline">
+            <input class="drawing-panel-input" id="drawing-text-border-color" type="color" value="#D97706">
+            <input class="drawing-panel-input" id="drawing-text-border-width" type="number" min="1" max="8" step="1" value="1" title="Width (CSS px)">
+          </div>
+        </div>
+        <div class="drawing-panel-row">
+          <span class="drawing-panel-label">B Dash</span>
+          <div class="drawing-panel-inline">
+            <input class="drawing-panel-input" id="drawing-text-border-dash-on" type="number" min="0" max="40" step="1" value="0" title="Dash on (0 = solid)">
+            <input class="drawing-panel-input" id="drawing-text-border-dash-off" type="number" min="0" max="40" step="1" value="0" title="Dash off (0 = solid)">
+          </div>
+        </div>
+        <div class="drawing-panel-row">
+          <span class="drawing-panel-label">Fill</span>
+          <label class="drawing-panel-check">
+            <input id="drawing-text-fill-enable" type="checkbox">
+            Enable
+          </label>
+        </div>
+        <div class="drawing-panel-row">
+          <span class="drawing-panel-label">F Color</span>
+          <div class="drawing-panel-inline">
+            <input class="drawing-panel-input" id="drawing-text-fill-color" type="color" value="#D97706">
+            <input class="drawing-panel-input" id="drawing-text-fill-alpha" type="number" min="0" max="1" step="0.05" value="0.15" title="Fill opacity (0..1)">
           </div>
         </div>
       </div>
@@ -1000,7 +1034,7 @@
     const drawingTextFontSize = $('drawing-text-font-size');
     const drawingTextItalic = $('drawing-text-italic');
     const drawingTextColor = $('drawing-text-color');
-    const drawingTextFollowColor = $('drawing-text-follow-color');
+    const drawingTextColorReset = $('drawing-text-color-reset');
     const drawingFibControls = $('drawing-fib-controls');
     const drawingFibLevels = $('drawing-fib-levels');
     const drawingFibApply = $('drawing-fib-apply');
@@ -1010,6 +1044,15 @@
     const drawingRectMiddleWidth = $('drawing-rect-middle-width');
     const drawingRectMiddleDashOn = $('drawing-rect-middle-dash-on');
     const drawingRectMiddleDashOff = $('drawing-rect-middle-dash-off');
+    const drawingTextControls = $('drawing-text-controls');
+    const drawingTextBorderEnable = $('drawing-text-border-enable');
+    const drawingTextBorderColor = $('drawing-text-border-color');
+    const drawingTextBorderWidth = $('drawing-text-border-width');
+    const drawingTextBorderDashOn = $('drawing-text-border-dash-on');
+    const drawingTextBorderDashOff = $('drawing-text-border-dash-off');
+    const drawingTextFillEnable = $('drawing-text-fill-enable');
+    const drawingTextFillColor = $('drawing-text-fill-color');
+    const drawingTextFillAlpha = $('drawing-text-fill-alpha');
 
     let core = null;
     let workspace = null;
@@ -1169,7 +1212,9 @@
         selectedDrawingInfo.text_font_size || 12,
       );
       const italic = !!drawingTextItalic.checked;
-      const followDrawingColor = !!drawingTextFollowColor.checked;
+      // Always send the picker color as the explicit override; reset is a
+      // separate action that re-enables follow-drawing mode.
+      const followDrawingColor = false;
       const [r, g, b, a] = hexToRgba(drawingTextColor.value || '#FFFFFF');
       core.set_selected_drawing_text_style(
         fontSize,
@@ -1181,14 +1226,27 @@
         followDrawingColor,
       );
       drawingTextFontSize.value = String(fontSize);
-      drawingTextColor.disabled = followDrawingColor;
       if (selectedDrawingInfo) {
         selectedDrawingInfo.text_font_size = fontSize;
         selectedDrawingInfo.text_italic = italic;
-        selectedDrawingInfo.text_color_follows_drawing = followDrawingColor;
-        selectedDrawingInfo.text_color = followDrawingColor
-          ? (selectedDrawingInfo.drawing_color || drawingTextColor.value)
-          : drawingTextColor.value;
+        selectedDrawingInfo.text_color_follows_drawing = false;
+        selectedDrawingInfo.text_color = drawingTextColor.value;
+      }
+    }
+
+    function resetSelectedDrawingTextColor() {
+      if (!core || !selectedDrawingInfo?.supports_text_style) return;
+      const fontSize = clampDrawingTextFontSize(
+        drawingTextFontSize.value,
+        selectedDrawingInfo.text_font_size || 12,
+      );
+      const italic = !!drawingTextItalic.checked;
+      // Color args ignored when followDrawingColor=true; pass zeros.
+      core.set_selected_drawing_text_style(fontSize, italic, 0, 0, 0, 1, true);
+      if (selectedDrawingInfo) {
+        selectedDrawingInfo.text_color_follows_drawing = true;
+        selectedDrawingInfo.text_color =
+          selectedDrawingInfo.drawing_color || drawingTextColor.value;
       }
     }
 
@@ -1228,6 +1286,52 @@
       drawingRectMiddleDashOff.disabled = dependentDisabled;
     }
 
+    function applySelectedTextDrawingBorder() {
+      if (!core || !selectedDrawingInfo?.supports_border) return;
+      const enabled = !!drawingTextBorderEnable.checked;
+      const [r, g, b, a] = hexToRgba(drawingTextBorderColor.value || '#D97706');
+      const widthRaw = parseFloat(drawingTextBorderWidth.value);
+      const width = Number.isFinite(widthRaw) && widthRaw > 0 ? widthRaw : 1;
+      const dashOnRaw = parseFloat(drawingTextBorderDashOn.value);
+      const dashOffRaw = parseFloat(drawingTextBorderDashOff.value);
+      const dashOn = Number.isFinite(dashOnRaw) && dashOnRaw > 0 ? dashOnRaw : 0;
+      const dashOff = Number.isFinite(dashOffRaw) && dashOffRaw > 0 ? dashOffRaw : 0;
+      core.set_selected_text_border(enabled, r, g, b, a, width, dashOn, dashOff);
+      if (selectedDrawingInfo) {
+        selectedDrawingInfo.border_enabled = enabled;
+        selectedDrawingInfo.border_color = drawingTextBorderColor.value;
+        selectedDrawingInfo.border_width = width;
+        selectedDrawingInfo.border_dash =
+          dashOn > 0 && dashOff > 0 ? [dashOn, dashOff] : null;
+      }
+      const dependentDisabled = !enabled;
+      drawingTextBorderColor.disabled = dependentDisabled;
+      drawingTextBorderWidth.disabled = dependentDisabled;
+      drawingTextBorderDashOn.disabled = dependentDisabled;
+      drawingTextBorderDashOff.disabled = dependentDisabled;
+    }
+
+    function applySelectedTextDrawingFill() {
+      if (!core || !selectedDrawingInfo?.supports_fill) return;
+      const enabled = !!drawingTextFillEnable.checked;
+      // Use the dedicated alpha input rather than the alpha bits inside the
+      // hex picker (which is always 1.0 from `hexToRgba`).
+      const [r, g, b] = hexToRgba(drawingTextFillColor.value || '#D97706');
+      const alphaRaw = parseFloat(drawingTextFillAlpha.value);
+      const alpha = Number.isFinite(alphaRaw)
+        ? Math.min(1, Math.max(0, alphaRaw))
+        : 0.15;
+      core.set_selected_text_fill(enabled, r, g, b, alpha);
+      if (selectedDrawingInfo) {
+        selectedDrawingInfo.fill_enabled = enabled;
+        selectedDrawingInfo.fill_color = drawingTextFillColor.value;
+        selectedDrawingInfo.fill_alpha = alpha;
+      }
+      const dependentDisabled = !enabled;
+      drawingTextFillColor.disabled = dependentDisabled;
+      drawingTextFillAlpha.disabled = dependentDisabled;
+    }
+
     async function applySelectedFibLevels() {
       if (!core || !selectedDrawingInfo?.supports_fibonacci_levels) return;
       const levels = parseFibLevelsInput(drawingFibLevels.value);
@@ -1264,9 +1368,10 @@
         drawingTextFontSize.disabled = true;
         drawingTextItalic.disabled = true;
         drawingTextColor.disabled = true;
-        drawingTextFollowColor.disabled = true;
+        drawingTextColorReset.disabled = true;
         drawingFibControls.style.display = 'none';
         drawingRectControls.style.display = 'none';
+        drawingTextControls.style.display = 'none';
         drawingPlaceholder.style.display = 'none';
         drawingTextEditor.style.display = 'none';
         return;
@@ -1283,9 +1388,10 @@
         drawingTextFontSize.disabled = true;
         drawingTextItalic.disabled = true;
         drawingTextColor.disabled = true;
-        drawingTextFollowColor.disabled = true;
+        drawingTextColorReset.disabled = true;
         drawingFibControls.style.display = 'none';
         drawingRectControls.style.display = 'none';
+        drawingTextControls.style.display = 'none';
         drawingPlaceholder.style.display = 'none';
         drawingTextEditor.style.display = 'none';
         return;
@@ -1298,17 +1404,19 @@
       drawingAlignVertical.disabled = false;
       drawingTextFontSize.disabled = !selectedDrawingInfo.supports_text_style;
       drawingTextItalic.disabled = !selectedDrawingInfo.supports_text_style;
-      drawingTextFollowColor.disabled = !selectedDrawingInfo.supports_text_style;
+      drawingTextColorReset.disabled = !selectedDrawingInfo.supports_text_style;
       if (document.activeElement !== drawingTextFontSize) {
         drawingTextFontSize.value = String(
           clampDrawingTextFontSize(selectedDrawingInfo.text_font_size, 12),
         );
       }
       drawingTextItalic.checked = !!selectedDrawingInfo.text_italic;
-      drawingTextFollowColor.checked = !!selectedDrawingInfo.text_color_follows_drawing;
-      drawingTextColor.disabled =
-        !selectedDrawingInfo.supports_text_style || !!selectedDrawingInfo.text_color_follows_drawing;
-      drawingTextColor.value = selectedDrawingInfo.text_color || '#D97706';
+      // Color picker is always interactive when text styling is supported.
+      // The Reset button is the way to return to "follow drawing color".
+      drawingTextColor.disabled = !selectedDrawingInfo.supports_text_style;
+      if (document.activeElement !== drawingTextColor) {
+        drawingTextColor.value = selectedDrawingInfo.text_color || '#D97706';
+      }
       drawingPanelHint.textContent = selectedDrawingInfo.supports_text
         ? (selectedDrawingInfo.text_editing
           ? 'Typing now edits the selected drawing natively. Press Enter to finish, Shift+Enter for a new line, or Escape to cancel.'
@@ -1349,6 +1457,53 @@
         }
         if (document.activeElement !== drawingRectMiddleDashOff) {
           drawingRectMiddleDashOff.value = String(dash ? Math.round(dash[1]) : 0);
+        }
+      }
+
+      // Text drawing border + fill controls (single-anchor Text drawing only).
+      const showTextControls =
+        !!selectedDrawingInfo.supports_border || !!selectedDrawingInfo.supports_fill;
+      drawingTextControls.style.display = showTextControls ? 'block' : 'none';
+      if (showTextControls) {
+        // Border block
+        const borderEnabled = !!selectedDrawingInfo.border_enabled;
+        drawingTextBorderEnable.checked = borderEnabled;
+        const bDisabled = !borderEnabled;
+        drawingTextBorderColor.disabled = bDisabled;
+        drawingTextBorderWidth.disabled = bDisabled;
+        drawingTextBorderDashOn.disabled = bDisabled;
+        drawingTextBorderDashOff.disabled = bDisabled;
+        if (document.activeElement !== drawingTextBorderColor) {
+          drawingTextBorderColor.value =
+            selectedDrawingInfo.border_color || '#D97706';
+        }
+        if (document.activeElement !== drawingTextBorderWidth) {
+          drawingTextBorderWidth.value = String(
+            Math.max(1, Math.round(selectedDrawingInfo.border_width || 1)),
+          );
+        }
+        const bDash = selectedDrawingInfo.border_dash;
+        if (document.activeElement !== drawingTextBorderDashOn) {
+          drawingTextBorderDashOn.value = String(bDash ? Math.round(bDash[0]) : 0);
+        }
+        if (document.activeElement !== drawingTextBorderDashOff) {
+          drawingTextBorderDashOff.value = String(bDash ? Math.round(bDash[1]) : 0);
+        }
+
+        // Fill block
+        const fillEnabled = !!selectedDrawingInfo.fill_enabled;
+        drawingTextFillEnable.checked = fillEnabled;
+        const fDisabled = !fillEnabled;
+        drawingTextFillColor.disabled = fDisabled;
+        drawingTextFillAlpha.disabled = fDisabled;
+        if (document.activeElement !== drawingTextFillColor) {
+          drawingTextFillColor.value =
+            selectedDrawingInfo.fill_color || '#D97706';
+        }
+        if (document.activeElement !== drawingTextFillAlpha) {
+          const a = selectedDrawingInfo.fill_alpha;
+          drawingTextFillAlpha.value =
+            Number.isFinite(a) ? String(a) : '0.15';
         }
       }
 
@@ -1903,12 +2058,20 @@
     drawingTextFontSize.addEventListener('change', applySelectedDrawingTextStyle);
     drawingTextItalic.addEventListener('change', applySelectedDrawingTextStyle);
     drawingTextColor.addEventListener('change', applySelectedDrawingTextStyle);
-    drawingTextFollowColor.addEventListener('change', applySelectedDrawingTextStyle);
+    drawingTextColorReset.addEventListener('click', resetSelectedDrawingTextColor);
     drawingRectMiddleEnable.addEventListener('change', applySelectedRectangleMiddleLine);
     drawingRectMiddleColor.addEventListener('change', applySelectedRectangleMiddleLine);
     drawingRectMiddleWidth.addEventListener('change', applySelectedRectangleMiddleLine);
     drawingRectMiddleDashOn.addEventListener('change', applySelectedRectangleMiddleLine);
     drawingRectMiddleDashOff.addEventListener('change', applySelectedRectangleMiddleLine);
+    drawingTextBorderEnable.addEventListener('change', applySelectedTextDrawingBorder);
+    drawingTextBorderColor.addEventListener('change', applySelectedTextDrawingBorder);
+    drawingTextBorderWidth.addEventListener('change', applySelectedTextDrawingBorder);
+    drawingTextBorderDashOn.addEventListener('change', applySelectedTextDrawingBorder);
+    drawingTextBorderDashOff.addEventListener('change', applySelectedTextDrawingBorder);
+    drawingTextFillEnable.addEventListener('change', applySelectedTextDrawingFill);
+    drawingTextFillColor.addEventListener('change', applySelectedTextDrawingFill);
+    drawingTextFillAlpha.addEventListener('change', applySelectedTextDrawingFill);
     drawingFibApply.addEventListener('click', applySelectedFibLevels);
     drawingFibLevels.addEventListener('blur', () => {
       if (selectedDrawingInfo?.supports_fibonacci_levels) applySelectedFibLevels();
@@ -2019,7 +2182,8 @@
     // ═══════════════════════════════════════════════════════════════════════
     const drawTools = {
       'draw-trendline': 'trend_line', 'draw-hline': 'horizontal_line', 'draw-vline': 'vertical_line',
-      'draw-ray': 'ray', 'draw-rectangle': 'rectangle', 'draw-fibonacci': 'fibonacci', 'draw-brush': 'brush',
+      'draw-ray': 'ray', 'draw-rectangle': 'rectangle', 'draw-text': 'text',
+      'draw-fibonacci': 'fibonacci', 'draw-brush': 'brush',
     };
     Object.entries(drawTools).forEach(([id, tool]) => {
       $(id).onclick = () => {
