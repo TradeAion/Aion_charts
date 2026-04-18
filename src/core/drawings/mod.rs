@@ -26,8 +26,9 @@ use crate::core::renderer::draw_list::{DrawText, TextAlign, TextVerticalAlign};
 use crate::core::renderer::value_projection::TimeScaleIndex;
 use crate::core::viewport::Viewport;
 use drawing::{
-    ensure_next_drawing_id_at_least, line_label_placement, point_to_css, prepare_text_block,
-    rect_text_anchor, rotated_text_box_top_left, Drawing, PreparedTextBlock, TEXT_DRAWING_GAP_CSS,
+    ensure_next_drawing_id_at_least, line_label_placement, point_to_bitmap, point_to_css,
+    prepare_text_block, push_rotated_text_block, rect_text_anchor, rotated_text_box_top_left,
+    Drawing, PreparedTextBlock, TEXT_DRAWING_GAP_CSS,
 };
 use persistence::{
     drawing_tool_from_key, drawing_tool_to_key, migrate_snapshot, DrawingSnapshot,
@@ -444,20 +445,8 @@ impl DrawingManager {
             }
         }
 
-        // Use the placeholder-sized editor target so the placeholder respects
-        // the drawing's horizontal alignment (e.g., right-aligned drawings get
-        // a placeholder whose right edge sits at the line's right endpoint —
-        // the same place typed text will end). The horizontal "jump" between
-        // a long placeholder and shorter typed text is intrinsic to right/
-        // center alignment and matches TradingView's behavior.
-        let Some(target) = Self::editor_target_for_drawing(drawing, vp, pane_css_w, pane_css_h)
-        else {
-            return;
-        };
-
         // Resolve the drawing's actual horizontal/vertical alignment so the
-        // placeholder renders identically to typed text (any descender/ascender
-        // gap, any horizontal anchoring).
+        // placeholder renders identically to typed text.
         let (h_align, v_align) = Self::drawing_text_ref(drawing)
             .map(|t| (t.horizontal_align, t.vertical_align))
             .unwrap_or((TextAlign::Left, TextVerticalAlign::Top));
@@ -467,12 +456,109 @@ impl DrawingManager {
         let font_size = style
             .map(|text_style| text_style.resolved_font_size(drawing.style().font_size))
             .unwrap_or(drawing.style().font_size);
-        // Drawing labels are always italic — placeholder included so it visually
-        // matches the typed text the user is about to enter.
-        let italic = true;
-        // For non-Left alignments, anchor the rendered text at the right edge
-        // (Right) or center (Center) of the editor target rather than its
-        // left edge — that's where the alignment math expects the anchor.
+
+        // Editing-with-empty-text: render at ~35% opacity so it reads as a
+        // ghost hint behind the caret. Otherwise full color.
+        let base_alpha = drawing.style().color[3];
+        let alpha = if is_editing_this {
+            base_alpha * 0.35
+        } else {
+            base_alpha
+        };
+        let color = [
+            drawing.style().color[0],
+            drawing.style().color[1],
+            drawing.style().color[2],
+            alpha,
+        ];
+
+        // For line-style drawings, route the placeholder through the SAME
+        // code path typed text uses (mirrors trend_line.rs render): work
+        // entirely in device-pixel space using point_to_bitmap, scaled font
+        // size, and scaled gap/inset. This guarantees identical anchoring
+        // and rotation between placeholder and typed text on tilted lines.
+        let snap_to_pixel = true;
+        let anchors = drawing.anchors();
+        let line_endpoints_dev: Option<((f64, f64), (f64, f64))> = match drawing.tool() {
+            DrawingTool::TrendLine | DrawingTool::Ray => {
+                if anchors.len() >= 2 {
+                    Some((
+                        point_to_bitmap(
+                            &anchors[0].point,
+                            vp,
+                            pane_css_w,
+                            pane_css_h,
+                            h_pixel_ratio,
+                            v_pixel_ratio,
+                            snap_to_pixel,
+                        ),
+                        point_to_bitmap(
+                            &anchors[1].point,
+                            vp,
+                            pane_css_w,
+                            pane_css_h,
+                            h_pixel_ratio,
+                            v_pixel_ratio,
+                            snap_to_pixel,
+                        ),
+                    ))
+                } else {
+                    None
+                }
+            }
+            DrawingTool::HorizontalLine => {
+                if !anchors.is_empty() {
+                    let y_css = vp.price_to_css_y(anchors[0].point.price, pane_css_h);
+                    let y_dev = y_css * v_pixel_ratio;
+                    Some(((0.0, y_dev), (pane_css_w * h_pixel_ratio, y_dev)))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
+        if let Some(((bx0, by0), (bx1, by1))) = line_endpoints_dev {
+            let fs_dev = (font_size * avg_ratio) as f32;
+            let block = prepare_text_block(Self::DRAWING_PLACEHOLDER, fs_dev).unwrap_or(
+                PreparedTextBlock {
+                    lines: vec![Self::DRAWING_PLACEHOLDER.to_string()],
+                    line_height: (fs_dev * 1.2).max(fs_dev),
+                    total_height: fs_dev,
+                    max_width: ((Self::DRAWING_PLACEHOLDER.len() as f64)
+                        * font_size
+                        * avg_ratio
+                        * 0.6) as f32,
+                },
+            );
+            let inset = TEXT_DRAWING_GAP_CSS * avg_ratio;
+            let gap = Self::LINE_LABEL_SIDE_GAP_CSS * avg_ratio;
+            let placement = line_label_placement(
+                bx0, by0, bx1, by1, h_align, v_align, &block, fs_dev, inset, gap,
+            );
+            push_rotated_text_block(
+                &mut geom.texts,
+                &block,
+                placement.anchor_x,
+                placement.anchor_y,
+                placement.top_local_y,
+                fs_dev,
+                600,
+                true,
+                color,
+                placement.align,
+                placement.rotation_rad,
+            );
+            return;
+        }
+
+        // Fallback for non-line drawings (Rectangle, VerticalLine, etc.):
+        // use the editor target's bounding box. This path doesn't deal with
+        // rotation so the simple anchor math is correct.
+        let Some(target) = Self::editor_target_for_drawing(drawing, vp, pane_css_w, pane_css_h)
+        else {
+            return;
+        };
         let anchor_x_css = match h_align {
             TextAlign::Left => target.left,
             TextAlign::Center => target.left + target.width * 0.5,
@@ -481,28 +567,18 @@ impl DrawingManager {
         let x = ((anchor_x_css + 1.0) * h_pixel_ratio - 1.0) as f32;
         let y = (target.top * v_pixel_ratio) as f32;
 
-        // Editing-with-empty-text: render at ~35% opacity so it reads as a
-        // ghost hint behind the caret. Otherwise full color (modulo any
-        // existing alpha on the drawing's color).
-        let base_alpha = drawing.style().color[3];
-        let alpha = if is_editing_this {
-            base_alpha * 0.35
-        } else {
-            base_alpha
-        };
-
         geom.texts.push(DrawText {
             text: Self::DRAWING_PLACEHOLDER.to_string(),
             x,
             y,
             font_size: (font_size * avg_ratio) as f32,
             font_weight: 600,
-            italic,
+            italic: true,
             rotation_rad: target.rotation_deg.to_radians() as f32,
-            r: drawing.style().color[0],
-            g: drawing.style().color[1],
-            b: drawing.style().color[2],
-            a: alpha,
+            r: color[0],
+            g: color[1],
+            b: color[2],
+            a: color[3],
             align: h_align,
             vertical_align: v_align,
         });
