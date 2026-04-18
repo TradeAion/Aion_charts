@@ -386,15 +386,20 @@ impl Drawing for RectangleDrawing {
 
         // Optional horizontal middle line (TradingView-style). Independent of
         // the rectangle's border style — uses its own color, width, and dash.
-        // When the midline is enabled, the rectangle's text rides ALONG the
-        // midline (like horizontal-line text) instead of being centered inside
-        // the rect, so labels never overlap the line.
+        // When the midline is enabled AND the text is set to Middle vertical
+        // alignment, the text rides ALONG the midline (like horizontal-line
+        // text) and the line opens a gap so the label never overlaps it.
+        // Top / Bottom alignment is unchanged: text sits OUTSIDE the rectangle
+        // (above the top edge / below the bottom edge), exactly like before
+        // the midline feature existed.
         let mid_y = (py0 + py1) * 0.5;
-        let midline_enabled = self.middle_line.is_some();
+        let route_text_along_midline = self.middle_line.is_some()
+            && self.text.vertical_align
+                == crate::core::renderer::draw_list::TextVerticalAlign::Middle;
         let mut midline_gap_range: Option<(f64, f64)> = None;
         let mut midline_text_pushed = false;
 
-        if midline_enabled {
+        if route_text_along_midline {
             if let Some(block) = prepare_text_block(&self.text.value, fs) {
                 // Same inset/gap conventions as horizontal_line: 2 px breathing
                 // room on the ends, 2 px perpendicular gap above/below the line.
@@ -412,11 +417,7 @@ impl Drawing for RectangleDrawing {
                     inset,
                     gap_css,
                 );
-                if self.text.vertical_align
-                    == crate::core::renderer::draw_list::TextVerticalAlign::Middle
-                {
-                    midline_gap_range = line_middle_gap_range(&placement, &block, avg_ratio as f32);
-                }
+                midline_gap_range = line_middle_gap_range(&placement, &block, avg_ratio as f32);
                 push_rotated_text_block(
                     &mut geom.texts,
                     &block,
