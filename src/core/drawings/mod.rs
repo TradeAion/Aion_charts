@@ -1253,6 +1253,49 @@ impl DrawingManager {
             (false, false, String::new(), 0.0, None)
         };
 
+        // Text drawing border + fill toggles. The struct stores the colors
+        // even when disabled so toggling does not lose the user's last pick.
+        let (
+            supports_border,
+            border_enabled,
+            border_color,
+            border_width,
+            border_dash,
+            supports_fill,
+            fill_enabled,
+            fill_color_hex,
+            fill_alpha,
+        ) = if tool == DrawingTool::Text {
+            let td = drawing
+                .as_any()
+                .downcast_ref::<text_drawing::TextDrawing>()?;
+            let style = td.style();
+            let fill = style.fill_color.unwrap_or([0.0, 0.0, 0.0, 0.0]);
+            (
+                true,
+                td.border_enabled(),
+                rgba_to_hex(style.color),
+                style.line_width,
+                style.dash,
+                true,
+                td.fill_enabled(),
+                rgba_to_hex(fill),
+                fill[3] as f64,
+            )
+        } else {
+            (
+                false,
+                false,
+                String::new(),
+                0.0,
+                None,
+                false,
+                false,
+                String::new(),
+                0.0,
+            )
+        };
+
         Some(SelectedDrawingInfo {
             id,
             tool: drawing_tool_to_key(tool).to_string(),
@@ -1280,6 +1323,15 @@ impl DrawingManager {
             middle_line_color,
             middle_line_width,
             middle_line_dash,
+            supports_border,
+            border_enabled,
+            border_color,
+            border_width,
+            border_dash,
+            supports_fill,
+            fill_enabled,
+            fill_color: fill_color_hex,
+            fill_alpha,
         })
     }
 
@@ -1410,6 +1462,65 @@ impl DrawingManager {
         } else {
             rect.set_middle_line(None);
         }
+        true
+    }
+
+    /// Update the border of the currently selected Text drawing. The color,
+    /// width, and dash are always written so toggling `enabled` off and back
+    /// on preserves the user's last choices.
+    pub fn set_selected_text_border(
+        &mut self,
+        enabled: bool,
+        color: [f32; 4],
+        line_width: f64,
+        dash: Option<[f64; 2]>,
+    ) -> bool {
+        let Some(id) = self.selected_id else {
+            return false;
+        };
+        let Some(drawing) = self.get_mut(id) else {
+            return false;
+        };
+        if drawing.tool() != DrawingTool::Text {
+            return false;
+        }
+        {
+            let style = drawing.style_mut();
+            style.color = color;
+            style.line_width = line_width;
+            style.dash = dash;
+        }
+        let Some(td) = drawing
+            .as_any_mut()
+            .downcast_mut::<text_drawing::TextDrawing>()
+        else {
+            return false;
+        };
+        td.set_border_enabled(enabled);
+        true
+    }
+
+    /// Update the background fill of the currently selected Text drawing.
+    /// The color (including alpha) is always written so toggling `enabled`
+    /// off and back on preserves the user's last picked color.
+    pub fn set_selected_text_fill(&mut self, enabled: bool, color: [f32; 4]) -> bool {
+        let Some(id) = self.selected_id else {
+            return false;
+        };
+        let Some(drawing) = self.get_mut(id) else {
+            return false;
+        };
+        if drawing.tool() != DrawingTool::Text {
+            return false;
+        }
+        drawing.style_mut().fill_color = Some(color);
+        let Some(td) = drawing
+            .as_any_mut()
+            .downcast_mut::<text_drawing::TextDrawing>()
+        else {
+            return false;
+        };
+        td.set_fill_enabled(enabled);
         true
     }
 
@@ -1932,6 +2043,16 @@ impl DrawingManager {
                     None
                 };
 
+                let (border_enabled, fill_enabled) = if drawing.tool() == DrawingTool::Text {
+                    drawing
+                        .as_any()
+                        .downcast_ref::<text_drawing::TextDrawing>()
+                        .map(|td| (Some(td.border_enabled()), Some(td.fill_enabled())))
+                        .unwrap_or((None, None))
+                } else {
+                    (None, None)
+                };
+
                 SerializedDrawing {
                     id: drawing.id(),
                     tool: drawing_tool_to_key(drawing.tool()).to_string(),
@@ -1950,6 +2071,8 @@ impl DrawingManager {
                     text_color: drawing_text_style.and_then(|style| style.color),
                     fibonacci_levels,
                     middle_line,
+                    border_enabled,
+                    fill_enabled,
                 }
             })
             .collect();
@@ -2091,6 +2214,8 @@ impl DrawingManager {
             text_color,
             fibonacci_levels,
             middle_line,
+            border_enabled,
+            fill_enabled,
         } = item;
 
         let tool = drawing_tool_from_key(tool.as_str())
@@ -2170,6 +2295,18 @@ impl DrawingManager {
                 .downcast_mut::<rectangle::RectangleDrawing>()
                 .ok_or_else(|| "Rectangle type mismatch during restore".to_string())?;
             rect.set_middle_line(middle_line.map(Into::into));
+        }
+
+        if tool == DrawingTool::Text {
+            let td = drawing
+                .as_any_mut()
+                .downcast_mut::<text_drawing::TextDrawing>()
+                .ok_or_else(|| "Text type mismatch during restore".to_string())?;
+            // Missing fields fall back to the tool's defaults (no border, no
+            // fill) so legacy snapshots without these flags behave like a
+            // freshly-created Text drawing.
+            td.set_border_enabled(border_enabled.unwrap_or(false));
+            td.set_fill_enabled(fill_enabled.unwrap_or(false));
         }
 
         if let Some(text_style) = Self::drawing_text_style_mut(drawing.as_mut()) {
@@ -3149,5 +3286,62 @@ mod tests {
         assert!(!info.middle_line_enabled);
         assert!(info.middle_line_width > 0.0);
         assert!(info.middle_line_color.starts_with('#'));
+    }
+
+    #[test]
+    fn selected_text_info_exposes_border_and_fill_toggles() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Text;
+        let id = manager.start_creating(10.0, 110.0).expect("text id");
+        // Single-anchor finalization happens immediately on creation, but
+        // the manager only sets the selection in finalize_creation_step.
+        manager.finalize_creation_step(10.0, 110.0);
+
+        // After creation the new Text drawing should be the selected one.
+        manager.selected_id = Some(id);
+
+        let vp = test_viewport();
+        let info = manager
+            .selected_drawing_info(&vp, 800.0, 600.0)
+            .expect("info");
+        assert!(info.supports_border);
+        assert!(!info.border_enabled, "Text defaults to no border");
+        assert!(info.supports_fill);
+        assert!(!info.fill_enabled, "Text defaults to no fill");
+        assert!(info.border_color.starts_with('#'));
+        assert!(info.fill_color.starts_with('#'));
+    }
+
+    #[test]
+    fn set_selected_text_border_and_fill_persist_across_snapshot_roundtrip() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Text;
+        let id = manager.start_creating(10.0, 110.0).expect("text id");
+        manager.finalize_creation_step(10.0, 110.0);
+        manager.selected_id = Some(id);
+
+        assert!(manager.set_selected_text_border(
+            true,
+            [0.1, 0.2, 0.3, 1.0],
+            2.5,
+            Some([4.0, 4.0]),
+        ));
+        assert!(manager.set_selected_text_fill(true, [0.5, 0.6, 0.7, 0.4]));
+
+        let json = manager.snapshot_json().expect("snapshot");
+        let mut restored = DrawingManager::new();
+        restored.replace_from_json(&json).expect("restore");
+
+        let drawing = restored.all().iter().next().expect("one drawing");
+        let td = drawing
+            .as_any()
+            .downcast_ref::<text_drawing::TextDrawing>()
+            .expect("text drawing");
+        assert!(td.border_enabled());
+        assert!(td.fill_enabled());
+        assert!((td.style().line_width - 2.5).abs() < 1e-9);
+        assert_eq!(td.style().dash, Some([4.0, 4.0]));
+        let fc = td.style().fill_color.expect("fill color preserved");
+        assert!((fc[3] - 0.4).abs() < 1e-6);
     }
 }

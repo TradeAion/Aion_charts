@@ -440,6 +440,29 @@ pub struct SelectedDrawingInfo {
     /// Optional dash pattern [dash, gap] for the middle line, when applicable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub middle_line_dash: Option<[f64; 2]>,
+    /// True when the selected drawing supports an on/off toggle for its
+    /// border (currently: Text drawing only).
+    pub supports_border: bool,
+    /// True when the border is currently enabled on the selected drawing.
+    pub border_enabled: bool,
+    /// Hex string ("#RRGGBB") of the border color, when applicable. Mirrors
+    /// `drawing_color` for tools whose border color == the drawing color.
+    pub border_color: String,
+    /// Border line width in CSS px, when applicable.
+    pub border_width: f64,
+    /// Optional dash pattern [dash, gap] for the border, when applicable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub border_dash: Option<[f64; 2]>,
+    /// True when the selected drawing supports an on/off toggle for its
+    /// background fill (currently: Text drawing only).
+    pub supports_fill: bool,
+    /// True when the fill is currently enabled on the selected drawing.
+    pub fill_enabled: bool,
+    /// Hex string ("#RRGGBB") of the fill color, when applicable.
+    pub fill_color: String,
+    /// Fill alpha in [0, 1], when applicable. Surfaced separately from
+    /// `fill_color` so the UI can edit opacity without parsing #RRGGBBAA.
+    pub fill_alpha: f64,
 }
 
 #[cfg(test)]

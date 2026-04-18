@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
 
-pub const DRAWINGS_SNAPSHOT_VERSION: u32 = 4;
+pub const DRAWINGS_SNAPSHOT_VERSION: u32 = 5;
 
 fn snapshot_version() -> u32 {
     DRAWINGS_SNAPSHOT_VERSION
@@ -57,6 +57,14 @@ pub struct SerializedDrawing {
     /// non-rectangle drawings, or rectangles without a midline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub middle_line: Option<SerializedMiddleLineStyle>,
+    /// Optional border-enabled flag for Text drawings. `None` for legacy /
+    /// non-text drawings (treated as the tool's default by the deserializer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border_enabled: Option<bool>,
+    /// Optional fill-enabled flag for Text drawings. `None` for legacy /
+    /// non-text drawings (treated as the tool's default by the deserializer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -306,6 +314,22 @@ fn apply_snapshot_migration_step(
             }
             Ok(payload)
         }
+        4 => {
+            // v4 → v5: introduces the optional Text-drawing flags
+            // `border_enabled` and `fill_enabled` on `SerializedDrawing`.
+            // Both are `Option<bool>` with serde default, so v4 snapshots
+            // without them deserialize as `None`. The deserializer applies
+            // tool-appropriate defaults (text-only / no border / no fill for
+            // brand-new Text drawings, no-op for non-text tools), so the
+            // migration step is a pure version bump.
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert(
+                    "version".to_string(),
+                    serde_json::Value::from((from_version + 1) as u64),
+                );
+            }
+            Ok(payload)
+        }
         // Future migrations should be added here as `vN -> vN+1` transforms.
         _ => Err(DrawingsMigrationError::UnknownVersion(from_version)),
     }
@@ -379,6 +403,8 @@ mod tests {
                 text_color: None,
                 fibonacci_levels: Vec::new(),
                 middle_line: None,
+                border_enabled: None,
+                fill_enabled: None,
             }],
         }
     }
@@ -515,5 +541,36 @@ mod tests {
         assert_eq!(migrated.version, DRAWINGS_SNAPSHOT_VERSION);
         assert_eq!(migrated.drawings.len(), 1);
         assert_eq!(migrated.drawings[0].middle_line, None);
+    }
+
+    #[test]
+    fn v4_snapshot_migrates_and_defaults_text_flags_to_none() {
+        // v4 had no Text drawing tool, and no border_enabled / fill_enabled
+        // fields. After migrating to v5 those fields must default to `None`
+        // so the deserializer applies the tool's own defaults.
+        let payload = json!({
+            "version": 4,
+            "drawings": [{
+                "id": 21,
+                "tool": "rectangle",
+                "style": SerializedDrawingStyle::default(),
+                "anchors": [{
+                    "point": { "bar_index": 5.0, "price": 50.0, "timestamp": null },
+                    "hit_radius": 5.0
+                }, {
+                    "point": { "bar_index": 15.0, "price": 75.0, "timestamp": null },
+                    "hit_radius": 5.0
+                }],
+                "points": [],
+                "middle_line": null
+            }]
+        });
+
+        let migrated = migrate_snapshot(&payload).expect("migrate v4 snapshot");
+
+        assert_eq!(migrated.version, DRAWINGS_SNAPSHOT_VERSION);
+        assert_eq!(migrated.drawings.len(), 1);
+        assert_eq!(migrated.drawings[0].border_enabled, None);
+        assert_eq!(migrated.drawings[0].fill_enabled, None);
     }
 }
