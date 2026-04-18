@@ -444,7 +444,19 @@ impl DrawingManager {
             }
         }
 
-        let Some(target) = Self::editor_target_for_drawing(drawing, vp, pane_css_w, pane_css_h)
+        // Anchor the placeholder at the SAME point where the first typed
+        // character will land — i.e., the caret position. We get this by sizing
+        // the editor target with the collapsed (1px-wide) anchor, regardless
+        // of the drawing's horizontal alignment. This way:
+        //   - Right-aligned drawing: placeholder appears just inside the line's
+        //     right endpoint (where typed text begins flowing leftward in the
+        //     reader's eye), not 70px to the left where its left edge would be.
+        //   - Left-aligned: identical to before (anchor IS the left edge).
+        //   - Center-aligned: placeholder starts at the line's center.
+        // The placeholder always renders left-to-right starting from the caret,
+        // so its width no longer affects placement.
+        let Some(target) =
+            Self::editor_target_for_drawing_sized(drawing, vp, pane_css_w, pane_css_h, false)
         else {
             return;
         };
