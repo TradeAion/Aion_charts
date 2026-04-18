@@ -26,7 +26,9 @@ use crate::core::footprint::{
     FootprintBar, FootprintData, FootprintDisplayMode, FootprintGradientStyle, FootprintOptions,
     ImbalanceType, VolumeColorIntensity,
 };
-use crate::core::renderer::draw_list::{ColoredRect, DrawText, HorizontalGradientRect, TextAlign};
+use crate::core::renderer::draw_list::{
+    ColoredRect, DrawText, HorizontalGradientRect, TextAlign, TextVerticalAlign,
+};
 use crate::core::renderer::series::CandleSizing;
 use crate::core::renderer::traits::ChartStyle;
 use crate::core::renderer::transforms::{bar_to_x, color4, price_to_y};
@@ -345,12 +347,8 @@ pub fn generate_footprint_geometry(
         {
             let first_level = &levels[0];
             let last_level = &levels[levels.len() - 1];
-            let ladder_top = price_to_y(
-                last_level.price + effective_tick,
-                viewport,
-                candle_h,
-            )
-            .round();
+            let ladder_top =
+                price_to_y(last_level.price + effective_tick, viewport, candle_h).round();
             let ladder_bottom = price_to_y(first_level.price, viewport, candle_h).round();
             let ladder_h = (ladder_bottom - ladder_top).max(1.0);
 
@@ -689,11 +687,15 @@ fn render_bid_ask_cell(
                 x: bid_text_x as f32,
                 y: text_y as f32,
                 font_size: effective_font,
+                font_weight: 400,
+                italic: false,
+                rotation_rad: 0.0,
                 r: opts.text_color[0],
                 g: opts.text_color[1],
                 b: opts.text_color[2],
                 a: opts.text_color[3],
                 align: TextAlign::Center,
+                vertical_align: TextVerticalAlign::Middle,
             });
         }
 
@@ -705,11 +707,15 @@ fn render_bid_ask_cell(
                 x: ask_text_x as f32,
                 y: text_y as f32,
                 font_size: effective_font,
+                font_weight: 400,
+                italic: false,
+                rotation_rad: 0.0,
                 r: opts.text_color[0],
                 g: opts.text_color[1],
                 b: opts.text_color[2],
                 a: opts.text_color[3],
                 align: TextAlign::Center,
+                vertical_align: TextVerticalAlign::Middle,
             });
         }
     }
@@ -787,11 +793,15 @@ fn render_delta_cell(
             x: (bar_left + bar_width * 0.5) as f32,
             y: (cell_y + cell_h * 0.5) as f32,
             font_size: effective_font,
+            font_weight: 400,
+            italic: false,
+            rotation_rad: 0.0,
             r: text_color[0],
             g: text_color[1],
             b: text_color[2],
             a: text_color[3],
             align: TextAlign::Center,
+            vertical_align: TextVerticalAlign::Middle,
         });
     }
 }
@@ -858,11 +868,15 @@ fn render_volume_cell(
             x: (bar_left + bar_width * 0.5) as f32,
             y: (cell_y + cell_h * 0.5) as f32,
             font_size: effective_font,
+            font_weight: 400,
+            italic: false,
+            rotation_rad: 0.0,
             r: opts.text_color[0],
             g: opts.text_color[1],
             b: opts.text_color[2],
             a: opts.text_color[3],
             align: TextAlign::Center,
+            vertical_align: TextVerticalAlign::Middle,
         });
     }
 }
@@ -1008,11 +1022,15 @@ fn render_delta_bar(
             x: (bar_left + bar_width * 0.5) as f32,
             y: (y + bar_h * 0.5) as f32,
             font_size: fs,
+            font_weight: 400,
+            italic: false,
+            rotation_rad: 0.0,
             r: color[0],
             g: color[1],
             b: color[2],
             a: 1.0,
             align: TextAlign::Center,
+            vertical_align: TextVerticalAlign::Middle,
         });
     }
 }

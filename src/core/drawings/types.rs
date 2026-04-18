@@ -3,7 +3,10 @@
 //! Coordinates are stored in logical space (bar_index + price) so drawings
 //! survive scroll, zoom, price auto-fit, and window resize.
 
-use crate::core::renderer::draw_list::{ColoredLine, ColoredRect, DrawText};
+use crate::core::renderer::draw_list::{
+    ColoredLine, ColoredRect, DrawText, TextAlign, TextVerticalAlign,
+};
+use serde::Serialize;
 
 // ── Logical coordinate ──────────────────────────────────────────────────────
 
@@ -96,6 +99,8 @@ pub enum DrawingState {
 pub enum HitPart {
     /// Hit an anchor point (index into the drawing's anchor array).
     Anchor(usize),
+    /// Hit the drawing's inline text label / placeholder.
+    Label,
     /// Hit the drawing body (line, rect fill, etc.)
     Body,
     /// Hit an edge of the drawing (e.g. rectangle border, distinct from interior).
@@ -143,6 +148,7 @@ pub fn cursor_for_drawing_hit(
                 _ => "pointer",                             // trend line, fib, scale, ray anchors
             }
         }
+        HitPart::Label => "text",
         HitPart::Edge => {
             match tool {
                 DrawingTool::Rectangle => "move", // edge drag moves the whole rectangle
@@ -263,9 +269,144 @@ impl DrawingStyle {
     }
 }
 
+/// Shared inline text configuration for drawings that support labels/notes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DrawingTextStyle {
+    pub font_size: Option<f64>,
+    pub italic: bool,
+    pub color: Option<[f32; 4]>,
+}
+
+impl Default for DrawingTextStyle {
+    fn default() -> Self {
+        Self {
+            font_size: None,
+            italic: false,
+            color: None,
+        }
+    }
+}
+
+impl DrawingTextStyle {
+    pub fn resolved_font_size(&self, fallback: f64) -> f64 {
+        self.font_size
+            .filter(|value| value.is_finite())
+            .unwrap_or(fallback)
+            .clamp(8.0, 48.0)
+    }
+
+    pub fn resolved_color(&self, fallback: [f32; 4]) -> [f32; 4] {
+        self.color
+            .unwrap_or(fallback)
+            .map(|channel| channel.clamp(0.0, 1.0))
+    }
+
+    pub fn set_font_size(&mut self, value: f64) {
+        if value.is_finite() {
+            self.font_size = Some(value.clamp(8.0, 48.0));
+        }
+    }
+
+    pub fn set_color_override(&mut self, color: Option<[f32; 4]>) {
+        self.color = color.map(|rgba| rgba.map(|channel| channel.clamp(0.0, 1.0)));
+    }
+}
+
+pub fn rgba_to_hex(color: [f32; 4]) -> String {
+    let [r, g, b, _a] = color.map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8);
+    format!("#{r:02X}{g:02X}{b:02X}")
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DrawingText {
+    pub value: String,
+    pub horizontal_align: TextAlign,
+    pub vertical_align: TextVerticalAlign,
+    pub style: DrawingTextStyle,
+}
+
+impl Default for DrawingText {
+    fn default() -> Self {
+        Self {
+            value: String::new(),
+            horizontal_align: TextAlign::Right,
+            vertical_align: TextVerticalAlign::Top,
+            style: DrawingTextStyle::default(),
+        }
+    }
+}
+
+impl DrawingText {
+    pub fn rectangle_default() -> Self {
+        Self {
+            value: String::new(),
+            horizontal_align: TextAlign::Right,
+            vertical_align: TextVerticalAlign::Top,
+            style: DrawingTextStyle::default(),
+        }
+    }
+}
+
+impl DrawingText {
+    pub fn is_empty(&self) -> bool {
+        self.value.trim().is_empty()
+    }
+}
+
+/// User-configurable Fibonacci level definition.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FibonacciLevel {
+    pub ratio: f64,
+    pub label: String,
+}
+
+impl FibonacciLevel {
+    pub fn new(ratio: f64, label: impl Into<String>) -> Self {
+        Self {
+            ratio,
+            label: label.into(),
+        }
+    }
+}
+
+/// Rectangle in CSS pixels used by the demo/editor overlay.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct DrawingTextEditorTarget {
+    pub left: f64,
+    pub top: f64,
+    pub width: f64,
+    pub height: f64,
+    pub rotation_deg: f64,
+}
+
+/// UI-facing snapshot of the currently selected drawing's text capabilities.
+#[derive(Debug, Clone, Serialize)]
+pub struct SelectedDrawingInfo {
+    pub id: u64,
+    pub tool: String,
+    pub supports_text: bool,
+    pub supports_text_style: bool,
+    pub placeholder: String,
+    pub text: String,
+    pub horizontal_align: String,
+    pub vertical_align: String,
+    pub text_font_size: f64,
+    pub text_italic: bool,
+    pub drawing_color: String,
+    pub text_color: String,
+    pub text_color_follows_drawing: bool,
+    pub text_editing: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub editor_target: Option<DrawingTextEditorTarget>,
+    pub supports_fibonacci_levels: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fibonacci_levels: Vec<FibonacciLevel>,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::DrawingStyle;
+    use super::{DrawingStyle, DrawingText};
+    use crate::core::renderer::draw_list::{TextAlign, TextVerticalAlign};
     use crate::core::renderer::theme::ThemeConfig;
 
     #[test]
@@ -282,6 +423,20 @@ mod tests {
         let style = DrawingStyle::fibonacci_from_theme(&theme);
 
         assert_eq!(style.line_width, 2.0);
+    }
+
+    #[test]
+    fn drawing_text_defaults_to_right_top_alignment() {
+        let text = DrawingText::default();
+        assert_eq!(text.horizontal_align, TextAlign::Right);
+        assert_eq!(text.vertical_align, TextVerticalAlign::Top);
+    }
+
+    #[test]
+    fn rectangle_text_defaults_to_right_top_alignment() {
+        let text = DrawingText::rectangle_default();
+        assert_eq!(text.horizontal_align, TextAlign::Right);
+        assert_eq!(text.vertical_align, TextVerticalAlign::Top);
     }
 }
 

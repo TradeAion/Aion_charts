@@ -4,11 +4,13 @@
 //! Completes on the first click (1 anchor).
 
 use super::drawing::{
-    generate_anchor_circles, next_drawing_id, point_to_bitmap, point_to_css, Drawing,
+    generate_anchor_circles, next_drawing_id, optical_middle_top, point_to_bitmap, point_to_css,
+    prepare_text_block, push_line_with_gap, push_text_block, text_block_bounds, Drawing,
+    TEXT_DRAWING_GAP_CSS,
 };
 use super::hit_test;
 use super::types::*;
-use crate::core::renderer::draw_list::ColoredLine;
+use crate::core::renderer::draw_list::{TextAlign, TextVerticalAlign};
 use crate::core::viewport::Viewport;
 use crate::impl_drawing_accessors;
 
@@ -18,6 +20,7 @@ pub struct VerticalLineDrawing {
     state: DrawingState,
     style: DrawingStyle,
     anchors: Vec<AnchorPoint>,
+    text: DrawingText,
 }
 
 impl VerticalLineDrawing {
@@ -30,7 +33,16 @@ impl VerticalLineDrawing {
             state: DrawingState::Creating { step: 0 },
             style: DrawingStyle::default(),
             anchors: vec![AnchorPoint::new(bar_index, price)],
+            text: DrawingText::default(),
         }
+    }
+
+    pub fn text(&self) -> &DrawingText {
+        &self.text
+    }
+
+    pub fn text_mut(&mut self) -> &mut DrawingText {
+        &mut self.text
     }
 }
 
@@ -77,6 +89,8 @@ impl Drawing for VerticalLineDrawing {
         let c = &self.style.color;
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let lw = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
+        let text_color = self.text.style.resolved_color(*c);
+        let fs = (self.text.style.resolved_font_size(self.style.font_size) * avg_ratio) as f32;
         // Keep live preview crisp while creating/dragging too.
         let snap_to_pixel = true;
         let (x, _y) = point_to_bitmap(
@@ -95,19 +109,52 @@ impl Drawing for VerticalLineDrawing {
             ((d[0] * avg_ratio) as f32, (d[1] * avg_ratio) as f32)
         });
 
-        geom.lines.push(ColoredLine {
-            x0: x,
-            y0: 0.0,
-            x1: x,
-            y1: pane_ph,
-            width: lw,
-            r: c[0],
-            g: c[1],
-            b: c[2],
-            a: c[3],
+        let mut line_gap_bounds = None;
+
+        if let Some(block) = prepare_text_block(&self.text.value, fs) {
+            // Universal 2px shape↔text spacing for both the horizontal offset
+            // from the vertical line and the vertical padding from the pane edges.
+            let gap = TEXT_DRAWING_GAP_CSS * avg_ratio;
+            let pad_y = TEXT_DRAWING_GAP_CSS * avg_ratio;
+            let (text_x, text_align) = match self.text.horizontal_align {
+                TextAlign::Left => (x as f64 - gap, TextAlign::Right),
+                TextAlign::Center => (x as f64, TextAlign::Center),
+                TextAlign::Right => (x as f64 + gap, TextAlign::Left),
+            };
+            let top_y = match self.text.vertical_align {
+                TextVerticalAlign::Top => pad_y as f32,
+                TextVerticalAlign::Middle => optical_middle_top(pane_ph * 0.5, &block, fs),
+                TextVerticalAlign::Bottom => pane_ph - pad_y as f32 - block.total_height,
+            };
+            if self.text.horizontal_align == TextAlign::Center {
+                line_gap_bounds = Some(text_block_bounds(&block, text_x as f32, top_y, text_align));
+            }
+            push_text_block(
+                &mut geom.texts,
+                &block,
+                text_x as f32,
+                top_y,
+                fs,
+                600,
+                self.text.style.italic,
+                text_color,
+                text_align,
+            );
+        }
+
+        push_line_with_gap(
+            &mut geom.lines,
+            x as f64,
+            0.0,
+            x as f64,
+            pane_ph as f64,
+            lw,
+            *c,
             dash,
             gap,
-        });
+            line_gap_bounds,
+            (2.0 * avg_ratio) as f32,
+        );
 
         if show_anchors {
             geom.anchors = generate_anchor_circles(

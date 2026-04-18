@@ -164,8 +164,7 @@ pub use crate::core::drawings::DrawingManager;
 
 pub use crate::core::drawings::persistence::{
     migrate_snapshot, DrawingSnapshot, DrawingsMigrationError, SerializedAnchorPoint,
-    SerializedDrawing, SerializedDrawingPoint, SerializedDrawingStyle,
-    DRAWINGS_SNAPSHOT_VERSION,
+    SerializedDrawing, SerializedDrawingPoint, SerializedDrawingStyle, DRAWINGS_SNAPSHOT_VERSION,
 };
 /// Available drawing tools.
 pub use crate::core::drawings::types::DrawingTool;

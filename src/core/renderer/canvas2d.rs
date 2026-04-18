@@ -188,15 +188,19 @@ impl Canvas2DRenderer {
         let font_family = crate::core::renderer::theme::FONT_FAMILY;
         self.ctx.set_text_baseline("middle");
 
-        let mut prev_size: Option<f32> = None;
+        let mut prev_font: Option<(f32, u16, bool)> = None;
         let mut prev_color: Option<[f32; 4]> = None;
 
         for t in texts {
-            // Update font size when it changes
-            if prev_size != Some(t.font_size) {
-                let font = format!("{}px {}", t.font_size, font_family);
+            let font_key = (t.font_size, t.font_weight, t.italic);
+            if prev_font != Some(font_key) {
+                let font = if t.italic {
+                    format!("italic {} {}px {}", t.font_weight, t.font_size, font_family)
+                } else {
+                    format!("{} {}px {}", t.font_weight, t.font_size, font_family)
+                };
                 self.ctx.set_font(&font);
-                prev_size = Some(t.font_size);
+                prev_font = Some(font_key);
             }
 
             // Update color when it changes
@@ -207,7 +211,15 @@ impl Canvas2DRenderer {
             }
 
             self.ctx.set_text_align("center");
-            let _ = self.ctx.fill_text(&t.text, t.x as f64, t.y as f64);
+            if t.rotation_rad.abs() > f32::EPSILON {
+                self.ctx.save();
+                let _ = self.ctx.translate(t.x as f64, t.y as f64);
+                let _ = self.ctx.rotate(t.rotation_rad as f64);
+                let _ = self.ctx.fill_text(&t.text, 0.0, 0.0);
+                self.ctx.restore();
+            } else {
+                let _ = self.ctx.fill_text(&t.text, t.x as f64, t.y as f64);
+            }
         }
     }
 
@@ -247,12 +259,24 @@ impl Canvas2DRenderer {
         let _ = self.ctx.set_line_dash(&js_sys::Array::new());
 
         for t in &geom.texts {
-            let font = format!("{}px {}", t.font_size, font_family);
+            let font = if t.italic {
+                format!("italic {} {}px {}", t.font_weight, t.font_size, font_family)
+            } else {
+                format!("{} {}px {}", t.font_weight, t.font_size, font_family)
+            };
+            self.ctx.save();
             self.ctx.set_font(&font);
             self.ctx.set_fill_style_str(&rgba(&[t.r, t.g, t.b, t.a]));
             self.ctx.set_text_align(t.align.as_canvas_str());
-            self.ctx.set_text_baseline("middle");
-            let _ = self.ctx.fill_text(&t.text, t.x as f64, t.y as f64);
+            self.ctx.set_text_baseline(t.vertical_align.as_canvas_str());
+            if t.rotation_rad.abs() > f32::EPSILON {
+                let _ = self.ctx.translate(t.x as f64, t.y as f64);
+                let _ = self.ctx.rotate(t.rotation_rad as f64);
+                let _ = self.ctx.fill_text(&t.text, 0.0, 0.0);
+            } else {
+                let _ = self.ctx.fill_text(&t.text, t.x as f64, t.y as f64);
+            }
+            self.ctx.restore();
         }
 
         for a in &geom.anchors {

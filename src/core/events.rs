@@ -326,7 +326,14 @@ mod tests {
         (0..count)
             .map(|i| {
                 let base = 100.0 + i as f64 * 0.5;
-                Bar::new(1_000 + i as u64, base, base + 1.0, base - 1.0, base + 0.25, 10.0)
+                Bar::new(
+                    1_000 + i as u64,
+                    base,
+                    base + 1.0,
+                    base - 1.0,
+                    base + 0.25,
+                    10.0,
+                )
             })
             .collect()
     }
@@ -441,7 +448,10 @@ mod tests {
             engine.bars.len(),
         );
 
-        assert!(still_gliding, "glide tick should still be active mid-animation");
+        assert!(
+            still_gliding,
+            "glide tick should still be active mid-animation"
+        );
         assert!(
             engine.emit_visible_range_change_if_changed(before_start, before_end),
             "glide tick should emit when the visible bar range changes"
@@ -453,8 +463,7 @@ mod tests {
             ChartEvent::VisibleRangeChange { start_bar, end_bar } => {
                 assert!(*end_bar > *start_bar);
                 assert!(
-                    (start_bar - before_start).abs() > 1e-9
-                        || (end_bar - before_end).abs() > 1e-9
+                    (start_bar - before_start).abs() > 1e-9 || (end_bar - before_end).abs() > 1e-9
                 );
             }
             other => panic!("expected VisibleRangeChange, got {other:?}"),

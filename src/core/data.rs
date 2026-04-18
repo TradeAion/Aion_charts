@@ -949,7 +949,7 @@ mod tests {
     fn test_bar_array_normalizes_finite_bounds() {
         let mut arr = BarArray::new();
         arr.append(Bar::new(1000, 10.0, 9.0, 12.0, 11.0, -5.0))
-        .unwrap();
+            .unwrap();
 
         let bar = arr.get(0).unwrap();
         assert_eq!(bar.high, 11.0);

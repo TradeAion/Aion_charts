@@ -448,7 +448,10 @@ pub fn build_execution_text_lines(
                 crate::core::formatters::format_price(mark.price, price_step)
             )
         } else {
-            format!("@ {}", crate::core::formatters::format_price(mark.price, price_step))
+            format!(
+                "@ {}",
+                crate::core::formatters::format_price(mark.price, price_step)
+            )
         },
     ];
 
@@ -483,7 +486,8 @@ pub fn cluster_execution_mark_renderables(
         return Vec::new();
     }
 
-    let mut indexed: Vec<(usize, &ExecutionRenderableMark)> = renderables.iter().enumerate().collect();
+    let mut indexed: Vec<(usize, &ExecutionRenderableMark)> =
+        renderables.iter().enumerate().collect();
     indexed.sort_by(|(a_idx, a), (b_idx, b)| {
         a.x_css
             .total_cmp(&b.x_css)
@@ -529,7 +533,10 @@ fn cluster_group(group: &[&ExecutionRenderableMark], base_hit_radius_css: f64) -
         .first()
         .map(|renderable| renderable.side)
         .unwrap_or(ExecutionSide::Buy);
-    let member_ids: Vec<String> = group.iter().map(|renderable| renderable.id.clone()).collect();
+    let member_ids: Vec<String> = group
+        .iter()
+        .map(|renderable| renderable.id.clone())
+        .collect();
 
     let (x_css, y_css, vwap_price, radius_css) = if group.len() == 1 {
         let renderable = group[0];
@@ -610,13 +617,14 @@ pub fn build_selected_trade_locator_plan(
         chevrons: group_marks
             .into_iter()
             .filter_map(|mark| {
-                mark.resolved_time_index.map(|time_index| ExecutionLocatorChevron {
-                    id: mark.id.clone(),
-                    time_index,
-                    price: mark.price,
-                    side: mark.side,
-                    color: mark.color,
-                })
+                mark.resolved_time_index
+                    .map(|time_index| ExecutionLocatorChevron {
+                        id: mark.id.clone(),
+                        time_index,
+                        price: mark.price,
+                        side: mark.side,
+                        color: mark.color,
+                    })
             })
             .collect(),
         connector_segments: Vec::new(),
@@ -645,7 +653,9 @@ pub fn migrate_execution_marks_snapshot(value: Value, from_version: u32) -> Resu
 }
 
 /// Parse execution marks from either the legacy bare array or the wrapped snapshot.
-pub fn parse_execution_marks_snapshot_value(value: &Value) -> Result<ExecutionMarksSnapshot, String> {
+pub fn parse_execution_marks_snapshot_value(
+    value: &Value,
+) -> Result<ExecutionMarksSnapshot, String> {
     match value {
         Value::Array(items) => Ok(ExecutionMarksSnapshot {
             version: EXECUTION_MARKS_SNAPSHOT_VERSION,
@@ -689,7 +699,10 @@ fn parse_execution_mark_items(items: &[Value]) -> Result<Vec<SerializedExecution
         .collect()
 }
 
-fn parse_execution_mark_item(item: &Value, index: usize) -> Result<SerializedExecutionMark, String> {
+fn parse_execution_mark_item(
+    item: &Value,
+    index: usize,
+) -> Result<SerializedExecutionMark, String> {
     let id = item
         .get("id")
         .and_then(Value::as_str)
@@ -734,7 +747,10 @@ fn parse_execution_mark_item(item: &Value, index: usize) -> Result<SerializedExe
             .get("realized_pnl")
             .or_else(|| item.get("realizedPnl"))
             .and_then(Value::as_f64),
-        label: item.get("label").and_then(Value::as_str).map(str::to_string),
+        label: item
+            .get("label")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         color: parse_color_json_value(item.get("color").unwrap_or(&Value::Null)),
         group_id: item
             .get("group_id")
@@ -852,8 +868,12 @@ impl ExecutionMarkManager {
     fn ensure_sorted(&mut self) {
         if self.dirty_sort {
             self.sorted_ids = self.marks.keys().cloned().collect();
-            self.sorted_ids
-                .sort_by_key(|id| self.marks.get(id).map(|mark| mark.timestamp_ms).unwrap_or(0));
+            self.sorted_ids.sort_by_key(|id| {
+                self.marks
+                    .get(id)
+                    .map(|mark| mark.timestamp_ms)
+                    .unwrap_or(0)
+            });
             self.dirty_sort = false;
         }
     }
@@ -1014,7 +1034,13 @@ mod tests {
         ExecutionMark::new(id, 1_700_000_000_000, 103_842.5712345, 1.5, side, role)
     }
 
-    fn sample_renderable(id: &str, side: ExecutionSide, x_css: f64, price: f64, quantity: f64) -> ExecutionRenderableMark {
+    fn sample_renderable(
+        id: &str,
+        side: ExecutionSide,
+        x_css: f64,
+        price: f64,
+        quantity: f64,
+    ) -> ExecutionRenderableMark {
         ExecutionRenderableMark {
             id: id.to_string(),
             timestamp_ms: 1_700_000_000_000,
@@ -1048,7 +1074,10 @@ mod tests {
         assert_eq!(ExecutionRole::from_str("ENTRY"), ExecutionRole::Entry);
         assert_eq!(ExecutionRole::from_str("scale_in"), ExecutionRole::ScaleIn);
         assert_eq!(ExecutionRole::from_str("scalein"), ExecutionRole::ScaleIn);
-        assert_eq!(ExecutionRole::from_str("scale_out"), ExecutionRole::ScaleOut);
+        assert_eq!(
+            ExecutionRole::from_str("scale_out"),
+            ExecutionRole::ScaleOut
+        );
         assert_eq!(ExecutionRole::from_str("exit"), ExecutionRole::Exit);
     }
 
@@ -1335,21 +1364,78 @@ mod tests {
     #[test]
     fn label_mode_formats_every_role_and_side() {
         let cases = [
-            (ExecutionSide::Buy, ExecutionRole::Entry, "BUY", "ENTRY", "BUY · ENTRY"),
-            (ExecutionSide::Buy, ExecutionRole::ScaleIn, "BUY", "SCALE IN", "BUY · SCALE IN"),
-            (ExecutionSide::Buy, ExecutionRole::ScaleOut, "BUY", "SCALE OUT", "BUY · SCALE OUT"),
-            (ExecutionSide::Buy, ExecutionRole::Exit, "BUY", "EXIT", "BUY · EXIT"),
-            (ExecutionSide::Sell, ExecutionRole::Entry, "SELL", "ENTRY", "SELL · ENTRY"),
-            (ExecutionSide::Sell, ExecutionRole::ScaleIn, "SELL", "SCALE IN", "SELL · SCALE IN"),
-            (ExecutionSide::Sell, ExecutionRole::ScaleOut, "SELL", "SCALE OUT", "SELL · SCALE OUT"),
-            (ExecutionSide::Sell, ExecutionRole::Exit, "SELL", "EXIT", "SELL · EXIT"),
+            (
+                ExecutionSide::Buy,
+                ExecutionRole::Entry,
+                "BUY",
+                "ENTRY",
+                "BUY · ENTRY",
+            ),
+            (
+                ExecutionSide::Buy,
+                ExecutionRole::ScaleIn,
+                "BUY",
+                "SCALE IN",
+                "BUY · SCALE IN",
+            ),
+            (
+                ExecutionSide::Buy,
+                ExecutionRole::ScaleOut,
+                "BUY",
+                "SCALE OUT",
+                "BUY · SCALE OUT",
+            ),
+            (
+                ExecutionSide::Buy,
+                ExecutionRole::Exit,
+                "BUY",
+                "EXIT",
+                "BUY · EXIT",
+            ),
+            (
+                ExecutionSide::Sell,
+                ExecutionRole::Entry,
+                "SELL",
+                "ENTRY",
+                "SELL · ENTRY",
+            ),
+            (
+                ExecutionSide::Sell,
+                ExecutionRole::ScaleIn,
+                "SELL",
+                "SCALE IN",
+                "SELL · SCALE IN",
+            ),
+            (
+                ExecutionSide::Sell,
+                ExecutionRole::ScaleOut,
+                "SELL",
+                "SCALE OUT",
+                "SELL · SCALE OUT",
+            ),
+            (
+                ExecutionSide::Sell,
+                ExecutionRole::Exit,
+                "SELL",
+                "EXIT",
+                "SELL · EXIT",
+            ),
         ];
 
         for (side, role, side_only, role_only, both) in cases {
             let mark = sample_mark("label", side, role);
-            assert_eq!(format_execution_label(&mark, ExecutionLabelMode::SideOnly), side_only);
-            assert_eq!(format_execution_label(&mark, ExecutionLabelMode::RoleOnly), role_only);
-            assert_eq!(format_execution_label(&mark, ExecutionLabelMode::SideAndRole), both);
+            assert_eq!(
+                format_execution_label(&mark, ExecutionLabelMode::SideOnly),
+                side_only
+            );
+            assert_eq!(
+                format_execution_label(&mark, ExecutionLabelMode::RoleOnly),
+                role_only
+            );
+            assert_eq!(
+                format_execution_label(&mark, ExecutionLabelMode::SideAndRole),
+                both
+            );
         }
     }
 
@@ -1387,8 +1473,8 @@ mod tests {
 
     #[test]
     fn execution_text_lines_include_pnl_for_exit_marks() {
-        let mark = sample_mark("exit", ExecutionSide::Sell, ExecutionRole::Exit)
-            .with_realized_pnl(150.0);
+        let mark =
+            sample_mark("exit", ExecutionSide::Sell, ExecutionRole::Exit).with_realized_pnl(150.0);
         let lines = build_execution_text_lines(&mark, ExecutionLabelMode::SideOnly, true, 0.01);
         assert_eq!(lines.len(), 3);
         assert_eq!(lines[2], "+$150.00");
@@ -1396,8 +1482,8 @@ mod tests {
 
     #[test]
     fn execution_text_lines_skip_pnl_for_entry_marks() {
-        let mark = sample_mark("entry", ExecutionSide::Buy, ExecutionRole::Entry)
-            .with_realized_pnl(150.0);
+        let mark =
+            sample_mark("entry", ExecutionSide::Buy, ExecutionRole::Entry).with_realized_pnl(150.0);
         let lines = build_execution_text_lines(&mark, ExecutionLabelMode::SideOnly, true, 0.01);
         assert_eq!(lines.len(), 2);
     }
@@ -1418,7 +1504,10 @@ mod tests {
         ];
 
         let clusters = cluster_execution_mark_renderables(&renderables, 14.0, 14.0);
-        let member_counts: Vec<usize> = clusters.iter().map(|cluster| cluster.member_ids.len()).collect();
+        let member_counts: Vec<usize> = clusters
+            .iter()
+            .map(|cluster| cluster.member_ids.len())
+            .collect();
         assert_eq!(member_counts, vec![3, 2, 2, 1, 2]);
     }
 
@@ -1450,7 +1539,15 @@ mod tests {
     #[test]
     fn clustering_twenty_same_timestamp_marks_forms_one_cluster() {
         let renderables: Vec<_> = (0..20)
-            .map(|index| sample_renderable(&format!("m{index}"), ExecutionSide::Buy, 10.0, 100.0 + index as f64 * 0.1, 1.0))
+            .map(|index| {
+                sample_renderable(
+                    &format!("m{index}"),
+                    ExecutionSide::Buy,
+                    10.0,
+                    100.0 + index as f64 * 0.1,
+                    1.0,
+                )
+            })
             .collect();
 
         let clusters = cluster_execution_mark_renderables(&renderables, 14.0, 14.0);
@@ -1502,8 +1599,15 @@ mod tests {
         let bars = make_bars(&[1000, 2000, 3000, 4000]);
         let mut mgr = ExecutionMarkManager::new();
         mgr.set(vec![
-            ExecutionMark::new("entry", 1000, 100.0, 1.0, ExecutionSide::Buy, ExecutionRole::Entry)
-                .with_group_id("trade-1"),
+            ExecutionMark::new(
+                "entry",
+                1000,
+                100.0,
+                1.0,
+                ExecutionSide::Buy,
+                ExecutionRole::Entry,
+            )
+            .with_group_id("trade-1"),
             ExecutionMark::new(
                 "scale-out",
                 2000,
@@ -1513,8 +1617,15 @@ mod tests {
                 ExecutionRole::ScaleOut,
             )
             .with_group_id("trade-1"),
-            ExecutionMark::new("exit", 3000, 102.0, 0.5, ExecutionSide::Sell, ExecutionRole::Exit)
-                .with_group_id("trade-1"),
+            ExecutionMark::new(
+                "exit",
+                3000,
+                102.0,
+                0.5,
+                ExecutionSide::Sell,
+                ExecutionRole::Exit,
+            )
+            .with_group_id("trade-1"),
         ]);
         mgr.resolve_bar_indices(&bars);
 

@@ -188,6 +188,191 @@
       line-height: 1.6;
     }
     body.light #hud-shortcuts { background: #ffffffcc; color: #666; }
+
+    #drawing-placeholder,
+    #drawing-text-editor {
+      position: absolute;
+      z-index: 14;
+      display: none;
+      transform-origin: 0 0;
+      will-change: left, top, width, height, transform;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    #drawing-placeholder {
+      min-height: 0;
+      padding: 0;
+      border: none;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      color: #d97706;
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.2;
+      cursor: text;
+      pointer-events: auto;
+      white-space: pre;
+    }
+    #drawing-placeholder:hover {
+      color: inherit;
+    }
+    body.light #drawing-placeholder {
+      background: transparent;
+      color: #b45309;
+    }
+    #drawing-text-editor {
+      resize: none;
+      border: none;
+      outline: none;
+      border-radius: 0;
+      background: transparent;
+      color: #f59e0b;
+      padding: 0;
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.2;
+      box-shadow: none;
+      pointer-events: auto;
+      overflow: hidden;
+      white-space: pre;
+    }
+    body.light #drawing-text-editor {
+      background: transparent;
+      color: #b45309;
+      box-shadow: none;
+    }
+
+    #drawing-panel {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      width: 260px;
+      padding: 10px;
+      border-radius: 10px;
+      background: #17171dcc;
+      border: 1px solid #2d2d38;
+      box-shadow: 0 10px 30px #00000045;
+      backdrop-filter: blur(12px);
+      z-index: 13;
+      display: block;
+    }
+    body.light #drawing-panel {
+      background: #ffffffdd;
+      border-color: #d5d7dd;
+      box-shadow: 0 10px 30px #00000018;
+    }
+    .drawing-panel-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      color: #22C55E;
+      margin-bottom: 8px;
+    }
+    .drawing-panel-hint {
+      margin: 0 0 10px 0;
+      font-size: 11px;
+      line-height: 1.45;
+      color: #aeb5c4;
+    }
+    body.light .drawing-panel-hint {
+      color: #4b5563;
+    }
+    .drawing-panel-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .drawing-panel-row:last-child { margin-bottom: 0; }
+    .drawing-panel-label {
+      width: 66px;
+      font-size: 10px;
+      color: #8f95a3;
+      text-transform: uppercase;
+      letter-spacing: 0.35px;
+    }
+    body.light .drawing-panel-label { color: #4b5563; }
+    .drawing-panel-value,
+    .drawing-panel-select,
+    .drawing-panel-textarea {
+      flex: 1;
+      min-width: 0;
+      background: #22222b;
+      border: 1px solid #363645;
+      color: inherit;
+      border-radius: 6px;
+      font-size: 11px;
+      padding: 6px 8px;
+    }
+    body.light .drawing-panel-value,
+    body.light .drawing-panel-select,
+    body.light .drawing-panel-textarea {
+      background: #f8fafc;
+      border-color: #d1d5db;
+    }
+    .drawing-panel-value {
+      color: #d5d9e4;
+    }
+    body.light .drawing-panel-value {
+      color: #111827;
+    }
+    .drawing-panel-textarea {
+      min-height: 120px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      line-height: 1.4;
+    }
+    .drawing-panel-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 8px;
+    }
+    .drawing-panel-inline {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .drawing-panel-input {
+      flex: 1;
+      min-width: 0;
+      background: #22222b;
+      border: 1px solid #363645;
+      color: inherit;
+      border-radius: 6px;
+      font-size: 11px;
+      padding: 6px 8px;
+    }
+    body.light .drawing-panel-input {
+      background: #f8fafc;
+      border-color: #d1d5db;
+    }
+    .drawing-panel-input[type="number"] {
+      max-width: 82px;
+    }
+    .drawing-panel-input[type="color"] {
+      width: 38px;
+      min-width: 38px;
+      padding: 2px;
+      cursor: pointer;
+    }
+    .drawing-panel-check {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: #cbd5e1;
+      white-space: nowrap;
+    }
+    body.light .drawing-panel-check {
+      color: #334155;
+    }
+    .drawing-panel-check input {
+      accent-color: #22C55E;
+    }
     .shortcut-key {
       display: inline-block;
       padding: 1px 4px;
@@ -417,9 +602,75 @@
         <b>Shortcuts:</b><br>
         <span class="shortcut-key">Shift</span> Angle snap (45°)<br>
         <span class="shortcut-key">Ctrl</span> OHLC snap<br>
+        <span class="shortcut-key">Type</span> Add text to selected drawing<br>
         <span class="shortcut-key">Esc</span> Cancel / Deselect<br>
         <span class="shortcut-key">Del</span> Delete selected<br>
         <span class="shortcut-key">←→</span> Scroll · <span class="shortcut-key">+−</span> Zoom · <span class="shortcut-key">0</span> Fit All
+      </div>
+    </div>
+
+    <div id="drawing-placeholder" role="button" tabindex="0">+ Add text</div>
+    <textarea id="drawing-text-editor" spellcheck="false"></textarea>
+    <div id="drawing-panel">
+      <div class="drawing-panel-title">Drawing Text / Fib</div>
+      <div class="drawing-panel-row">
+        <span class="drawing-panel-label">Tool</span>
+        <div class="drawing-panel-value" id="drawing-panel-tool">No selection</div>
+      </div>
+      <div class="drawing-panel-hint" id="drawing-panel-hint">
+        Select a Line, Ray, H-Line, V-Line, Rectangle, or Fibonacci drawing to test text and alignment.
+      </div>
+      <div class="drawing-panel-actions" id="drawing-text-actions" style="margin-bottom:8px;justify-content:stretch">
+        <button class="btn" id="drawing-text-open" type="button" style="flex:1">Add Text</button>
+      </div>
+      <div class="drawing-panel-row">
+        <span class="drawing-panel-label">Horizontal</span>
+        <select class="drawing-panel-select" id="drawing-align-horizontal">
+          <option value="left">Left</option>
+          <option value="center">Center</option>
+          <option value="right">Right</option>
+        </select>
+      </div>
+      <div class="drawing-panel-row">
+        <span class="drawing-panel-label">Vertical</span>
+        <select class="drawing-panel-select" id="drawing-align-vertical">
+          <option value="top">Top</option>
+          <option value="middle">Middle</option>
+          <option value="bottom">Bottom</option>
+        </select>
+      </div>
+      <div class="drawing-panel-row">
+        <span class="drawing-panel-label">Font</span>
+        <div class="drawing-panel-inline">
+          <input class="drawing-panel-input" id="drawing-text-font-size" type="number" min="8" max="48" step="1" value="12">
+          <label class="drawing-panel-check">
+            <input id="drawing-text-italic" type="checkbox">
+            Italic
+          </label>
+        </div>
+      </div>
+      <div class="drawing-panel-row">
+        <span class="drawing-panel-label">Color</span>
+        <div class="drawing-panel-inline">
+          <input class="drawing-panel-input" id="drawing-text-color" type="color" value="#D97706">
+          <label class="drawing-panel-check">
+            <input id="drawing-text-follow-color" type="checkbox" checked>
+            Follow Drawing
+          </label>
+        </div>
+      </div>
+      <div id="drawing-fib-controls" style="display:none">
+        <div class="drawing-panel-row" style="align-items:flex-start">
+          <span class="drawing-panel-label">Fib Levels</span>
+          <textarea
+            class="drawing-panel-textarea"
+            id="drawing-fib-levels"
+            placeholder="0.0 | 0&#10;0.236 | 0.236&#10;0.5 | Mid"
+          ></textarea>
+        </div>
+        <div class="drawing-panel-actions">
+          <button class="btn" id="drawing-fib-apply" type="button">Apply Levels</button>
+        </div>
       </div>
     </div>
 
@@ -714,6 +965,22 @@
     const hudExecution = $('hud-execution');
     const rendererGroup = $('renderer-group');
     const settingsPanel = $('settings-panel');
+    const drawingPlaceholder = $('drawing-placeholder');
+    const drawingTextEditor = $('drawing-text-editor');
+    const drawingPanel = $('drawing-panel');
+    const drawingPanelTool = $('drawing-panel-tool');
+    const drawingPanelHint = $('drawing-panel-hint');
+    const drawingTextActions = $('drawing-text-actions');
+    const drawingTextOpen = $('drawing-text-open');
+    const drawingAlignHorizontal = $('drawing-align-horizontal');
+    const drawingAlignVertical = $('drawing-align-vertical');
+    const drawingTextFontSize = $('drawing-text-font-size');
+    const drawingTextItalic = $('drawing-text-italic');
+    const drawingTextColor = $('drawing-text-color');
+    const drawingTextFollowColor = $('drawing-text-follow-color');
+    const drawingFibControls = $('drawing-fib-controls');
+    const drawingFibLevels = $('drawing-fib-levels');
+    const drawingFibApply = $('drawing-fib-apply');
 
     let core = null;
     let workspace = null;
@@ -729,6 +996,8 @@
     let hudBaseStatus = '';
     let requestedRenderer = 'webgpu';
     let rendererFallbackText = '';
+    let selectedDrawingInfo = null;
+    let drawingInfoMissStreak = 0;
     const themeLinkedSettings = {
       dark: {
         background: '#131315',
@@ -791,6 +1060,206 @@
       const g = parseInt(hex.slice(3, 5), 16) / 255;
       const b = parseInt(hex.slice(5, 7), 16) / 255;
       return [r, g, b, 1.0];
+    }
+
+    function clampDrawingTextFontSize(value, fallback = 12) {
+      const numeric = Number.parseFloat(value);
+      if (!Number.isFinite(numeric)) return fallback;
+      return Math.max(8, Math.min(48, numeric));
+    }
+
+    function isPrintableKey(event) {
+      return event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
+    }
+
+    function isEditingFormControl(element) {
+      if (!element) return false;
+      const tag = element.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || element.isContentEditable;
+    }
+
+    function readSelectedDrawingInfo() {
+      if (!core || typeof core.get_selected_drawing_info_json !== 'function') return null;
+      try {
+        const raw = core.get_selected_drawing_info_json();
+        if (!raw || raw === 'null') return null;
+        return JSON.parse(raw);
+      } catch (err) {
+        console.warn('[axiuscharts demo] failed to parse selected drawing info', err);
+        return null;
+      }
+    }
+
+    function closeDrawingEditor(commit = true) {
+      if (!core || !selectedDrawingInfo?.supports_text || !selectedDrawingInfo.text_editing) return;
+      core.end_selected_drawing_text_edit(!commit);
+      drawingTextEditor.style.display = 'none';
+    }
+
+    function openDrawingEditor(seedText = null) {
+      if (!core || !selectedDrawingInfo?.supports_text) return;
+      if (seedText !== null) {
+        core.set_selected_drawing_text(seedText);
+      }
+      core.begin_selected_drawing_text_edit();
+      drawingTextEditor.style.display = 'none';
+    }
+
+    function formatFibLevels(levels) {
+      return (levels || [])
+        .map(level => `${level.ratio} | ${level.label ?? ''}`)
+        .join('\n');
+    }
+
+    function parseFibLevelsInput(raw) {
+      return raw
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map(line => {
+          const [ratioToken, ...labelParts] = line.split('|');
+          const ratio = parseFloat((ratioToken || '').trim());
+          const label = labelParts.join('|').trim();
+          return Number.isFinite(ratio) ? { ratio, label } : null;
+        })
+        .filter(Boolean);
+    }
+
+    function applySelectedDrawingAlignment() {
+      if (!core || !selectedDrawingInfo) return;
+      core.set_selected_drawing_text_alignment(
+        drawingAlignHorizontal.value,
+        drawingAlignVertical.value,
+      );
+    }
+
+    function applySelectedDrawingTextStyle() {
+      if (!core || !selectedDrawingInfo?.supports_text_style) return;
+      const fontSize = clampDrawingTextFontSize(
+        drawingTextFontSize.value,
+        selectedDrawingInfo.text_font_size || 12,
+      );
+      const italic = !!drawingTextItalic.checked;
+      const followDrawingColor = !!drawingTextFollowColor.checked;
+      const [r, g, b, a] = hexToRgba(drawingTextColor.value || '#FFFFFF');
+      core.set_selected_drawing_text_style(
+        fontSize,
+        italic,
+        r,
+        g,
+        b,
+        a,
+        followDrawingColor,
+      );
+      drawingTextFontSize.value = String(fontSize);
+      drawingTextColor.disabled = followDrawingColor;
+      if (selectedDrawingInfo) {
+        selectedDrawingInfo.text_font_size = fontSize;
+        selectedDrawingInfo.text_italic = italic;
+        selectedDrawingInfo.text_color_follows_drawing = followDrawingColor;
+        selectedDrawingInfo.text_color = followDrawingColor
+          ? (selectedDrawingInfo.drawing_color || drawingTextColor.value)
+          : drawingTextColor.value;
+      }
+    }
+
+    async function applySelectedFibLevels() {
+      if (!core || !selectedDrawingInfo?.supports_fibonacci_levels) return;
+      const levels = parseFibLevelsInput(drawingFibLevels.value);
+      if (!levels.length) return;
+      try {
+        core.set_selected_fibonacci_levels_json(JSON.stringify(levels));
+      } catch (err) {
+        showError(`Fib levels update failed: ${err.message || err}`);
+      }
+    }
+
+    function syncDrawingInspector() {
+      const previousId = selectedDrawingInfo?.id ?? null;
+      let next = readSelectedDrawingInfo();
+      if (next) {
+        drawingInfoMissStreak = 0;
+      } else if (selectedDrawingInfo) {
+        drawingInfoMissStreak += 1;
+        if (drawingInfoMissStreak < 8) {
+          next = selectedDrawingInfo;
+        }
+      }
+      selectedDrawingInfo = next;
+      drawingPanel.style.display = 'block';
+
+      if (!selectedDrawingInfo) {
+        drawingPanelTool.textContent = 'No selection';
+        drawingPanelHint.textContent = 'Select a Line, Ray, H-Line, V-Line, Rectangle, or Fibonacci drawing to test text and alignment.';
+        drawingTextActions.style.display = 'flex';
+        drawingTextOpen.textContent = 'Add Text';
+        drawingTextOpen.disabled = true;
+        drawingAlignHorizontal.disabled = true;
+        drawingAlignVertical.disabled = true;
+        drawingTextFontSize.disabled = true;
+        drawingTextItalic.disabled = true;
+        drawingTextColor.disabled = true;
+        drawingTextFollowColor.disabled = true;
+        drawingFibControls.style.display = 'none';
+        drawingPlaceholder.style.display = 'none';
+        drawingTextEditor.style.display = 'none';
+        return;
+      }
+
+      if (!selectedDrawingInfo.supports_text && !selectedDrawingInfo.supports_fibonacci_levels) {
+        drawingPanelTool.textContent = selectedDrawingInfo.tool.replace(/_/g, ' ');
+        drawingPanelHint.textContent = 'This drawing does not expose text or Fibonacci controls in the demo.';
+        drawingTextActions.style.display = 'flex';
+        drawingTextOpen.textContent = 'Add Text';
+        drawingTextOpen.disabled = true;
+        drawingAlignHorizontal.disabled = true;
+        drawingAlignVertical.disabled = true;
+        drawingTextFontSize.disabled = true;
+        drawingTextItalic.disabled = true;
+        drawingTextColor.disabled = true;
+        drawingTextFollowColor.disabled = true;
+        drawingFibControls.style.display = 'none';
+        drawingPlaceholder.style.display = 'none';
+        drawingTextEditor.style.display = 'none';
+        return;
+      }
+
+      drawingPanelTool.textContent = selectedDrawingInfo.tool.replace(/_/g, ' ');
+      drawingAlignHorizontal.value = selectedDrawingInfo.horizontal_align || 'right';
+      drawingAlignVertical.value = selectedDrawingInfo.vertical_align || 'top';
+      drawingAlignHorizontal.disabled = false;
+      drawingAlignVertical.disabled = false;
+      drawingTextFontSize.disabled = !selectedDrawingInfo.supports_text_style;
+      drawingTextItalic.disabled = !selectedDrawingInfo.supports_text_style;
+      drawingTextFollowColor.disabled = !selectedDrawingInfo.supports_text_style;
+      if (document.activeElement !== drawingTextFontSize) {
+        drawingTextFontSize.value = String(
+          clampDrawingTextFontSize(selectedDrawingInfo.text_font_size, 12),
+        );
+      }
+      drawingTextItalic.checked = !!selectedDrawingInfo.text_italic;
+      drawingTextFollowColor.checked = !!selectedDrawingInfo.text_color_follows_drawing;
+      drawingTextColor.disabled =
+        !selectedDrawingInfo.supports_text_style || !!selectedDrawingInfo.text_color_follows_drawing;
+      drawingTextColor.value = selectedDrawingInfo.text_color || '#D97706';
+      drawingPanelHint.textContent = selectedDrawingInfo.supports_text
+        ? (selectedDrawingInfo.text_editing
+          ? 'Typing now edits the selected drawing natively. Press Enter to finish, Shift+Enter for a new line, or Escape to cancel.'
+          : 'Click Add Text, click the native on-chart label/placeholder, or just start typing while the drawing is selected.')
+        : 'Edit Fibonacci label styling, alignment, and levels here. Level labels update immediately.';
+      drawingTextActions.style.display = selectedDrawingInfo.supports_text ? 'flex' : 'none';
+      drawingTextOpen.textContent = selectedDrawingInfo.text_editing
+        ? 'Finish Text'
+        : (String(selectedDrawingInfo.text || '').trim() ? 'Edit Text' : 'Add Text');
+      drawingTextOpen.disabled = !selectedDrawingInfo.supports_text;
+
+      drawingFibControls.style.display = selectedDrawingInfo.supports_fibonacci_levels ? 'block' : 'none';
+      if (selectedDrawingInfo.supports_fibonacci_levels && document.activeElement !== drawingFibLevels) {
+        drawingFibLevels.value = formatFibLevels(selectedDrawingInfo.fibonacci_levels);
+      }
+
+      drawingPlaceholder.style.display = 'none';
+      drawingTextEditor.style.display = 'none';
     }
 
     function syncThemeLinkedSettings() {
@@ -1081,10 +1550,21 @@
     async function createChart(renderer) {
       requestedRenderer = renderer;
       rendererFallbackText = '';
+      selectedDrawingInfo = null;
+      closeDrawingEditor(false);
+      drawingPanel.style.display = 'none';
+      drawingPlaceholder.style.display = 'none';
       if (workspace) { workspace.dispose(); workspace.free(); workspace = null; }
       if (core) { core.dispose(); core.free(); core = null; }
       Array.from(container.children).forEach(el => {
-        if (!['loading', 'hud', 'settings-panel'].includes(el.id)) el.remove();
+        if (![
+          'loading',
+          'hud',
+          'settings-panel',
+          'drawing-placeholder',
+          'drawing-text-editor',
+          'drawing-panel',
+        ].includes(el.id)) el.remove();
       });
       loading.textContent = `Loading ${renderer}...`;
       loading.style.display = 'flex';
@@ -1148,6 +1628,7 @@
         syncExecutionMarksToggle();
         applyExecutionMarkDisplayOptions();
         syncExecutionMarkDisplayToggles();
+        syncDrawingInspector();
 
         // Apply initial settings
         syncThemeLinkedSettings();
@@ -1298,6 +1779,56 @@
     $('cfg-margin-top').addEventListener('input', e => $('cfg-margin-top-val').textContent = e.target.value);
     $('cfg-margin-bottom').addEventListener('input', e => $('cfg-margin-bottom-val').textContent = e.target.value);
 
+    drawingPlaceholder.addEventListener('click', () => openDrawingEditor());
+    drawingPlaceholder.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        openDrawingEditor();
+        e.preventDefault();
+      }
+    });
+    drawingTextOpen.addEventListener('click', () => {
+      if (!core || !selectedDrawingInfo?.supports_text) return;
+      if (selectedDrawingInfo.text_editing) {
+        closeDrawingEditor(true);
+      } else {
+        openDrawingEditor();
+      }
+      drawingTextOpen.blur();
+    });
+    drawingTextEditor.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        closeDrawingEditor(false);
+        e.preventDefault();
+      } else if (e.key === 'Enter' && !e.shiftKey) {
+        closeDrawingEditor(true);
+        e.preventDefault();
+      }
+    });
+    drawingAlignHorizontal.addEventListener('change', applySelectedDrawingAlignment);
+    drawingAlignVertical.addEventListener('change', applySelectedDrawingAlignment);
+    drawingTextFontSize.addEventListener('change', applySelectedDrawingTextStyle);
+    drawingTextItalic.addEventListener('change', applySelectedDrawingTextStyle);
+    drawingTextColor.addEventListener('change', applySelectedDrawingTextStyle);
+    drawingTextFollowColor.addEventListener('change', applySelectedDrawingTextStyle);
+    drawingFibApply.addEventListener('click', applySelectedFibLevels);
+    drawingFibLevels.addEventListener('blur', () => {
+      if (selectedDrawingInfo?.supports_fibonacci_levels) applySelectedFibLevels();
+    });
+    function tickDrawingInspector() {
+      if (core) {
+        syncDrawingInspector();
+        // Drive the canvas-rendered text-edit caret blink. The WASM side
+        // toggles caret visibility every ~530ms and marks the canvas dirty
+        // when the visible state flips, so the next frame redraws with the
+        // updated caret. No-op when no drawing is being edited.
+        if (typeof core.tick_drawing_caret_blink === 'function') {
+          core.tick_drawing_caret_blink(performance.now());
+        }
+      }
+      requestAnimationFrame(tickDrawingInspector);
+    }
+    requestAnimationFrame(tickDrawingInspector);
+
     // ═══════════════════════════════════════════════════════════════════════
     // Theme
     // ═══════════════════════════════════════════════════════════════════════
@@ -1405,9 +1936,28 @@
     // Keyboard
     // ═══════════════════════════════════════════════════════════════════════
     document.addEventListener('keydown', e => {
+      if (isEditingFormControl(document.activeElement)) {
+        return;
+      }
+
+      if (selectedDrawingInfo?.supports_text && !selectedDrawingInfo?.text_editing) {
+        if (isPrintableKey(e)) {
+          const seed = `${selectedDrawingInfo.text || ''}${e.key}`;
+          openDrawingEditor(seed);
+          e.preventDefault();
+          return;
+        }
+        if (e.key === 'Enter') {
+          openDrawingEditor();
+          e.preventDefault();
+          return;
+        }
+      }
+
       if (!core) return;
       const handled = core.on_key_down(e.key, e.ctrlKey || e.metaKey, e.shiftKey, e.altKey);
       if (e.key === 'Escape') {
+        closeDrawingEditor(false);
         core.set_drawing_tool('none');
         activeDrawTool = 'none';
         Object.keys(drawTools).forEach(k => $(k).classList.remove('active'));

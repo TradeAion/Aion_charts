@@ -4,7 +4,7 @@
 
 use super::drawing::{next_drawing_id, point_to_bitmap, Drawing};
 use super::types::*;
-use crate::core::renderer::draw_list::{ColoredLine, ColoredRect, DrawText};
+use crate::core::renderer::draw_list::{ColoredLine, ColoredRect, DrawText, TextVerticalAlign};
 use crate::core::viewport::Viewport;
 use crate::impl_drawing_accessors;
 
@@ -232,11 +232,15 @@ impl Drawing for ScaleDrawing {
             x: mid_x,
             y: (top_y + bottom_y) / 2.0 - fs * 0.6,
             font_size: fs,
+            font_weight: 500,
+            italic: false,
+            rotation_rad: 0.0,
             r: c[0],
             g: c[1],
             b: c[2],
             a: c[3],
             align: Default::default(),
+            vertical_align: TextVerticalAlign::Top,
         });
 
         // Scale tool is hold-only: never show anchor circles

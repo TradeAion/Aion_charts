@@ -345,11 +345,8 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
             for member_id in member_ids {
                 member_array.push(&JsValue::from_str(member_id));
             }
-            let _ = js_sys::Reflect::set(
-                &obj,
-                &JsValue::from_str("memberIds"),
-                &member_array.into(),
-            );
+            let _ =
+                js_sys::Reflect::set(&obj, &JsValue::from_str("memberIds"), &member_array.into());
         }
         axiuscharts::ChartEvent::ExecutionMarkHover {
             id,

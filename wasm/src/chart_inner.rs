@@ -1011,13 +1011,15 @@ impl ChartInner {
                 .bar_index_for_crosshair(engine.crosshair.x, pw)
                 .and_then(|slot| engine.time_scale.resolve_rounded_timestamp(slot as f64))
                 .or_else(|| bar_idx.and_then(|idx| engine.bars.get(idx).map(|b| b.timestamp)));
-            engine.event_bus.emit(axiuscharts::ChartEvent::CrosshairMove {
-                x,
-                y,
-                bar_index: bar_idx,
-                price: engine.crosshair.price,
-                timestamp,
-            });
+            engine
+                .event_bus
+                .emit(axiuscharts::ChartEvent::CrosshairMove {
+                    x,
+                    y,
+                    bar_index: bar_idx,
+                    price: engine.crosshair.price,
+                    timestamp,
+                });
         }
     }
 
@@ -1079,6 +1081,7 @@ impl ChartInner {
 
             let mut should_return = false;
             let mut drag_cursor: Option<&'static str> = None;
+            let mut activate_drawing_drag = false;
 
             {
                 let drawings = &mut self.engine.drawings;
@@ -1106,12 +1109,20 @@ impl ChartInner {
                             _ => None,
                         };
 
-                        // Allow body-dragging again for rectangles and other drawings.
-                        // Rectangle edges/corners still resize because they are exposed
-                        // as dedicated anchor hits, while body hits move the whole shape.
                         drawings.select(id);
-                        drawings.start_drag(id, anchor_idx, bar, price);
-                        drag_cursor = Some(cursor_for_drawing_hit(tool, result.part, anchor_idx));
+                        if result.part == HitPart::Label {
+                            drawings.begin_text_edit(id);
+                            drag_cursor =
+                                Some(cursor_for_drawing_hit(tool, result.part, anchor_idx));
+                        } else {
+                            // Allow body-dragging again for rectangles and other drawings.
+                            // Rectangle edges/corners still resize because they are exposed
+                            // as dedicated anchor hits, while body hits move the whole shape.
+                            drawings.start_drag(id, anchor_idx, bar, price);
+                            drag_cursor =
+                                Some(cursor_for_drawing_hit(tool, result.part, anchor_idx));
+                            activate_drawing_drag = true;
+                        }
                         should_return = true;
                     } else {
                         // Click on empty space: deselect
@@ -1127,7 +1138,7 @@ impl ChartInner {
                 self.interaction.cancel_pointer_gesture();
                 self.engine.stamp_drawing_timestamps();
                 if let Some(cursor) = drag_cursor {
-                    self.interaction.drawing_drag_active = true;
+                    self.interaction.drawing_drag_active = activate_drawing_drag;
                     self.interaction.set_drawing_cursor(Some(cursor));
                 }
                 return; // don't pan while drawing tool / drawing drag
@@ -1655,8 +1666,7 @@ fn snap_to_angle_45(
 
     // Convert to normalized screen space
     let dx_screen = (target_bar - anchor_bar) * px_per_bar;
-    let dy_screen =
-        (anchor_internal_price - target_internal_price) * px_per_internal_price; // Y inverted in screen space
+    let dy_screen = (anchor_internal_price - target_internal_price) * px_per_internal_price; // Y inverted in screen space
 
     // Calculate angle and snap to nearest 45°
     let angle = dy_screen.atan2(dx_screen);
@@ -1671,8 +1681,7 @@ fn snap_to_angle_45(
 
     // Convert back to bar/price coordinates
     let snapped_bar = anchor_bar + snapped_dx_screen / px_per_bar;
-    let snapped_internal_price =
-        anchor_internal_price - snapped_dy_screen / px_per_internal_price; // Y inverted
+    let snapped_internal_price = anchor_internal_price - snapped_dy_screen / px_per_internal_price; // Y inverted
     let snapped_price = viewport.internal_to_price(snapped_internal_price);
 
     (snapped_bar, snapped_price)

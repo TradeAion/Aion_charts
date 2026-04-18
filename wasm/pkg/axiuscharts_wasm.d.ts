@@ -109,6 +109,7 @@ export class AxiusCharts {
      * Returns 0 if the bar index is out of bounds.
      */
     bar_index_to_timestamp(bar_index: number): bigint;
+    begin_selected_drawing_text_edit(): boolean;
     /**
      * Cancel the drawing currently being created (e.g. on Escape key).
      */
@@ -211,6 +212,7 @@ export class AxiusCharts {
      * Get the number of drawings.
      */
     drawing_count(): number;
+    end_selected_drawing_text_edit(cancel: boolean): boolean;
     /**
      * Get the number of execution marks.
      */
@@ -267,6 +269,11 @@ export class AxiusCharts {
      * Return whether footprint pane two-axis zoom (X+Y) is enabled.
      */
     get_footprint_xy_zoom_enabled(): boolean;
+    /**
+     * Get the currently selected drawing's text/alignment inspector payload as JSON.
+     * Returns `"null"` when no drawing is selected.
+     */
+    get_selected_drawing_info_json(): string;
     /**
      * Get the currently selected execution mark ID, or null if none.
      */
@@ -820,10 +827,27 @@ export class AxiusCharts {
      */
     set_replay_playing(playing: boolean): void;
     /**
+     * Set inline text on the currently selected drawing.
+     */
+    set_selected_drawing_text(text: string): boolean;
+    /**
+     * Set text alignment on the currently selected drawing.
+     */
+    set_selected_drawing_text_alignment(horizontal: string, vertical: string): boolean;
+    /**
+     * Set font size / italic / color override on the currently selected drawing label.
+     */
+    set_selected_drawing_text_style(font_size: number, italic: boolean, r: number, g: number, b: number, a: number, follow_drawing_color: boolean): boolean;
+    /**
      * Set the selected execution mark ID (shows selected-trade execution locators).
      * Pass empty string or null to deselect.
      */
     set_selected_execution_mark(mark_id?: string | null): void;
+    /**
+     * Replace the currently selected Fibonacci drawing's levels from JSON.
+     * Input shape: `[{"ratio":0.5,"label":"Mid"}, ...]`
+     */
+    set_selected_fibonacci_levels_json(json: string): boolean;
     /**
      * Set data for a line series. `values` and `timestamps` must be same length.
      */
@@ -883,6 +907,14 @@ export class AxiusCharts {
      * Get the current theme preset name ("dark", "light", or "custom").
      */
     theme(): string;
+    /**
+     * Advance the text-edit caret blink phase. The host should call this on
+     * each animation frame (e.g. inside the rAF loop) passing `performance.now()`
+     * in milliseconds. Returns true when the caret visibility flipped, in which
+     * case the canvas is automatically marked dirty for repaint. When no text
+     * edit is active this is a cheap no-op.
+     */
+    tick_drawing_caret_blink(now_ms: number): boolean;
     /**
      * Convert a timestamp (in milliseconds) to a bar index.
      * Returns -1 if the timestamp is before all bars.
@@ -1020,6 +1052,7 @@ export interface InitOutput {
     readonly axiuscharts_append_series_point: (a: number, b: number, c: number, d: bigint, e: number) => void;
     readonly axiuscharts_apply_options: (a: number, b: number) => void;
     readonly axiuscharts_bar_index_to_timestamp: (a: number, b: number) => bigint;
+    readonly axiuscharts_begin_selected_drawing_text_edit: (a: number) => number;
     readonly axiuscharts_cancel_drawing: (a: number) => void;
     readonly axiuscharts_clear_all_markers: (a: number) => void;
     readonly axiuscharts_clear_crosshair: (a: number) => void;
@@ -1040,6 +1073,7 @@ export interface InitOutput {
     readonly axiuscharts_dispose: (a: number) => void;
     readonly axiuscharts_drag_pane_separator: (a: number, b: number, c: number) => void;
     readonly axiuscharts_drawing_count: (a: number) => number;
+    readonly axiuscharts_end_selected_drawing_text_edit: (a: number, b: number) => number;
     readonly axiuscharts_execution_mark_count: (a: number) => number;
     readonly axiuscharts_expand_execution_cluster: (a: number, b: number, c: number, d: number) => void;
     readonly axiuscharts_export_drawings: (a: number, b: number) => void;
@@ -1053,6 +1087,7 @@ export interface InitOutput {
     readonly axiuscharts_get_execution_marks_json: (a: number, b: number) => void;
     readonly axiuscharts_get_execution_pnl_visible: (a: number) => number;
     readonly axiuscharts_get_footprint_xy_zoom_enabled: (a: number) => number;
+    readonly axiuscharts_get_selected_drawing_info_json: (a: number, b: number) => void;
     readonly axiuscharts_get_selected_execution_mark: (a: number, b: number) => void;
     readonly axiuscharts_get_study_output: (a: number, b: number, c: number) => number;
     readonly axiuscharts_get_supported_renderers: () => number;
@@ -1156,7 +1191,11 @@ export interface InitOutput {
     readonly axiuscharts_set_replay_mode: (a: number, b: number, c: number) => void;
     readonly axiuscharts_set_replay_options: (a: number, b: number, c: number) => void;
     readonly axiuscharts_set_replay_playing: (a: number, b: number) => void;
+    readonly axiuscharts_set_selected_drawing_text: (a: number, b: number, c: number) => number;
+    readonly axiuscharts_set_selected_drawing_text_alignment: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly axiuscharts_set_selected_drawing_text_style: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
     readonly axiuscharts_set_selected_execution_mark: (a: number, b: number, c: number) => void;
+    readonly axiuscharts_set_selected_fibonacci_levels_json: (a: number, b: number, c: number, d: number) => void;
     readonly axiuscharts_set_series_data: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly axiuscharts_set_series_visible: (a: number, b: number, c: number) => void;
     readonly axiuscharts_set_study_parameter: (a: number, b: number, c: number, d: number, e: number) => void;
@@ -1173,6 +1212,7 @@ export interface InitOutput {
     readonly axiuscharts_study_count: (a: number) => number;
     readonly axiuscharts_symbol: (a: number, b: number) => void;
     readonly axiuscharts_theme: (a: number, b: number) => void;
+    readonly axiuscharts_tick_drawing_caret_blink: (a: number, b: number) => number;
     readonly axiuscharts_timestamp_to_bar_index: (a: number, b: bigint) => bigint;
     readonly axiuscharts_update_indicator_pane: (a: number, b: number, c: number) => void;
     readonly axiuscharts_update_last_bar: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number) => void;
@@ -1225,12 +1265,12 @@ export interface InitOutput {
     readonly chartworkspace_split_active: (a: number, b: number, c: number, d: number) => void;
     readonly chartworkspace_split_pane: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
-    readonly __wasm_bindgen_func_elem_432: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_443: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_2371: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_433: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_436: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_441: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_444: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_455: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_2444: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_445: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_448: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_453: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

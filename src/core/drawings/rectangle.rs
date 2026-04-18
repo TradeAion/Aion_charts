@@ -1,6 +1,9 @@
 //! Rectangle drawing — 2-anchor filled rectangle with border.
 
-use super::drawing::{next_drawing_id, point_to_bitmap, point_to_css, Drawing};
+use super::drawing::{
+    next_drawing_id, optical_middle_top, point_to_bitmap, point_to_css, prepare_text_block,
+    push_text_block, rect_text_anchor, Drawing, TEXT_DRAWING_GAP_CSS,
+};
 use super::hit_test;
 use super::types::*;
 use crate::core::renderer::draw_list::{ColoredLine, ColoredRect};
@@ -13,6 +16,7 @@ pub struct RectangleDrawing {
     state: DrawingState,
     style: DrawingStyle,
     anchors: Vec<AnchorPoint>,
+    text: DrawingText,
 }
 
 impl RectangleDrawing {
@@ -28,6 +32,7 @@ impl RectangleDrawing {
                 AnchorPoint::new(bar_index, price),
                 AnchorPoint::new(bar_index, price),
             ],
+            text: DrawingText::rectangle_default(),
         }
     }
 
@@ -170,6 +175,14 @@ impl RectangleDrawing {
         }
         best_idx
     }
+
+    pub fn text(&self) -> &DrawingText {
+        &self.text
+    }
+
+    pub fn text_mut(&mut self) -> &mut DrawingText {
+        &mut self.text
+    }
 }
 
 impl Drawing for RectangleDrawing {
@@ -292,6 +305,8 @@ impl Drawing for RectangleDrawing {
         let c = &self.style.color;
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let lw = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
+        let text_color = self.text.style.resolved_color(*c);
+        let fs = (self.text.style.resolved_font_size(self.style.font_size) * avg_ratio) as f32;
         let d = self.style.dash.map_or(0.0, |d| (d[0] * avg_ratio) as f32);
         let g = self.style.dash.map_or(0.0, |d| (d[1] * avg_ratio) as f32);
 
@@ -351,6 +366,45 @@ impl Drawing for RectangleDrawing {
             dash: d,
             gap: g,
         });
+
+        if let Some(block) = prepare_text_block(&self.text.value, fs) {
+            // Horizontal inset (Left/Right alignment) keeps a small breathing
+            // room from the rect edge; vertical inset is the universal 2px gap
+            // applied OUTSIDE the rect for Top/Bottom and ignored for Middle
+            // (rect_text_anchor centers Middle inside the rect).
+            let inset_x = TEXT_DRAWING_GAP_CSS * avg_ratio;
+            let inset_y = TEXT_DRAWING_GAP_CSS * avg_ratio;
+            let (text_x, text_y, text_align, vertical_align) = rect_text_anchor(
+                px0 as f64,
+                py0 as f64,
+                px1 as f64,
+                py1 as f64,
+                self.text.horizontal_align,
+                self.text.vertical_align,
+                inset_x,
+                inset_y,
+            );
+            let top_y = match vertical_align {
+                crate::core::renderer::draw_list::TextVerticalAlign::Top => {
+                    text_y as f32 - block.total_height
+                }
+                crate::core::renderer::draw_list::TextVerticalAlign::Middle => {
+                    optical_middle_top(text_y as f32, &block, fs)
+                }
+                crate::core::renderer::draw_list::TextVerticalAlign::Bottom => text_y as f32,
+            };
+            push_text_block(
+                &mut geom.texts,
+                &block,
+                text_x as f32,
+                top_y,
+                fs,
+                600,
+                self.text.style.italic,
+                text_color,
+                text_align,
+            );
+        }
 
         if show_anchors {
             let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;

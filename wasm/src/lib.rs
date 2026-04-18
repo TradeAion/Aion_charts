@@ -275,13 +275,8 @@ fn sync_widget_sizes(s: &mut ChartInner, dpr: f64, prefer_exact: bool) {
         s.engine.v_pixel_ratio = v_ratio;
 
         s.engine.resize(es.pane_pw.max(1), es.pane_ph.max(1), dpr);
-        s.overlay.resize(
-            es.pane_pw.max(1),
-            es.pane_ph.max(1),
-            dpr,
-            h_ratio,
-            v_ratio,
-        );
+        s.overlay
+            .resize(es.pane_pw.max(1), es.pane_ph.max(1), dpr, h_ratio, v_ratio);
         s.price_axis_renderer
             .resize(es.price_axis_pw.max(1), es.price_axis_ph.max(1), dpr);
         s.time_axis_renderer
@@ -297,8 +292,7 @@ fn sync_widget_sizes(s: &mut ChartInner, dpr: f64, prefer_exact: bool) {
     let ppw = (pw * dpr).round() as u32;
     let pph = (ph * dpr).round() as u32;
     s.engine.resize(ppw.max(1), pph.max(1), dpr);
-    s.overlay
-        .resize(ppw.max(1), pph.max(1), dpr, dpr, dpr);
+    s.overlay.resize(ppw.max(1), pph.max(1), dpr, dpr, dpr);
 
     let (aw, ah) = s.layout.price_axis_css_size();
     s.price_axis_renderer
@@ -2794,7 +2788,10 @@ impl AxiusCharts {
     ///   priceScale: { mode: "normal", margins: { top: 0.1, bottom: 0.1 } },
     /// }
     /// ```
-    pub async fn create_chart(container: JsValue, options: JsValue) -> Result<AxiusCharts, JsValue> {
+    pub async fn create_chart(
+        container: JsValue,
+        options: JsValue,
+    ) -> Result<AxiusCharts, JsValue> {
         let options = normalize_options(options);
 
         // Resolve container: HTMLElement or string ID
@@ -4435,6 +4432,12 @@ impl AxiusCharts {
         let bar_count = s.engine.bars.len() as f64;
         let mut visible_range_changed = false;
 
+        if s.engine.drawings.handle_text_key(key, ctrl, _alt, shift) {
+            drop(s);
+            self.mark_dirty();
+            return true;
+        }
+
         let handled = match key {
             // Delete selected drawing
             "Delete" | "Backspace" => {
@@ -4576,6 +4579,178 @@ impl AxiusCharts {
         let active_tool = s.engine.drawings.active_tool;
         s.engine.drawings.clear();
         s.engine.drawings.active_tool = active_tool;
+    }
+
+    /// Get the currently selected drawing's text/alignment inspector payload as JSON.
+    /// Returns `"null"` when no drawing is selected.
+    pub fn get_selected_drawing_info_json(&self) -> String {
+        let s = self.inner.borrow();
+        let (pane_css_w, pane_css_h) = s.layout.pane_css_size();
+        match s
+            .engine
+            .drawings
+            .selected_drawing_info(&s.engine.viewport, pane_css_w, pane_css_h)
+        {
+            Some(info) => serde_json::to_string(&info).unwrap_or_else(|_| "null".to_string()),
+            None => "null".to_string(),
+        }
+    }
+
+    /// Set inline text on the currently selected drawing.
+    pub fn set_selected_drawing_text(&mut self, text: &str) -> bool {
+        let changed = self
+            .inner
+            .borrow_mut()
+            .engine
+            .drawings
+            .set_selected_drawing_text(text.to_string());
+        if changed {
+            self.mark_dirty();
+        }
+        changed
+    }
+
+    pub fn begin_selected_drawing_text_edit(&mut self) -> bool {
+        let changed = self
+            .inner
+            .borrow_mut()
+            .engine
+            .drawings
+            .begin_text_edit_selected();
+        if changed {
+            self.mark_dirty();
+        }
+        changed
+    }
+
+    pub fn end_selected_drawing_text_edit(&mut self, cancel: bool) -> bool {
+        let changed = if cancel {
+            self.inner.borrow_mut().engine.drawings.cancel_text_edit()
+        } else {
+            self.inner.borrow_mut().engine.drawings.commit_text_edit()
+        };
+        if changed {
+            self.mark_dirty();
+        }
+        changed
+    }
+
+    /// Advance the text-edit caret blink phase. The host should call this on
+    /// each animation frame (e.g. inside the rAF loop) passing `performance.now()`
+    /// in milliseconds. Returns true when the caret visibility flipped, in which
+    /// case the canvas is automatically marked dirty for repaint. When no text
+    /// edit is active this is a cheap no-op.
+    pub fn tick_drawing_caret_blink(&mut self, now_ms: f64) -> bool {
+        let flipped = self
+            .inner
+            .borrow_mut()
+            .engine
+            .drawings
+            .tick_caret_blink(now_ms);
+        if flipped {
+            self.mark_dirty();
+        }
+        flipped
+    }
+
+    /// Set font size / italic / color override on the currently selected drawing label.
+    pub fn set_selected_drawing_text_style(
+        &mut self,
+        font_size: f32,
+        italic: bool,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+        follow_drawing_color: bool,
+    ) -> bool {
+        let color = if follow_drawing_color {
+            None
+        } else {
+            Some([r, g, b, a])
+        };
+
+        let changed = self
+            .inner
+            .borrow_mut()
+            .engine
+            .drawings
+            .set_selected_text_style(font_size as f64, italic, color);
+        if changed {
+            self.mark_dirty();
+        }
+        changed
+    }
+
+    /// Set text alignment on the currently selected drawing.
+    pub fn set_selected_drawing_text_alignment(
+        &mut self,
+        horizontal: &str,
+        vertical: &str,
+    ) -> bool {
+        let Some(horizontal_align) =
+            axiuscharts::core::renderer::draw_list::TextAlign::from_key(horizontal)
+        else {
+            return false;
+        };
+        let Some(vertical_align) =
+            axiuscharts::core::renderer::draw_list::TextVerticalAlign::from_key(vertical)
+        else {
+            return false;
+        };
+
+        let changed = self
+            .inner
+            .borrow_mut()
+            .engine
+            .drawings
+            .set_selected_text_alignment(horizontal_align, vertical_align);
+        if changed {
+            self.mark_dirty();
+        }
+        changed
+    }
+
+    /// Replace the currently selected Fibonacci drawing's levels from JSON.
+    /// Input shape: `[{"ratio":0.5,"label":"Mid"}, ...]`
+    pub fn set_selected_fibonacci_levels_json(&mut self, json: &str) -> Result<bool, JsValue> {
+        #[derive(Deserialize)]
+        struct FibLevelInput {
+            ratio: f64,
+            #[serde(default)]
+            label: Option<String>,
+        }
+
+        let parsed: Vec<FibLevelInput> = serde_json::from_str(json)
+            .map_err(|err| js_err(format!("Invalid fibonacci levels JSON: {err}")))?;
+        let levels = parsed
+            .into_iter()
+            .filter(|level| level.ratio.is_finite())
+            .map(|level| {
+                let label = level.label.unwrap_or_else(|| {
+                    let mut raw = format!("{:.6}", level.ratio);
+                    while raw.contains('.') && raw.ends_with('0') {
+                        raw.pop();
+                    }
+                    if raw.ends_with('.') {
+                        raw.pop();
+                    }
+                    raw
+                });
+                axiuscharts::core::drawings::types::FibonacciLevel::new(level.ratio, label)
+            })
+            .collect::<Vec<_>>();
+
+        let changed = self
+            .inner
+            .borrow_mut()
+            .engine
+            .drawings
+            .set_selected_fibonacci_levels(levels);
+        if changed {
+            self.mark_dirty();
+        }
+        Ok(changed)
     }
 
     /// Remove all scale (measurement) drawings.
@@ -5782,7 +5957,10 @@ impl AxiusCharts {
                 mode
             ))
         })?;
-        self.inner.borrow_mut().engine.set_execution_label_mode(parsed);
+        self.inner
+            .borrow_mut()
+            .engine
+            .set_execution_label_mode(parsed);
         Ok(())
     }
 
@@ -5798,7 +5976,10 @@ impl AxiusCharts {
 
     /// Show or hide realized P&L text for eligible execution marks.
     pub fn set_execution_pnl_visible(&mut self, visible: bool) {
-        self.inner.borrow_mut().engine.set_execution_pnl_visible(visible);
+        self.inner
+            .borrow_mut()
+            .engine
+            .set_execution_pnl_visible(visible);
     }
 
     /// Whether realized P&L text is currently rendered for eligible execution marks.
@@ -5817,8 +5998,10 @@ impl AxiusCharts {
     /// Serialize all execution marks to JSON.
     pub fn get_execution_marks_json(&self) -> String {
         let s = self.inner.borrow();
-        serde_json::to_string(&axiuscharts::execution_marks_snapshot(&s.engine.execution_marks))
-            .unwrap_or_else(|_| "{\"version\":1,\"marks\":[]}".to_string())
+        serde_json::to_string(&axiuscharts::execution_marks_snapshot(
+            &s.engine.execution_marks,
+        ))
+        .unwrap_or_else(|_| "{\"version\":1,\"marks\":[]}".to_string())
     }
 
     /// Set multiple execution marks at once (replaces existing).
@@ -5906,8 +6089,8 @@ impl AxiusCharts {
     pub fn set_execution_marks_json(&mut self, json: &str) -> Result<(), JsValue> {
         let payload: serde_json::Value = serde_json::from_str(json)
             .map_err(|e| js_err(format!("Invalid execution marks JSON: {}", e)))?;
-        let snapshot = axiuscharts::parse_execution_marks_snapshot_value(&payload)
-            .map_err(js_err)?;
+        let snapshot =
+            axiuscharts::parse_execution_marks_snapshot_value(&payload).map_err(js_err)?;
         let marks: Vec<_> = snapshot
             .marks
             .into_iter()
@@ -6970,123 +7153,126 @@ impl AxiusCharts {
             web_sys::Element,
             Rc<Cell<f64>>,
             Rc<Cell<bool>>,
-        )> =
-            {
-                let mut s = self.inner.borrow_mut();
+        )> = {
+            let mut s = self.inner.borrow_mut();
 
-                let window = match web_sys::window() {
-                    Some(w) => w,
-                    None => return 0,
-                };
-                let doc = match window.document() {
-                    Some(d) => d,
-                    None => return 0,
-                };
+            let window = match web_sys::window() {
+                Some(w) => w,
+                None => return 0,
+            };
+            let doc = match window.document() {
+                Some(d) => d,
+                None => return 0,
+            };
 
-                let id = s.next_subpane_id;
-                s.next_subpane_id += 1;
-                let dpr = s.engine.dpr;
+            let id = s.next_subpane_id;
+            s.next_subpane_id += 1;
+            let dpr = s.engine.dpr;
 
-                let grid_row = 2 + (s.subpanes.len() as u32 * 2);
+            let grid_row = 2 + (s.subpanes.len() as u32 * 2);
 
-                // Use IndicatorConfig for colors
-                let config = IndicatorConfig::for_type(indicator_type);
+            // Use IndicatorConfig for colors
+            let config = IndicatorConfig::for_type(indicator_type);
 
-                // Register with coordinator to get coordinated height
-                s.pane_coordinator.register_subpane(id);
+            // Register with coordinator to get coordinated height
+            s.pane_coordinator.register_subpane(id);
 
-                // Get total height and update coordinator
-                let (_, total_h) = s.layout.pane_css_size();
-                let subpane_count = s.subpanes.len();
-                // Reserve space: main pane + subpane heights + time axis
-                let time_axis_h = s.engine.style.time_axis_height();
-                let available_h =
-                    total_h + (subpane_count as f64 * height_css) + height_css + time_axis_h;
-                s.pane_coordinator.set_total_height(available_h);
+            // Get total height and update coordinator
+            let (_, total_h) = s.layout.pane_css_size();
+            let subpane_count = s.subpanes.len();
+            // Reserve space: main pane + subpane heights + time axis
+            let time_axis_h = s.engine.style.time_axis_height();
+            let available_h =
+                total_h + (subpane_count as f64 * height_css) + height_css + time_axis_h;
+            s.pane_coordinator.set_total_height(available_h);
 
-                // Use coordinator's computed height, or fall back to requested height
-                let coordinated_height = s.pane_coordinator.get_height(id);
-                let initial_height = if coordinated_height > 0.0 {
-                    coordinated_height
-                } else {
-                    height_css
-                };
-                let separator_drag_cb: Rc<dyn Fn(f64)> = {
-                    let inner = Rc::clone(&inner_for_events);
-                    let dirty = Rc::clone(&dirty_for_events);
-                    Rc::new(move |delta_y: f64| {
-                        let Ok(mut s) = inner.try_borrow_mut() else {
-                            return;
-                        };
-                        let Some(separator_idx) = s.pane_coordinator.separator_index(id) else {
-                            return;
-                        };
-                        s.pane_coordinator.drag_separator(separator_idx, delta_y);
-                        let heights = s.pane_coordinator.all_heights();
-                        for (subpane_id, height) in heights {
-                            if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == subpane_id) {
-                                sp.set_height(height);
-                            }
-                        }
-                        dirty.set(true);
-                    })
-                };
-
-                let mut subpane = match SubPane::new(
-                    &doc,
-                    &s.layout.grid_wrapper,
-                    id,
-                    study_id,
-                    indicator_type,
-                    grid_row,
-                    initial_height,
-                    dpr,
-                    &s.engine.style,
-                    &s.subpane_separator_style,
-                    separator_drag_cb,
-                    Rc::clone(&dirty_for_events),
-                ) {
-                    Ok(sp) => sp,
-                    Err(e) => {
-                        log::error!("Failed to create sub-pane: {:?}", e);
-                        s.pane_coordinator.unregister_subpane(id);
-                        return 0;
-                    }
-                };
-
-                // Populate with current study data using config colors
-                if let Some(study) = s.engine.studies.get_study(axiuscharts::StudyId(study_id)) {
-                    let mut data = Vec::new();
-                    let mut colors = Vec::new();
-                    for i in 0..study.outputs.len() {
-                        if let Some(output) = study.get_output(i) {
-                            data.push(output.data.clone());
-                            colors.push(config.colors.get(i).copied().unwrap_or(
-                                axiuscharts::ThemeConfig::default().indicator_palette.fallback,
-                            ));
+            // Use coordinator's computed height, or fall back to requested height
+            let coordinated_height = s.pane_coordinator.get_height(id);
+            let initial_height = if coordinated_height > 0.0 {
+                coordinated_height
+            } else {
+                height_css
+            };
+            let separator_drag_cb: Rc<dyn Fn(f64)> = {
+                let inner = Rc::clone(&inner_for_events);
+                let dirty = Rc::clone(&dirty_for_events);
+                Rc::new(move |delta_y: f64| {
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
+                    let Some(separator_idx) = s.pane_coordinator.separator_index(id) else {
+                        return;
+                    };
+                    s.pane_coordinator.drag_separator(separator_idx, delta_y);
+                    let heights = s.pane_coordinator.all_heights();
+                    for (subpane_id, height) in heights {
+                        if let Some(sp) = s.subpanes.iter().find(|sp| sp.id == subpane_id) {
+                            sp.set_height(height);
                         }
                     }
-                    subpane.set_data(data, colors);
+                    dirty.set(true);
+                })
+            };
+
+            let mut subpane = match SubPane::new(
+                &doc,
+                &s.layout.grid_wrapper,
+                id,
+                study_id,
+                indicator_type,
+                grid_row,
+                initial_height,
+                dpr,
+                &s.engine.style,
+                &s.subpane_separator_style,
+                separator_drag_cb,
+                Rc::clone(&dirty_for_events),
+            ) {
+                Ok(sp) => sp,
+                Err(e) => {
+                    log::error!("Failed to create sub-pane: {:?}", e);
+                    s.pane_coordinator.unregister_subpane(id);
+                    return 0;
                 }
+            };
 
-                subpane.resize(dpr);
+            // Populate with current study data using config colors
+            if let Some(study) = s.engine.studies.get_study(axiuscharts::StudyId(study_id)) {
+                let mut data = Vec::new();
+                let mut colors = Vec::new();
+                for i in 0..study.outputs.len() {
+                    if let Some(output) = study.get_output(i) {
+                        data.push(output.data.clone());
+                        colors.push(
+                            config.colors.get(i).copied().unwrap_or(
+                                axiuscharts::ThemeConfig::default()
+                                    .indicator_palette
+                                    .fallback,
+                            ),
+                        );
+                    }
+                }
+                subpane.set_data(data, colors);
+            }
 
-                // Extract refs before pushing into vec
-                let chart_el: web_sys::Element = subpane.chart_container.clone().unchecked_into();
-                let axis_el: web_sys::Element = subpane.axis_container.clone().unchecked_into();
-                let crosshair_y_rc = subpane.crosshair_y.clone();
-                let crosshair_active_rc = subpane.crosshair_active.clone();
+            subpane.resize(dpr);
 
-                s.subpanes.push(subpane);
+            // Extract refs before pushing into vec
+            let chart_el: web_sys::Element = subpane.chart_container.clone().unchecked_into();
+            let axis_el: web_sys::Element = subpane.axis_container.clone().unchecked_into();
+            let crosshair_y_rc = subpane.crosshair_y.clone();
+            let crosshair_active_rc = subpane.crosshair_active.clone();
 
-                log::info!(
-                    "Created indicator sub-pane: id={}, type={}, height={:.1}",
-                    id,
-                    indicator_type,
-                    initial_height
-                );
-                Some((id, chart_el, axis_el, crosshair_y_rc, crosshair_active_rc))
-            }; // borrow dropped
+            s.subpanes.push(subpane);
+
+            log::info!(
+                "Created indicator sub-pane: id={}, type={}, height={:.1}",
+                id,
+                indicator_type,
+                initial_height
+            );
+            Some((id, chart_el, axis_el, crosshair_y_rc, crosshair_active_rc))
+        }; // borrow dropped
 
         let (id, chart_el, axis_el, crosshair_y, crosshair_active) = match creation_result {
             Some(r) => r,
@@ -7163,20 +7349,19 @@ impl AxiusCharts {
                     };
                     let mut drawing_gesture_active = false;
                     if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
-                        drawing_gesture_active =
-                            sp.drawings.is_creating()
-                                || sp
-                                    .drawings
-                                    .selected_id
-                                    .and_then(|id| sp.drawings.get(id).map(|d| d.state()))
-                                    .is_some_and(|state| {
-                                        matches!(
+                        drawing_gesture_active = sp.drawings.is_creating()
+                            || sp
+                                .drawings
+                                .selected_id
+                                .and_then(|id| sp.drawings.get(id).map(|d| d.state()))
+                                .is_some_and(|state| {
+                                    matches!(
                                         state,
                                         axiuscharts::core::drawings::types::DrawingState::Dragging {
                                             ..
                                         }
                                     )
-                                    });
+                                });
                         sp.drawings.clear_hovered();
                     }
                     if !drag.get() && !drawing_gesture_active {
@@ -7206,8 +7391,8 @@ impl AxiusCharts {
             let is_touch = sp_is_touch.clone();
             let dirty = Rc::clone(&dirty_for_events);
             let pid = pane_id;
-            let cb =
-                Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |e: web_sys::Event| {
+            let cb = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(
+                move |e: web_sys::Event| {
                     let pe: web_sys::PointerEvent = e.unchecked_into();
                     let rect = chart_c.get_bounding_client_rect();
                     let x = pe.client_x() as f64 - rect.left();
@@ -7269,7 +7454,9 @@ impl AxiusCharts {
                                 sp.drawings.update_drag(id, bar, price);
                                 is_drawing_drag = true;
                                 let hit_part = match anchor_index {
-                                    Some(i) => axiuscharts::core::drawings::types::HitPart::Anchor(i),
+                                    Some(i) => {
+                                        axiuscharts::core::drawings::types::HitPart::Anchor(i)
+                                    }
                                     None => axiuscharts::core::drawings::types::HitPart::Body,
                                 };
                                 let drag_cursor =
@@ -7382,7 +7569,8 @@ impl AxiusCharts {
                         let _ = html_el.style().set_property("cursor", cursor);
                     }
                     dirty.set(true);
-                }));
+                },
+            ));
             let _ = chart_el
                 .add_event_listener_with_callback("pointermove", cb.as_ref().unchecked_ref());
             interaction_closures.push(cb);
@@ -7626,7 +7814,9 @@ impl AxiusCharts {
                             if let Some((id, hit)) = sp.drawings.hit_test(x, y, &hybrid_vp, pw, ph)
                             {
                                 let anchor_idx = match hit.part {
-                                    axiuscharts::core::drawings::types::HitPart::Anchor(i) => Some(i),
+                                    axiuscharts::core::drawings::types::HitPart::Anchor(i) => {
+                                        Some(i)
+                                    }
                                     _ => None,
                                 };
                                 if let Some(tool) = sp.drawings.get(id).map(|d| d.tool()) {
@@ -7709,7 +7899,9 @@ impl AxiusCharts {
                             if let Some((id, hit)) = sp.drawings.hit_test(x, y, &hybrid_vp, pw, ph)
                             {
                                 let anchor_idx = match hit.part {
-                                    axiuscharts::core::drawings::types::HitPart::Anchor(i) => Some(i),
+                                    axiuscharts::core::drawings::types::HitPart::Anchor(i) => {
+                                        Some(i)
+                                    }
                                     _ => None,
                                 };
                                 if let Some(tool) = sp.drawings.get(id).map(|d| d.tool()) {
@@ -8221,15 +8413,17 @@ impl AxiusCharts {
             if let Some(subpane) = s.subpanes.iter_mut().find(|sp| sp.id == pane_id) {
                 // Use IndicatorConfig for colors instead of hardcoded values
                 let config = IndicatorConfig::for_type(&indicator_type);
-                let colors: Vec<[f32; 4]> =
-                    data.iter()
-                        .enumerate()
-                        .map(|(i, _)| {
-                            config.colors.get(i).copied().unwrap_or(
-                                axiuscharts::ThemeConfig::default().indicator_palette.fallback,
-                            )
-                        })
-                        .collect();
+                let colors: Vec<[f32; 4]> = data
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| {
+                        config.colors.get(i).copied().unwrap_or(
+                            axiuscharts::ThemeConfig::default()
+                                .indicator_palette
+                                .fallback,
+                        )
+                    })
+                    .collect();
 
                 subpane.set_data(data, colors);
             }

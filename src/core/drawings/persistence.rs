@@ -1,9 +1,9 @@
-use super::types::{AnchorPoint, DrawingPoint, DrawingStyle, DrawingTool};
+use super::types::{AnchorPoint, DrawingPoint, DrawingStyle, DrawingTool, FibonacciLevel};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
 
-pub const DRAWINGS_SNAPSHOT_VERSION: u32 = 1;
+pub const DRAWINGS_SNAPSHOT_VERSION: u32 = 3;
 
 fn snapshot_version() -> u32 {
     DRAWINGS_SNAPSHOT_VERSION
@@ -29,9 +29,27 @@ pub struct SerializedDrawing {
     /// Brush intermediate points (excluding first/last anchors).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub points: Vec<SerializedDrawingPoint>,
-    /// Fibonacci label alignment ("left", "center", "right"). Omitted for other tools.
+    /// Drawing label text for text-capable tools. Omitted when empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label_align: Option<String>,
+    pub text: Option<String>,
+    /// Horizontal alignment for drawing labels / fibonacci level labels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub horizontal_align: Option<String>,
+    /// Vertical alignment for drawing labels / fibonacci level labels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical_align: Option<String>,
+    /// Optional text font size override in CSS px.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_font_size: Option<f64>,
+    /// Optional italic override for drawing/fibonacci labels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_italic: Option<bool>,
+    /// Optional text color override [r, g, b, a].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_color: Option<[f32; 4]>,
+    /// Custom Fibonacci levels. Omitted for non-fibonacci drawings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fibonacci_levels: Vec<SerializedFibonacciLevel>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -56,6 +74,12 @@ pub struct SerializedDrawingStyle {
     pub fill_color: Option<[f32; 4]>,
     pub dash: Option<[f64; 2]>,
     pub font_size: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SerializedFibonacciLevel {
+    pub ratio: f64,
+    pub label: String,
 }
 
 impl Default for SerializedDrawingStyle {
@@ -140,6 +164,24 @@ impl From<SerializedAnchorPoint> for AnchorPoint {
     }
 }
 
+impl From<&FibonacciLevel> for SerializedFibonacciLevel {
+    fn from(value: &FibonacciLevel) -> Self {
+        Self {
+            ratio: value.ratio,
+            label: value.label.clone(),
+        }
+    }
+}
+
+impl From<SerializedFibonacciLevel> for FibonacciLevel {
+    fn from(value: SerializedFibonacciLevel) -> Self {
+        FibonacciLevel {
+            ratio: value.ratio,
+            label: value.label,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum DrawingsMigrationError {
     UnknownVersion(u32),
@@ -194,9 +236,27 @@ fn read_snapshot_version(payload: &serde_json::Value) -> Result<u32, DrawingsMig
 
 fn apply_snapshot_migration_step(
     from_version: u32,
-    _payload: serde_json::Value,
+    mut payload: serde_json::Value,
 ) -> Result<serde_json::Value, DrawingsMigrationError> {
     match from_version {
+        1 => {
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert(
+                    "version".to_string(),
+                    serde_json::Value::from((from_version + 1) as u64),
+                );
+            }
+            Ok(payload)
+        }
+        2 => {
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert(
+                    "version".to_string(),
+                    serde_json::Value::from((from_version + 1) as u64),
+                );
+            }
+            Ok(payload)
+        }
         // Future migrations should be added here as `vN -> vN+1` transforms.
         _ => Err(DrawingsMigrationError::UnknownVersion(from_version)),
     }
@@ -262,7 +322,13 @@ mod tests {
                     },
                 ],
                 points: Vec::new(),
-                label_align: None,
+                text: None,
+                horizontal_align: None,
+                vertical_align: None,
+                text_font_size: None,
+                text_italic: None,
+                text_color: None,
+                fibonacci_levels: Vec::new(),
             }],
         }
     }
@@ -305,5 +371,67 @@ mod tests {
                 to: DRAWINGS_SNAPSHOT_VERSION,
             } if from == DRAWINGS_SNAPSHOT_VERSION + 1
         ));
+    }
+
+    #[test]
+    fn v1_snapshot_migrates_with_legacy_label_align_and_defaults_new_fields() {
+        let payload = json!({
+            "version": 1,
+            "drawings": [{
+                "id": 9,
+                "tool": "fibonacci",
+                "style": SerializedDrawingStyle::default(),
+                "anchors": [{
+                    "point": { "bar_index": 10.0, "price": 100.0, "timestamp": null },
+                    "hit_radius": 5.0
+                }, {
+                    "point": { "bar_index": 20.0, "price": 120.0, "timestamp": null },
+                    "hit_radius": 5.0
+                }],
+                "points": [],
+                "label_align": "right"
+            }]
+        });
+
+        let migrated = migrate_snapshot(&payload).expect("migrate v1 snapshot");
+
+        assert_eq!(migrated.version, DRAWINGS_SNAPSHOT_VERSION);
+        assert_eq!(migrated.drawings.len(), 1);
+        assert_eq!(migrated.drawings[0].horizontal_align, None);
+        assert_eq!(migrated.drawings[0].vertical_align, None);
+        assert_eq!(migrated.drawings[0].text_font_size, None);
+        assert_eq!(migrated.drawings[0].text_italic, None);
+        assert_eq!(migrated.drawings[0].text_color, None);
+        assert!(migrated.drawings[0].fibonacci_levels.is_empty());
+    }
+
+    #[test]
+    fn v2_snapshot_migrates_and_defaults_text_style_fields() {
+        let payload = json!({
+            "version": 2,
+            "drawings": [{
+                "id": 11,
+                "tool": "trend_line",
+                "style": SerializedDrawingStyle::default(),
+                "anchors": [{
+                    "point": { "bar_index": 10.0, "price": 100.0, "timestamp": null },
+                    "hit_radius": 5.0
+                }, {
+                    "point": { "bar_index": 20.0, "price": 120.0, "timestamp": null },
+                    "hit_radius": 5.0
+                }],
+                "points": [],
+                "text": "Dev",
+                "horizontal_align": "left",
+                "vertical_align": "middle"
+            }]
+        });
+
+        let migrated = migrate_snapshot(&payload).expect("migrate v2 snapshot");
+
+        assert_eq!(migrated.version, DRAWINGS_SNAPSHOT_VERSION);
+        assert_eq!(migrated.drawings[0].text_font_size, None);
+        assert_eq!(migrated.drawings[0].text_italic, None);
+        assert_eq!(migrated.drawings[0].text_color, None);
     }
 }

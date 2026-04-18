@@ -96,7 +96,10 @@ mod tests {
         vp.set_range(10.0, 110.0);
 
         let x = bar_to_x(10.5, &vp, 1000.0);
-        assert!((x - 4.0).abs() < 1e-9, "expected first visible center at x=4, got {x}");
+        assert!(
+            (x - 4.0).abs() < 1e-9,
+            "expected first visible center at x=4, got {x}"
+        );
 
         let x = bar_to_x(11.5, &vp, 1000.0);
         assert!(

@@ -1267,12 +1267,27 @@ impl SubPane {
 
         // Text labels (in physical pixel coords)
         for t in &geom.texts {
-            let font = format!("{}px {}", t.font_size, self.font_family);
+            let font = if t.italic {
+                format!(
+                    "italic {} {}px {}",
+                    t.font_weight, t.font_size, self.font_family
+                )
+            } else {
+                format!("{} {}px {}", t.font_weight, t.font_size, self.font_family)
+            };
+            ctx.save();
             ctx.set_font(&font);
             ctx.set_fill_style_str(&rgba(&[t.r, t.g, t.b, t.a]));
             ctx.set_text_align(t.align.as_canvas_str());
-            ctx.set_text_baseline("middle");
-            let _ = ctx.fill_text(&t.text, t.x as f64, t.y as f64);
+            ctx.set_text_baseline(t.vertical_align.as_canvas_str());
+            if t.rotation_rad.abs() > f32::EPSILON {
+                let _ = ctx.translate(t.x as f64, t.y as f64);
+                let _ = ctx.rotate(t.rotation_rad as f64);
+                let _ = ctx.fill_text(&t.text, 0.0, 0.0);
+            } else {
+                let _ = ctx.fill_text(&t.text, t.x as f64, t.y as f64);
+            }
+            ctx.restore();
         }
 
         // Anchor circles

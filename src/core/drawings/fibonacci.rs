@@ -4,24 +4,28 @@
 //! (not extended to full pane width).
 
 use super::drawing::{
-    generate_anchor_circles, next_drawing_id, point_to_bitmap, point_to_css, Drawing,
+    generate_anchor_circles, line_label_placement, line_middle_gap_range, next_drawing_id,
+    point_to_bitmap, point_to_css, prepare_text_block, push_line_with_gap_range,
+    push_rotated_text_block, Drawing,
 };
 use super::hit_test;
 use super::types::*;
-use crate::core::renderer::draw_list::{ColoredLine, DrawText, TextAlign};
+use crate::core::renderer::draw_list::{TextAlign, TextVerticalAlign};
 use crate::core::viewport::Viewport;
 use crate::impl_drawing_accessors;
 
 /// Standard Fibonacci retracement levels (matches TradingView defaults).
-const FIB_LEVELS: &[(f64, &str)] = &[
-    (0.0, "0"),
-    (0.236, "0.236"),
-    (0.382, "0.382"),
-    (0.5, "0.5"),
-    (0.618, "0.618"),
-    (0.786, "0.786"),
-    (1.0, "1"),
-];
+fn default_fibonacci_levels() -> Vec<FibonacciLevel> {
+    vec![
+        FibonacciLevel::new(0.0, "0"),
+        FibonacciLevel::new(0.236, "0.236"),
+        FibonacciLevel::new(0.382, "0.382"),
+        FibonacciLevel::new(0.5, "0.5"),
+        FibonacciLevel::new(0.618, "0.618"),
+        FibonacciLevel::new(0.786, "0.786"),
+        FibonacciLevel::new(1.0, "1"),
+    ]
+}
 
 #[derive(Debug)]
 pub struct FibonacciDrawing {
@@ -29,8 +33,13 @@ pub struct FibonacciDrawing {
     state: DrawingState,
     style: DrawingStyle,
     anchors: Vec<AnchorPoint>,
+    levels: Vec<FibonacciLevel>,
     /// Horizontal alignment for level labels (left / center / right).
     label_align: TextAlign,
+    /// Vertical alignment for level labels (top / middle / bottom).
+    label_vertical_align: TextVerticalAlign,
+    /// Shared font/color styling for all level labels.
+    label_style: DrawingTextStyle,
 }
 
 impl FibonacciDrawing {
@@ -46,7 +55,10 @@ impl FibonacciDrawing {
                 AnchorPoint::new(bar_index, price),
                 AnchorPoint::new(bar_index, price),
             ],
+            levels: default_fibonacci_levels(),
             label_align: TextAlign::Right,
+            label_vertical_align: TextVerticalAlign::Top,
+            label_style: DrawingTextStyle::default(),
         }
     }
 
@@ -58,6 +70,34 @@ impl FibonacciDrawing {
     /// Set the label alignment (left / center / right).
     pub fn set_label_align(&mut self, align: TextAlign) {
         self.label_align = align;
+    }
+
+    pub fn label_vertical_align(&self) -> TextVerticalAlign {
+        self.label_vertical_align
+    }
+
+    pub fn set_label_vertical_align(&mut self, align: TextVerticalAlign) {
+        self.label_vertical_align = align;
+    }
+
+    pub fn label_style(&self) -> &DrawingTextStyle {
+        &self.label_style
+    }
+
+    pub fn label_style_mut(&mut self) -> &mut DrawingTextStyle {
+        &mut self.label_style
+    }
+
+    pub fn levels(&self) -> &[FibonacciLevel] {
+        &self.levels
+    }
+
+    pub fn set_levels(&mut self, levels: Vec<FibonacciLevel>) {
+        self.levels = if levels.is_empty() {
+            default_fibonacci_levels()
+        } else {
+            levels
+        };
     }
 
     /// Compute the price at a given fib level between the two anchor prices.
@@ -96,8 +136,8 @@ impl Drawing for FibonacciDrawing {
 
         // Only test fib level lines within the anchor span
         if cx >= left && cx <= right {
-            for &(level, _) in FIB_LEVELS {
-                let price = self.level_price(level);
+            for level in &self.levels {
+                let price = self.level_price(level.ratio);
                 let y = vp.price_to_css_y(price, ph);
                 let d = (cy - y).abs();
                 if d <= hit_test::HIT_THRESHOLD_CSS {
@@ -136,7 +176,8 @@ impl Drawing for FibonacciDrawing {
         let c = &self.style.color;
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let lw = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
-        let fs = (self.style.font_size * avg_ratio) as f32;
+        let label_color = self.label_style.resolved_color(*c);
+        let fs = (self.label_style.resolved_font_size(self.style.font_size) * avg_ratio) as f32;
         // Keep live preview crisp while creating/dragging too.
         let snap_to_pixel = true;
 
@@ -164,8 +205,8 @@ impl Drawing for FibonacciDrawing {
         let right_x = (bx0.max(bx1)) as f32;
         let h_inset = (5.0 * h_pixel_ratio) as f32;
 
-        for &(level, label_text) in FIB_LEVELS {
-            let price = self.level_price(level);
+        for level in &self.levels {
+            let price = self.level_price(level.ratio);
             let y = {
                 let value = vp.price_to_css_y(price, ph) * v_pixel_ratio;
                 if snap_to_pixel {
@@ -175,45 +216,51 @@ impl Drawing for FibonacciDrawing {
                 }
             } as f32;
 
-            // Level line — confined between anchor X positions
-            geom.lines.push(ColoredLine {
-                x0: left_x,
-                y0: y,
-                x1: right_x,
-                y1: y,
-                width: lw,
-                r: c[0],
-                g: c[1],
-                b: c[2],
-                a: c[3],
-                dash: 0.0,
-                gap: 0.0,
-            });
-
-            // Label x position and alignment driven by self.label_align
-            let label_x = match self.label_align {
-                TextAlign::Left => left_x + h_inset,
-                TextAlign::Right => right_x - h_inset,
-                TextAlign::Center => (left_x + right_x) * 0.5,
-            };
-
-            // Place label above the line: offset by half the font height plus
-            // a small gap so text never collides with the level line.
-            let gap_px = (2.0 * avg_ratio) as f32;
-            let label_y = y - fs * 0.5 - gap_px;
-
-            let price_label = format!("{} ({:.2})", label_text, price);
-            geom.texts.push(DrawText {
-                text: price_label,
-                x: label_x,
-                y: label_y,
-                font_size: fs,
-                r: c[0],
-                g: c[1],
-                b: c[2],
-                a: c[3],
-                align: self.label_align,
-            });
+            let price_label = format!("{} ({:.2})", level.label, price);
+            let mut line_gap_range = None;
+            if let Some(block) = prepare_text_block(&price_label, fs) {
+                let gap_px = (1.0 * avg_ratio) as f32;
+                let placement = line_label_placement(
+                    left_x as f64,
+                    y as f64,
+                    right_x as f64,
+                    y as f64,
+                    self.label_align,
+                    self.label_vertical_align,
+                    &block,
+                    fs,
+                    h_inset as f64,
+                    gap_px as f64,
+                );
+                if self.label_vertical_align == TextVerticalAlign::Middle {
+                    line_gap_range = line_middle_gap_range(&placement, &block, avg_ratio as f32);
+                }
+                push_rotated_text_block(
+                    &mut geom.texts,
+                    &block,
+                    placement.anchor_x,
+                    placement.anchor_y,
+                    placement.top_local_y,
+                    fs,
+                    600,
+                    self.label_style.italic,
+                    label_color,
+                    placement.align,
+                    placement.rotation_rad,
+                );
+            }
+            push_line_with_gap_range(
+                &mut geom.lines,
+                left_x as f64,
+                y as f64,
+                right_x as f64,
+                y as f64,
+                lw,
+                *c,
+                0.0,
+                0.0,
+                line_gap_range,
+            );
         }
 
         if show_anchors {

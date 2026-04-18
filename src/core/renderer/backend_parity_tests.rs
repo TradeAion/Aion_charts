@@ -180,26 +180,29 @@ impl OffscreenWgpuRenderer {
             ..Default::default()
         });
 
-        let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: true,
-        })) {
-            Ok(adapter) => adapter,
-            Err(_) => pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        let adapter =
+            match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::LowPower,
                 compatible_surface: None,
-                force_fallback_adapter: false,
-            }))
-            .map_err(|e| format!("failed to acquire a parity-test adapter: {e:?}"))?,
-        };
+                force_fallback_adapter: true,
+            })) {
+                Ok(adapter) => adapter,
+                Err(_) => {
+                    pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                        power_preference: wgpu::PowerPreference::LowPower,
+                        compatible_surface: None,
+                        force_fallback_adapter: false,
+                    }))
+                    .map_err(|e| format!("failed to acquire a parity-test adapter: {e:?}"))?
+                }
+            };
 
         let info = adapter.get_info();
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("backend-parity-device"),
             required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::downlevel_webgl2_defaults()
-                .using_resolution(adapter.limits()),
+            required_limits:
+                wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()),
             memory_hints: wgpu::MemoryHints::Performance,
             trace: wgpu::Trace::Off,
             experimental_features: wgpu::ExperimentalFeatures::default(),
@@ -385,7 +388,10 @@ struct FixtureGeometry {
 fn fixture_specs() -> [(&'static str, FixtureKind); 4] {
     [
         ("candlestick-only", FixtureKind::Candlestick),
-        ("candles-with-line-overlay", FixtureKind::CandleWithLineOverlay),
+        (
+            "candles-with-line-overlay",
+            FixtureKind::CandleWithLineOverlay,
+        ),
         ("area-series", FixtureKind::AreaSeries),
         ("log-scale", FixtureKind::LogScale),
     ]
@@ -406,12 +412,7 @@ fn make_overlay_points(bars: &[Bar], amplitude: f64) -> Vec<LinePoint> {
 }
 
 fn build_engine(kind: FixtureKind) -> Result<ChartEngine, String> {
-    let mut engine = ChartEngine::new(
-        RendererBackend::Noop,
-        PARITY_WIDTH,
-        PARITY_HEIGHT,
-        1.0,
-    );
+    let mut engine = ChartEngine::new(RendererBackend::Noop, PARITY_WIDTH, PARITY_HEIGHT, 1.0);
     engine.set_data(sample_bars())?;
     engine.viewport.set_range(20.0, 80.0);
 

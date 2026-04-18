@@ -2,11 +2,12 @@
 //! and extends infinitely in that direction to the pane boundary.
 
 use super::drawing::{
-    generate_anchor_circles, next_drawing_id, point_to_bitmap, point_to_css, Drawing,
+    generate_anchor_circles, line_label_placement, line_middle_gap_range, next_drawing_id,
+    point_to_bitmap, point_to_css, prepare_text_block, push_line_with_gap_range,
+    push_rotated_text_block, Drawing, TEXT_DRAWING_GAP_CSS,
 };
 use super::hit_test;
 use super::types::*;
-use crate::core::renderer::draw_list::ColoredLine;
 use crate::core::viewport::Viewport;
 use crate::impl_drawing_accessors;
 
@@ -16,6 +17,7 @@ pub struct RayDrawing {
     state: DrawingState,
     style: DrawingStyle,
     anchors: Vec<AnchorPoint>,
+    text: DrawingText,
 }
 
 impl RayDrawing {
@@ -29,6 +31,7 @@ impl RayDrawing {
                 AnchorPoint::new(bar_index, price),
                 AnchorPoint::new(bar_index, price),
             ],
+            text: DrawingText::default(),
         }
     }
 
@@ -67,6 +70,14 @@ impl RayDrawing {
             t_max = 1.0;
         }
         (x0 + t_max * dx, y0 + t_max * dy)
+    }
+
+    pub fn text(&self) -> &DrawingText {
+        &self.text
+    }
+
+    pub fn text_mut(&mut self) -> &mut DrawingText {
+        &mut self.text
     }
 }
 
@@ -116,6 +127,8 @@ impl Drawing for RayDrawing {
         let c = &self.style.color;
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let lw = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
+        let text_color = self.text.style.resolved_color(*c);
+        let fs = (self.text.style.resolved_font_size(self.style.font_size) * avg_ratio) as f32;
         // Keep live preview crisp while creating/dragging too.
         let snap_to_pixel = true;
 
@@ -141,20 +154,56 @@ impl Drawing for RayDrawing {
         let pane_pw = pw * h_pixel_ratio;
         let pane_ph = ph * v_pixel_ratio;
         let (far_x, far_y) = Self::ray_far_point(bx0, by0, bx1, by1, pane_pw, pane_ph);
+        let mut line_gap_range = None;
 
-        geom.lines.push(ColoredLine {
-            x0: bx0 as f32,
-            y0: by0 as f32,
-            x1: far_x as f32,
-            y1: far_y as f32,
-            width: lw,
-            r: c[0],
-            g: c[1],
-            b: c[2],
-            a: c[3],
-            dash: 0.0,
-            gap: 0.0,
-        });
+        if let Some(block) = prepare_text_block(&self.text.value, fs) {
+            // Universal 2px shape↔text spacing.
+            let inset = TEXT_DRAWING_GAP_CSS * avg_ratio;
+            let gap = TEXT_DRAWING_GAP_CSS * avg_ratio;
+            let placement = line_label_placement(
+                bx0,
+                by0,
+                far_x,
+                far_y,
+                self.text.horizontal_align,
+                self.text.vertical_align,
+                &block,
+                fs,
+                inset,
+                gap,
+            );
+            if self.text.vertical_align
+                == crate::core::renderer::draw_list::TextVerticalAlign::Middle
+            {
+                line_gap_range = line_middle_gap_range(&placement, &block, avg_ratio as f32);
+            }
+            push_rotated_text_block(
+                &mut geom.texts,
+                &block,
+                placement.anchor_x,
+                placement.anchor_y,
+                placement.top_local_y,
+                fs,
+                600,
+                self.text.style.italic,
+                text_color,
+                placement.align,
+                placement.rotation_rad,
+            );
+        }
+
+        push_line_with_gap_range(
+            &mut geom.lines,
+            bx0,
+            by0,
+            far_x,
+            far_y,
+            lw,
+            *c,
+            0.0,
+            0.0,
+            line_gap_range,
+        );
 
         if show_anchors {
             geom.anchors = generate_anchor_circles(

@@ -7,13 +7,13 @@
 //! - Viewport coordinate transformations
 //! - Price auto-fit calculations
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use axiuscharts::core::data::{Bar, BarArray};
+use axiuscharts::core::viewport::Viewport;
 use axiuscharts::{
     cluster_execution_mark_renderables, hit_test_execution_mark_hit_areas, ExecutionMarkHitArea,
     ExecutionRenderableMark, ExecutionRole, ExecutionSide,
 };
-use axiuscharts::core::data::{Bar, BarArray};
-use axiuscharts::core::viewport::Viewport;
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Test Data Generators
@@ -221,7 +221,14 @@ fn bench_bar_array_update_last(c: &mut Criterion) {
 
     for size in [100, 1_000, 10_000].iter() {
         let bars = generate_bars(*size);
-        let updated_bar = Bar::new(bars.last().unwrap().timestamp, 150.0, 155.0, 148.0, 152.0, 5000.0);
+        let updated_bar = Bar::new(
+            bars.last().unwrap().timestamp,
+            150.0,
+            155.0,
+            148.0,
+            152.0,
+            5000.0,
+        );
 
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _| {
             b.iter_batched(

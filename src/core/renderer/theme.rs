@@ -468,8 +468,8 @@ impl ThemeConfig {
                 scale_color: [0.6, 0.8, 0.4, 1.0],
                 scale_fill: [0.6, 0.8, 0.4, 0.1],
                 anchor_color: [1.0, 1.0, 1.0, 1.0],
-                font_size: 11.0,
-                fibonacci_font_size: 10.0,
+                font_size: 12.0,
+                fibonacci_font_size: 11.0,
             },
             indicator_palette: ThemeIndicatorPalette {
                 colors: vec![
@@ -564,8 +564,8 @@ impl ThemeConfig {
                 scale_color: [0.6, 0.8, 0.4, 1.0],
                 scale_fill: [0.6, 0.8, 0.4, 0.1],
                 anchor_color: [ch(0x13), ch(0x17), ch(0x22), 1.0], // Dark anchors on light bg
-                font_size: 11.0,
-                fibonacci_font_size: 10.0,
+                font_size: 12.0,
+                fibonacci_font_size: 11.0,
             },
             indicator_palette: ThemeIndicatorPalette {
                 colors: vec![
@@ -885,10 +885,7 @@ mod tests {
             dark.crosshair.line_color,
             [ch(0x22), ch(0x26), ch(0x2A), 1.0]
         );
-        assert_eq!(
-            dark.crosshair.label_bg,
-            [ch(0x22), ch(0x26), ch(0x2A), 1.0]
-        );
+        assert_eq!(dark.crosshair.label_bg, [ch(0x22), ch(0x26), ch(0x2A), 1.0]);
         assert_eq!(
             dark.crosshair.label_text,
             [ch(0xE7), ch(0xE7), ch(0xE7), 1.0]

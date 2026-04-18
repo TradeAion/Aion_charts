@@ -4,10 +4,13 @@
 //! Completes on the first click (1 anchor). The line extends across the full
 //! pane width at the anchor's price level.
 
-use super::drawing::{generate_anchor_circles, next_drawing_id, point_to_css, Drawing};
+use super::drawing::{
+    generate_anchor_circles, line_label_placement, line_middle_gap_range, next_drawing_id,
+    point_to_css, prepare_text_block, push_line_with_gap_range, push_rotated_text_block, Drawing,
+    TEXT_DRAWING_GAP_CSS,
+};
 use super::hit_test;
 use super::types::*;
-use crate::core::renderer::draw_list::ColoredLine;
 use crate::core::viewport::Viewport;
 use crate::impl_drawing_accessors;
 
@@ -17,6 +20,7 @@ pub struct HorizontalLineDrawing {
     state: DrawingState,
     style: DrawingStyle,
     anchors: Vec<AnchorPoint>,
+    text: DrawingText,
 }
 
 impl HorizontalLineDrawing {
@@ -29,7 +33,16 @@ impl HorizontalLineDrawing {
             state: DrawingState::Creating { step: 0 },
             style: DrawingStyle::default(),
             anchors: vec![AnchorPoint::new(bar_index, price)],
+            text: DrawingText::default(),
         }
+    }
+
+    pub fn text(&self) -> &DrawingText {
+        &self.text
+    }
+
+    pub fn text_mut(&mut self) -> &mut DrawingText {
+        &mut self.text
     }
 }
 
@@ -76,6 +89,8 @@ impl Drawing for HorizontalLineDrawing {
         let c = &self.style.color;
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let lw = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
+        let text_color = self.text.style.resolved_color(*c);
+        let fs = (self.text.style.resolved_font_size(self.style.font_size) * avg_ratio) as f32;
         // Keep live preview crisp while creating/dragging too.
         let snap_to_pixel = true;
         let y = {
@@ -91,20 +106,58 @@ impl Drawing for HorizontalLineDrawing {
         let (dash, gap) = self.style.dash.map_or((0.0, 0.0), |d| {
             ((d[0] * avg_ratio) as f32, (d[1] * avg_ratio) as f32)
         });
+        let mut line_gap_range = None;
 
-        geom.lines.push(ColoredLine {
-            x0: 0.0,
-            y0: y,
-            x1: pane_pw,
-            y1: y,
-            width: lw,
-            r: c[0],
-            g: c[1],
-            b: c[2],
-            a: c[3],
+        if let Some(block) = prepare_text_block(&self.text.value, fs) {
+            // Inset (horizontal padding from pane edge) and gap (perpendicular
+            // distance from the line to the text baseline) both use the
+            // universal 2px shape↔text spacing.
+            let inset = TEXT_DRAWING_GAP_CSS * avg_ratio;
+            let gap = TEXT_DRAWING_GAP_CSS * avg_ratio;
+            let placement = line_label_placement(
+                0.0,
+                y as f64,
+                pane_pw as f64,
+                y as f64,
+                self.text.horizontal_align,
+                self.text.vertical_align,
+                &block,
+                fs,
+                inset,
+                gap,
+            );
+            if self.text.vertical_align
+                == crate::core::renderer::draw_list::TextVerticalAlign::Middle
+            {
+                line_gap_range = line_middle_gap_range(&placement, &block, avg_ratio as f32);
+            }
+            push_rotated_text_block(
+                &mut geom.texts,
+                &block,
+                placement.anchor_x,
+                placement.anchor_y,
+                placement.top_local_y,
+                fs,
+                600,
+                self.text.style.italic,
+                text_color,
+                placement.align,
+                placement.rotation_rad,
+            );
+        }
+
+        push_line_with_gap_range(
+            &mut geom.lines,
+            0.0,
+            y as f64,
+            pane_pw as f64,
+            y as f64,
+            lw,
+            *c,
             dash,
             gap,
-        });
+            line_gap_range,
+        );
 
         if show_anchors {
             geom.anchors = generate_anchor_circles(
@@ -132,5 +185,34 @@ impl Drawing for HorizontalLineDrawing {
         if let Some(a) = self.anchors.get_mut(index) {
             a.point.price = price;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::renderer::draw_list::{TextAlign, TextVerticalAlign};
+
+    fn test_viewport() -> Viewport {
+        let mut vp = Viewport::new(1000, 600);
+        vp.start_bar = 10.0;
+        vp.end_bar = 20.0;
+        vp.price_min = 90.0;
+        vp.price_max = 110.0;
+        vp
+    }
+
+    #[test]
+    fn centered_middle_text_splits_horizontal_line_geometry() {
+        let vp = test_viewport();
+        let mut drawing = HorizontalLineDrawing::new(14.5, 100.0);
+        drawing.set_state(DrawingState::Idle);
+        drawing.text_mut().value = "Dev".to_string();
+        drawing.text_mut().horizontal_align = TextAlign::Center;
+        drawing.text_mut().vertical_align = TextVerticalAlign::Middle;
+
+        let geom = drawing.generate_geometry(&vp, 1000.0, 600.0, 1.0, 1.0, 1.0, false);
+
+        assert_eq!(geom.lines.len(), 2);
     }
 }

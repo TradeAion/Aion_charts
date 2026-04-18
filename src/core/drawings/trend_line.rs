@@ -1,11 +1,12 @@
 //! Trend Line drawing — 2-anchor line segment.
 
 use super::drawing::{
-    generate_anchor_circles, next_drawing_id, point_to_bitmap, point_to_css, Drawing,
+    generate_anchor_circles, line_label_placement, line_middle_gap_range, next_drawing_id,
+    point_to_bitmap, point_to_css, prepare_text_block, push_line_with_gap_range,
+    push_rotated_text_block, Drawing, TEXT_DRAWING_GAP_CSS,
 };
 use super::hit_test;
 use super::types::*;
-use crate::core::renderer::draw_list::ColoredLine;
 use crate::core::viewport::Viewport;
 use crate::impl_drawing_accessors;
 
@@ -15,6 +16,7 @@ pub struct TrendLineDrawing {
     state: DrawingState,
     style: DrawingStyle,
     anchors: Vec<AnchorPoint>,
+    text: DrawingText,
 }
 
 impl TrendLineDrawing {
@@ -28,7 +30,16 @@ impl TrendLineDrawing {
                 AnchorPoint::new(bar_index, price),
                 AnchorPoint::new(bar_index, price), // preview anchor
             ],
+            text: DrawingText::default(),
         }
+    }
+
+    pub fn text(&self) -> &DrawingText {
+        &self.text
+    }
+
+    pub fn text_mut(&mut self) -> &mut DrawingText {
+        &mut self.text
     }
 }
 
@@ -103,20 +114,61 @@ impl Drawing for TrendLineDrawing {
         let c = &self.style.color;
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let line_w = (self.style.line_width * avg_ratio).floor().max(1.0);
+        let text_color = self.text.style.resolved_color(*c);
+        let fs = (self.text.style.resolved_font_size(self.style.font_size) * avg_ratio) as f32;
+        let dash = self.style.dash.map_or(0.0, |d| (d[0] * avg_ratio) as f32);
+        let gap = self.style.dash.map_or(0.0, |d| (d[1] * avg_ratio) as f32);
+        let mut line_gap_range = None;
 
-        geom.lines.push(ColoredLine {
-            x0: bx0 as f32,
-            y0: by0 as f32,
-            x1: bx1 as f32,
-            y1: by1 as f32,
-            width: line_w as f32,
-            r: c[0],
-            g: c[1],
-            b: c[2],
-            a: c[3],
-            dash: self.style.dash.map_or(0.0, |d| (d[0] * avg_ratio) as f32),
-            gap: self.style.dash.map_or(0.0, |d| (d[1] * avg_ratio) as f32),
-        });
+        if let Some(block) = prepare_text_block(&self.text.value, fs) {
+            // Universal 2px shape↔text spacing for both end inset and
+            // perpendicular gap from the trend line.
+            let inset = TEXT_DRAWING_GAP_CSS * avg_ratio;
+            let gap = TEXT_DRAWING_GAP_CSS * avg_ratio;
+            let placement = line_label_placement(
+                bx0,
+                by0,
+                bx1,
+                by1,
+                self.text.horizontal_align,
+                self.text.vertical_align,
+                &block,
+                fs,
+                inset,
+                gap,
+            );
+            if self.text.vertical_align
+                == crate::core::renderer::draw_list::TextVerticalAlign::Middle
+            {
+                line_gap_range = line_middle_gap_range(&placement, &block, avg_ratio as f32);
+            }
+            push_rotated_text_block(
+                &mut geom.texts,
+                &block,
+                placement.anchor_x,
+                placement.anchor_y,
+                placement.top_local_y,
+                fs,
+                600,
+                self.text.style.italic,
+                text_color,
+                placement.align,
+                placement.rotation_rad,
+            );
+        }
+
+        push_line_with_gap_range(
+            &mut geom.lines,
+            bx0,
+            by0,
+            bx1,
+            by1,
+            line_w as f32,
+            *c,
+            dash,
+            gap,
+            line_gap_range,
+        );
 
         if show_anchors {
             geom.anchors = generate_anchor_circles(

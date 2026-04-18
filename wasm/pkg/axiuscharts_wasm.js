@@ -355,6 +355,13 @@ export class AxiusCharts {
         return BigInt.asUintN(64, ret);
     }
     /**
+     * @returns {boolean}
+     */
+    begin_selected_drawing_text_edit() {
+        const ret = wasm.axiuscharts_begin_selected_drawing_text_edit(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * Cancel the drawing currently being created (e.g. on Escape key).
      */
     cancel_drawing() {
@@ -569,6 +576,14 @@ export class AxiusCharts {
         return ret >>> 0;
     }
     /**
+     * @param {boolean} cancel
+     * @returns {boolean}
+     */
+    end_selected_drawing_text_edit(cancel) {
+        const ret = wasm.axiuscharts_end_selected_drawing_text_edit(this.__wbg_ptr, cancel);
+        return ret !== 0;
+    }
+    /**
      * Get the number of execution marks.
      * @returns {number}
      */
@@ -762,6 +777,27 @@ export class AxiusCharts {
     get_footprint_xy_zoom_enabled() {
         const ret = wasm.axiuscharts_get_footprint_xy_zoom_enabled(this.__wbg_ptr);
         return ret !== 0;
+    }
+    /**
+     * Get the currently selected drawing's text/alignment inspector payload as JSON.
+     * Returns `"null"` when no drawing is selected.
+     * @returns {string}
+     */
+    get_selected_drawing_info_json() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.axiuscharts_get_selected_drawing_info_json(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export4(deferred1_0, deferred1_1, 1);
+        }
     }
     /**
      * Get the currently selected execution mark ID, or null if none.
@@ -2150,6 +2186,46 @@ export class AxiusCharts {
         wasm.axiuscharts_set_replay_playing(this.__wbg_ptr, playing);
     }
     /**
+     * Set inline text on the currently selected drawing.
+     * @param {string} text
+     * @returns {boolean}
+     */
+    set_selected_drawing_text(text) {
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.axiuscharts_set_selected_drawing_text(this.__wbg_ptr, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
+     * Set text alignment on the currently selected drawing.
+     * @param {string} horizontal
+     * @param {string} vertical
+     * @returns {boolean}
+     */
+    set_selected_drawing_text_alignment(horizontal, vertical) {
+        const ptr0 = passStringToWasm0(horizontal, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(vertical, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.axiuscharts_set_selected_drawing_text_alignment(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        return ret !== 0;
+    }
+    /**
+     * Set font size / italic / color override on the currently selected drawing label.
+     * @param {number} font_size
+     * @param {boolean} italic
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     * @param {number} a
+     * @param {boolean} follow_drawing_color
+     * @returns {boolean}
+     */
+    set_selected_drawing_text_style(font_size, italic, r, g, b, a, follow_drawing_color) {
+        const ret = wasm.axiuscharts_set_selected_drawing_text_style(this.__wbg_ptr, font_size, italic, r, g, b, a, follow_drawing_color);
+        return ret !== 0;
+    }
+    /**
      * Set the selected execution mark ID (shows selected-trade execution locators).
      * Pass empty string or null to deselect.
      * @param {string | null} [mark_id]
@@ -2158,6 +2234,29 @@ export class AxiusCharts {
         var ptr0 = isLikeNone(mark_id) ? 0 : passStringToWasm0(mark_id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         var len0 = WASM_VECTOR_LEN;
         wasm.axiuscharts_set_selected_execution_mark(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * Replace the currently selected Fibonacci drawing's levels from JSON.
+     * Input shape: `[{"ratio":0.5,"label":"Mid"}, ...]`
+     * @param {string} json
+     * @returns {boolean}
+     */
+    set_selected_fibonacci_levels_json(json) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.axiuscharts_set_selected_fibonacci_levels_json(retptr, this.__wbg_ptr, ptr0, len0);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return r0 !== 0;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
     }
     /**
      * Set data for a line series. `values` and `timestamps` must be same length.
@@ -2331,6 +2430,19 @@ export class AxiusCharts {
             wasm.__wbindgen_add_to_stack_pointer(16);
             wasm.__wbindgen_export4(deferred1_0, deferred1_1, 1);
         }
+    }
+    /**
+     * Advance the text-edit caret blink phase. The host should call this on
+     * each animation frame (e.g. inside the rAF loop) passing `performance.now()`
+     * in milliseconds. Returns true when the caret visibility flipped, in which
+     * case the canvas is automatically marked dirty for repaint. When no text
+     * edit is active this is a cheap no-op.
+     * @param {number} now_ms
+     * @returns {boolean}
+     */
+    tick_drawing_caret_blink(now_ms) {
+        const ret = wasm.axiuscharts_tick_drawing_caret_blink(this.__wbg_ptr, now_ms);
+        return ret !== 0;
     }
     /**
      * Convert a timestamp (in milliseconds) to a bar index.
@@ -3728,7 +3840,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_2371(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_2444(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -3855,6 +3967,9 @@ function __wbg_get_imports() {
         __wbg_restore_0d233789d098ba64: function(arg0) {
             getObject(arg0).restore();
         },
+        __wbg_rotate_31f482965274db16: function() { return handleError(function (arg0, arg1) {
+            getObject(arg0).rotate(arg1);
+        }, arguments); },
         __wbg_save_e0cc2e58b36d33c9: function(arg0) {
             getObject(arg0).save();
         },
@@ -4344,6 +4459,9 @@ function __wbg_get_imports() {
             const ret = getObject(arg0).touches;
             return addHeapObject(ret);
         },
+        __wbg_translate_3aa10730376a8c06: function() { return handleError(function (arg0, arg1, arg2) {
+            getObject(arg0).translate(arg1, arg2);
+        }, arguments); },
         __wbg_warn_f7ae1b2e66ccb930: function(arg0) {
             console.warn(getObject(arg0));
         },
@@ -4364,42 +4482,42 @@ function __wbg_get_imports() {
         }, arguments); },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [Externref], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_432, __wasm_bindgen_func_elem_433);
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_444, __wasm_bindgen_func_elem_445);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [F64], shim_idx: 14, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_432, __wasm_bindgen_func_elem_443);
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_444, __wasm_bindgen_func_elem_455);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [NamedExternref("Array<any>")], shim_idx: 9, ret: Unit, inner_ret: Some(Unit) }, mutable: false }) -> Externref`.
-            const ret = makeClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_432, __wasm_bindgen_func_elem_436);
+            const ret = makeClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_444, __wasm_bindgen_func_elem_448);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [NamedExternref("Event")], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_432, __wasm_bindgen_func_elem_433);
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_444, __wasm_bindgen_func_elem_445);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000005: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [NamedExternref("PointerEvent")], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_432, __wasm_bindgen_func_elem_433);
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_444, __wasm_bindgen_func_elem_445);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000006: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [NamedExternref("TouchEvent")], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_432, __wasm_bindgen_func_elem_433);
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_444, __wasm_bindgen_func_elem_445);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000007: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_432, __wasm_bindgen_func_elem_433);
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_444, __wasm_bindgen_func_elem_445);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000008: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [], shim_idx: 12, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_432, __wasm_bindgen_func_elem_441);
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_444, __wasm_bindgen_func_elem_453);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000009: function(arg0) {
@@ -4426,24 +4544,24 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_441(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_441(arg0, arg1);
+function __wasm_bindgen_func_elem_453(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_453(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_433(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_433(arg0, arg1, addHeapObject(arg2));
+function __wasm_bindgen_func_elem_445(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_445(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_436(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_436(arg0, arg1, addHeapObject(arg2));
+function __wasm_bindgen_func_elem_448(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_448(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_2371(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_2371(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_2444(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_2444(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
-function __wasm_bindgen_func_elem_443(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_443(arg0, arg1, arg2);
+function __wasm_bindgen_func_elem_455(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_455(arg0, arg1, arg2);
 }
 
 
