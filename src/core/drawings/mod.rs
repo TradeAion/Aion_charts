@@ -454,7 +454,9 @@ impl DrawingManager {
         let font_size = style
             .map(|text_style| text_style.resolved_font_size(drawing.style().font_size))
             .unwrap_or(drawing.style().font_size);
-        let italic = style.map(|text_style| text_style.italic).unwrap_or(false);
+        // Drawing labels are always italic — placeholder included so it visually
+        // matches the typed text the user is about to enter.
+        let italic = true;
         let x = ((target.left + 1.0) * h_pixel_ratio - 1.0) as f32;
         let y = (target.top * v_pixel_ratio) as f32;
 

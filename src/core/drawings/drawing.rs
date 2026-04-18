@@ -389,10 +389,15 @@ pub fn push_text_block(
     top_y: f32,
     font_size: f32,
     font_weight: u16,
-    italic: bool,
+    _italic: bool,
     color: [f32; 4],
     align: TextAlign,
 ) {
+    // Drawing labels are ALWAYS italic regardless of caller-supplied style.
+    // This is a deliberate product decision: italic is the visual signature
+    // of drawing-tool annotations (matches TradingView). The `_italic` arg
+    // is kept for call-site compatibility but ignored.
+    let italic = true;
     for (line_idx, line) in block.lines.iter().enumerate() {
         texts.push(DrawText {
             text: line.clone(),
@@ -420,11 +425,13 @@ pub fn push_rotated_text_block(
     top_local_y: f32,
     font_size: f32,
     font_weight: u16,
-    italic: bool,
+    _italic: bool,
     color: [f32; 4],
     align: TextAlign,
     rotation_rad: f32,
 ) {
+    // See `push_text_block`: drawing labels are always italic.
+    let italic = true;
     let (sin_theta, cos_theta) = rotation_rad.sin_cos();
     for (line_idx, line) in block.lines.iter().enumerate() {
         let local_y = top_local_y + block.line_height * line_idx as f32;
