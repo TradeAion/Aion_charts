@@ -282,12 +282,14 @@ impl Drawing for TextDrawing {
         if let Some(block) = block {
             if !self.text.value.trim().is_empty() {
                 let text_color = self.text.style.resolved_color(self.style.color);
-                // Anchor x for horizontal text alignment maps inside the box.
-                let text_x = match self.text.horizontal_align {
-                    TextAlign::Left => box_left + pad,
-                    TextAlign::Center => (box_left + box_right) * 0.5,
-                    TextAlign::Right => box_right - pad,
-                };
+                // Always horizontally CENTER the text inside the auto-sized
+                // box. The drawing's `horizontal_align` only governs how the
+                // box is positioned relative to the click anchor — once the
+                // box exists, padding should be visually equal on both sides.
+                // The width estimate from `prepare_text_block` over- or
+                // under-shoots real font metrics, so left-aligning the text
+                // would leave a visibly uneven gap on the right.
+                let text_x = (box_left + box_right) * 0.5;
                 // Optically center the text vertically inside the box. The
                 // canvas "top" baseline used by `push_text_block` includes
                 // ascender padding above the cap height, so a naive
@@ -306,7 +308,7 @@ impl Drawing for TextDrawing {
                     600,
                     self.text.style.italic,
                     text_color,
-                    self.text.horizontal_align,
+                    TextAlign::Center,
                 );
             }
         }
