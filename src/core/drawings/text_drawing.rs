@@ -12,8 +12,8 @@
 //!   disable them while preserving the last picked color.
 
 use super::drawing::{
-    next_drawing_id, point_to_bitmap, point_to_css, prepare_text_block, push_text_block, Drawing,
-    TEXT_DRAWING_GAP_CSS,
+    next_drawing_id, optical_middle_top, point_to_bitmap, point_to_css, prepare_text_block,
+    push_text_block, Drawing, TEXT_DRAWING_GAP_CSS,
 };
 use super::hit_test;
 use super::types::*;
@@ -288,7 +288,15 @@ impl Drawing for TextDrawing {
                     TextAlign::Center => (box_left + box_right) * 0.5,
                     TextAlign::Right => box_right - pad,
                 };
-                let top_y = box_top + pad;
+                // Optically center the text vertically inside the box. The
+                // canvas "top" baseline used by `push_text_block` includes
+                // ascender padding above the cap height, so a naive
+                // `box_top + pad` leaves visible empty space above the caps
+                // and crowds the descenders against the bottom edge.
+                // `optical_middle_top` gives the top-y that visually centers
+                // glyphs around the supplied anchor y.
+                let box_center_y = (box_top + box_bottom) * 0.5;
+                let top_y = optical_middle_top(box_center_y, &block, fs);
                 push_text_block(
                     &mut geom.texts,
                     &block,
