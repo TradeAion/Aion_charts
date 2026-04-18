@@ -164,6 +164,8 @@ export const axiuscharts_set_selected_drawing_text_style: (a: number, b: number,
 export const axiuscharts_set_selected_execution_mark: (a: number, b: number, c: number) => void;
 export const axiuscharts_set_selected_fibonacci_levels_json: (a: number, b: number, c: number, d: number) => void;
 export const axiuscharts_set_selected_rectangle_middle_line: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
+export const axiuscharts_set_selected_text_border: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
+export const axiuscharts_set_selected_text_fill: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
 export const axiuscharts_set_series_data: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
 export const axiuscharts_set_series_visible: (a: number, b: number, c: number) => void;
 export const axiuscharts_set_study_parameter: (a: number, b: number, c: number, d: number, e: number) => void;
@@ -233,12 +235,12 @@ export const chartworkspace_set_workspace_pane_background_color: (a: number, b: 
 export const chartworkspace_split_active: (a: number, b: number, c: number, d: number) => void;
 export const chartworkspace_split_pane: (a: number, b: number, c: number, d: number, e: number) => void;
 export const chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
-export const __wasm_bindgen_func_elem_446: (a: number, b: number) => void;
-export const __wasm_bindgen_func_elem_457: (a: number, b: number, c: number) => void;
-export const __wasm_bindgen_func_elem_2470: (a: number, b: number, c: number, d: number) => void;
-export const __wasm_bindgen_func_elem_447: (a: number, b: number, c: number) => void;
-export const __wasm_bindgen_func_elem_450: (a: number, b: number, c: number) => void;
-export const __wasm_bindgen_func_elem_455: (a: number, b: number) => void;
+export const __wasm_bindgen_func_elem_444: (a: number, b: number) => void;
+export const __wasm_bindgen_func_elem_455: (a: number, b: number, c: number) => void;
+export const __wasm_bindgen_func_elem_2482: (a: number, b: number, c: number, d: number) => void;
+export const __wasm_bindgen_func_elem_445: (a: number, b: number, c: number) => void;
+export const __wasm_bindgen_func_elem_448: (a: number, b: number, c: number) => void;
+export const __wasm_bindgen_func_elem_453: (a: number, b: number) => void;
 export const __wbindgen_export: (a: number, b: number) => number;
 export const __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
 export const __wbindgen_export3: (a: number) => void;

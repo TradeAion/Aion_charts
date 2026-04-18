@@ -4749,6 +4749,63 @@ impl AxiusCharts {
         changed
     }
 
+    /// Update the border on the currently selected Text drawing. The color,
+    /// width, and dash are always written so toggling `enabled` off and back
+    /// on preserves the user's last picks.
+    ///
+    /// `dash_on`/`dash_off` ≤ 0 means a solid line. Returns `false` when the
+    /// current selection is not a Text drawing, or when nothing is selected.
+    pub fn set_selected_text_border(
+        &mut self,
+        enabled: bool,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+        line_width: f32,
+        dash_on: f32,
+        dash_off: f32,
+    ) -> bool {
+        let dash = if dash_on > 0.0 && dash_off > 0.0 {
+            Some([dash_on as f64, dash_off as f64])
+        } else {
+            None
+        };
+        let changed = self
+            .inner
+            .borrow_mut()
+            .engine
+            .drawings
+            .set_selected_text_border(enabled, [r, g, b, a], line_width as f64, dash);
+        if changed {
+            self.mark_dirty();
+        }
+        changed
+    }
+
+    /// Update the background fill on the currently selected Text drawing.
+    /// The color (including alpha) is always written so toggling `enabled`
+    /// off and back on preserves the user's last picked color.
+    pub fn set_selected_text_fill(
+        &mut self,
+        enabled: bool,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+    ) -> bool {
+        let changed = self
+            .inner
+            .borrow_mut()
+            .engine
+            .drawings
+            .set_selected_text_fill(enabled, [r, g, b, a]);
+        if changed {
+            self.mark_dirty();
+        }
+        changed
+    }
+
     /// Replace the currently selected Fibonacci drawing's levels from JSON.
     /// Input shape: `[{"ratio":0.5,"label":"Mid"}, ...]`
     pub fn set_selected_fibonacci_levels_json(&mut self, json: &str) -> Result<bool, JsValue> {
