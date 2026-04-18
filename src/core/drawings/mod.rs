@@ -1201,11 +1201,17 @@ impl DrawingManager {
             match rect.middle_line() {
                 Some(ml) => (true, true, rgba_to_hex(ml.color), ml.line_width, ml.dash),
                 None => {
+                    // When the midline hasn't been enabled yet, surface the
+                    // rectangle's own border color as the default so the
+                    // inspector inputs (and any subsequent enable toggle)
+                    // start out matching the rectangle border. The user can
+                    // still pick a different color afterwards — once they do,
+                    // the explicit choice is persisted on the drawing.
                     let default_ml = MiddleLineStyle::default();
                     (
                         true,
                         false,
-                        rgba_to_hex(default_ml.color),
+                        rgba_to_hex(rect.style().color),
                         default_ml.line_width,
                         default_ml.dash,
                     )
