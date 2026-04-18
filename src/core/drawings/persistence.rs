@@ -1,9 +1,11 @@
-use super::types::{AnchorPoint, DrawingPoint, DrawingStyle, DrawingTool, FibonacciLevel};
+use super::types::{
+    AnchorPoint, DrawingPoint, DrawingStyle, DrawingTool, FibonacciLevel, MiddleLineStyle,
+};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
 
-pub const DRAWINGS_SNAPSHOT_VERSION: u32 = 3;
+pub const DRAWINGS_SNAPSHOT_VERSION: u32 = 4;
 
 fn snapshot_version() -> u32 {
     DRAWINGS_SNAPSHOT_VERSION
@@ -50,6 +52,11 @@ pub struct SerializedDrawing {
     /// Custom Fibonacci levels. Omitted for non-fibonacci drawings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fibonacci_levels: Vec<SerializedFibonacciLevel>,
+    /// Optional rectangle middle-line style (TradingView-style horizontal
+    /// midline). `None` means the midline is disabled. Omitted for
+    /// non-rectangle drawings, or rectangles without a midline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub middle_line: Option<SerializedMiddleLineStyle>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -80,6 +87,34 @@ pub struct SerializedDrawingStyle {
 pub struct SerializedFibonacciLevel {
     pub ratio: f64,
     pub label: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct SerializedMiddleLineStyle {
+    pub color: [f32; 4],
+    pub line_width: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dash: Option<[f64; 2]>,
+}
+
+impl From<&MiddleLineStyle> for SerializedMiddleLineStyle {
+    fn from(value: &MiddleLineStyle) -> Self {
+        Self {
+            color: value.color,
+            line_width: value.line_width,
+            dash: value.dash,
+        }
+    }
+}
+
+impl From<SerializedMiddleLineStyle> for MiddleLineStyle {
+    fn from(value: SerializedMiddleLineStyle) -> Self {
+        Self {
+            color: value.color,
+            line_width: value.line_width,
+            dash: value.dash,
+        }
+    }
 }
 
 impl Default for SerializedDrawingStyle {
@@ -257,6 +292,20 @@ fn apply_snapshot_migration_step(
             }
             Ok(payload)
         }
+        3 => {
+            // v3 → v4: introduces the optional rectangle `middle_line` field
+            // on `SerializedDrawing`. The field is `Option<...>` with serde
+            // default, so v3 snapshots without it deserialize as `None`
+            // (midline disabled) — matches the historical behavior. We just
+            // bump the version key.
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert(
+                    "version".to_string(),
+                    serde_json::Value::from((from_version + 1) as u64),
+                );
+            }
+            Ok(payload)
+        }
         // Future migrations should be added here as `vN -> vN+1` transforms.
         _ => Err(DrawingsMigrationError::UnknownVersion(from_version)),
     }
@@ -329,6 +378,7 @@ mod tests {
                 text_italic: None,
                 text_color: None,
                 fibonacci_levels: Vec::new(),
+                middle_line: None,
             }],
         }
     }
@@ -433,5 +483,37 @@ mod tests {
         assert_eq!(migrated.drawings[0].text_font_size, None);
         assert_eq!(migrated.drawings[0].text_italic, None);
         assert_eq!(migrated.drawings[0].text_color, None);
+    }
+
+    #[test]
+    fn v3_snapshot_migrates_and_defaults_middle_line_to_none() {
+        // v3 rectangles never had a `middle_line` field. After migrating to
+        // v4, the field must default to `None` (midline disabled), preserving
+        // historical visual behavior.
+        let payload = json!({
+            "version": 3,
+            "drawings": [{
+                "id": 13,
+                "tool": "rectangle",
+                "style": SerializedDrawingStyle::default(),
+                "anchors": [{
+                    "point": { "bar_index": 10.0, "price": 100.0, "timestamp": null },
+                    "hit_radius": 5.0
+                }, {
+                    "point": { "bar_index": 20.0, "price": 120.0, "timestamp": null },
+                    "hit_radius": 5.0
+                }],
+                "points": [],
+                "text": "Range",
+                "horizontal_align": "right",
+                "vertical_align": "top"
+            }]
+        });
+
+        let migrated = migrate_snapshot(&payload).expect("migrate v3 snapshot");
+
+        assert_eq!(migrated.version, DRAWINGS_SNAPSHOT_VERSION);
+        assert_eq!(migrated.drawings.len(), 1);
+        assert_eq!(migrated.drawings[0].middle_line, None);
     }
 }

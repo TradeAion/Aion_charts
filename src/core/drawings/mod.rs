@@ -32,7 +32,8 @@ use drawing::{
 };
 use persistence::{
     drawing_tool_from_key, drawing_tool_to_key, migrate_snapshot, DrawingSnapshot,
-    SerializedAnchorPoint, SerializedDrawing, SerializedDrawingPoint, DRAWINGS_SNAPSHOT_VERSION,
+    SerializedAnchorPoint, SerializedDrawing, SerializedDrawingPoint, SerializedMiddleLineStyle,
+    DRAWINGS_SNAPSHOT_VERSION,
 };
 use types::*;
 
@@ -1182,6 +1183,38 @@ impl DrawingManager {
             (false, Vec::new())
         };
 
+        // Rectangle midline state (TradingView-style horizontal middle line).
+        // Only Rectangle currently exposes this control. When the rectangle's
+        // `middle_line()` is `None`, the midline is disabled but we still
+        // surface sensible defaults so the UI checkbox + style inputs have
+        // something to show before the user enables it.
+        let (
+            supports_middle_line,
+            middle_line_enabled,
+            middle_line_color,
+            middle_line_width,
+            middle_line_dash,
+        ) = if tool == DrawingTool::Rectangle {
+            let rect = drawing
+                .as_any()
+                .downcast_ref::<rectangle::RectangleDrawing>()?;
+            match rect.middle_line() {
+                Some(ml) => (true, true, rgba_to_hex(ml.color), ml.line_width, ml.dash),
+                None => {
+                    let default_ml = MiddleLineStyle::default();
+                    (
+                        true,
+                        false,
+                        rgba_to_hex(default_ml.color),
+                        default_ml.line_width,
+                        default_ml.dash,
+                    )
+                }
+            }
+        } else {
+            (false, false, String::new(), 0.0, None)
+        };
+
         Some(SelectedDrawingInfo {
             id,
             tool: drawing_tool_to_key(tool).to_string(),
@@ -1204,6 +1237,11 @@ impl DrawingManager {
             editor_target,
             supports_fibonacci_levels,
             fibonacci_levels,
+            supports_middle_line,
+            middle_line_enabled,
+            middle_line_color,
+            middle_line_width,
+            middle_line_dash,
         })
     }
 
@@ -1293,6 +1331,47 @@ impl DrawingManager {
             return false;
         };
         fib.set_levels(levels);
+        true
+    }
+
+    /// Toggle / configure the optional horizontal middle line on the currently
+    /// selected Rectangle drawing (TradingView-style midline).
+    ///
+    /// When `enabled` is false, the midline is removed (`None`). When true,
+    /// the midline is set to the provided color/width/dash. Returns `false`
+    /// when there is no current selection or the selection is not a
+    /// rectangle.
+    pub fn set_selected_rectangle_middle_line(
+        &mut self,
+        enabled: bool,
+        color: [f32; 4],
+        line_width: f64,
+        dash: Option<[f64; 2]>,
+    ) -> bool {
+        let Some(id) = self.selected_id else {
+            return false;
+        };
+        let Some(drawing) = self.get_mut(id) else {
+            return false;
+        };
+        if drawing.tool() != DrawingTool::Rectangle {
+            return false;
+        }
+        let Some(rect) = drawing
+            .as_any_mut()
+            .downcast_mut::<rectangle::RectangleDrawing>()
+        else {
+            return false;
+        };
+        if enabled {
+            rect.set_middle_line(Some(MiddleLineStyle {
+                color,
+                line_width,
+                dash,
+            }));
+        } else {
+            rect.set_middle_line(None);
+        }
         true
     }
 
@@ -1805,6 +1884,15 @@ impl DrawingManager {
                     Vec::new()
                 };
 
+                let middle_line = if drawing.tool() == DrawingTool::Rectangle {
+                    drawing
+                        .as_any()
+                        .downcast_ref::<rectangle::RectangleDrawing>()
+                        .and_then(|rect| rect.middle_line().map(SerializedMiddleLineStyle::from))
+                } else {
+                    None
+                };
+
                 SerializedDrawing {
                     id: drawing.id(),
                     tool: drawing_tool_to_key(drawing.tool()).to_string(),
@@ -1822,6 +1910,7 @@ impl DrawingManager {
                     text_italic: drawing_text_style.and_then(|style| style.italic.then_some(true)),
                     text_color: drawing_text_style.and_then(|style| style.color),
                     fibonacci_levels,
+                    middle_line,
                 }
             })
             .collect();
@@ -1962,6 +2051,7 @@ impl DrawingManager {
             text_italic,
             text_color,
             fibonacci_levels,
+            middle_line,
         } = item;
 
         let tool = drawing_tool_from_key(tool.as_str())
@@ -2029,6 +2119,14 @@ impl DrawingManager {
                 .ok_or_else(|| "Brush type mismatch during restore".to_string())?;
             let points = points.into_iter().map(Into::into).collect();
             brush.set_points(points);
+        }
+
+        if tool == DrawingTool::Rectangle {
+            let rect = drawing
+                .as_any_mut()
+                .downcast_mut::<rectangle::RectangleDrawing>()
+                .ok_or_else(|| "Rectangle type mismatch during restore".to_string())?;
+            rect.set_middle_line(middle_line.map(Into::into));
         }
 
         if let Some(text_style) = Self::drawing_text_style_mut(drawing.as_mut()) {
@@ -2911,5 +3009,102 @@ mod tests {
             bottom_target.top >= rect_bottom - 1.0,
             "bottom target should stay outside bottom edge"
         );
+    }
+
+    #[test]
+    fn rectangle_middle_line_toggle_renders_extra_horizontal_line() {
+        // The Rectangle drawing must render exactly the 4 border edges by
+        // default; enabling the optional midline must add a 5th line at the
+        // vertical center spanning the full width. Disabling removes it.
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Rectangle;
+        let id = manager.start_creating(10.0, 110.0).expect("rectangle id");
+        manager.finalize_creation_step(20.0, 100.0);
+        manager.deselect_all();
+
+        let vp = test_viewport();
+        let pw = 800.0;
+        let ph = 600.0;
+        let count_rect_lines = |mgr: &DrawingManager| -> (
+            usize,
+            Option<crate::core::renderer::draw_list::ColoredLine>,
+        ) {
+            let (base, top) = mgr.generate_all_geometry(&vp, pw, ph, 1.0, 1.0, 1.0);
+            let mut all_lines: Vec<_> = base
+                .iter()
+                .chain(top.iter())
+                .flat_map(|g| g.lines.iter().copied())
+                .collect();
+            let last = all_lines.pop();
+            (all_lines.len() + last.iter().count(), last)
+        };
+
+        // Default: no midline → 4 border lines.
+        let (n, _) = count_rect_lines(&manager);
+        assert_eq!(n, 4);
+
+        // Enable midline.
+        manager.select(id);
+        let enabled = manager.set_selected_rectangle_middle_line(
+            true,
+            [0.2, 0.4, 0.8, 1.0],
+            2.0,
+            Some([6.0, 4.0]),
+        );
+        assert!(enabled);
+        manager.deselect_all();
+
+        let (n, last) = count_rect_lines(&manager);
+        assert_eq!(n, 5, "midline should add a 5th line");
+        let midline = last.expect("midline");
+        // Horizontal line at vertical center, spans full width.
+        assert!((midline.y0 - midline.y1).abs() < 1e-3);
+        assert!(midline.x1 > midline.x0);
+        assert!((midline.r - 0.2).abs() < 1e-6);
+        assert!((midline.b - 0.8).abs() < 1e-6);
+
+        // Snapshot round-trip preserves the midline state.
+        let snapshot = manager.snapshot();
+        let mut restored = DrawingManager::new();
+        restored
+            .replace_from_snapshot(snapshot)
+            .expect("restore snapshot with midline");
+        let rect = restored
+            .get(id)
+            .expect("restored rect")
+            .as_any()
+            .downcast_ref::<rectangle::RectangleDrawing>()
+            .expect("rectangle");
+        let ml = rect.middle_line().expect("midline preserved");
+        assert_eq!(ml.color, [0.2, 0.4, 0.8, 1.0]);
+        assert!((ml.line_width - 2.0).abs() < 1e-6);
+        assert_eq!(ml.dash, Some([6.0, 4.0]));
+
+        // Disable midline → back to 4 border lines.
+        restored.select(id);
+        let disabled =
+            restored.set_selected_rectangle_middle_line(false, [0.0, 0.0, 0.0, 1.0], 1.0, None);
+        assert!(disabled);
+        restored.deselect_all();
+        let (base, top) = restored.generate_all_geometry(&vp, pw, ph, 1.0, 1.0, 1.0);
+        let total: usize = base.iter().chain(top.iter()).map(|g| g.lines.len()).sum();
+        assert_eq!(total, 4);
+    }
+
+    #[test]
+    fn selected_rectangle_info_exposes_middle_line_defaults_when_disabled() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Rectangle;
+        manager.start_creating(10.0, 110.0).expect("rectangle id");
+        manager.finalize_creation_step(20.0, 100.0);
+
+        let vp = test_viewport();
+        let info = manager
+            .selected_drawing_info(&vp, 800.0, 600.0)
+            .expect("info");
+        assert!(info.supports_middle_line);
+        assert!(!info.middle_line_enabled);
+        assert!(info.middle_line_width > 0.0);
+        assert!(info.middle_line_color.starts_with('#'));
     }
 }

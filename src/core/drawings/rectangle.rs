@@ -17,6 +17,9 @@ pub struct RectangleDrawing {
     style: DrawingStyle,
     anchors: Vec<AnchorPoint>,
     text: DrawingText,
+    /// Optional horizontal midline through the rectangle's vertical center
+    /// (TradingView-style). `None` means the midline is disabled.
+    middle_line: Option<MiddleLineStyle>,
 }
 
 impl RectangleDrawing {
@@ -33,7 +36,20 @@ impl RectangleDrawing {
                 AnchorPoint::new(bar_index, price),
             ],
             text: DrawingText::rectangle_default(),
+            middle_line: None,
         }
+    }
+
+    /// Current optional middle-line style (None = disabled).
+    #[inline]
+    pub fn middle_line(&self) -> Option<&MiddleLineStyle> {
+        self.middle_line.as_ref()
+    }
+
+    /// Replace the middle-line style. `None` disables the middle line.
+    #[inline]
+    pub fn set_middle_line(&mut self, style: Option<MiddleLineStyle>) {
+        self.middle_line = style;
     }
 
     #[inline]
@@ -366,6 +382,28 @@ impl Drawing for RectangleDrawing {
             dash: d,
             gap: g,
         });
+
+        // Optional horizontal middle line (TradingView-style). Independent of
+        // the rectangle's border style — uses its own color, width, and dash.
+        if let Some(ml) = self.middle_line.as_ref() {
+            let ml_lw = (ml.line_width * avg_ratio).floor().max(1.0) as f32;
+            let ml_d = ml.dash.map_or(0.0, |dd| (dd[0] * avg_ratio) as f32);
+            let ml_g = ml.dash.map_or(0.0, |dd| (dd[1] * avg_ratio) as f32);
+            let mid_y = (py0 + py1) * 0.5;
+            geom.lines.push(ColoredLine {
+                x0: px0,
+                y0: mid_y,
+                x1: px1,
+                y1: mid_y,
+                width: ml_lw,
+                r: ml.color[0],
+                g: ml.color[1],
+                b: ml.color[2],
+                a: ml.color[3],
+                dash: ml_d,
+                gap: ml_g,
+            });
+        }
 
         if let Some(block) = prepare_text_block(&self.text.value, fs) {
             // Horizontal inset (Left/Right alignment) keeps a small breathing

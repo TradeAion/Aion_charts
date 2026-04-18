@@ -4711,6 +4711,44 @@ impl AxiusCharts {
         changed
     }
 
+    /// Toggle / configure the optional horizontal middle line on the currently
+    /// selected Rectangle drawing (TradingView-style midline).
+    ///
+    /// `dash_on`/`dash_off` ≤ 0 means a solid line. Returns `false` when the
+    /// current selection is not a Rectangle, or when nothing is selected.
+    pub fn set_selected_rectangle_middle_line(
+        &mut self,
+        enabled: bool,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+        line_width: f32,
+        dash_on: f32,
+        dash_off: f32,
+    ) -> bool {
+        let dash = if dash_on > 0.0 && dash_off > 0.0 {
+            Some([dash_on as f64, dash_off as f64])
+        } else {
+            None
+        };
+        let changed = self
+            .inner
+            .borrow_mut()
+            .engine
+            .drawings
+            .set_selected_rectangle_middle_line(
+                enabled,
+                [r, g, b, a],
+                line_width as f64,
+                dash,
+            );
+        if changed {
+            self.mark_dirty();
+        }
+        changed
+    }
+
     /// Replace the currently selected Fibonacci drawing's levels from JSON.
     /// Input shape: `[{"ratio":0.5,"label":"Mid"}, ...]`
     pub fn set_selected_fibonacci_levels_json(&mut self, json: &str) -> Result<bool, JsValue> {

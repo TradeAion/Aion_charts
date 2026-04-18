@@ -369,6 +369,33 @@ impl FibonacciLevel {
     }
 }
 
+/// Optional horizontal middle line for a Rectangle drawing (TradingView-style).
+///
+/// When `Some`, the rectangle renders an extra horizontal line through its
+/// vertical midpoint, spanning the rectangle's full width. The line uses its
+/// own color, width, and dash pattern, independent of the rectangle border.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MiddleLineStyle {
+    /// Line color [R, G, B, A] (0.0–1.0).
+    pub color: [f32; 4],
+    /// Line width in CSS pixels.
+    pub line_width: f64,
+    /// Optional dash pattern [dash, gap] in CSS px. None = solid.
+    pub dash: Option<[f64; 2]>,
+}
+
+impl Default for MiddleLineStyle {
+    fn default() -> Self {
+        // Default to a neutral mid-gray, 1px solid line — matches TradingView's
+        // default middle-line appearance once enabled.
+        Self {
+            color: [0.55, 0.55, 0.55, 1.0],
+            line_width: 1.0,
+            dash: None,
+        }
+    }
+}
+
 /// Rectangle in CSS pixels used by the demo/editor overlay.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct DrawingTextEditorTarget {
@@ -401,6 +428,18 @@ pub struct SelectedDrawingInfo {
     pub supports_fibonacci_levels: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub fibonacci_levels: Vec<FibonacciLevel>,
+    /// True when the selected drawing supports a horizontal middle line
+    /// (currently: Rectangle only).
+    pub supports_middle_line: bool,
+    /// True when the middle line is enabled on the selected drawing.
+    pub middle_line_enabled: bool,
+    /// Hex string ("#RRGGBB") of the middle-line color, when applicable.
+    pub middle_line_color: String,
+    /// Middle-line width in CSS px, when applicable.
+    pub middle_line_width: f64,
+    /// Optional dash pattern [dash, gap] for the middle line, when applicable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub middle_line_dash: Option<[f64; 2]>,
 }
 
 #[cfg(test)]

@@ -672,6 +672,29 @@
           <button class="btn" id="drawing-fib-apply" type="button">Apply Levels</button>
         </div>
       </div>
+      <div id="drawing-rectangle-controls" style="display:none">
+        <div class="drawing-panel-row">
+          <span class="drawing-panel-label">Middle Line</span>
+          <label class="drawing-panel-check">
+            <input id="drawing-rect-middle-enable" type="checkbox">
+            Enable
+          </label>
+        </div>
+        <div class="drawing-panel-row">
+          <span class="drawing-panel-label">ML Color</span>
+          <div class="drawing-panel-inline">
+            <input class="drawing-panel-input" id="drawing-rect-middle-color" type="color" value="#8C8C8C">
+            <input class="drawing-panel-input" id="drawing-rect-middle-width" type="number" min="1" max="8" step="1" value="1" title="Width (CSS px)">
+          </div>
+        </div>
+        <div class="drawing-panel-row">
+          <span class="drawing-panel-label">ML Dash</span>
+          <div class="drawing-panel-inline">
+            <input class="drawing-panel-input" id="drawing-rect-middle-dash-on" type="number" min="0" max="40" step="1" value="0" title="Dash on (0 = solid)">
+            <input class="drawing-panel-input" id="drawing-rect-middle-dash-off" type="number" min="0" max="40" step="1" value="0" title="Dash off (0 = solid)">
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Settings Panel -->
@@ -981,6 +1004,12 @@
     const drawingFibControls = $('drawing-fib-controls');
     const drawingFibLevels = $('drawing-fib-levels');
     const drawingFibApply = $('drawing-fib-apply');
+    const drawingRectControls = $('drawing-rectangle-controls');
+    const drawingRectMiddleEnable = $('drawing-rect-middle-enable');
+    const drawingRectMiddleColor = $('drawing-rect-middle-color');
+    const drawingRectMiddleWidth = $('drawing-rect-middle-width');
+    const drawingRectMiddleDashOn = $('drawing-rect-middle-dash-on');
+    const drawingRectMiddleDashOff = $('drawing-rect-middle-dash-off');
 
     let core = null;
     let workspace = null;
@@ -1163,6 +1192,42 @@
       }
     }
 
+    function applySelectedRectangleMiddleLine() {
+      if (!core || !selectedDrawingInfo?.supports_middle_line) return;
+      const enabled = !!drawingRectMiddleEnable.checked;
+      const [r, g, b, a] = hexToRgba(drawingRectMiddleColor.value || '#8C8C8C');
+      const widthRaw = parseFloat(drawingRectMiddleWidth.value);
+      const width = Number.isFinite(widthRaw) && widthRaw > 0 ? widthRaw : 1;
+      const dashOnRaw = parseFloat(drawingRectMiddleDashOn.value);
+      const dashOffRaw = parseFloat(drawingRectMiddleDashOff.value);
+      const dashOn = Number.isFinite(dashOnRaw) && dashOnRaw > 0 ? dashOnRaw : 0;
+      const dashOff = Number.isFinite(dashOffRaw) && dashOffRaw > 0 ? dashOffRaw : 0;
+      core.set_selected_rectangle_middle_line(
+        enabled,
+        r,
+        g,
+        b,
+        a,
+        width,
+        dashOn,
+        dashOff,
+      );
+      // Mirror state locally so the next inspector tick doesn't visibly flip
+      // the dependent inputs back before the WASM round-trip lands.
+      if (selectedDrawingInfo) {
+        selectedDrawingInfo.middle_line_enabled = enabled;
+        selectedDrawingInfo.middle_line_color = drawingRectMiddleColor.value;
+        selectedDrawingInfo.middle_line_width = width;
+        selectedDrawingInfo.middle_line_dash =
+          dashOn > 0 && dashOff > 0 ? [dashOn, dashOff] : null;
+      }
+      const dependentDisabled = !enabled;
+      drawingRectMiddleColor.disabled = dependentDisabled;
+      drawingRectMiddleWidth.disabled = dependentDisabled;
+      drawingRectMiddleDashOn.disabled = dependentDisabled;
+      drawingRectMiddleDashOff.disabled = dependentDisabled;
+    }
+
     async function applySelectedFibLevels() {
       if (!core || !selectedDrawingInfo?.supports_fibonacci_levels) return;
       const levels = parseFibLevelsInput(drawingFibLevels.value);
@@ -1201,6 +1266,7 @@
         drawingTextColor.disabled = true;
         drawingTextFollowColor.disabled = true;
         drawingFibControls.style.display = 'none';
+        drawingRectControls.style.display = 'none';
         drawingPlaceholder.style.display = 'none';
         drawingTextEditor.style.display = 'none';
         return;
@@ -1219,6 +1285,7 @@
         drawingTextColor.disabled = true;
         drawingTextFollowColor.disabled = true;
         drawingFibControls.style.display = 'none';
+        drawingRectControls.style.display = 'none';
         drawingPlaceholder.style.display = 'none';
         drawingTextEditor.style.display = 'none';
         return;
@@ -1256,6 +1323,33 @@
       drawingFibControls.style.display = selectedDrawingInfo.supports_fibonacci_levels ? 'block' : 'none';
       if (selectedDrawingInfo.supports_fibonacci_levels && document.activeElement !== drawingFibLevels) {
         drawingFibLevels.value = formatFibLevels(selectedDrawingInfo.fibonacci_levels);
+      }
+
+      // Rectangle midline controls (TradingView-style horizontal middle line).
+      // Only Rectangle drawings expose `supports_middle_line === true`.
+      drawingRectControls.style.display = selectedDrawingInfo.supports_middle_line ? 'block' : 'none';
+      if (selectedDrawingInfo.supports_middle_line) {
+        drawingRectMiddleEnable.checked = !!selectedDrawingInfo.middle_line_enabled;
+        const dependentDisabled = !selectedDrawingInfo.middle_line_enabled;
+        drawingRectMiddleColor.disabled = dependentDisabled;
+        drawingRectMiddleWidth.disabled = dependentDisabled;
+        drawingRectMiddleDashOn.disabled = dependentDisabled;
+        drawingRectMiddleDashOff.disabled = dependentDisabled;
+        if (document.activeElement !== drawingRectMiddleColor) {
+          drawingRectMiddleColor.value = selectedDrawingInfo.middle_line_color || '#8C8C8C';
+        }
+        if (document.activeElement !== drawingRectMiddleWidth) {
+          drawingRectMiddleWidth.value = String(
+            Math.max(1, Math.round(selectedDrawingInfo.middle_line_width || 1)),
+          );
+        }
+        const dash = selectedDrawingInfo.middle_line_dash;
+        if (document.activeElement !== drawingRectMiddleDashOn) {
+          drawingRectMiddleDashOn.value = String(dash ? Math.round(dash[0]) : 0);
+        }
+        if (document.activeElement !== drawingRectMiddleDashOff) {
+          drawingRectMiddleDashOff.value = String(dash ? Math.round(dash[1]) : 0);
+        }
       }
 
       drawingPlaceholder.style.display = 'none';
@@ -1810,6 +1904,11 @@
     drawingTextItalic.addEventListener('change', applySelectedDrawingTextStyle);
     drawingTextColor.addEventListener('change', applySelectedDrawingTextStyle);
     drawingTextFollowColor.addEventListener('change', applySelectedDrawingTextStyle);
+    drawingRectMiddleEnable.addEventListener('change', applySelectedRectangleMiddleLine);
+    drawingRectMiddleColor.addEventListener('change', applySelectedRectangleMiddleLine);
+    drawingRectMiddleWidth.addEventListener('change', applySelectedRectangleMiddleLine);
+    drawingRectMiddleDashOn.addEventListener('change', applySelectedRectangleMiddleLine);
+    drawingRectMiddleDashOff.addEventListener('change', applySelectedRectangleMiddleLine);
     drawingFibApply.addEventListener('click', applySelectedFibLevels);
     drawingFibLevels.addEventListener('blur', () => {
       if (selectedDrawingInfo?.supports_fibonacci_levels) applySelectedFibLevels();
