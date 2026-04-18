@@ -498,6 +498,8 @@ pub enum DrawingTool {
     Ray,
     /// Brush / freehand (variable points, recorded from pointer drag).
     Brush,
+    /// Text annotation (single anchor, auto-sized to text content).
+    Text,
 }
 
 impl DrawingTool {
@@ -512,6 +514,7 @@ impl DrawingTool {
             DrawingTool::VerticalLine => "vertical_line",
             DrawingTool::Ray => "ray",
             DrawingTool::Brush => "brush",
+            DrawingTool::Text => "text",
         }
     }
 
@@ -526,6 +529,7 @@ impl DrawingTool {
             "vertical_line" => Some(DrawingTool::VerticalLine),
             "ray" => Some(DrawingTool::Ray),
             "brush" => Some(DrawingTool::Brush),
+            "text" => Some(DrawingTool::Text),
             _ => None,
         }
     }

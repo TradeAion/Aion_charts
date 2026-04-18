@@ -17,6 +17,7 @@ pub mod persistence;
 pub mod ray;
 pub mod rectangle;
 pub mod scale;
+pub mod text_drawing;
 pub mod trend_line;
 pub mod types;
 pub mod vertical_line;
@@ -175,6 +176,10 @@ impl DrawingManager {
                 .as_any()
                 .downcast_ref::<ray::RayDrawing>()
                 .map(|d| d.text()),
+            DrawingTool::Text => drawing
+                .as_any()
+                .downcast_ref::<text_drawing::TextDrawing>()
+                .map(|d| d.text()),
             _ => None,
         }
     }
@@ -201,6 +206,10 @@ impl DrawingManager {
                 .as_any_mut()
                 .downcast_mut::<ray::RayDrawing>()
                 .map(|d| d.text_mut()),
+            DrawingTool::Text => drawing
+                .as_any_mut()
+                .downcast_mut::<text_drawing::TextDrawing>()
+                .map(|d| d.text_mut()),
             _ => None,
         }
     }
@@ -211,7 +220,8 @@ impl DrawingManager {
             | DrawingTool::Rectangle
             | DrawingTool::HorizontalLine
             | DrawingTool::VerticalLine
-            | DrawingTool::Ray => Self::drawing_text_ref(drawing).map(|text| &text.style),
+            | DrawingTool::Ray
+            | DrawingTool::Text => Self::drawing_text_ref(drawing).map(|text| &text.style),
             DrawingTool::Fibonacci => drawing
                 .as_any()
                 .downcast_ref::<fibonacci::FibonacciDrawing>()
@@ -226,7 +236,8 @@ impl DrawingManager {
             | DrawingTool::Rectangle
             | DrawingTool::HorizontalLine
             | DrawingTool::VerticalLine
-            | DrawingTool::Ray => Self::drawing_text_mut(drawing).map(|text| &mut text.style),
+            | DrawingTool::Ray
+            | DrawingTool::Text => Self::drawing_text_mut(drawing).map(|text| &mut text.style),
             DrawingTool::Fibonacci => drawing
                 .as_any_mut()
                 .downcast_mut::<fibonacci::FibonacciDrawing>()
@@ -1100,6 +1111,27 @@ impl DrawingManager {
                     pane_css_h,
                 ))
             }
+            DrawingTool::Text => {
+                if anchors.is_empty() {
+                    return None;
+                }
+                let text_drawing = drawing
+                    .as_any()
+                    .downcast_ref::<text_drawing::TextDrawing>()?;
+                let (ax, ay) = point_to_css(&anchors[0].point, vp, pane_css_w, pane_css_h);
+                let (left, top, right, bottom) = text_drawing.box_css_bounds(ax, ay);
+                Some(Self::clamp_editor_target(
+                    DrawingTextEditorTarget {
+                        left,
+                        top,
+                        width: (right - left).max(1.0),
+                        height: (bottom - top).max(1.0),
+                        rotation_deg: 0.0,
+                    },
+                    pane_css_w,
+                    pane_css_h,
+                ))
+            }
             _ => None,
         }
     }
@@ -1542,6 +1574,7 @@ impl DrawingManager {
                 Box::new(vertical_line::VerticalLineDrawing::new(bar_index, price))
             }
             DrawingTool::Ray => Box::new(ray::RayDrawing::new(bar_index, price)),
+            DrawingTool::Text => Box::new(text_drawing::TextDrawing::new(bar_index, price)),
             DrawingTool::None => unreachable!(),
         };
 
@@ -2099,6 +2132,10 @@ impl DrawingManager {
                 first.point.price,
             )),
             DrawingTool::Ray => Box::new(ray::RayDrawing::new(
+                first.point.bar_index,
+                first.point.price,
+            )),
+            DrawingTool::Text => Box::new(text_drawing::TextDrawing::new(
                 first.point.bar_index,
                 first.point.price,
             )),
