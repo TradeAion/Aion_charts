@@ -227,6 +227,12 @@ pub use crate::core::price_line::{
     PriceLine, PriceLineHit, PriceLineId, PriceLineManager, PriceLineOptions,
 };
 
+/// Order management lines (TradingView-style).
+pub use crate::core::order_line::{
+    OrderLine, OrderLineHit, OrderLineId, OrderLineManager, OrderLineOptions,
+    OrderSide, OrderStatus, OrderType,
+};
+
 /// Series markers (annotations on bars).
 pub use crate::core::markers::{
     MarkerManager, MarkerPosition, MarkerShape, SeriesMarker, SeriesMarkers,

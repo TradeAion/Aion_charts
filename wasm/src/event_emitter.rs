@@ -414,6 +414,59 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
                 },
             );
         }
+        axiuscharts::ChartEvent::OrderLineModified {
+            id,
+            old_price,
+            new_price,
+            order_type,
+            side,
+            quantity,
+        } => {
+            let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("id"), &JsValue::from_str(id));
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("oldPrice"),
+                &JsValue::from_f64(*old_price),
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("newPrice"),
+                &JsValue::from_f64(*new_price),
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("orderType"),
+                &JsValue::from_str(order_type),
+            );
+            let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("side"), &JsValue::from_str(side));
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("quantity"),
+                &JsValue::from_f64(*quantity),
+            );
+        }
+        axiuscharts::ChartEvent::OrderLineCancelled {
+            id,
+            price,
+            order_type,
+            side,
+            quantity,
+        } => {
+            let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("id"), &JsValue::from_str(id));
+            let _ =
+                js_sys::Reflect::set(&obj, &JsValue::from_str("price"), &JsValue::from_f64(*price));
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("orderType"),
+                &JsValue::from_str(order_type),
+            );
+            let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("side"), &JsValue::from_str(side));
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("quantity"),
+                &JsValue::from_f64(*quantity),
+            );
+        }
     }
 
     obj.into()

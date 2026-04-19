@@ -59,7 +59,8 @@ use axiuscharts::{
     ChartPaneId, ChartStyle, CrosshairMagnetMode, CrosshairSnapshot, DataRange, GpuContext,
     HistogramPoint, HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint,
     LineSeriesOptions, LineStyle, MainChartType, MainViewportPreset, MarkerPosition, MarkerShape,
-    MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint, OverlayRenderer, PriceAxisRenderer,
+    MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint, OrderLineId, OrderLineOptions, OrderSide,
+    OrderStatus, OrderType, OverlayRenderer, PriceAxisRenderer,
     PriceLineOptions, RendererBackend, ResourceLimits, RuntimeEvent, SeriesId, SeriesMarker,
     SnapshotMtfResolver, TimeAxisRenderer, TimeRange, Viewport, WgpuRenderer,
 };
@@ -1710,6 +1711,8 @@ impl AxiusCharts {
             hovered_execution_mark_id: None,
             selected_execution_mark_id: None,
             price_line_drag_id: None,
+            order_line_drag_id: None,
+            cancelling_order_id: None,
         }));
 
         let event_emitter = Rc::new(RefCell::new(EventEmitter::new()));
@@ -5772,6 +5775,268 @@ impl AxiusCharts {
     /// Get the number of price lines.
     pub fn price_line_count(&self) -> usize {
         self.inner.borrow().engine.price_lines.len()
+    }
+
+    // ── Order Lines API (TradingView-style) ─────────────────────────────────────
+
+    /// Create a new order line at the specified price level.
+    ///
+    /// This creates a TradingView-style order management line with:
+    /// - Order type label (Limit, Stop, TP, SL)
+    /// - Side indication (Buy/Sell) with appropriate colors
+    /// - Quantity display
+    /// - Draggable price modification
+    /// - Cancel button
+    ///
+    /// `order_type`: "limit", "stop", "stop_limit", "take_profit", "stop_loss", "trailing_stop"
+    /// `side`: "buy" or "sell"
+    /// `status`: "pending", "working", "partial", "filled", "cancelled"
+    ///
+    /// Returns the order line ID (the same string you passed in).
+    #[wasm_bindgen]
+    pub fn create_order_line(
+        &mut self,
+        id: &str,
+        price: f64,
+        order_type: &str,
+        side: &str,
+        quantity: f64,
+        modifiable: bool,
+        cancellable: bool,
+    ) -> String {
+        let opts = OrderLineOptions {
+            price,
+            order_type: OrderType::from_str(order_type),
+            side: OrderSide::from_str(side),
+            quantity,
+            modifiable,
+            cancellable,
+            ..Default::default()
+        };
+        let order_id = self.inner.borrow_mut().engine.order_lines.create(id, opts);
+        log::info!("create_order_line: id={}, price={}, type={}, side={}", id, price, order_type, side);
+        order_id.0
+    }
+
+    /// Create an order line with full options.
+    ///
+    /// `order_type`: "limit", "stop", "stop_limit", "take_profit", "stop_loss", "trailing_stop"
+    /// `side`: "buy" or "sell"
+    /// `status`: "pending", "working", "partial", "filled", "cancelled"
+    /// `color_*`: Custom color override (pass all zeros to use default)
+    /// `custom_label`: Custom label text (empty string for auto-generated)
+    #[wasm_bindgen]
+    pub fn create_order_line_full(
+        &mut self,
+        id: &str,
+        price: f64,
+        order_type: &str,
+        side: &str,
+        status: &str,
+        quantity: f64,
+        filled_quantity: f64,
+        modifiable: bool,
+        cancellable: bool,
+        color_r: f32,
+        color_g: f32,
+        color_b: f32,
+        color_a: f32,
+        custom_label: &str,
+        linked_position_id: &str,
+    ) -> String {
+        let color = if color_r == 0.0 && color_g == 0.0 && color_b == 0.0 && color_a == 0.0 {
+            None
+        } else {
+            Some([color_r, color_g, color_b, color_a])
+        };
+
+        let custom_label_opt = if custom_label.is_empty() {
+            None
+        } else {
+            Some(custom_label.to_string())
+        };
+
+        let linked_position_id_opt = if linked_position_id.is_empty() {
+            None
+        } else {
+            Some(linked_position_id.to_string())
+        };
+
+        let opts = OrderLineOptions {
+            price,
+            order_type: OrderType::from_str(order_type),
+            side: OrderSide::from_str(side),
+            status: OrderStatus::from_str(status),
+            quantity,
+            filled_quantity,
+            modifiable,
+            cancellable,
+            color,
+            custom_label: custom_label_opt,
+            linked_position_id: linked_position_id_opt,
+            ..Default::default()
+        };
+        let order_id = self.inner.borrow_mut().engine.order_lines.create(id, opts);
+        log::info!("create_order_line_full: id={}, price={}", id, price);
+        order_id.0
+    }
+
+    /// Update the price of an existing order line.
+    #[wasm_bindgen]
+    pub fn set_order_line_price(&mut self, id: &str, price: f64) -> bool {
+        let order_id = OrderLineId::new(id);
+        self.inner
+            .borrow_mut()
+            .engine
+            .order_lines
+            .update_price(&order_id, price)
+    }
+
+    /// Update the status of an order line.
+    ///
+    /// `status`: "pending", "working", "partial", "filled", "cancelled", "rejected", "expired"
+    #[wasm_bindgen]
+    pub fn set_order_line_status(&mut self, id: &str, status: &str) -> bool {
+        let order_id = OrderLineId::new(id);
+        self.inner
+            .borrow_mut()
+            .engine
+            .order_lines
+            .update_status(&order_id, OrderStatus::from_str(status))
+    }
+
+    /// Update the filled quantity of an order line (for partial fills).
+    #[wasm_bindgen]
+    pub fn set_order_line_filled_quantity(&mut self, id: &str, filled: f64) -> bool {
+        let order_id = OrderLineId::new(id);
+        self.inner
+            .borrow_mut()
+            .engine
+            .order_lines
+            .update_filled_quantity(&order_id, filled)
+    }
+
+    /// Set whether an order line is visible.
+    #[wasm_bindgen]
+    pub fn set_order_line_visible(&mut self, id: &str, visible: bool) -> bool {
+        let order_id = OrderLineId::new(id);
+        if let Some(line) = self.inner.borrow_mut().engine.order_lines.get_mut(&order_id) {
+            line.options.visible = visible;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Update the live PNL displayed on an existing order line.
+    #[wasm_bindgen]
+    pub fn set_order_line_pnl(&mut self, id: &str, pnl: f64) -> bool {
+        let order_id = OrderLineId::new(id);
+        if let Some(line) = self.inner.borrow_mut().engine.order_lines.get_mut(&order_id) {
+            line.options.pnl = Some(pnl);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove an order line by ID.
+    #[wasm_bindgen]
+    pub fn remove_order_line(&mut self, id: &str) -> bool {
+        let order_id = OrderLineId::new(id);
+        self.inner
+            .borrow_mut()
+            .engine
+            .order_lines
+            .remove(&order_id)
+    }
+
+    /// Remove all order lines.
+    #[wasm_bindgen]
+    pub fn clear_order_lines(&mut self) {
+        self.inner.borrow_mut().engine.order_lines.clear();
+    }
+
+    /// Remove all order lines with a specific status.
+    ///
+    /// `status`: "pending", "working", "partial", "filled", "cancelled", "rejected", "expired"
+    #[wasm_bindgen]
+    pub fn remove_order_lines_by_status(&mut self, status: &str) {
+        self.inner
+            .borrow_mut()
+            .engine
+            .order_lines
+            .remove_by_status(OrderStatus::from_str(status));
+    }
+
+    /// Get the number of order lines.
+    #[wasm_bindgen]
+    pub fn order_line_count(&self) -> usize {
+        self.inner.borrow().engine.order_lines.len()
+    }
+
+    /// Get the number of active (pending/working) order lines.
+    #[wasm_bindgen]
+    pub fn active_order_line_count(&self) -> usize {
+        self.inner.borrow().engine.order_lines.active_count()
+    }
+
+    /// Serialize all order lines to JSON.
+    #[wasm_bindgen]
+    pub fn get_order_lines_json(&self) -> String {
+        self.inner.borrow().engine.order_lines.to_json()
+    }
+
+    /// Load order lines from JSON (replaces existing).
+    ///
+    /// Expected format:
+    /// ```json
+    /// {
+    ///   "version": 1,
+    ///   "orders": [
+    ///     {
+    ///       "id": "order-1",
+    ///       "price": 50000.0,
+    ///       "order_type": "Limit",
+    ///       "side": "Buy",
+    ///       "status": "Pending",
+    ///       "quantity": 0.5,
+    ///       "filled_quantity": 0.0,
+    ///       "visible": true,
+    ///       "cancellable": true,
+    ///       "modifiable": true
+    ///     }
+    ///   ]
+    /// }
+    /// ```
+    #[wasm_bindgen]
+    pub fn set_order_lines_json(&mut self, json: &str) -> Result<(), JsValue> {
+        self.inner
+            .borrow_mut()
+            .engine
+            .order_lines
+            .from_json(json)
+            .map_err(|e| JsValue::from_str(&e))
+    }
+
+    /// Set the price precision (decimal places) for order line labels.
+    #[wasm_bindgen]
+    pub fn set_order_line_price_precision(&mut self, precision: u32) {
+        self.inner
+            .borrow_mut()
+            .engine
+            .order_lines
+            .set_price_precision(precision);
+    }
+
+    /// Set whether to show cancel buttons on order lines.
+    #[wasm_bindgen]
+    pub fn set_order_line_show_cancel_buttons(&mut self, show: bool) {
+        self.inner
+            .borrow_mut()
+            .engine
+            .order_lines
+            .set_show_cancel_buttons(show);
     }
 
     // ── Series Markers API ─────────────────────────────────────────────────────

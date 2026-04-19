@@ -11,6 +11,7 @@
 use crate::core::chart_type::MainChartType;
 use crate::core::footprint::{FootprintData, FootprintOptions};
 use crate::core::formatters::format_countdown;
+use crate::core::order_line::OrderLineManager;
 use crate::core::price_line::PriceLineManager;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
@@ -426,6 +427,8 @@ impl PriceAxisRenderer {
         let dpr = self.dpr;
         let candle_h = candle_area_height_ph(vp, pane_ph);
         let label_h = candle_h.min(self.ph as f64);
+
+        let _step = y_tick_step_internal(vp, pane_ph, dpr, style);
         let font = style.axis_font(dpr);
         self.base_ctx.set_font(&font);
         let metrics = RightAxisLabelMetrics::from_style(style, dpr);
@@ -730,6 +733,118 @@ impl PriceAxisRenderer {
                 &metrics,
                 0.0,
                 RightAxisLabelWidthMode::TextFit,
+            ) {
+                Some(v) => v,
+                None => continue,
+            };
+
+            draw_right_axis_label_background(&self.base_ctx, &geom, &entry.bg_color);
+            draw_right_axis_label_tick(&self.base_ctx, &geom, &entry.text_color, dpr);
+            draw_right_axis_label_text(
+                &self.base_ctx,
+                &mut self.text_cache,
+                &entry.text,
+                &css_font,
+                &entry.text_color,
+                &geom,
+                dpr,
+            );
+        }
+    }
+
+    /// Render labels for order management lines on the price axis.
+    ///
+    /// Order line labels show only the price with appropriate colors.
+    /// `pane_ph` is the pane height in physical pixels.
+    pub fn render_order_line_labels(
+        &mut self,
+        order_lines: &OrderLineManager,
+        vp: &Viewport,
+        style: &ChartStyle,
+        pane_ph: f64,
+    ) {
+        if order_lines.is_empty() {
+            return;
+        }
+
+        let w = self.pw as f64;
+        let dpr = self.dpr;
+
+        // Keep order-label clamping in the same physical Y space as order-line
+        // rendering in overlay.rs (full pane height). Using candle-area-only
+        // bounds here causes the axis chip to clamp while the line continues,
+        // which visually disconnects the label from its line.
+        let label_h = pane_ph.min(self.ph as f64);
+
+        let font = style.axis_font(dpr);
+        self.base_ctx.set_font(&font);
+        let metrics = RightAxisLabelMetrics::from_style(style, dpr);
+        let price_precision = order_lines.price_precision() as usize;
+        // Keep axis-label visibility in sync with overlay order-line rendering.
+        // Use the same pill-height formula as overlay.rs so labels disappear at
+        // the same time as the corresponding order-line controls.
+        let font_size_phys = style.font_size as f64 * dpr;
+        let inset_tb_phys = style.price_axis_inset_tb() * dpr;
+        let tick_h_bmp = dpr.floor().max(1.0) as i32;
+        let mut order_pill_h_bmp = (font_size_phys + inset_tb_phys * 2.0).round() as i32;
+        if order_pill_h_bmp % 2 != tick_h_bmp % 2 {
+            order_pill_h_bmp += 1;
+        }
+        let edge_visibility_margin = order_pill_h_bmp.max(1) as f64;
+
+        struct OrderLineLabel {
+            text: String,
+            y_phys: f64,
+            bg_color: [f32; 4],
+            text_color: [f32; 4],
+        }
+
+        let mut entries: Vec<OrderLineLabel> = Vec::new();
+        for line in order_lines.iter() {
+            if !line.is_visible() {
+                continue;
+            }
+            let opts = &line.options;
+            let y_phys = price_to_pane_y_phys(opts.price, vp, pane_ph);
+
+            // Keep labels clamped at the edge while lines are near the pane,
+            // but stop rendering once the line is far outside the visible range.
+            if !y_phys.is_finite() {
+                continue;
+            }
+            if y_phys < -edge_visibility_margin || y_phys > pane_ph + edge_visibility_margin {
+                continue;
+            }
+
+            let text = format!("{:.prec$}", opts.price, prec = price_precision);
+
+            entries.push(OrderLineLabel {
+                text,
+                y_phys,
+                bg_color: opts.effective_color(),
+                text_color: opts.label_text_color,
+            });
+        }
+
+        if entries.is_empty() {
+            return;
+        }
+
+        let css_font = format!("{}px {}", style.font_size, style.font_family);
+        for entry in entries.iter() {
+            let text_w = self
+                .text_cache
+                .measure(&self.base_ctx, &entry.text, &font)
+                .ceil();
+            let geom = match compute_right_axis_label_geometry(
+                w,
+                label_h,
+                entry.y_phys,
+                text_w,
+                dpr,
+                &metrics,
+                0.0,
+                RightAxisLabelWidthMode::AxisFull,
             ) {
                 Some(v) => v,
                 None => continue,

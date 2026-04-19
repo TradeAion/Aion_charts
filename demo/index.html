@@ -582,6 +582,7 @@
     <div class="toolbar-section">
       <button class="btn" id="execution-marks-toggle" title="Toggle demo execution marks">Exec</button>
       <button class="btn active" id="execution-text-toggle" title="Toggle execution mark text labels">Text</button>
+      <button class="btn" id="order-lines-toggle" title="Toggle demo order lines">Orders</button>
       <button class="btn" id="stream-toggle">▶ Live</button>
       <button class="btn active" id="volume-toggle">Volume</button>
       <button class="btn active" id="autoscroll-toggle">Auto</button>
@@ -599,7 +600,7 @@
       <div id="hud-price"></div>
       <div id="hud-status"></div>
       <div id="hud-execution"></div>
-      <div id="hud-shortcuts">
+      <div id="hud-shortcuts" style="display:none">
         <b>Shortcuts:</b><br>
         <span class="shortcut-key">Shift</span> Angle snap (45°)<br>
         <span class="shortcut-key">Ctrl</span> OHLC snap<br>
@@ -611,7 +612,7 @@
     </div>
     <div id="drawing-placeholder" role="button" tabindex="0">+ Add text</div>
     <textarea id="drawing-text-editor" spellcheck="false"></textarea>
-    <div id="drawing-panel">
+    <div id="drawing-panel" style="display:none">
       <div class="drawing-panel-title">Drawing Text / Fib</div>
       <div class="drawing-panel-row">
         <span class="drawing-panel-label">Tool</span>
@@ -1004,10 +1005,10 @@
   <script type="module">
     // Demo uses the current local wasm/pkg artifact directly.
     const cacheBust = Date.now().toString();
-    const wasmModule = await import(`../wasm/pkg/axiuscharts_wasm.js?v=${cacheBust}`);
+    const wasmModule = await import(`../wasm/pkg_dragfix/axiuscharts_wasm.js?v=${cacheBust}`);
     const init = wasmModule.default;
     const { AxiusCharts, ChartGroup, ChartWorkspace } = wasmModule;
-    const wasmBinaryUrl = `../wasm/pkg/axiuscharts_wasm_bg.wasm?v=${cacheBust}`;
+    const wasmBinaryUrl = `../wasm/pkg_dragfix/axiuscharts_wasm_bg.wasm?v=${cacheBust}`;
 
     // ═══════════════════════════════════════════════════════════════════════
     // DOM & State
@@ -1759,6 +1760,98 @@
       syncExecutionMarkDisplayToggles();
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // Order Lines Demo
+    // ═══════════════════════════════════════════════════════════════════════
+    let orderLinesVisible = true;
+    let demoPositionEntryPrice = null;
+    const demoPositionQuantity = 2.5;
+
+    function createDemoOrderLines() {
+      const lastClose = Number(demoData.close[demoData.close.length - 1] || 0);
+      const p = Number.isFinite(lastClose) && lastClose > 0 ? lastClose : 42000;
+      if (!Number.isFinite(demoPositionEntryPrice)) {
+        demoPositionEntryPrice = p;
+      }
+      const step = Math.max(p * 0.0025, 1);
+      return [
+        {
+          id: 'live-position',
+          price: demoPositionEntryPrice,
+          order_type: 'Market', // Live position usually represented without a specific limit type or just "working" status
+          side: 'Buy',
+          status: 'Working',
+          quantity: demoPositionQuantity,
+          filled_quantity: demoPositionQuantity,
+          visible: true,
+          cancellable: true, // Close position button
+          modifiable: false,
+          pnl: 0,
+          show_sl_button: true, // Show SL button
+          show_tp_button: true, // Show TP button
+        },
+        {
+          id: 'demo-sell-limit',
+          price: p + (step * 2),
+          order_type: 'Limit',
+          side: 'Sell',
+          status: 'Pending',
+          quantity: 1.0,
+          visible: true,
+          cancellable: true,
+          modifiable: true,
+          show_sl_button: false,
+          show_tp_button: false,
+        }
+      ];
+    }
+
+    function syncOrderLinesToggle() {
+      const btn = $('order-lines-toggle');
+      if (!btn) return;
+      btn.classList.toggle('active', orderLinesVisible);
+      btn.textContent = orderLinesVisible ? 'Orders' : 'Orders Off';
+    }
+
+    function applyDemoOrderLines() {
+      if (!core || typeof core.clear_order_lines !== 'function') return;
+
+      if (!orderLinesVisible) {
+        core.clear_order_lines();
+        syncOrderLinesToggle();
+        return;
+      }
+
+      if (typeof core.set_order_lines_json !== 'function') {
+        core.clear_order_lines();
+        syncOrderLinesToggle();
+        return;
+      }
+
+      // Set price precision (2 decimals for demo)
+      if (typeof core.set_order_line_price_precision === 'function') {
+        core.set_order_line_price_precision(2);
+      }
+
+      const orders = createDemoOrderLines();
+      try {
+        core.set_order_lines_json(JSON.stringify({ version: 1, orders }));
+      } catch (err) {
+        console.error("Order lines JSON error:", err);
+      }
+      updateDemoOrderLinePnl();
+      syncOrderLinesToggle();
+    }
+
+    function updateDemoOrderLinePnl() {
+      if (!core || !orderLinesVisible || typeof core.set_order_line_pnl !== 'function') return;
+      const lastClose = Number(demoData.close[demoData.close.length - 1] || simPrice || 0);
+      const entryPrice = Number.isFinite(demoPositionEntryPrice) ? demoPositionEntryPrice : lastClose;
+      const pnl = (lastClose - entryPrice) * demoPositionQuantity;
+      core.set_order_line_pnl('live-position', pnl);
+      core.set_order_line_price('live-position', entryPrice);
+    }
+
     function loadDemoDataForChartType(type) {
       if (!core) return;
       if (type === 'footprint' && typeof core.demo_mode_footprint === 'function') {
@@ -1870,6 +1963,14 @@
           hudExecution.textContent = `Clicked ${e.id} · ${buildExecutionLabel(e.side)} · ${e.price.toFixed(2)} · qty ${e.quantity}`;
           console.log('[axiuscharts demo] executionMarkClick', e);
         });
+        core.on('orderLineModified', e => {
+          console.log('[axiuscharts demo] orderLineModified', e);
+          hudExecution.textContent = `Order ${e.id} modified: ${e.oldPrice.toFixed(2)} → ${e.newPrice.toFixed(2)}`;
+        });
+        core.on('orderLineCancelled', e => {
+          console.log('[axiuscharts demo] orderLineCancelled', e);
+          hudExecution.textContent = `Order ${e.id} cancelled at ${e.price.toFixed(2)}`;
+        });
         core.on('error', e => showError(e.message));
 
         loading.style.display = 'none';
@@ -1886,6 +1987,8 @@
         applyReplaySessionOptions();
         syncReplayControls();
         applyDemoExecutionMarks();
+        applyDemoOrderLines();  // Show Stop Loss & Take Profit lines by default
+        syncOrderLinesToggle();
 
       } catch (e) {
         console.error(e);
@@ -2456,6 +2559,7 @@
         barClose,
         barVolume
       );
+      updateDemoOrderLinePnl();
     }
 
     $('stream-toggle').onclick = () => {
@@ -2481,6 +2585,12 @@
       syncExecutionMarkDisplayToggles();
       applyExecutionMarkDisplayOptions();
     };
+
+    $('order-lines-toggle').onclick = () => {
+      orderLinesVisible = !orderLinesVisible;
+      applyDemoOrderLines();
+    };
+    syncOrderLinesToggle();
 
     syncExecutionMarkDisplayToggles();
 

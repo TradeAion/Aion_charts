@@ -16,6 +16,7 @@ pub mod interaction;
 pub mod invalidate_mask;
 pub mod kinetic_animation;
 pub mod markers;
+pub mod order_line;
 pub mod pane;
 pub mod price_line;
 pub mod renderer;

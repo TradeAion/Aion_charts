@@ -22,6 +22,7 @@ use crate::core::execution_marks::{ExecutionLabelMode, ExecutionMarkManager};
 use crate::core::footprint::{FootprintBar, FootprintData, FootprintDisplayMode, FootprintOptions};
 use crate::core::indicators::IndicatorManager;
 use crate::core::markers::MarkerManager;
+use crate::core::order_line::OrderLineManager;
 use crate::core::price_line::PriceLineManager;
 use crate::core::renderer::draw_list::DrawText;
 use crate::core::renderer::traits::{
@@ -189,6 +190,7 @@ pub struct ChartEngine {
     pub series: SeriesCollection,
     pub studies: StudyManager,
     pub price_lines: PriceLineManager,
+    pub order_lines: OrderLineManager,
     pub markers: MarkerManager,
     pub execution_marks: ExecutionMarkManager,
     pub indicators: IndicatorManager,
@@ -357,6 +359,7 @@ impl ChartEngine {
         let time_scale = TimeScaleIndex::from_bars_and_series(&bars, &series);
         let mut studies = StudyManager::new();
         let price_lines = PriceLineManager::new();
+        let order_lines = OrderLineManager::new();
         let markers = MarkerManager::new();
         let execution_marks = ExecutionMarkManager::new();
         let indicators = IndicatorManager::default();
@@ -375,6 +378,7 @@ impl ChartEngine {
             series,
             studies,
             price_lines,
+            order_lines,
             markers,
             execution_marks,
             indicators,

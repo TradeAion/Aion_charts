@@ -13,7 +13,7 @@ use wasm_bindgen::JsCast;
 
 use axiuscharts::{
     hit_test_execution_mark_hit_areas, Bar, ChartEngine, ExecutionMarkHitArea, HitZone,
-    InteractionHandler, MainChartType, OverlayRenderer, PriceAxisRenderer, PriceLineHit,
+    InteractionHandler, MainChartType, OrderLineHit, OrderLineId, OverlayRenderer, PriceAxisRenderer, PriceLineHit,
     PriceLineId, TimeAxisRenderer,
 };
 
@@ -210,6 +210,10 @@ pub struct ChartInner {
     pub selected_execution_mark_id: Option<String>,
     /// Active price-line drag ID, if the user is dragging a draggable price line.
     pub price_line_drag_id: Option<u32>,
+    /// Active order-line drag ID, if the user is dragging a modifiable order line.
+    pub order_line_drag_id: Option<String>,
+    /// Order line being cancelled (for cancel button click handling).
+    pub cancelling_order_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -773,6 +777,16 @@ impl ChartInner {
             return;
         }
 
+        // Handle order line drag
+        if let Some(ref id) = self.order_line_drag_id {
+            let order_id = OrderLineId::new(id.clone());
+            self.engine
+                .order_lines
+                .drag_to(&order_id, y, &self.engine.viewport, ph);
+            self.engine.crosshair.active = false;
+            return;
+        }
+
         // Pre-compute logical coords from viewport (before any mutable drawing borrow)
         let mut bar = self.engine.viewport.pixel_to_bar(x, pw);
         // Use candle area height for drawing coordinates — matches price_to_css_y().
@@ -918,6 +932,60 @@ impl ChartInner {
         self.emit_execution_mark_hover_event(hovered_execution_mark_id.as_deref());
         if hover_cursor.is_none() && hovered_execution_mark_id.is_some() {
             hover_cursor = Some("pointer");
+        }
+
+        // Check for order line hover and update cursor
+        let can_hover_order_lines = !is_drawing_drag
+            && !self.engine.drawings.is_creating()
+            && self.engine.drawings.active_tool == axiuscharts::DrawingTool::None
+            && !(self.replay_active && self.replay_trim_edit_mode)
+            && self.order_line_drag_id.is_none();
+        if can_hover_order_lines && hover_cursor.is_none() {
+            let (pw, ph) = self.layout.pane_css_size();
+            match self.engine.order_lines.hit_test(
+                x,
+                y,
+                &self.engine.viewport,
+                ph,
+                pw,
+                self.engine.style.font_size as f64,
+            ) {
+                OrderLineHit::Line(ref id) => {
+                    // Show ns-resize cursor for modifiable order lines
+                    if let Some(line) = self.engine.order_lines.get(id) {
+                        if line.is_modifiable() {
+                            hover_cursor = Some("ns-resize");
+                        }
+                    }
+                    self.engine.order_lines.clear_hover();
+                    self.engine.order_lines.set_hover(id, true);
+                }
+                OrderLineHit::CancelButton(ref id) => {
+                    hover_cursor = Some("pointer");
+                    self.engine.order_lines.clear_hover();
+                    self.engine.order_lines.set_cancel_hover(id, true);
+                }
+                OrderLineHit::SlButton(ref id) => {
+                    hover_cursor = Some("pointer");
+                    self.engine.order_lines.clear_hover();
+                    self.engine.order_lines.set_sl_hover(id, true);
+                    self.engine.order_lines.set_hover(id, true);
+                }
+                OrderLineHit::TpButton(ref id) => {
+                    hover_cursor = Some("pointer");
+                    self.engine.order_lines.clear_hover();
+                    self.engine.order_lines.set_tp_hover(id, true);
+                    self.engine.order_lines.set_hover(id, true);
+                }
+                OrderLineHit::Label(ref id) => {
+                    hover_cursor = Some("pointer");
+                    self.engine.order_lines.clear_hover();
+                    self.engine.order_lines.set_hover(id, true);
+                }
+                OrderLineHit::None => {
+                    self.engine.order_lines.clear_hover();
+                }
+            }
         }
 
         // Update hover cursor only when not in a drawing drag
@@ -1077,6 +1145,101 @@ impl ChartInner {
                         return;
                     }
                 }
+
+                // Check for order line interactions
+                match self.engine.order_lines.hit_test(
+                    x,
+                    y,
+                    &self.engine.viewport,
+                    ph,
+                    pw,
+                    self.engine.style.font_size as f64,
+                ) {
+                    OrderLineHit::CancelButton(id) => {
+                        // Capture order info before removing
+                        let order_info = self.engine.order_lines.get(&id).map(|line| {
+                            (
+                                line.options.price,
+                                line.options.order_type.as_str().to_string(),
+                                line.options.side.as_str().to_string(),
+                                line.options.quantity,
+                            )
+                        });
+                        
+                        // Remove the order line
+                        self.engine.order_lines.remove(&id);
+                        
+                        // Emit cancel event via EventBus
+                        if let Some((price, order_type, side, quantity)) = order_info {
+                            self.engine.event_bus.emit(axiuscharts::ChartEvent::OrderLineCancelled {
+                                id: id.0.clone(),
+                                price,
+                                order_type,
+                                side,
+                                quantity,
+                            });
+                        }
+                        return;
+                    }
+                    OrderLineHit::Line(id) => {
+                        // Start dragging if modifiable
+                        if self.engine.order_lines.start_drag(&id) {
+                            self.order_line_drag_id = Some(id.0.clone());
+                            self.interaction.drag_active = true;
+                            self.interaction.set_drawing_cursor(Some("ns-resize"));
+                            self.engine.crosshair.active = false;
+                            return;
+                        }
+                    }
+                    OrderLineHit::SlButton(id) => {
+                        if let Some(line) = self.engine.order_lines.get(&id) {
+                            let new_id = format!("{}_sl_{}", id.0, js_sys::Date::now());
+                            let options = axiuscharts::core::order_line::OrderLineOptions {
+                                price: line.options.price,
+                                order_type: axiuscharts::core::order_line::OrderType::StopLoss,
+                                side: line.options.side,
+                                quantity: line.options.quantity,
+                                show_sl_button: false,
+                                show_tp_button: false,
+                                linked_position_id: Some(id.0.clone()),
+                                ..Default::default()
+                            };
+                            let new_order_id = self.engine.order_lines.create(new_id, options);
+                            self.engine.order_lines.start_drag(&new_order_id);
+                            self.order_line_drag_id = Some(new_order_id.0.clone());
+                            self.interaction.drag_active = true;
+                            self.interaction.set_drawing_cursor(Some("ns-resize"));
+                            self.engine.crosshair.active = false;
+                            return;
+                        }
+                    }
+                    OrderLineHit::TpButton(id) => {
+                        if let Some(line) = self.engine.order_lines.get(&id) {
+                            let new_id = format!("{}_tp_{}", id.0, js_sys::Date::now());
+                            let options = axiuscharts::core::order_line::OrderLineOptions {
+                                price: line.options.price,
+                                order_type: axiuscharts::core::order_line::OrderType::TakeProfit,
+                                side: line.options.side,
+                                quantity: line.options.quantity,
+                                show_sl_button: false,
+                                show_tp_button: false,
+                                linked_position_id: Some(id.0.clone()),
+                                ..Default::default()
+                            };
+                            let new_order_id = self.engine.order_lines.create(new_id, options);
+                            self.engine.order_lines.start_drag(&new_order_id);
+                            self.order_line_drag_id = Some(new_order_id.0.clone());
+                            self.interaction.drag_active = true;
+                            self.interaction.set_drawing_cursor(Some("ns-resize"));
+                            self.engine.crosshair.active = false;
+                            return;
+                        }
+                    }
+                    OrderLineHit::Label(_id) => {
+                        // Clicking on label could show order details (future enhancement)
+                    }
+                    OrderLineHit::None => {}
+                }
             }
 
             let mut should_return = false;
@@ -1152,6 +1315,40 @@ impl ChartInner {
 
         if let Some(id) = self.price_line_drag_id.take() {
             self.engine.price_lines.end_drag(PriceLineId(id));
+            self.interaction.cancel_pointer_gesture();
+            self.interaction.drawing_drag_active = false;
+            self.interaction.set_drawing_cursor(None);
+            self.engine.crosshair.active = false;
+            return;
+        }
+
+        // End order line drag
+        if let Some(id) = self.order_line_drag_id.take() {
+            let order_id = OrderLineId::new(id.clone());
+            
+            // Capture order info before ending drag (old_price is in drag_start_price)
+            let order_info = self.engine.order_lines.get(&order_id).map(|line| {
+                (
+                    line.drag_start_price.unwrap_or(line.options.price), // old price
+                    line.options.order_type.as_str().to_string(),
+                    line.options.side.as_str().to_string(),
+                    line.options.quantity,
+                )
+            });
+            
+            if let Some(new_price) = self.engine.order_lines.end_drag(&order_id) {
+                // Emit order modified event via EventBus
+                if let Some((old_price, order_type, side, quantity)) = order_info {
+                    self.engine.event_bus.emit(axiuscharts::ChartEvent::OrderLineModified {
+                        id: id.clone(),
+                        old_price,
+                        new_price,
+                        order_type,
+                        side,
+                        quantity,
+                    });
+                }
+            }
             self.interaction.cancel_pointer_gesture();
             self.interaction.drawing_drag_active = false;
             self.interaction.set_drawing_cursor(None);
@@ -1297,6 +1494,17 @@ impl ChartInner {
     pub fn on_pointer_cancel(&mut self) {
         if let Some(id) = self.price_line_drag_id.take() {
             self.engine.price_lines.end_drag(PriceLineId(id));
+            self.interaction.cancel_pointer_gesture();
+            self.interaction.drawing_drag_active = false;
+            self.interaction.set_drawing_cursor(None);
+            self.engine.crosshair.active = false;
+            return;
+        }
+
+        // Cancel order line drag (revert to original price)
+        if let Some(id) = self.order_line_drag_id.take() {
+            let order_id = OrderLineId::new(id);
+            self.engine.order_lines.cancel_drag(&order_id);
             self.interaction.cancel_pointer_gesture();
             self.interaction.drawing_drag_active = false;
             self.interaction.set_drawing_cursor(None);

@@ -6,6 +6,10 @@ export class AxiusCharts {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Get the number of active (pending/working) order lines.
+     */
+    active_order_line_count(): number;
+    /**
      * Add a new area series overlay. Returns the series ID.
      *
      * `line_color_*`: RGBA for the line stroke.
@@ -139,6 +143,10 @@ export class AxiusCharts {
      */
     clear_markers(series_id: number): void;
     /**
+     * Remove all order lines.
+     */
+    clear_order_lines(): void;
+    /**
      * Clear the selected execution mark.
      */
     clear_selected_execution_mark(): void;
@@ -160,6 +168,33 @@ export class AxiusCharts {
      * ```
      */
     static create_chart(container: any, options: any): Promise<AxiusCharts>;
+    /**
+     * Create a new order line at the specified price level.
+     *
+     * This creates a TradingView-style order management line with:
+     * - Order type label (Limit, Stop, TP, SL)
+     * - Side indication (Buy/Sell) with appropriate colors
+     * - Quantity display
+     * - Draggable price modification
+     * - Cancel button
+     *
+     * `order_type`: "limit", "stop", "stop_limit", "take_profit", "stop_loss", "trailing_stop"
+     * `side`: "buy" or "sell"
+     * `status`: "pending", "working", "partial", "filled", "cancelled"
+     *
+     * Returns the order line ID (the same string you passed in).
+     */
+    create_order_line(id: string, price: number, order_type: string, side: string, quantity: number, modifiable: boolean, cancellable: boolean): string;
+    /**
+     * Create an order line with full options.
+     *
+     * `order_type`: "limit", "stop", "stop_limit", "take_profit", "stop_loss", "trailing_stop"
+     * `side`: "buy" or "sell"
+     * `status`: "pending", "working", "partial", "filled", "cancelled"
+     * `color_*`: Custom color override (pass all zeros to use default)
+     * `custom_label`: Custom label text (empty string for auto-generated)
+     */
+    create_order_line_full(id: string, price: number, order_type: string, side: string, status: string, quantity: number, filled_quantity: number, modifiable: boolean, cancellable: boolean, color_r: number, color_g: number, color_b: number, color_a: number, custom_label: string, linked_position_id: string): string;
     /**
      * Create a new price line at the specified price level. Returns the price line ID.
      *
@@ -269,6 +304,10 @@ export class AxiusCharts {
      * Return whether footprint pane two-axis zoom (X+Y) is enabled.
      */
     get_footprint_xy_zoom_enabled(): boolean;
+    /**
+     * Serialize all order lines to JSON.
+     */
+    get_order_lines_json(): string;
     /**
      * Get the currently selected drawing's text/alignment inspector payload as JSON.
      * Returns `"null"` when no drawing is selected.
@@ -401,6 +440,10 @@ export class AxiusCharts {
      */
     once(event: string, callback: Function): void;
     /**
+     * Get the number of order lines.
+     */
+    order_line_count(): number;
+    /**
      * Get the number of price lines.
      */
     price_line_count(): number;
@@ -424,6 +467,16 @@ export class AxiusCharts {
      * Remove a specific marker from a series.
      */
     remove_marker(series_id: number, marker_id: number): boolean;
+    /**
+     * Remove an order line by ID.
+     */
+    remove_order_line(id: string): boolean;
+    /**
+     * Remove all order lines with a specific status.
+     *
+     * `status`: "pending", "working", "partial", "filled", "cancelled", "rejected", "expired"
+     */
+    remove_order_lines_by_status(status: string): void;
     /**
      * Remove a price line by ID.
      */
@@ -783,6 +836,61 @@ export class AxiusCharts {
      */
     set_markers(series_id: number, marker_data: Float64Array): void;
     /**
+     * Update the filled quantity of an order line (for partial fills).
+     */
+    set_order_line_filled_quantity(id: string, filled: number): boolean;
+    /**
+     * Update the live PNL displayed on an existing order line.
+     */
+    set_order_line_pnl(id: string, pnl: number): boolean;
+    /**
+     * Update the price of an existing order line.
+     */
+    set_order_line_price(id: string, price: number): boolean;
+    /**
+     * Set the price precision (decimal places) for order line labels.
+     */
+    set_order_line_price_precision(precision: number): void;
+    /**
+     * Set whether to show cancel buttons on order lines.
+     */
+    set_order_line_show_cancel_buttons(show: boolean): void;
+    /**
+     * Update the status of an order line.
+     *
+     * `status`: "pending", "working", "partial", "filled", "cancelled", "rejected", "expired"
+     */
+    set_order_line_status(id: string, status: string): boolean;
+    /**
+     * Set whether an order line is visible.
+     */
+    set_order_line_visible(id: string, visible: boolean): boolean;
+    /**
+     * Load order lines from JSON (replaces existing).
+     *
+     * Expected format:
+     * ```json
+     * {
+     *   "version": 1,
+     *   "orders": [
+     *     {
+     *       "id": "order-1",
+     *       "price": 50000.0,
+     *       "order_type": "Limit",
+     *       "side": "Buy",
+     *       "status": "Pending",
+     *       "quantity": 0.5,
+     *       "filled_quantity": 0.0,
+     *       "visible": true,
+     *       "cancellable": true,
+     *       "modifiable": true
+     *     }
+     *   ]
+     * }
+     * ```
+     */
+    set_order_lines_json(json: string): void;
+    /**
      * Set the label text of a price line. Empty string uses formatted price.
      */
     set_price_line_label(id: number, label: string): void;
@@ -1060,6 +1168,7 @@ export interface InitOutput {
     readonly __wbg_axiuscharts_free: (a: number, b: number) => void;
     readonly __wbg_chartgroup_free: (a: number, b: number) => void;
     readonly __wbg_chartworkspace_free: (a: number, b: number) => void;
+    readonly axiuscharts_active_order_line_count: (a: number) => number;
     readonly axiuscharts_add_area_series: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => number;
     readonly axiuscharts_add_bar_series: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
     readonly axiuscharts_add_baseline_series: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number, a1: number) => number;
@@ -1083,8 +1192,11 @@ export interface InitOutput {
     readonly axiuscharts_clear_execution_marks: (a: number) => void;
     readonly axiuscharts_clear_footprint_data: (a: number) => void;
     readonly axiuscharts_clear_markers: (a: number, b: number) => void;
+    readonly axiuscharts_clear_order_lines: (a: number) => void;
     readonly axiuscharts_clear_selected_execution_mark: (a: number) => void;
     readonly axiuscharts_create_chart: (a: number, b: number) => number;
+    readonly axiuscharts_create_order_line: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
+    readonly axiuscharts_create_order_line_full: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number) => void;
     readonly axiuscharts_create_price_line: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => number;
     readonly axiuscharts_create_study: (a: number, b: number, c: number) => number;
     readonly axiuscharts_create_with: (a: number, b: number, c: number, d: number) => number;
@@ -1110,6 +1222,7 @@ export interface InitOutput {
     readonly axiuscharts_get_execution_marks_json: (a: number, b: number) => void;
     readonly axiuscharts_get_execution_pnl_visible: (a: number) => number;
     readonly axiuscharts_get_footprint_xy_zoom_enabled: (a: number) => number;
+    readonly axiuscharts_get_order_lines_json: (a: number, b: number) => void;
     readonly axiuscharts_get_selected_drawing_info_json: (a: number, b: number) => void;
     readonly axiuscharts_get_selected_execution_mark: (a: number, b: number) => void;
     readonly axiuscharts_get_study_output: (a: number, b: number, c: number) => number;
@@ -1136,12 +1249,15 @@ export interface InitOutput {
     readonly axiuscharts_on: (a: number, b: number, c: number, d: number) => void;
     readonly axiuscharts_on_key_down: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly axiuscharts_once: (a: number, b: number, c: number, d: number) => void;
+    readonly axiuscharts_order_line_count: (a: number) => number;
     readonly axiuscharts_price_line_count: (a: number) => number;
     readonly axiuscharts_project_point: (a: number, b: bigint, c: number) => number;
     readonly axiuscharts_remove_all_scale_drawings: (a: number) => void;
     readonly axiuscharts_remove_execution_mark: (a: number, b: number, c: number) => number;
     readonly axiuscharts_remove_indicator_pane: (a: number, b: number) => number;
     readonly axiuscharts_remove_marker: (a: number, b: number, c: number) => number;
+    readonly axiuscharts_remove_order_line: (a: number, b: number, c: number) => number;
+    readonly axiuscharts_remove_order_lines_by_status: (a: number, b: number, c: number) => void;
     readonly axiuscharts_remove_price_line: (a: number, b: number) => number;
     readonly axiuscharts_remove_selected_drawing: (a: number) => void;
     readonly axiuscharts_remove_series: (a: number, b: number) => number;
@@ -1204,6 +1320,14 @@ export interface InitOutput {
     readonly axiuscharts_set_last_price_line_visible: (a: number, b: number) => void;
     readonly axiuscharts_set_last_price_line_width: (a: number, b: number) => void;
     readonly axiuscharts_set_markers: (a: number, b: number, c: number, d: number) => void;
+    readonly axiuscharts_set_order_line_filled_quantity: (a: number, b: number, c: number, d: number) => number;
+    readonly axiuscharts_set_order_line_pnl: (a: number, b: number, c: number, d: number) => number;
+    readonly axiuscharts_set_order_line_price: (a: number, b: number, c: number, d: number) => number;
+    readonly axiuscharts_set_order_line_price_precision: (a: number, b: number) => void;
+    readonly axiuscharts_set_order_line_show_cancel_buttons: (a: number, b: number) => void;
+    readonly axiuscharts_set_order_line_status: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly axiuscharts_set_order_line_visible: (a: number, b: number, c: number, d: number) => number;
+    readonly axiuscharts_set_order_lines_json: (a: number, b: number, c: number, d: number) => void;
     readonly axiuscharts_set_price_line_label: (a: number, b: number, c: number, d: number) => void;
     readonly axiuscharts_set_price_line_price: (a: number, b: number, c: number) => void;
     readonly axiuscharts_set_price_line_visible: (a: number, b: number, c: number) => void;
@@ -1291,12 +1415,12 @@ export interface InitOutput {
     readonly chartworkspace_split_active: (a: number, b: number, c: number, d: number) => void;
     readonly chartworkspace_split_pane: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
-    readonly __wasm_bindgen_func_elem_444: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_455: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_2482: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_445: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_448: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_453: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_445: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_456: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_2530: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_446: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_449: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_454: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

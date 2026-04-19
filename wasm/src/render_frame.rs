@@ -290,6 +290,14 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
             pane_css_w,
             pane_css_h,
         );
+        overlay.render_order_lines(
+            &engine.order_lines,
+            &engine.viewport,
+            &engine.style,
+            pane_css_w,
+            pane_css_h,
+            2, // price precision - TODO: make configurable
+        );
         overlay.render_last_price_lines(
             &engine.series,
             &engine.bars,
@@ -396,6 +404,12 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
         );
         price_axis_renderer.render_price_line_labels(
             &engine.price_lines,
+            &engine.viewport,
+            &engine.style,
+            pane_ph,
+        );
+        price_axis_renderer.render_order_line_labels(
+            &engine.order_lines,
             &engine.viewport,
             &engine.style,
             pane_ph,

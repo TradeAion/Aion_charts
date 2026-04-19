@@ -19,6 +19,14 @@ export class AxiusCharts {
         wasm.__wbg_axiuscharts_free(ptr, 0);
     }
     /**
+     * Get the number of active (pending/working) order lines.
+     * @returns {number}
+     */
+    active_order_line_count() {
+        const ret = wasm.axiuscharts_active_order_line_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * Add a new area series overlay. Returns the series ID.
      *
      * `line_color_*`: RGBA for the line stroke.
@@ -405,6 +413,12 @@ export class AxiusCharts {
         wasm.axiuscharts_clear_markers(this.__wbg_ptr, series_id);
     }
     /**
+     * Remove all order lines.
+     */
+    clear_order_lines() {
+        wasm.axiuscharts_clear_order_lines(this.__wbg_ptr);
+    }
+    /**
      * Clear the selected execution mark.
      */
     clear_selected_execution_mark() {
@@ -433,6 +447,105 @@ export class AxiusCharts {
     static create_chart(container, options) {
         const ret = wasm.axiuscharts_create_chart(addHeapObject(container), addHeapObject(options));
         return takeObject(ret);
+    }
+    /**
+     * Create a new order line at the specified price level.
+     *
+     * This creates a TradingView-style order management line with:
+     * - Order type label (Limit, Stop, TP, SL)
+     * - Side indication (Buy/Sell) with appropriate colors
+     * - Quantity display
+     * - Draggable price modification
+     * - Cancel button
+     *
+     * `order_type`: "limit", "stop", "stop_limit", "take_profit", "stop_loss", "trailing_stop"
+     * `side`: "buy" or "sell"
+     * `status`: "pending", "working", "partial", "filled", "cancelled"
+     *
+     * Returns the order line ID (the same string you passed in).
+     * @param {string} id
+     * @param {number} price
+     * @param {string} order_type
+     * @param {string} side
+     * @param {number} quantity
+     * @param {boolean} modifiable
+     * @param {boolean} cancellable
+     * @returns {string}
+     */
+    create_order_line(id, price, order_type, side, quantity, modifiable, cancellable) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(order_type, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(side, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len2 = WASM_VECTOR_LEN;
+            wasm.axiuscharts_create_order_line(retptr, this.__wbg_ptr, ptr0, len0, price, ptr1, len1, ptr2, len2, quantity, modifiable, cancellable);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred4_0 = r0;
+            deferred4_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export4(deferred4_0, deferred4_1, 1);
+        }
+    }
+    /**
+     * Create an order line with full options.
+     *
+     * `order_type`: "limit", "stop", "stop_limit", "take_profit", "stop_loss", "trailing_stop"
+     * `side`: "buy" or "sell"
+     * `status`: "pending", "working", "partial", "filled", "cancelled"
+     * `color_*`: Custom color override (pass all zeros to use default)
+     * `custom_label`: Custom label text (empty string for auto-generated)
+     * @param {string} id
+     * @param {number} price
+     * @param {string} order_type
+     * @param {string} side
+     * @param {string} status
+     * @param {number} quantity
+     * @param {number} filled_quantity
+     * @param {boolean} modifiable
+     * @param {boolean} cancellable
+     * @param {number} color_r
+     * @param {number} color_g
+     * @param {number} color_b
+     * @param {number} color_a
+     * @param {string} custom_label
+     * @param {string} linked_position_id
+     * @returns {string}
+     */
+    create_order_line_full(id, price, order_type, side, status, quantity, filled_quantity, modifiable, cancellable, color_r, color_g, color_b, color_a, custom_label, linked_position_id) {
+        let deferred7_0;
+        let deferred7_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(order_type, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(side, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len2 = WASM_VECTOR_LEN;
+            const ptr3 = passStringToWasm0(status, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len3 = WASM_VECTOR_LEN;
+            const ptr4 = passStringToWasm0(custom_label, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len4 = WASM_VECTOR_LEN;
+            const ptr5 = passStringToWasm0(linked_position_id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len5 = WASM_VECTOR_LEN;
+            wasm.axiuscharts_create_order_line_full(retptr, this.__wbg_ptr, ptr0, len0, price, ptr1, len1, ptr2, len2, ptr3, len3, quantity, filled_quantity, modifiable, cancellable, color_r, color_g, color_b, color_a, ptr4, len4, ptr5, len5);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred7_0 = r0;
+            deferred7_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export4(deferred7_0, deferred7_1, 1);
+        }
     }
     /**
      * Create a new price line at the specified price level. Returns the price line ID.
@@ -779,6 +892,26 @@ export class AxiusCharts {
         return ret !== 0;
     }
     /**
+     * Serialize all order lines to JSON.
+     * @returns {string}
+     */
+    get_order_lines_json() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.axiuscharts_get_order_lines_json(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export4(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * Get the currently selected drawing's text/alignment inspector payload as JSON.
      * Returns `"null"` when no drawing is selected.
      * @returns {string}
@@ -1117,6 +1250,14 @@ export class AxiusCharts {
         wasm.axiuscharts_once(this.__wbg_ptr, ptr0, len0, addHeapObject(callback));
     }
     /**
+     * Get the number of order lines.
+     * @returns {number}
+     */
+    order_line_count() {
+        const ret = wasm.axiuscharts_order_line_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * Get the number of price lines.
      * @returns {number}
      */
@@ -1169,6 +1310,28 @@ export class AxiusCharts {
     remove_marker(series_id, marker_id) {
         const ret = wasm.axiuscharts_remove_marker(this.__wbg_ptr, series_id, marker_id);
         return ret !== 0;
+    }
+    /**
+     * Remove an order line by ID.
+     * @param {string} id
+     * @returns {boolean}
+     */
+    remove_order_line(id) {
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.axiuscharts_remove_order_line(this.__wbg_ptr, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
+     * Remove all order lines with a specific status.
+     *
+     * `status`: "pending", "working", "partial", "filled", "cancelled", "rejected", "expired"
+     * @param {string} status
+     */
+    remove_order_lines_by_status(status) {
+        const ptr0 = passStringToWasm0(status, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.axiuscharts_remove_order_lines_by_status(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * Remove a price line by ID.
@@ -2072,6 +2235,124 @@ export class AxiusCharts {
         const ptr0 = passArrayF64ToWasm0(marker_data, wasm.__wbindgen_export);
         const len0 = WASM_VECTOR_LEN;
         wasm.axiuscharts_set_markers(this.__wbg_ptr, series_id, ptr0, len0);
+    }
+    /**
+     * Update the filled quantity of an order line (for partial fills).
+     * @param {string} id
+     * @param {number} filled
+     * @returns {boolean}
+     */
+    set_order_line_filled_quantity(id, filled) {
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.axiuscharts_set_order_line_filled_quantity(this.__wbg_ptr, ptr0, len0, filled);
+        return ret !== 0;
+    }
+    /**
+     * Update the live PNL displayed on an existing order line.
+     * @param {string} id
+     * @param {number} pnl
+     * @returns {boolean}
+     */
+    set_order_line_pnl(id, pnl) {
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.axiuscharts_set_order_line_pnl(this.__wbg_ptr, ptr0, len0, pnl);
+        return ret !== 0;
+    }
+    /**
+     * Update the price of an existing order line.
+     * @param {string} id
+     * @param {number} price
+     * @returns {boolean}
+     */
+    set_order_line_price(id, price) {
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.axiuscharts_set_order_line_price(this.__wbg_ptr, ptr0, len0, price);
+        return ret !== 0;
+    }
+    /**
+     * Set the price precision (decimal places) for order line labels.
+     * @param {number} precision
+     */
+    set_order_line_price_precision(precision) {
+        wasm.axiuscharts_set_order_line_price_precision(this.__wbg_ptr, precision);
+    }
+    /**
+     * Set whether to show cancel buttons on order lines.
+     * @param {boolean} show
+     */
+    set_order_line_show_cancel_buttons(show) {
+        wasm.axiuscharts_set_order_line_show_cancel_buttons(this.__wbg_ptr, show);
+    }
+    /**
+     * Update the status of an order line.
+     *
+     * `status`: "pending", "working", "partial", "filled", "cancelled", "rejected", "expired"
+     * @param {string} id
+     * @param {string} status
+     * @returns {boolean}
+     */
+    set_order_line_status(id, status) {
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(status, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.axiuscharts_set_order_line_status(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        return ret !== 0;
+    }
+    /**
+     * Set whether an order line is visible.
+     * @param {string} id
+     * @param {boolean} visible
+     * @returns {boolean}
+     */
+    set_order_line_visible(id, visible) {
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.axiuscharts_set_order_line_visible(this.__wbg_ptr, ptr0, len0, visible);
+        return ret !== 0;
+    }
+    /**
+     * Load order lines from JSON (replaces existing).
+     *
+     * Expected format:
+     * ```json
+     * {
+     *   "version": 1,
+     *   "orders": [
+     *     {
+     *       "id": "order-1",
+     *       "price": 50000.0,
+     *       "order_type": "Limit",
+     *       "side": "Buy",
+     *       "status": "Pending",
+     *       "quantity": 0.5,
+     *       "filled_quantity": 0.0,
+     *       "visible": true,
+     *       "cancellable": true,
+     *       "modifiable": true
+     *     }
+     *   ]
+     * }
+     * ```
+     * @param {string} json
+     */
+    set_order_lines_json(json) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.axiuscharts_set_order_lines_json(retptr, this.__wbg_ptr, ptr0, len0);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            if (r1) {
+                throw takeObject(r0);
+            }
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
     }
     /**
      * Set the label text of a price line. Empty string uses formatted price.
@@ -3896,7 +4177,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_2482(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_2530(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -4538,42 +4819,42 @@ function __wbg_get_imports() {
         }, arguments); },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [Externref], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_444, __wasm_bindgen_func_elem_445);
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_445, __wasm_bindgen_func_elem_446);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [F64], shim_idx: 14, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_444, __wasm_bindgen_func_elem_455);
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_445, __wasm_bindgen_func_elem_456);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [NamedExternref("Array<any>")], shim_idx: 9, ret: Unit, inner_ret: Some(Unit) }, mutable: false }) -> Externref`.
-            const ret = makeClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_444, __wasm_bindgen_func_elem_448);
+            const ret = makeClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_445, __wasm_bindgen_func_elem_449);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [NamedExternref("Event")], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_444, __wasm_bindgen_func_elem_445);
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_445, __wasm_bindgen_func_elem_446);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000005: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [NamedExternref("PointerEvent")], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_444, __wasm_bindgen_func_elem_445);
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_445, __wasm_bindgen_func_elem_446);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000006: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [NamedExternref("TouchEvent")], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_444, __wasm_bindgen_func_elem_445);
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_445, __wasm_bindgen_func_elem_446);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000007: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_444, __wasm_bindgen_func_elem_445);
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_445, __wasm_bindgen_func_elem_446);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000008: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [], shim_idx: 12, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_444, __wasm_bindgen_func_elem_453);
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_445, __wasm_bindgen_func_elem_454);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000009: function(arg0) {
@@ -4600,24 +4881,24 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_453(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_453(arg0, arg1);
+function __wasm_bindgen_func_elem_454(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_454(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_445(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_445(arg0, arg1, addHeapObject(arg2));
+function __wasm_bindgen_func_elem_446(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_446(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_448(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_448(arg0, arg1, addHeapObject(arg2));
+function __wasm_bindgen_func_elem_449(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_449(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_2482(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_2482(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_2530(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_2530(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
-function __wasm_bindgen_func_elem_455(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_455(arg0, arg1, arg2);
+function __wasm_bindgen_func_elem_456(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_456(arg0, arg1, arg2);
 }
 
 
