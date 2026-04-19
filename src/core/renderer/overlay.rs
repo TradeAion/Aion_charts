@@ -929,24 +929,19 @@ impl OverlayRenderer {
 
             // Calculate exact width with dividers
             let mut main_pill_w = px;
-            let mut text_w = 0.0; // Total width of the text section for close button offset
 
             if is_position {
                 if !qty_text.is_empty() {
                     main_pill_w += qty_w;
-                    text_w += qty_w;
                 }
                 if !pnl_text.is_empty() {
                     if !qty_text.is_empty() {
                         main_pill_w += div_margin + div_w + div_margin;
-                        text_w += div_margin + div_w + div_margin;
                     }
                     main_pill_w += pnl_w;
-                    text_w += pnl_w;
                 }
             } else {
                 main_pill_w += main_w;
-                text_w += main_w;
             }
 
             if has_close {
@@ -1035,7 +1030,7 @@ impl OverlayRenderer {
                 btn_cursor = draw_secondary_pill(&self.ctx, "SL", btn_cursor, [0.98, 0.21, 0.28, 0.9], line.sl_hovered) - btn_gap;
             }
             if show_tp {
-                btn_cursor = draw_secondary_pill(&self.ctx, "TP", btn_cursor, [0.20, 0.36, 1.0, 0.9], line.tp_hovered) - btn_gap;
+                let _ = draw_secondary_pill(&self.ctx, "TP", btn_cursor, [0.20, 0.36, 1.0, 0.9], line.tp_hovered);
             }
 
             // Draw Main Pill Background
@@ -1060,7 +1055,7 @@ impl OverlayRenderer {
             self.ctx.set_text_align("left");
             let mut text_cursor = x + px;
 
-            let mut draw_divider = |cursor: f64| {
+            let draw_divider = |cursor: f64| {
                 self.ctx.set_stroke_style_str(&rgba(&[1.0, 1.0, 1.0, 0.25]));
                 self.ctx.set_line_width(div_w);
                 self.ctx.begin_path();
