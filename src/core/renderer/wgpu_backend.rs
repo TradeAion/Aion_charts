@@ -685,6 +685,18 @@ impl ChartRenderer for WgpuRenderer {
         // geometry generator so Canvas2D and WebGPU stay pixel-identical.
         match ctx.main_chart_type {
             MainChartType::Candlestick => {
+                // Generate volume rects first (rendered behind candles)
+                let mut all_rects = geometry_generator::generate_volume_rects(
+                    ctx.bars,
+                    ctx.time_scale,
+                    ctx.viewport,
+                    ctx.style,
+                    pane_w,
+                    pane_h,
+                    ctx.h_pixel_ratio,
+                    ctx.v_pixel_ratio,
+                );
+
                 let bullish_border = ctx
                     .main_chart_options
                     .up_border_color
@@ -693,7 +705,7 @@ impl ChartRenderer for WgpuRenderer {
                     .main_chart_options
                     .down_border_color
                     .unwrap_or(ctx.style.wick_bearish_color);
-                let rects = geometry_generator::generate_candle_rects(
+                let candle_rects = geometry_generator::generate_candle_rects(
                     ctx.bars,
                     ctx.time_scale,
                     ctx.viewport,
@@ -705,11 +717,14 @@ impl ChartRenderer for WgpuRenderer {
                     ctx.h_pixel_ratio,
                     ctx.v_pixel_ratio,
                 );
-                let count = self.upload_rects(&rects, ctx.viewport.width, ctx.viewport.height);
+                all_rects.extend(candle_rects);
+
+                let count = self.upload_rects(&all_rects, ctx.viewport.width, ctx.viewport.height);
                 self.draw_rect_pass(count);
             }
             MainChartType::HeikinAshi => {
-                let rects = geometry_generator::generate_heikin_ashi_rects(
+                // Generate volume rects first (rendered behind candles)
+                let mut all_rects = geometry_generator::generate_volume_rects(
                     ctx.bars,
                     ctx.time_scale,
                     ctx.viewport,
@@ -719,11 +734,25 @@ impl ChartRenderer for WgpuRenderer {
                     ctx.h_pixel_ratio,
                     ctx.v_pixel_ratio,
                 );
-                let count = self.upload_rects(&rects, ctx.viewport.width, ctx.viewport.height);
+
+                let heikin_rects = geometry_generator::generate_heikin_ashi_rects(
+                    ctx.bars,
+                    ctx.time_scale,
+                    ctx.viewport,
+                    ctx.style,
+                    pane_w,
+                    pane_h,
+                    ctx.h_pixel_ratio,
+                    ctx.v_pixel_ratio,
+                );
+                all_rects.extend(heikin_rects);
+
+                let count = self.upload_rects(&all_rects, ctx.viewport.width, ctx.viewport.height);
                 self.draw_rect_pass(count);
             }
             MainChartType::OhlcBars => {
-                let rects = geometry_generator::generate_ohlc_bar_rects(
+                // Generate volume rects first (rendered behind OHLC bars)
+                let mut all_rects = geometry_generator::generate_volume_rects(
                     ctx.bars,
                     ctx.time_scale,
                     ctx.viewport,
@@ -733,7 +762,20 @@ impl ChartRenderer for WgpuRenderer {
                     ctx.h_pixel_ratio,
                     ctx.v_pixel_ratio,
                 );
-                let count = self.upload_rects(&rects, ctx.viewport.width, ctx.viewport.height);
+
+                let ohlc_rects = geometry_generator::generate_ohlc_bar_rects(
+                    ctx.bars,
+                    ctx.time_scale,
+                    ctx.viewport,
+                    ctx.style,
+                    pane_w,
+                    pane_h,
+                    ctx.h_pixel_ratio,
+                    ctx.v_pixel_ratio,
+                );
+                all_rects.extend(ohlc_rects);
+
+                let count = self.upload_rects(&all_rects, ctx.viewport.width, ctx.viewport.height);
                 self.draw_rect_pass(count);
             }
             MainChartType::Line => {
@@ -840,10 +882,25 @@ impl ChartRenderer for WgpuRenderer {
     }
 
     fn draw_volume(&mut self, ctx: &RenderContext) -> Result<(), String> {
+        use crate::core::chart_type::MainChartType;
+
         // Footprint chart integrates volume directly into the cells — skip separate volume bars.
-        if ctx.main_chart_type == crate::core::chart_type::MainChartType::Footprint {
+        if ctx.main_chart_type == MainChartType::Footprint {
             return Ok(());
         }
+
+        // For chart types that use rect pipeline (Candlestick, OHLC, HeikinAshi), volume
+        // is rendered together with candles in draw_candles to avoid GPU buffer race
+        // condition where the second upload_rects overwrites the first before rendering.
+        // Volume-only rendering here is for Line/Area which use different pipelines.
+        match ctx.main_chart_type {
+            MainChartType::Candlestick | MainChartType::OhlcBars | MainChartType::HeikinAshi => {
+                // Volume will be rendered in draw_candles along with candle geometry
+                return Ok(());
+            }
+            _ => {}
+        }
+
         let pane_w = ctx.viewport.width as f64;
         let pane_h = ctx.viewport.height as f64;
         let vol_rects = geometry_generator::generate_volume_rects(

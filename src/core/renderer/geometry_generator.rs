@@ -528,13 +528,17 @@ fn generate_volume_into(
         let h = (b.volume / max_vol) * vol_h;
         let top = candle_h + vol_h - h;
 
-        let phys_x = cx.round();
-        let left = phys_x - half_bar;
+        // Match candlestick X anchoring exactly so volume bars stay aligned
+        // across backends (WebGPU + Canvas2D) and chart types.
+        let slot_center = cx.round();
+        let left = (slot_center - half_bar).round();
+        let right = left + sizing.bar_width - 1.0;
+        let width = (right - left + 1.0).max(1.0);
 
         rects.push(ColoredRect {
             x: left as f32,
             y: top.floor() as f32,
-            w: sizing.bar_width as f32,
+            w: width as f32,
             h: h.ceil() as f32,
             r: cr,
             g: cg,
