@@ -130,6 +130,7 @@ struct WorkspaceInner {
     drag_pointer_id: Option<i32>,
     fullscreen_pane_id: Option<u32>,
     style: WorkspaceStyleConfig,
+    guardrails: axiuscharts::WorkspaceGuardrails,
 }
 
 impl WorkspaceInner {
@@ -176,6 +177,7 @@ impl WorkspaceInner {
             drag_pointer_id: None,
             fullscreen_pane_id: None,
             style: WorkspaceStyleConfig::default(),
+            guardrails: axiuscharts::WorkspaceGuardrails::default(),
         };
         this.style.divider.normalize();
         this.style.pane.normalize();
@@ -271,6 +273,10 @@ impl WorkspaceInner {
     }
 
     fn split_pane(&mut self, pane_id: u32, direction: SplitDirection) -> Result<u32, JsValue> {
+        self.guardrails
+            .enforce_split(self.panes.len())
+            .map_err(|err| JsValue::from_str(&err.to_string()))?;
+
         let target_node_id = self
             .pane_to_node
             .get(&pane_id)
@@ -342,6 +348,22 @@ impl WorkspaceInner {
 
         self.rebuild_dom()?;
         Ok(new_pane_id)
+    }
+
+    fn can_split_pane(&self, pane_id: u32) -> bool {
+        self.panes.contains_key(&pane_id) && self.guardrails.can_split(self.panes.len())
+    }
+
+    fn set_max_panes(&mut self, max_panes: u32) {
+        self.guardrails
+            .set_max_panes((max_panes > 0).then_some(max_panes as usize));
+    }
+
+    fn max_panes(&self) -> u32 {
+        self.guardrails
+            .max_panes
+            .map(|value| value.min(u32::MAX as usize) as u32)
+            .unwrap_or(0)
     }
 
     fn rebuild_dom(&mut self) -> Result<(), JsValue> {
@@ -779,6 +801,23 @@ impl ChartWorkspace {
         let direction = SplitDirection::parse(direction)
             .ok_or_else(|| JsValue::from_str("direction must be 'vertical' or 'horizontal'"))?;
         self.inner.borrow_mut().split_pane(pane_id, direction)
+    }
+
+    pub fn can_split_active(&self) -> bool {
+        let inner = self.inner.borrow();
+        inner.can_split_pane(inner.active_pane_id())
+    }
+
+    pub fn can_split_pane(&self, pane_id: u32) -> bool {
+        self.inner.borrow().can_split_pane(pane_id)
+    }
+
+    pub fn set_max_panes(&mut self, max_panes: u32) {
+        self.inner.borrow_mut().set_max_panes(max_panes);
+    }
+
+    pub fn max_panes(&self) -> u32 {
+        self.inner.borrow().max_panes()
     }
 
     pub fn set_split_divider_thickness(&mut self, thickness_css: f64) {

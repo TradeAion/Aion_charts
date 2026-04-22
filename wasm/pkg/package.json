@@ -1,0 +1,16 @@
+{
+  "name": "axiuscharts-wasm",
+  "type": "module",
+  "description": "AxiusCharts WASM entry point — thin JS interop layer",
+  "version": "0.1.0",
+  "files": [
+    "axiuscharts_wasm_bg.wasm",
+    "axiuscharts_wasm.js",
+    "axiuscharts_wasm.d.ts"
+  ],
+  "main": "axiuscharts_wasm.js",
+  "types": "axiuscharts_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

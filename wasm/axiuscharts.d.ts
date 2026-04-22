@@ -116,6 +116,22 @@ export interface PriceScaleOptions {
   margins?: { top?: number; bottom?: number };
 }
 
+export interface ChartGuardrails {
+  /** Maximum indicator pane count. Use `0` or omit to disable the cap. */
+  maxIndicatorPanes?: number;
+  /** Maximum historical bar count accepted in a single load. Use `0` or omit to disable the cap. */
+  maxBarsPerLoad?: number;
+  /** Interval allowlist. Omit or pass an empty array to allow all intervals. */
+  allowedIntervals?: string[];
+  /** When true, blocks changing away from the current interval. */
+  lockInterval?: boolean;
+}
+
+export interface WorkspaceGuardrails {
+  /** Maximum split-pane count. Use `0` or omit to disable the cap. */
+  maxPanes?: number;
+}
+
 export type ReplayEdgeBehavior = 'auto_pause' | 'live_continue' | 'auto_exit';
 
 export interface ReplayOptions {
@@ -177,6 +193,8 @@ export interface CreateChartOptions {
   interval?: string;
   crosshair?: CrosshairOptions;
   priceScale?: PriceScaleOptions;
+  /** Optional engine-side guardrails for panes, historical bar loads, and interval control. */
+  guardrails?: ChartGuardrails;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -497,6 +515,12 @@ export declare class ChartWorkspace {
   /** Array of all current pane IDs. */
   pane_ids(): number[];
 
+  /** Whether the active pane can currently be split under the configured cap. */
+  can_split_active(): boolean;
+
+  /** Whether a specific pane can currently be split under the configured cap. */
+  can_split_pane(pane_id: number): boolean;
+
   /**
    * Split the active pane.
    * @param direction — `"vertical"` (left/right) or `"horizontal"` (top/bottom)
@@ -512,6 +536,12 @@ export declare class ChartWorkspace {
 
   /** Set which pane is active (focused). */
   set_active_pane(pane_id: number): boolean;
+
+  /** Set the maximum pane count. Pass `0` to disable the cap. */
+  set_max_panes(max_panes: number): void;
+
+  /** Get the maximum pane count. Returns `0` when uncapped. */
+  max_panes(): number;
 
   // ── Styling ──────────────────────────────────────────────────────────────
 
@@ -692,6 +722,45 @@ export declare class AxiusCharts {
    * ```
    */
   get_css_variables(): AxiusChartsCssVariables;
+
+  /** Set the maximum indicator sub-pane count. Pass `0` to disable the cap. */
+  set_max_indicator_panes(max_panes: number): void;
+
+  /** Get the maximum indicator sub-pane count. Returns `0` when uncapped. */
+  max_indicator_panes(): number;
+
+  /** Whether another indicator pane can be created under the current cap. */
+  can_add_indicator_pane(): boolean;
+
+  /** Replace the interval allowlist. Pass an empty array to allow all intervals. */
+  set_allowed_intervals(intervals: string[]): void;
+
+  /** Clear the interval allowlist. */
+  clear_allowed_intervals(): void;
+
+  /** Get the interval allowlist. Returns an empty array when all intervals are allowed. */
+  allowed_intervals(): string[];
+
+  /** Whether a specific interval is permitted by the current guardrails. */
+  is_interval_allowed(interval: string): boolean;
+
+  /** Whether the chart can switch from the current interval to the requested one. */
+  can_set_interval(interval: string): boolean;
+
+  /** Lock or unlock interval changes away from the current interval. */
+  set_interval_change_locked(locked: boolean): void;
+
+  /** Whether interval changes are currently locked. */
+  interval_change_locked(): boolean;
+
+  /** Set the maximum historical bar count accepted in a single load. Pass `0` to disable the cap. */
+  set_max_bars_per_load(max_bars: number): void;
+
+  /** Get the maximum historical bar count accepted in a single load. Returns `0` when uncapped. */
+  max_bars_per_load(): number;
+
+  /** Whether a historical load of the given bar count would be accepted. */
+  can_load_bar_count(bar_count: number): boolean;
 
   // ── Data loading ───────────────────────────────────────────────────────────
 

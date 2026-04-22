@@ -229,8 +229,8 @@ pub use crate::core::price_line::{
 
 /// Order management lines (TradingView-style).
 pub use crate::core::order_line::{
-    OrderLine, OrderLineHit, OrderLineId, OrderLineManager, OrderLineOptions,
-    OrderSide, OrderStatus, OrderType,
+    OrderLine, OrderLineHit, OrderLineId, OrderLineManager, OrderLineOptions, OrderSide,
+    OrderStatus, OrderType,
 };
 
 /// Series markers (annotations on bars).
@@ -255,6 +255,9 @@ pub use crate::core::execution_marks::{
 
 /// Typed chart events and core event bus.
 pub use crate::core::events::{ChartEvent, EventBus};
+
+/// Guardrails for commercial and operational limits.
+pub use crate::core::guardrails::{ChartGuardrails, GuardrailViolation, WorkspaceGuardrails};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Re-exports: Pane & Layout

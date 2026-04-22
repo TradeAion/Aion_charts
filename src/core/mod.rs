@@ -11,6 +11,7 @@ pub mod events;
 pub mod execution_marks;
 pub mod footprint;
 pub mod formatters;
+pub mod guardrails;
 pub mod indicators;
 pub mod interaction;
 pub mod invalidate_mask;

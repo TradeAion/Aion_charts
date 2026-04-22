@@ -86,6 +86,10 @@ export class AxiusCharts {
      */
     add_marker(series_id: number, bar_index: number, shape: string, position: string, price: number, color_r: number, color_g: number, color_b: number, color_a: number, size: number, text: string): number;
     /**
+     * Get the allowed interval list. Returns an empty array when all intervals are allowed.
+     */
+    allowed_intervals(): Array<any>;
+    /**
      * Append a single bar to the data array. Used for real-time streaming.
      */
     append_bar(timestamp: bigint, open: number, high: number, low: number, close: number, volume: number): void;
@@ -115,6 +119,18 @@ export class AxiusCharts {
     bar_index_to_timestamp(bar_index: number): bigint;
     begin_selected_drawing_text_edit(): boolean;
     /**
+     * Return whether another indicator pane can be created under the current cap.
+     */
+    can_add_indicator_pane(): boolean;
+    /**
+     * Return whether a historical load of the given size would be accepted.
+     */
+    can_load_bar_count(bar_count: number): boolean;
+    /**
+     * Return whether the chart can switch from the current interval to the requested one.
+     */
+    can_set_interval(interval: string): boolean;
+    /**
      * Cancel the drawing currently being created (e.g. on Escape key).
      */
     cancel_drawing(): void;
@@ -122,6 +138,10 @@ export class AxiusCharts {
      * Clear all markers for all series.
      */
     clear_all_markers(): void;
+    /**
+     * Clear the interval allowlist.
+     */
+    clear_allowed_intervals(): void;
     /**
      * Hide crosshair immediately.
      */
@@ -399,9 +419,25 @@ export class AxiusCharts {
     indicator_set_resource_limits(instance_id: number, limits_json: string): boolean;
     interval(): string;
     /**
+     * Return whether interval changes are locked.
+     */
+    interval_change_locked(): boolean;
+    /**
      * Returns whether auto-render is currently active.
      */
     is_auto_render(): boolean;
+    /**
+     * Return whether a specific interval is permitted by the current guardrails.
+     */
+    is_interval_allowed(interval: string): boolean;
+    /**
+     * Get the maximum historical bar count allowed in a single load. Returns 0 when uncapped.
+     */
+    max_bars_per_load(): number;
+    /**
+     * Get the maximum indicator sub-pane count. Returns 0 when uncapped.
+     */
+    max_indicator_panes(): number;
     /**
      * Remove a specific event callback.
      */
@@ -536,6 +572,10 @@ export class AxiusCharts {
      * Get the number of overlay series.
      */
     series_count(): number;
+    /**
+     * Replace the allowed interval list. Pass an empty array to remove the allowlist.
+     */
+    set_allowed_intervals(intervals: Array<any>): void;
     /**
      * Enable or disable auto-scroll on new bars.
      *
@@ -812,6 +852,10 @@ export class AxiusCharts {
     set_histogram_data(id: number, values: Float64Array, timestamps: BigUint64Array, colors_r: Float32Array, colors_g: Float32Array, colors_b: Float32Array, colors_a: Float32Array): void;
     set_interval(interval: string): void;
     /**
+     * Lock or unlock interval changes away from the current interval.
+     */
+    set_interval_change_locked(locked: boolean): void;
+    /**
      * Set live last-price label visibility on the Y axis.
      */
     set_last_price_label_visible(visible: boolean): void;
@@ -835,6 +879,14 @@ export class AxiusCharts {
      * and position_idx: 0=aboveBar, 1=belowBar, 2=atPrice
      */
     set_markers(series_id: number, marker_data: Float64Array): void;
+    /**
+     * Set the maximum historical bar count allowed in a single load. Pass 0 to disable the cap.
+     */
+    set_max_bars_per_load(max_bars: number): void;
+    /**
+     * Set the maximum indicator sub-pane count. Pass 0 to disable the cap.
+     */
+    set_max_indicator_panes(max_panes: number): void;
     /**
      * Update the filled quantity of an order line (for partial fills).
      */
@@ -1140,15 +1192,19 @@ export class ChartWorkspace {
     free(): void;
     [Symbol.dispose](): void;
     active_pane_id(): number;
+    can_split_active(): boolean;
+    can_split_pane(pane_id: number): boolean;
     clear_pane_fullscreen(): boolean;
     dispose(): void;
     fullscreen_pane_id(): number;
     is_pane_fullscreen(): boolean;
+    max_panes(): number;
     constructor(container_id: string);
     pane_host_id(pane_id: number): string;
     pane_ids(): Array<any>;
     root_pane_id(): number;
     set_active_pane(pane_id: number): boolean;
+    set_max_panes(max_panes: number): void;
     set_split_divider_active_color(r: number, g: number, b: number, a: number): void;
     set_split_divider_color(r: number, g: number, b: number, a: number): void;
     set_split_divider_hit_area(hit_area_css: number): void;
@@ -1178,6 +1234,7 @@ export interface InitOutput {
     readonly axiuscharts_add_indicator_pane: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly axiuscharts_add_line_series: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
     readonly axiuscharts_add_marker: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => number;
+    readonly axiuscharts_allowed_intervals: (a: number) => number;
     readonly axiuscharts_append_bar: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number) => void;
     readonly axiuscharts_append_bar_series_point: (a: number, b: number, c: number, d: bigint, e: number, f: number, g: number, h: number) => void;
     readonly axiuscharts_append_histogram_point: (a: number, b: number, c: number, d: bigint, e: number, f: number, g: number, h: number, i: number) => void;
@@ -1185,8 +1242,12 @@ export interface InitOutput {
     readonly axiuscharts_apply_options: (a: number, b: number) => void;
     readonly axiuscharts_bar_index_to_timestamp: (a: number, b: number) => bigint;
     readonly axiuscharts_begin_selected_drawing_text_edit: (a: number) => number;
+    readonly axiuscharts_can_add_indicator_pane: (a: number) => number;
+    readonly axiuscharts_can_load_bar_count: (a: number, b: number) => number;
+    readonly axiuscharts_can_set_interval: (a: number, b: number, c: number) => number;
     readonly axiuscharts_cancel_drawing: (a: number) => void;
     readonly axiuscharts_clear_all_markers: (a: number) => void;
+    readonly axiuscharts_clear_allowed_intervals: (a: number) => void;
     readonly axiuscharts_clear_crosshair: (a: number) => void;
     readonly axiuscharts_clear_drawings: (a: number) => void;
     readonly axiuscharts_clear_execution_marks: (a: number) => void;
@@ -1244,7 +1305,11 @@ export interface InitOutput {
     readonly axiuscharts_indicator_set_mtf_snapshot: (a: number, b: number, c: number) => number;
     readonly axiuscharts_indicator_set_resource_limits: (a: number, b: number, c: number, d: number) => number;
     readonly axiuscharts_interval: (a: number, b: number) => void;
+    readonly axiuscharts_interval_change_locked: (a: number) => number;
     readonly axiuscharts_is_auto_render: (a: number) => number;
+    readonly axiuscharts_is_interval_allowed: (a: number, b: number, c: number) => number;
+    readonly axiuscharts_max_bars_per_load: (a: number) => number;
+    readonly axiuscharts_max_indicator_panes: (a: number) => number;
     readonly axiuscharts_off: (a: number, b: number, c: number, d: number) => void;
     readonly axiuscharts_on: (a: number, b: number, c: number, d: number) => void;
     readonly axiuscharts_on_key_down: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
@@ -1272,6 +1337,7 @@ export interface InitOutput {
     readonly axiuscharts_replay_step_forward: (a: number, b: number) => void;
     readonly axiuscharts_reset_viewport: (a: number, b: number, c: number) => void;
     readonly axiuscharts_series_count: (a: number) => number;
+    readonly axiuscharts_set_allowed_intervals: (a: number, b: number, c: number) => void;
     readonly axiuscharts_set_auto_scroll: (a: number, b: number) => void;
     readonly axiuscharts_set_axis_border_color: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly axiuscharts_set_axis_border_visible: (a: number, b: number) => void;
@@ -1314,12 +1380,15 @@ export interface InitOutput {
     readonly axiuscharts_set_footprint_xy_zoom_enabled: (a: number, b: number) => void;
     readonly axiuscharts_set_grid_color: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly axiuscharts_set_histogram_data: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => void;
-    readonly axiuscharts_set_interval: (a: number, b: number, c: number) => void;
+    readonly axiuscharts_set_interval: (a: number, b: number, c: number, d: number) => void;
+    readonly axiuscharts_set_interval_change_locked: (a: number, b: number, c: number) => void;
     readonly axiuscharts_set_last_price_label_visible: (a: number, b: number) => void;
     readonly axiuscharts_set_last_price_line_style: (a: number, b: number, c: number) => void;
     readonly axiuscharts_set_last_price_line_visible: (a: number, b: number) => void;
     readonly axiuscharts_set_last_price_line_width: (a: number, b: number) => void;
     readonly axiuscharts_set_markers: (a: number, b: number, c: number, d: number) => void;
+    readonly axiuscharts_set_max_bars_per_load: (a: number, b: number) => void;
+    readonly axiuscharts_set_max_indicator_panes: (a: number, b: number) => void;
     readonly axiuscharts_set_order_line_filled_quantity: (a: number, b: number, c: number, d: number) => number;
     readonly axiuscharts_set_order_line_pnl: (a: number, b: number, c: number, d: number) => number;
     readonly axiuscharts_set_order_line_price: (a: number, b: number, c: number, d: number) => number;
@@ -1396,15 +1465,19 @@ export interface InitOutput {
     readonly chartgroup_update_symbol: (a: number, b: number, c: number, d: number) => number;
     readonly chartgroup_update_time_range: (a: number, b: number, c: number, d: number) => number;
     readonly chartworkspace_active_pane_id: (a: number) => number;
+    readonly chartworkspace_can_split_active: (a: number) => number;
+    readonly chartworkspace_can_split_pane: (a: number, b: number) => number;
     readonly chartworkspace_clear_pane_fullscreen: (a: number) => number;
     readonly chartworkspace_dispose: (a: number) => void;
     readonly chartworkspace_fullscreen_pane_id: (a: number) => number;
     readonly chartworkspace_is_pane_fullscreen: (a: number) => number;
+    readonly chartworkspace_max_panes: (a: number) => number;
     readonly chartworkspace_new: (a: number, b: number, c: number) => void;
     readonly chartworkspace_pane_host_id: (a: number, b: number, c: number) => void;
     readonly chartworkspace_pane_ids: (a: number) => number;
     readonly chartworkspace_root_pane_id: (a: number) => number;
     readonly chartworkspace_set_active_pane: (a: number, b: number) => number;
+    readonly chartworkspace_set_max_panes: (a: number, b: number) => void;
     readonly chartworkspace_set_split_divider_active_color: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly chartworkspace_set_split_divider_color: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly chartworkspace_set_split_divider_hit_area: (a: number, b: number) => void;
@@ -1415,12 +1488,12 @@ export interface InitOutput {
     readonly chartworkspace_split_active: (a: number, b: number, c: number, d: number) => void;
     readonly chartworkspace_split_pane: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
-    readonly __wasm_bindgen_func_elem_445: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_456: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_2530: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_446: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_449: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_454: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_449: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_460: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_2571: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_450: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_453: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_458: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

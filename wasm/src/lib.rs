@@ -56,13 +56,13 @@
 use axiuscharts::{
     generate_footprint_sample_data, generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions,
     BaselineSeriesOptions, Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup,
-    ChartPaneId, ChartStyle, CrosshairMagnetMode, CrosshairSnapshot, DataRange, GpuContext,
-    HistogramPoint, HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint,
+    ChartGuardrails, ChartPaneId, ChartStyle, CrosshairMagnetMode, CrosshairSnapshot, DataRange,
+    GpuContext, HistogramPoint, HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint,
     LineSeriesOptions, LineStyle, MainChartType, MainViewportPreset, MarkerPosition, MarkerShape,
     MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint, OrderLineId, OrderLineOptions, OrderSide,
-    OrderStatus, OrderType, OverlayRenderer, PriceAxisRenderer,
-    PriceLineOptions, RendererBackend, ResourceLimits, RuntimeEvent, SeriesId, SeriesMarker,
-    SnapshotMtfResolver, TimeAxisRenderer, TimeRange, Viewport, WgpuRenderer,
+    OrderStatus, OrderType, OverlayRenderer, PriceAxisRenderer, PriceLineOptions, RendererBackend,
+    ResourceLimits, RuntimeEvent, SeriesId, SeriesMarker, SnapshotMtfResolver, TimeAxisRenderer,
+    TimeRange, Viewport, WgpuRenderer,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -623,6 +623,94 @@ fn js_get_f64(obj: &JsValue, key: &str) -> Option<f64> {
 /// Get a bool property from a JS object.
 fn js_get_bool(obj: &JsValue, key: &str) -> Option<bool> {
     js_get(obj, key).and_then(|v| v.as_bool())
+}
+
+fn js_limit_to_option(limit: u32) -> Option<usize> {
+    (limit > 0).then_some(limit as usize)
+}
+
+fn option_limit_to_js(limit: Option<usize>) -> u32 {
+    limit
+        .map(|value| value.min(u32::MAX as usize) as u32)
+        .unwrap_or(0)
+}
+
+fn parse_guardrail_limit(options: &JsValue, key: &str) -> Result<Option<u32>, JsValue> {
+    let Some(value) = js_get(options, key) else {
+        return Ok(None);
+    };
+    let numeric = value
+        .as_f64()
+        .ok_or_else(|| js_err(format!("{key} must be a non-negative integer")))?;
+    if !numeric.is_finite() || numeric < 0.0 || numeric.fract() != 0.0 || numeric > u32::MAX as f64
+    {
+        return Err(js_err(format!("{key} must be a non-negative integer")));
+    }
+    Ok(Some(numeric as u32))
+}
+
+fn parse_guardrail_string_array(
+    options: &JsValue,
+    key: &str,
+) -> Result<Option<Vec<String>>, JsValue> {
+    let Some(value) = js_get(options, key) else {
+        return Ok(None);
+    };
+    let Some(array) = value.dyn_ref::<js_sys::Array>() else {
+        return Err(js_err(format!("{key} must be an array of strings")));
+    };
+
+    let mut out = Vec::with_capacity(array.length() as usize);
+    for item in array.iter() {
+        let Some(string_value) = item.as_string() else {
+            return Err(js_err(format!("{key} must be an array of strings")));
+        };
+        out.push(string_value);
+    }
+    Ok(Some(out))
+}
+
+fn parse_chart_guardrails(options: &JsValue) -> Result<Option<ChartGuardrails>, JsValue> {
+    let Some(guardrails) = js_get(options, "guardrails") else {
+        return Ok(None);
+    };
+
+    let mut parsed = ChartGuardrails::default();
+    if let Some(max_indicator_panes) = parse_guardrail_limit(&guardrails, "maxIndicatorPanes")? {
+        parsed.set_max_indicator_panes(js_limit_to_option(max_indicator_panes));
+    }
+    if let Some(max_bars_per_load) = parse_guardrail_limit(&guardrails, "maxBarsPerLoad")? {
+        parsed.set_max_bars_per_load(js_limit_to_option(max_bars_per_load));
+    }
+    if let Some(allowed_intervals) = parse_guardrail_string_array(&guardrails, "allowedIntervals")?
+    {
+        parsed.set_allowed_intervals(allowed_intervals);
+    }
+    if let Some(lock_interval) = js_get_bool(&guardrails, "lockInterval") {
+        parsed.set_interval_change_locked(lock_interval);
+    }
+    Ok(Some(parsed))
+}
+
+fn enforce_bar_load_guardrail(
+    ctx: &str,
+    guardrails: &ChartGuardrails,
+    bar_count: usize,
+) -> Result<(), JsValue> {
+    guardrails
+        .enforce_bar_load(bar_count)
+        .map_err(|err| js_err(format!("{ctx}: {err}")))
+}
+
+fn enforce_interval_guardrail(
+    ctx: &str,
+    guardrails: &ChartGuardrails,
+    current_interval: &str,
+    requested_interval: &str,
+) -> Result<(), JsValue> {
+    guardrails
+        .enforce_interval_change(current_interval, requested_interval)
+        .map_err(|err| js_err(format!("{ctx}: {err}")))
 }
 
 fn resolve_synced_crosshair_state(
@@ -1551,6 +1639,7 @@ struct ChartPersistenceState {
 pub struct AxiusCharts {
     inner: SharedInner,
     mtf_resolver: Arc<SnapshotMtfResolver>,
+    guardrails: ChartGuardrails,
     active_renderer_name: String,
     symbol: String,
     interval: String,
@@ -2736,6 +2825,7 @@ impl AxiusCharts {
         Ok(AxiusCharts {
             inner,
             mtf_resolver,
+            guardrails: ChartGuardrails::default(),
             active_renderer_name,
             symbol: "DEMO".to_string(),
             interval: "1m".to_string(),
@@ -2819,6 +2909,17 @@ impl AxiusCharts {
             .map(|v| RendererModeRequest::from_str(&v))
             .unwrap_or(RendererModeRequest::WebGpu);
         let mut chart = Self::create_with(&container_id, requested_renderer.as_str()).await?;
+        if let Some(guardrails) = parse_chart_guardrails(&options)? {
+            let requested_interval =
+                js_get_str(&options, "interval").unwrap_or_else(|| chart.interval.clone());
+            enforce_interval_guardrail(
+                "create_chart",
+                &guardrails,
+                &requested_interval,
+                &requested_interval,
+            )?;
+            chart.guardrails = guardrails;
+        }
 
         // Apply theme
         if let Some(theme_val) = js_get(&options, "theme") {
@@ -2870,6 +2971,59 @@ impl AxiusCharts {
             return;
         }
         let mut css_changed = false;
+
+        let parsed_guardrails = match parse_chart_guardrails(&options) {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                self.inner
+                    .borrow_mut()
+                    .engine
+                    .event_bus
+                    .emit(axiuscharts::ChartEvent::Error {
+                        message: err
+                            .as_string()
+                            .unwrap_or_else(|| "invalid guardrails option".to_string()),
+                    });
+                return;
+            }
+        };
+
+        let candidate_guardrails = parsed_guardrails
+            .clone()
+            .unwrap_or_else(|| self.guardrails.clone());
+        let requested_interval = js_get_str(&options, "interval");
+        let candidate_interval = requested_interval
+            .clone()
+            .unwrap_or_else(|| self.interval.clone());
+        let validation_current_interval = if candidate_guardrails.lock_interval_change
+            && parsed_guardrails.is_some()
+            && requested_interval.is_some()
+        {
+            candidate_interval.clone()
+        } else {
+            self.interval.clone()
+        };
+        if let Err(err) = enforce_interval_guardrail(
+            "apply_options",
+            &candidate_guardrails,
+            &validation_current_interval,
+            &candidate_interval,
+        ) {
+            self.inner
+                .borrow_mut()
+                .engine
+                .event_bus
+                .emit(axiuscharts::ChartEvent::Error {
+                    message: err
+                        .as_string()
+                        .unwrap_or_else(|| "interval guardrail rejected apply_options".to_string()),
+                });
+            return;
+        }
+
+        if let Some(guardrails) = parsed_guardrails {
+            self.guardrails = guardrails;
+        }
 
         if js_get(&options, "renderer").is_some() {
             self.inner
@@ -3714,6 +3868,111 @@ impl AxiusCharts {
         obj.into()
     }
 
+    // ── Guardrails ──────────────────────────────────────────────────────────
+
+    /// Set the maximum indicator sub-pane count. Pass 0 to disable the cap.
+    pub fn set_max_indicator_panes(&mut self, max_panes: u32) {
+        self.guardrails
+            .set_max_indicator_panes(js_limit_to_option(max_panes));
+    }
+
+    /// Get the maximum indicator sub-pane count. Returns 0 when uncapped.
+    pub fn max_indicator_panes(&self) -> u32 {
+        option_limit_to_js(self.guardrails.max_indicator_panes)
+    }
+
+    /// Return whether another indicator pane can be created under the current cap.
+    pub fn can_add_indicator_pane(&self) -> bool {
+        let current_count = self.inner.borrow().subpanes.len();
+        self.guardrails.can_add_indicator_pane(current_count)
+    }
+
+    /// Replace the allowed interval list. Pass an empty array to remove the allowlist.
+    pub fn set_allowed_intervals(&mut self, intervals: js_sys::Array) -> Result<(), JsValue> {
+        let parsed_intervals: Result<Vec<String>, JsValue> = intervals
+            .iter()
+            .map(|value| {
+                value
+                    .as_string()
+                    .ok_or_else(|| js_err("set_allowed_intervals expects only strings"))
+            })
+            .collect();
+        let parsed_intervals = parsed_intervals?;
+
+        let mut next_guardrails = self.guardrails.clone();
+        next_guardrails.set_allowed_intervals(parsed_intervals);
+        enforce_interval_guardrail(
+            "set_allowed_intervals",
+            &next_guardrails,
+            &self.interval,
+            &self.interval,
+        )?;
+        self.guardrails = next_guardrails;
+        Ok(())
+    }
+
+    /// Clear the interval allowlist.
+    pub fn clear_allowed_intervals(&mut self) {
+        self.guardrails.clear_allowed_intervals();
+    }
+
+    /// Get the allowed interval list. Returns an empty array when all intervals are allowed.
+    pub fn allowed_intervals(&self) -> js_sys::Array {
+        let out = js_sys::Array::new();
+        if let Some(intervals) = &self.guardrails.allowed_intervals {
+            for interval in intervals {
+                out.push(&JsValue::from_str(interval));
+            }
+        }
+        out
+    }
+
+    /// Return whether a specific interval is permitted by the current guardrails.
+    pub fn is_interval_allowed(&self, interval: &str) -> bool {
+        self.guardrails.is_interval_allowed(interval)
+    }
+
+    /// Return whether the chart can switch from the current interval to the requested one.
+    pub fn can_set_interval(&self, interval: &str) -> bool {
+        self.guardrails
+            .can_change_interval(&self.interval, interval)
+    }
+
+    /// Lock or unlock interval changes away from the current interval.
+    pub fn set_interval_change_locked(&mut self, locked: bool) -> Result<(), JsValue> {
+        let mut next_guardrails = self.guardrails.clone();
+        next_guardrails.set_interval_change_locked(locked);
+        enforce_interval_guardrail(
+            "set_interval_change_locked",
+            &next_guardrails,
+            &self.interval,
+            &self.interval,
+        )?;
+        self.guardrails = next_guardrails;
+        Ok(())
+    }
+
+    /// Return whether interval changes are locked.
+    pub fn interval_change_locked(&self) -> bool {
+        self.guardrails.lock_interval_change
+    }
+
+    /// Set the maximum historical bar count allowed in a single load. Pass 0 to disable the cap.
+    pub fn set_max_bars_per_load(&mut self, max_bars: u32) {
+        self.guardrails
+            .set_max_bars_per_load(js_limit_to_option(max_bars));
+    }
+
+    /// Get the maximum historical bar count allowed in a single load. Returns 0 when uncapped.
+    pub fn max_bars_per_load(&self) -> u32 {
+        option_limit_to_js(self.guardrails.max_bars_per_load)
+    }
+
+    /// Return whether a historical load of the given size would be accepted.
+    pub fn can_load_bar_count(&self, bar_count: u32) -> bool {
+        self.guardrails.can_load_bars(bar_count as usize)
+    }
+
     // ── Data loading ─────────────────────────────────────────────────────────
 
     pub fn set_data_arrays(
@@ -3735,6 +3994,7 @@ impl AxiusCharts {
             timestamps,
         )?;
         let count = bars.len();
+        enforce_bar_load_guardrail("set_data_arrays", &self.guardrails, count)?;
         {
             let mut inner = self.inner.borrow_mut();
             if inner.replay_active {
@@ -3781,6 +4041,8 @@ impl AxiusCharts {
             bid_volumes,
             ask_volumes,
         )?;
+        let count = bars.len();
+        enforce_bar_load_guardrail("set_data_with_footprint_arrays", &self.guardrails, count)?;
 
         let mut inner = self.inner.borrow_mut();
         if inner.replay_active {
@@ -3788,7 +4050,6 @@ impl AxiusCharts {
                 "set_data_with_footprint_arrays is not supported while replay is active",
             ));
         }
-        let count = bars.len();
         inner
             .engine
             .set_data_with_footprint(bars, footprint)
@@ -3808,6 +4069,8 @@ impl AxiusCharts {
     /// existing `bid_volume` / `bidVolume` / `ask_volume` / `askVolume` level aliases.
     pub fn set_data_with_footprint_json(&mut self, json: &str) -> Result<(), JsValue> {
         let (bars, footprint) = parse_historical_footprint_json_dataset(json)?;
+        let count = bars.len();
+        enforce_bar_load_guardrail("set_data_with_footprint_json", &self.guardrails, count)?;
 
         let mut inner = self.inner.borrow_mut();
         if inner.replay_active {
@@ -3815,7 +4078,6 @@ impl AxiusCharts {
                 "set_data_with_footprint_json is not supported while replay is active",
             ));
         }
-        let count = bars.len();
         inner
             .engine
             .set_data_with_footprint(bars, footprint)
@@ -4368,7 +4630,8 @@ impl AxiusCharts {
         self.symbol.clone()
     }
 
-    pub fn set_interval(&mut self, interval: &str) {
+    pub fn set_interval(&mut self, interval: &str) -> Result<(), JsValue> {
+        enforce_interval_guardrail("set_interval", &self.guardrails, &self.interval, interval)?;
         self.interval = interval.to_string();
         self.inner
             .borrow_mut()
@@ -4378,6 +4641,7 @@ impl AxiusCharts {
                 interval: interval.to_string(),
             });
         self.dirty.set(true);
+        Ok(())
     }
 
     pub fn interval(&self) -> String {
@@ -4740,12 +5004,7 @@ impl AxiusCharts {
             .borrow_mut()
             .engine
             .drawings
-            .set_selected_rectangle_middle_line(
-                enabled,
-                [r, g, b, a],
-                line_width as f64,
-                dash,
-            );
+            .set_selected_rectangle_middle_line(enabled, [r, g, b, a], line_width as f64, dash);
         if changed {
             self.mark_dirty();
         }
@@ -5093,6 +5352,9 @@ impl AxiusCharts {
         }
 
         self.apply_options(json_value_to_js(&snapshot.options));
+        self.guardrails
+            .enforce_indicator_pane_total(snapshot.panes.len())
+            .map_err(|err| js_err(format!("import_persistence_state: {err}")))?;
 
         {
             let mut s = self.inner.borrow_mut();
@@ -5814,7 +6076,13 @@ impl AxiusCharts {
             ..Default::default()
         };
         let order_id = self.inner.borrow_mut().engine.order_lines.create(id, opts);
-        log::info!("create_order_line: id={}, price={}, type={}, side={}", id, price, order_type, side);
+        log::info!(
+            "create_order_line: id={}, price={}, type={}, side={}",
+            id,
+            price,
+            order_type,
+            side
+        );
         order_id.0
     }
 
@@ -5920,7 +6188,13 @@ impl AxiusCharts {
     #[wasm_bindgen]
     pub fn set_order_line_visible(&mut self, id: &str, visible: bool) -> bool {
         let order_id = OrderLineId::new(id);
-        if let Some(line) = self.inner.borrow_mut().engine.order_lines.get_mut(&order_id) {
+        if let Some(line) = self
+            .inner
+            .borrow_mut()
+            .engine
+            .order_lines
+            .get_mut(&order_id)
+        {
             line.options.visible = visible;
             true
         } else {
@@ -5932,7 +6206,13 @@ impl AxiusCharts {
     #[wasm_bindgen]
     pub fn set_order_line_pnl(&mut self, id: &str, pnl: f64) -> bool {
         let order_id = OrderLineId::new(id);
-        if let Some(line) = self.inner.borrow_mut().engine.order_lines.get_mut(&order_id) {
+        if let Some(line) = self
+            .inner
+            .borrow_mut()
+            .engine
+            .order_lines
+            .get_mut(&order_id)
+        {
             line.options.pnl = Some(pnl);
             true
         } else {
@@ -5944,11 +6224,7 @@ impl AxiusCharts {
     #[wasm_bindgen]
     pub fn remove_order_line(&mut self, id: &str) -> bool {
         let order_id = OrderLineId::new(id);
-        self.inner
-            .borrow_mut()
-            .engine
-            .order_lines
-            .remove(&order_id)
+        self.inner.borrow_mut().engine.order_lines.remove(&order_id)
     }
 
     /// Remove all order lines.
@@ -7503,6 +7779,21 @@ impl AxiusCharts {
         indicator_type: &str,
         height_css: f64,
     ) -> u32 {
+        let current_subpane_count = self.inner.borrow().subpanes.len();
+        if let Err(err) = self
+            .guardrails
+            .enforce_indicator_pane_add(current_subpane_count)
+        {
+            let message = format!("add_indicator_pane: {err}");
+            log::warn!("{message}");
+            self.inner
+                .borrow_mut()
+                .engine
+                .event_bus
+                .emit(axiuscharts::ChartEvent::Error { message });
+            return 0;
+        }
+
         let inner_for_events = Rc::clone(&self.inner);
         let dirty_for_events = Rc::clone(&self.dirty);
 

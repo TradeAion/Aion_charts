@@ -36,6 +36,32 @@ chart.set_data_arrays(
 );
 ```
 
+## Guardrails
+
+AxiusCharts can enforce engine-side commercial or operational caps without relying on UI-only checks.
+
+```ts
+const chart = await AxiusCharts.create_chart(host, {
+  theme: 'dark',
+  guardrails: {
+    maxIndicatorPanes: 2,
+    maxBarsPerLoad: 5000,
+    allowedIntervals: ['1m', '5m', '1h'],
+    lockInterval: false,
+  },
+});
+
+chart.set_max_indicator_panes(3);
+chart.set_max_bars_per_load(10000);
+chart.set_allowed_intervals(['1m', '15m', '1h']);
+chart.set_interval_change_locked(true);
+
+const workspace = new ChartWorkspace('workspace-root');
+workspace.set_max_panes(2);
+```
+
+Use `0` to disable a cap.
+
 ## Implemented Surface
 
 - Main chart types: candlestick, OHLC, line, area, Heikin-Ashi, baseline, footprint

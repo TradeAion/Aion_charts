@@ -257,6 +257,14 @@ export class AxiusCharts {
         return ret >>> 0;
     }
     /**
+     * Get the allowed interval list. Returns an empty array when all intervals are allowed.
+     * @returns {Array<any>}
+     */
+    allowed_intervals() {
+        const ret = wasm.axiuscharts_allowed_intervals(this.__wbg_ptr);
+        return takeObject(ret);
+    }
+    /**
      * Append a single bar to the data array. Used for real-time streaming.
      * @param {bigint} timestamp
      * @param {number} open
@@ -370,6 +378,34 @@ export class AxiusCharts {
         return ret !== 0;
     }
     /**
+     * Return whether another indicator pane can be created under the current cap.
+     * @returns {boolean}
+     */
+    can_add_indicator_pane() {
+        const ret = wasm.axiuscharts_can_add_indicator_pane(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Return whether a historical load of the given size would be accepted.
+     * @param {number} bar_count
+     * @returns {boolean}
+     */
+    can_load_bar_count(bar_count) {
+        const ret = wasm.axiuscharts_can_load_bar_count(this.__wbg_ptr, bar_count);
+        return ret !== 0;
+    }
+    /**
+     * Return whether the chart can switch from the current interval to the requested one.
+     * @param {string} interval
+     * @returns {boolean}
+     */
+    can_set_interval(interval) {
+        const ptr0 = passStringToWasm0(interval, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.axiuscharts_can_set_interval(this.__wbg_ptr, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
      * Cancel the drawing currently being created (e.g. on Escape key).
      */
     cancel_drawing() {
@@ -380,6 +416,12 @@ export class AxiusCharts {
      */
     clear_all_markers() {
         wasm.axiuscharts_clear_all_markers(this.__wbg_ptr);
+    }
+    /**
+     * Clear the interval allowlist.
+     */
+    clear_allowed_intervals() {
+        wasm.axiuscharts_clear_allowed_intervals(this.__wbg_ptr);
     }
     /**
      * Hide crosshair immediately.
@@ -1177,12 +1219,47 @@ export class AxiusCharts {
         }
     }
     /**
+     * Return whether interval changes are locked.
+     * @returns {boolean}
+     */
+    interval_change_locked() {
+        const ret = wasm.axiuscharts_interval_change_locked(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * Returns whether auto-render is currently active.
      * @returns {boolean}
      */
     is_auto_render() {
         const ret = wasm.axiuscharts_is_auto_render(this.__wbg_ptr);
         return ret !== 0;
+    }
+    /**
+     * Return whether a specific interval is permitted by the current guardrails.
+     * @param {string} interval
+     * @returns {boolean}
+     */
+    is_interval_allowed(interval) {
+        const ptr0 = passStringToWasm0(interval, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.axiuscharts_is_interval_allowed(this.__wbg_ptr, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
+     * Get the maximum historical bar count allowed in a single load. Returns 0 when uncapped.
+     * @returns {number}
+     */
+    max_bars_per_load() {
+        const ret = wasm.axiuscharts_max_bars_per_load(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Get the maximum indicator sub-pane count. Returns 0 when uncapped.
+     * @returns {number}
+     */
+    max_indicator_panes() {
+        const ret = wasm.axiuscharts_max_indicator_panes(this.__wbg_ptr);
+        return ret >>> 0;
     }
     /**
      * Remove a specific event callback.
@@ -1477,6 +1554,23 @@ export class AxiusCharts {
     series_count() {
         const ret = wasm.axiuscharts_series_count(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * Replace the allowed interval list. Pass an empty array to remove the allowlist.
+     * @param {Array<any>} intervals
+     */
+    set_allowed_intervals(intervals) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.axiuscharts_set_allowed_intervals(retptr, this.__wbg_ptr, addHeapObject(intervals));
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            if (r1) {
+                throw takeObject(r0);
+            }
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
     }
     /**
      * Enable or disable auto-scroll on new bars.
@@ -2188,9 +2282,36 @@ export class AxiusCharts {
      * @param {string} interval
      */
     set_interval(interval) {
-        const ptr0 = passStringToWasm0(interval, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-        const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_interval(this.__wbg_ptr, ptr0, len0);
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(interval, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.axiuscharts_set_interval(retptr, this.__wbg_ptr, ptr0, len0);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            if (r1) {
+                throw takeObject(r0);
+            }
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * Lock or unlock interval changes away from the current interval.
+     * @param {boolean} locked
+     */
+    set_interval_change_locked(locked) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.axiuscharts_set_interval_change_locked(retptr, this.__wbg_ptr, locked);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            if (r1) {
+                throw takeObject(r0);
+            }
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
     }
     /**
      * Set live last-price label visibility on the Y axis.
@@ -2235,6 +2356,20 @@ export class AxiusCharts {
         const ptr0 = passArrayF64ToWasm0(marker_data, wasm.__wbindgen_export);
         const len0 = WASM_VECTOR_LEN;
         wasm.axiuscharts_set_markers(this.__wbg_ptr, series_id, ptr0, len0);
+    }
+    /**
+     * Set the maximum historical bar count allowed in a single load. Pass 0 to disable the cap.
+     * @param {number} max_bars
+     */
+    set_max_bars_per_load(max_bars) {
+        wasm.axiuscharts_set_max_bars_per_load(this.__wbg_ptr, max_bars);
+    }
+    /**
+     * Set the maximum indicator sub-pane count. Pass 0 to disable the cap.
+     * @param {number} max_panes
+     */
+    set_max_indicator_panes(max_panes) {
+        wasm.axiuscharts_set_max_indicator_panes(this.__wbg_ptr, max_panes);
     }
     /**
      * Update the filled quantity of an order line (for partial fills).
@@ -3319,6 +3454,21 @@ export class ChartWorkspace {
     /**
      * @returns {boolean}
      */
+    can_split_active() {
+        const ret = wasm.chartworkspace_can_split_active(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @param {number} pane_id
+     * @returns {boolean}
+     */
+    can_split_pane(pane_id) {
+        const ret = wasm.chartworkspace_can_split_pane(this.__wbg_ptr, pane_id);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
     clear_pane_fullscreen() {
         const ret = wasm.chartworkspace_clear_pane_fullscreen(this.__wbg_ptr);
         return ret !== 0;
@@ -3339,6 +3489,13 @@ export class ChartWorkspace {
     is_pane_fullscreen() {
         const ret = wasm.chartworkspace_is_pane_fullscreen(this.__wbg_ptr);
         return ret !== 0;
+    }
+    /**
+     * @returns {number}
+     */
+    max_panes() {
+        const ret = wasm.chartworkspace_max_panes(this.__wbg_ptr);
+        return ret >>> 0;
     }
     /**
      * @param {string} container_id
@@ -3403,6 +3560,12 @@ export class ChartWorkspace {
     set_active_pane(pane_id) {
         const ret = wasm.chartworkspace_set_active_pane(this.__wbg_ptr, pane_id);
         return ret !== 0;
+    }
+    /**
+     * @param {number} max_panes
+     */
+    set_max_panes(max_panes) {
+        wasm.chartworkspace_set_max_panes(this.__wbg_ptr, max_panes);
     }
     /**
      * @param {number} r
@@ -4177,7 +4340,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_2530(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_2571(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -4818,43 +4981,43 @@ function __wbg_get_imports() {
             getObject(arg0).writeBuffer(getObject(arg1), arg2, getObject(arg3), arg4, arg5);
         }, arguments); },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [Externref], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_445, __wasm_bindgen_func_elem_446);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 7, function: Function { arguments: [Externref], shim_idx: 8, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_449, __wasm_bindgen_func_elem_450);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [F64], shim_idx: 14, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_445, __wasm_bindgen_func_elem_456);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 7, function: Function { arguments: [F64], shim_idx: 15, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_449, __wasm_bindgen_func_elem_460);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [NamedExternref("Array<any>")], shim_idx: 9, ret: Unit, inner_ret: Some(Unit) }, mutable: false }) -> Externref`.
-            const ret = makeClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_445, __wasm_bindgen_func_elem_449);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 7, function: Function { arguments: [NamedExternref("Array<any>")], shim_idx: 10, ret: Unit, inner_ret: Some(Unit) }, mutable: false }) -> Externref`.
+            const ret = makeClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_449, __wasm_bindgen_func_elem_453);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [NamedExternref("Event")], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_445, __wasm_bindgen_func_elem_446);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 7, function: Function { arguments: [NamedExternref("Event")], shim_idx: 8, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_449, __wasm_bindgen_func_elem_450);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000005: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [NamedExternref("PointerEvent")], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_445, __wasm_bindgen_func_elem_446);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 7, function: Function { arguments: [NamedExternref("PointerEvent")], shim_idx: 8, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_449, __wasm_bindgen_func_elem_450);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000006: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [NamedExternref("TouchEvent")], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_445, __wasm_bindgen_func_elem_446);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 7, function: Function { arguments: [NamedExternref("TouchEvent")], shim_idx: 8, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_449, __wasm_bindgen_func_elem_450);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000007: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 7, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_445, __wasm_bindgen_func_elem_446);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 7, function: Function { arguments: [NamedExternref("WheelEvent")], shim_idx: 8, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_449, __wasm_bindgen_func_elem_450);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000008: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 6, function: Function { arguments: [], shim_idx: 12, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_445, __wasm_bindgen_func_elem_454);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 7, function: Function { arguments: [], shim_idx: 13, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_449, __wasm_bindgen_func_elem_458);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000009: function(arg0) {
@@ -4881,24 +5044,24 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_454(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_454(arg0, arg1);
+function __wasm_bindgen_func_elem_458(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_458(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_446(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_446(arg0, arg1, addHeapObject(arg2));
+function __wasm_bindgen_func_elem_450(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_450(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_449(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_449(arg0, arg1, addHeapObject(arg2));
+function __wasm_bindgen_func_elem_453(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_453(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_2530(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_2530(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_2571(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_2571(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
-function __wasm_bindgen_func_elem_456(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_456(arg0, arg1, arg2);
+function __wasm_bindgen_func_elem_460(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_460(arg0, arg1, arg2);
 }
 
 
