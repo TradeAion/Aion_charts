@@ -247,6 +247,7 @@ export const chartgroup_update_time_range: (a: number, b: number, c: number, d: 
 export const chartworkspace_active_pane_id: (a: number) => number;
 export const chartworkspace_can_split_active: (a: number) => number;
 export const chartworkspace_can_split_pane: (a: number, b: number) => number;
+export const chartworkspace_clear_on_active_pane_change: (a: number) => void;
 export const chartworkspace_clear_pane_fullscreen: (a: number) => number;
 export const chartworkspace_dispose: (a: number) => void;
 export const chartworkspace_fullscreen_pane_id: (a: number) => number;
@@ -258,6 +259,7 @@ export const chartworkspace_pane_ids: (a: number) => number;
 export const chartworkspace_root_pane_id: (a: number) => number;
 export const chartworkspace_set_active_pane: (a: number, b: number) => number;
 export const chartworkspace_set_max_panes: (a: number, b: number) => void;
+export const chartworkspace_set_on_active_pane_change: (a: number, b: number) => void;
 export const chartworkspace_set_split_divider_active_color: (a: number, b: number, c: number, d: number, e: number) => void;
 export const chartworkspace_set_split_divider_color: (a: number, b: number, c: number, d: number, e: number) => void;
 export const chartworkspace_set_split_divider_hit_area: (a: number, b: number) => void;
@@ -270,7 +272,7 @@ export const chartworkspace_split_pane: (a: number, b: number, c: number, d: num
 export const chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
 export const __wasm_bindgen_func_elem_449: (a: number, b: number) => void;
 export const __wasm_bindgen_func_elem_460: (a: number, b: number, c: number) => void;
-export const __wasm_bindgen_func_elem_2571: (a: number, b: number, c: number, d: number) => void;
+export const __wasm_bindgen_func_elem_2575: (a: number, b: number, c: number, d: number) => void;
 export const __wasm_bindgen_func_elem_450: (a: number, b: number, c: number) => void;
 export const __wasm_bindgen_func_elem_453: (a: number, b: number, c: number) => void;
 export const __wasm_bindgen_func_elem_458: (a: number, b: number) => void;

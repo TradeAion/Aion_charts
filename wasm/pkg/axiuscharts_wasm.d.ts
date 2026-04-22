@@ -1194,6 +1194,7 @@ export class ChartWorkspace {
     active_pane_id(): number;
     can_split_active(): boolean;
     can_split_pane(pane_id: number): boolean;
+    clear_on_active_pane_change(): void;
     clear_pane_fullscreen(): boolean;
     dispose(): void;
     fullscreen_pane_id(): number;
@@ -1205,6 +1206,7 @@ export class ChartWorkspace {
     root_pane_id(): number;
     set_active_pane(pane_id: number): boolean;
     set_max_panes(max_panes: number): void;
+    set_on_active_pane_change(callback: Function): void;
     set_split_divider_active_color(r: number, g: number, b: number, a: number): void;
     set_split_divider_color(r: number, g: number, b: number, a: number): void;
     set_split_divider_hit_area(hit_area_css: number): void;
@@ -1467,6 +1469,7 @@ export interface InitOutput {
     readonly chartworkspace_active_pane_id: (a: number) => number;
     readonly chartworkspace_can_split_active: (a: number) => number;
     readonly chartworkspace_can_split_pane: (a: number, b: number) => number;
+    readonly chartworkspace_clear_on_active_pane_change: (a: number) => void;
     readonly chartworkspace_clear_pane_fullscreen: (a: number) => number;
     readonly chartworkspace_dispose: (a: number) => void;
     readonly chartworkspace_fullscreen_pane_id: (a: number) => number;
@@ -1478,6 +1481,7 @@ export interface InitOutput {
     readonly chartworkspace_root_pane_id: (a: number) => number;
     readonly chartworkspace_set_active_pane: (a: number, b: number) => number;
     readonly chartworkspace_set_max_panes: (a: number, b: number) => void;
+    readonly chartworkspace_set_on_active_pane_change: (a: number, b: number) => void;
     readonly chartworkspace_set_split_divider_active_color: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly chartworkspace_set_split_divider_color: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly chartworkspace_set_split_divider_hit_area: (a: number, b: number) => void;
@@ -1490,7 +1494,7 @@ export interface InitOutput {
     readonly chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
     readonly __wasm_bindgen_func_elem_449: (a: number, b: number) => void;
     readonly __wasm_bindgen_func_elem_460: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_2571: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_2575: (a: number, b: number, c: number, d: number) => void;
     readonly __wasm_bindgen_func_elem_450: (a: number, b: number, c: number) => void;
     readonly __wasm_bindgen_func_elem_453: (a: number, b: number, c: number) => void;
     readonly __wasm_bindgen_func_elem_458: (a: number, b: number) => void;

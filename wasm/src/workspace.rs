@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use js_sys::Function;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{Document, Element, EventTarget, HtmlDivElement, PointerEvent};
@@ -131,6 +132,7 @@ struct WorkspaceInner {
     fullscreen_pane_id: Option<u32>,
     style: WorkspaceStyleConfig,
     guardrails: axiuscharts::WorkspaceGuardrails,
+    active_pane_change_handler: Option<Function>,
 }
 
 impl WorkspaceInner {
@@ -178,6 +180,7 @@ impl WorkspaceInner {
             fullscreen_pane_id: None,
             style: WorkspaceStyleConfig::default(),
             guardrails: axiuscharts::WorkspaceGuardrails::default(),
+            active_pane_change_handler: None,
         };
         this.style.divider.normalize();
         this.style.pane.normalize();
@@ -220,8 +223,12 @@ impl WorkspaceInner {
         if !self.panes.contains_key(&pane_id) {
             return false;
         }
+        if self.active_pane_id == pane_id {
+            return true;
+        }
         self.active_pane_id = pane_id;
         self.apply_active_styles();
+        self.notify_active_pane_change();
         true
     }
 
@@ -347,6 +354,7 @@ impl WorkspaceInner {
         self.fullscreen_pane_id = None;
 
         self.rebuild_dom()?;
+        self.notify_active_pane_change();
         Ok(new_pane_id)
     }
 
@@ -606,6 +614,21 @@ impl WorkspaceInner {
         self.apply_active_styles();
     }
 
+    fn set_active_pane_change_handler(&mut self, handler: Option<Function>) {
+        self.active_pane_change_handler = handler;
+    }
+
+    fn notify_active_pane_change(&self) {
+        let Some(handler) = &self.active_pane_change_handler else {
+            return;
+        };
+
+        let _ = handler.call1(
+            &JsValue::NULL,
+            &JsValue::from_f64(self.active_pane_id as f64),
+        );
+    }
+
     fn find_attr_u32(target: Option<EventTarget>, attr: &str) -> Option<u32> {
         let mut current = target.and_then(|t| t.dyn_into::<Element>().ok());
         while let Some(el) = current {
@@ -757,6 +780,16 @@ impl ChartWorkspace {
 
     pub fn set_active_pane(&mut self, pane_id: u32) -> bool {
         self.inner.borrow_mut().set_active_pane(pane_id)
+    }
+
+    pub fn set_on_active_pane_change(&mut self, callback: Function) {
+        self.inner
+            .borrow_mut()
+            .set_active_pane_change_handler(Some(callback));
+    }
+
+    pub fn clear_on_active_pane_change(&mut self) {
+        self.inner.borrow_mut().set_active_pane_change_handler(None);
     }
 
     pub fn pane_host_id(&self, pane_id: u32) -> String {

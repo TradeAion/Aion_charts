@@ -537,6 +537,12 @@ export declare class ChartWorkspace {
   /** Set which pane is active (focused). */
   set_active_pane(pane_id: number): boolean;
 
+  /** Register a callback fired whenever the active pane changes. */
+  set_on_active_pane_change(callback: (pane_id: number) => void): void;
+
+  /** Remove the active-pane change callback. */
+  clear_on_active_pane_change(): void;
+
   /** Set the maximum pane count. Pass `0` to disable the cap. */
   set_max_panes(max_panes: number): void;
 

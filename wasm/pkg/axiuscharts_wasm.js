@@ -3466,6 +3466,9 @@ export class ChartWorkspace {
         const ret = wasm.chartworkspace_can_split_pane(this.__wbg_ptr, pane_id);
         return ret !== 0;
     }
+    clear_on_active_pane_change() {
+        wasm.chartworkspace_clear_on_active_pane_change(this.__wbg_ptr);
+    }
     /**
      * @returns {boolean}
      */
@@ -3566,6 +3569,12 @@ export class ChartWorkspace {
      */
     set_max_panes(max_panes) {
         wasm.chartworkspace_set_max_panes(this.__wbg_ptr, max_panes);
+    }
+    /**
+     * @param {Function} callback
+     */
+    set_on_active_pane_change(callback) {
+        wasm.chartworkspace_set_on_active_pane_change(this.__wbg_ptr, addHeapObject(callback));
     }
     /**
      * @param {number} r
@@ -4340,7 +4349,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_2571(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_2575(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -5056,8 +5065,8 @@ function __wasm_bindgen_func_elem_453(arg0, arg1, arg2) {
     wasm.__wasm_bindgen_func_elem_453(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_2571(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_2571(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_2575(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_2575(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 function __wasm_bindgen_func_elem_460(arg0, arg1, arg2) {
