@@ -1494,7 +1494,7 @@ export interface InitOutput {
     readonly chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
     readonly __wasm_bindgen_func_elem_449: (a: number, b: number) => void;
     readonly __wasm_bindgen_func_elem_460: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_2575: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_2576: (a: number, b: number, c: number, d: number) => void;
     readonly __wasm_bindgen_func_elem_450: (a: number, b: number, c: number) => void;
     readonly __wasm_bindgen_func_elem_453: (a: number, b: number, c: number) => void;
     readonly __wasm_bindgen_func_elem_458: (a: number, b: number) => void;

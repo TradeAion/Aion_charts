@@ -331,6 +331,30 @@ impl ChartInner {
             });
     }
 
+    fn emit_drawing_created_event(&mut self, drawing_id: u64) {
+        let Some(tool) = self.engine.drawings.get(drawing_id).map(|drawing| drawing.tool()) else {
+            return;
+        };
+        let Ok(id) = u32::try_from(drawing_id) else {
+            return;
+        };
+        self.engine
+            .event_bus
+            .emit(axiuscharts::ChartEvent::DrawingCreated {
+                id,
+                tool: tool.as_api_key().to_string(),
+            });
+    }
+
+    fn emit_drawing_selected_event(&mut self, selected_id: Option<u64>) {
+        let selected_id_u32 = selected_id.and_then(|id| u32::try_from(id).ok());
+        self.engine
+            .event_bus
+            .emit(axiuscharts::ChartEvent::DrawingSelected {
+                id: selected_id_u32,
+            });
+    }
+
     fn emit_visible_range_change_if_changed(
         &mut self,
         before_start: f64,
@@ -1245,6 +1269,9 @@ impl ChartInner {
             let mut should_return = false;
             let mut drag_cursor: Option<&'static str> = None;
             let mut activate_drawing_drag = false;
+            let mut completed_drawing_id: Option<u64> = None;
+            let previous_selected_id = self.engine.drawings.selected_id;
+            let mut selected_id_after_interaction = previous_selected_id;
 
             {
                 let drawings = &mut self.engine.drawings;
@@ -1255,7 +1282,9 @@ impl ChartInner {
                         drawings.start_creating(bar, price);
                     } else {
                         // Multi-step tools: place next anchor on click
-                        drawings.finalize_creation_step(bar, price);
+                        if drawings.finalize_creation_step(bar, price) {
+                            completed_drawing_id = drawings.selected_id;
+                        }
                     }
                     should_return = true;
                 } else {
@@ -1273,6 +1302,7 @@ impl ChartInner {
                         };
 
                         drawings.select(id);
+                        selected_id_after_interaction = Some(id);
                         if result.part == HitPart::Label {
                             drawings.begin_text_edit(id);
                             drag_cursor =
@@ -1290,8 +1320,16 @@ impl ChartInner {
                     } else {
                         // Click on empty space: deselect
                         drawings.deselect_all();
+                        selected_id_after_interaction = None;
                     }
                 }
+            }
+
+            if previous_selected_id != selected_id_after_interaction {
+                self.emit_drawing_selected_event(selected_id_after_interaction);
+            }
+            if let Some(id) = completed_drawing_id {
+                self.emit_drawing_created_event(id);
             }
 
             if should_return {
@@ -1357,9 +1395,12 @@ impl ChartInner {
         }
 
         // If a drawing was being created (drag-to-create: release = place second anchor)
+        let mut completed_drawing_id: Option<u64> = None;
+        let mut finalized_creation = false;
         {
             let drawings = &mut self.engine.drawings;
             if drawings.is_creating() {
+                finalized_creation = true;
                 // Read the preview anchor position first (immutable borrow scope)
                 let anchor_pos: Option<(f64, f64)> = {
                     drawings
@@ -1384,17 +1425,24 @@ impl ChartInner {
                 };
                 // Now finalize with the stored position (mutable borrow)
                 if let Some((bar, price)) = anchor_pos {
-                    drawings.finalize_creation_step(bar, price);
+                    if drawings.finalize_creation_step(bar, price) {
+                        completed_drawing_id = drawings.selected_id;
+                    }
                 }
-                self.engine.stamp_drawing_timestamps();
-                self.interaction.cancel_pointer_gesture();
-                self.interaction.drawing_drag_active = false;
-                self.interaction.set_drawing_cursor(None);
-                if !self.interaction.is_touch {
-                    self.engine.crosshair.active = true;
-                }
-                return;
             }
+        }
+        if finalized_creation {
+            self.engine.stamp_drawing_timestamps();
+            self.interaction.cancel_pointer_gesture();
+            self.interaction.drawing_drag_active = false;
+            self.interaction.set_drawing_cursor(None);
+            if let Some(id) = completed_drawing_id {
+                self.emit_drawing_created_event(id);
+            }
+            if !self.interaction.is_touch {
+                self.engine.crosshair.active = true;
+            }
+            return;
         }
 
         // End any drawing drag
