@@ -33,6 +33,7 @@ const MIN_BOX_WIDTH_CSS: f64 = 12.0;
 pub struct TextDrawing {
     id: u64,
     state: DrawingState,
+    locked: bool,
     style: DrawingStyle,
     anchors: Vec<AnchorPoint>,
     text: DrawingText,
@@ -63,6 +64,7 @@ impl TextDrawing {
             // Single-anchor tool: start at step 0 so finalize_creation_step()
             // completes immediately on the first click.
             state: DrawingState::Creating { step: 0 },
+            locked: false,
             style,
             anchors: vec![AnchorPoint::new(bar_index, price)],
             text: DrawingText {

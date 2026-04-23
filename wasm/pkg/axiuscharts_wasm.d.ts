@@ -305,6 +305,10 @@ export class AxiusCharts {
      */
     get_css_variables(): any;
     /**
+     * Get chart-wide drawing lock summary across the main pane and all subpanes.
+     */
+    get_drawings_lock_summary_json(): string;
+    /**
      * Get the chart-wide execution label mode.
      */
     get_execution_label_mode(): string;
@@ -572,6 +576,10 @@ export class AxiusCharts {
      * Get the number of overlay series.
      */
     series_count(): number;
+    /**
+     * Lock or unlock every drawing on the chart across the main pane and all subpanes.
+     */
+    set_all_drawings_locked(locked: boolean): boolean;
     /**
      * Replace the allowed interval list. Pass an empty array to remove the allowlist.
      */
@@ -987,6 +995,10 @@ export class AxiusCharts {
      */
     set_replay_playing(playing: boolean): void;
     /**
+     * Lock or unlock the currently selected drawing.
+     */
+    set_selected_drawing_locked(locked: boolean): boolean;
+    /**
      * Set inline text on the currently selected drawing.
      */
     set_selected_drawing_text(text: string): boolean;
@@ -1280,6 +1292,7 @@ export interface InitOutput {
     readonly axiuscharts_get_available_chart_types: (a: number) => void;
     readonly axiuscharts_get_chart_type: (a: number, b: number) => void;
     readonly axiuscharts_get_css_variables: (a: number) => number;
+    readonly axiuscharts_get_drawings_lock_summary_json: (a: number, b: number) => void;
     readonly axiuscharts_get_execution_label_mode: (a: number, b: number) => void;
     readonly axiuscharts_get_execution_mark_text_visible: (a: number) => number;
     readonly axiuscharts_get_execution_marks_json: (a: number, b: number) => void;
@@ -1339,6 +1352,7 @@ export interface InitOutput {
     readonly axiuscharts_replay_step_forward: (a: number, b: number) => void;
     readonly axiuscharts_reset_viewport: (a: number, b: number, c: number) => void;
     readonly axiuscharts_series_count: (a: number) => number;
+    readonly axiuscharts_set_all_drawings_locked: (a: number, b: number) => number;
     readonly axiuscharts_set_allowed_intervals: (a: number, b: number, c: number) => void;
     readonly axiuscharts_set_auto_scroll: (a: number, b: number) => void;
     readonly axiuscharts_set_axis_border_color: (a: number, b: number, c: number, d: number, e: number) => void;
@@ -1409,6 +1423,7 @@ export interface InitOutput {
     readonly axiuscharts_set_replay_mode: (a: number, b: number, c: number) => void;
     readonly axiuscharts_set_replay_options: (a: number, b: number, c: number) => void;
     readonly axiuscharts_set_replay_playing: (a: number, b: number) => void;
+    readonly axiuscharts_set_selected_drawing_locked: (a: number, b: number) => number;
     readonly axiuscharts_set_selected_drawing_text: (a: number, b: number, c: number) => number;
     readonly axiuscharts_set_selected_drawing_text_alignment: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly axiuscharts_set_selected_drawing_text_style: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
@@ -1492,12 +1507,12 @@ export interface InitOutput {
     readonly chartworkspace_split_active: (a: number, b: number, c: number, d: number) => void;
     readonly chartworkspace_split_pane: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
-    readonly __wasm_bindgen_func_elem_449: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_460: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_2576: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_450: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_453: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_458: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_451: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_462: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_2592: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_452: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_455: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_460: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

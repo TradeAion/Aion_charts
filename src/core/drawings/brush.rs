@@ -16,6 +16,7 @@ use crate::impl_drawing_accessors;
 pub struct BrushDrawing {
     id: u64,
     state: DrawingState,
+    locked: bool,
     style: DrawingStyle,
     /// The two required "anchors" that the Drawing trait API expects.
     /// For brush, anchor[0] = first recorded point, anchor[1] = last.
@@ -34,6 +35,7 @@ impl BrushDrawing {
         Self {
             id,
             state: DrawingState::Creating { step: 1 },
+            locked: false,
             style,
             anchors: vec![
                 AnchorPoint::new(bar_index, price),

@@ -4863,6 +4863,56 @@ impl AxiusCharts {
         }
     }
 
+    /// Lock or unlock the currently selected drawing.
+    pub fn set_selected_drawing_locked(&mut self, locked: bool) -> bool {
+        let changed = self
+            .inner
+            .borrow_mut()
+            .engine
+            .drawings
+            .set_selected_locked(locked);
+        if changed {
+            self.mark_dirty();
+        }
+        changed
+    }
+
+    /// Get chart-wide drawing lock summary across the main pane and all subpanes.
+    pub fn get_drawings_lock_summary_json(&self) -> String {
+        let s = self.inner.borrow();
+        let mut total = s.engine.drawings.len();
+        let mut locked_count = s.engine.drawings.locked_count();
+
+        for subpane in &s.subpanes {
+            total += subpane.drawings.len();
+            locked_count += subpane.drawings.locked_count();
+        }
+
+        let summary = axiuscharts::core::drawings::types::DrawingsLockSummary {
+            total,
+            locked_count,
+            all_locked: total > 0 && locked_count == total,
+        };
+        serde_json::to_string(&summary)
+            .unwrap_or_else(|_| "{\"total\":0,\"lockedCount\":0,\"allLocked\":false}".to_string())
+    }
+
+    /// Lock or unlock every drawing on the chart across the main pane and all subpanes.
+    pub fn set_all_drawings_locked(&mut self, locked: bool) -> bool {
+        let mut s = self.inner.borrow_mut();
+        let mut changed = s.engine.drawings.set_all_locked(locked);
+
+        for subpane in s.subpanes.iter_mut() {
+            changed |= subpane.drawings.set_all_locked(locked);
+        }
+
+        drop(s);
+        if changed {
+            self.mark_dirty();
+        }
+        changed
+    }
+
     /// Set inline text on the currently selected drawing.
     pub fn set_selected_drawing_text(&mut self, text: &str) -> bool {
         let changed = self
@@ -8093,13 +8143,17 @@ impl AxiusCharts {
 
                         // Update drawing drag
                         if let Some(id) = sp.drawings.selected_id {
-                            let drag_state = sp.drawings.get(id).map(|d| (d.tool(), d.state()));
+                            let drag_state = sp
+                                .drawings
+                                .get(id)
+                                .map(|d| (d.tool(), d.state(), d.locked()));
                             if let Some((
                                 tool,
                                 axiuscharts::core::drawings::types::DrawingState::Dragging {
                                     anchor_index,
                                     ..
                                 },
+                                locked,
                             )) = drag_state
                             {
                                 sp.drawings.update_drag(id, bar, price);
@@ -8115,6 +8169,7 @@ impl AxiusCharts {
                                         tool,
                                         hit_part,
                                         anchor_index,
+                                        locked,
                                     );
                                 drawing_cursor = Some(if drag_cursor == "move" {
                                     "grabbing"
@@ -8146,12 +8201,17 @@ impl AxiusCharts {
                                             }
                                             _ => None,
                                         };
-                                        if let Some(tool) = sp.drawings.get(id).map(|d| d.tool()) {
+                                        if let Some((tool, locked)) = sp
+                                            .drawings
+                                            .get(id)
+                                            .map(|d| (d.tool(), d.locked()))
+                                        {
                                             drawing_cursor = Some(
                                             axiuscharts::core::drawings::types::cursor_for_drawing_hit(
                                                 tool,
                                                 hit.part,
                                                 anchor_idx,
+                                                locked,
                                             ),
                                         );
                                         }
@@ -8329,6 +8389,7 @@ impl AxiusCharts {
                                         d.tool(),
                                         result.part,
                                         anchor_idx,
+                                        d.locked(),
                                     )
                                 })
                                 .unwrap_or("move");
@@ -8470,10 +8531,12 @@ impl AxiusCharts {
                                     }
                                     _ => None,
                                 };
-                                if let Some(tool) = sp.drawings.get(id).map(|d| d.tool()) {
+                                if let Some((tool, locked)) =
+                                    sp.drawings.get(id).map(|d| (d.tool(), d.locked()))
+                                {
                                     hover_cursor =
                                         axiuscharts::core::drawings::types::cursor_for_drawing_hit(
-                                            tool, hit.part, anchor_idx,
+                                            tool, hit.part, anchor_idx, locked,
                                         );
                                 }
                             }
@@ -8555,10 +8618,12 @@ impl AxiusCharts {
                                     }
                                     _ => None,
                                 };
-                                if let Some(tool) = sp.drawings.get(id).map(|d| d.tool()) {
+                                if let Some((tool, locked)) =
+                                    sp.drawings.get(id).map(|d| (d.tool(), d.locked()))
+                                {
                                     hover_cursor =
                                         axiuscharts::core::drawings::types::cursor_for_drawing_hit(
-                                            tool, hit.part, anchor_idx,
+                                            tool, hit.part, anchor_idx, locked,
                                         );
                                 }
                             }

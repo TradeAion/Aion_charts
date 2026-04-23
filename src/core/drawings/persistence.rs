@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
 
-pub const DRAWINGS_SNAPSHOT_VERSION: u32 = 5;
+pub const DRAWINGS_SNAPSHOT_VERSION: u32 = 6;
 
 fn snapshot_version() -> u32 {
     DRAWINGS_SNAPSHOT_VERSION
@@ -24,6 +24,8 @@ pub struct SerializedDrawing {
     #[serde(default)]
     pub id: u64,
     pub tool: String,
+    #[serde(default)]
+    pub locked: bool,
     #[serde(default)]
     pub style: SerializedDrawingStyle,
     #[serde(default)]
@@ -330,6 +332,18 @@ fn apply_snapshot_migration_step(
             }
             Ok(payload)
         }
+        5 => {
+            // v5 → v6: introduces the persisted per-drawing `locked` flag.
+            // The field is `bool` with serde default, so legacy snapshots
+            // deserialize as unlocked drawings without mutating payload data.
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert(
+                    "version".to_string(),
+                    serde_json::Value::from((from_version + 1) as u64),
+                );
+            }
+            Ok(payload)
+        }
         // Future migrations should be added here as `vN -> vN+1` transforms.
         _ => Err(DrawingsMigrationError::UnknownVersion(from_version)),
     }
@@ -375,6 +389,7 @@ mod tests {
             drawings: vec![SerializedDrawing {
                 id: 7,
                 tool: "trend_line".to_string(),
+                locked: false,
                 style: SerializedDrawingStyle::default(),
                 anchors: vec![
                     SerializedAnchorPoint {
@@ -478,6 +493,7 @@ mod tests {
         assert_eq!(migrated.drawings[0].text_font_size, None);
         assert_eq!(migrated.drawings[0].text_italic, None);
         assert_eq!(migrated.drawings[0].text_color, None);
+        assert!(!migrated.drawings[0].locked);
         assert!(migrated.drawings[0].fibonacci_levels.is_empty());
     }
 

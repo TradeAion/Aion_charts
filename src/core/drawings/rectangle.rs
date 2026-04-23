@@ -15,6 +15,7 @@ use crate::impl_drawing_accessors;
 pub struct RectangleDrawing {
     id: u64,
     state: DrawingState,
+    locked: bool,
     style: DrawingStyle,
     anchors: Vec<AnchorPoint>,
     text: DrawingText,
@@ -29,6 +30,7 @@ impl RectangleDrawing {
         Self {
             id,
             state: DrawingState::Creating { step: 1 },
+            locked: false,
             style: DrawingStyle::rectangle_from_theme(
                 &crate::core::renderer::theme::ThemeConfig::default(),
             ),

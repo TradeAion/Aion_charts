@@ -13,8 +13,8 @@ use wasm_bindgen::JsCast;
 
 use axiuscharts::{
     hit_test_execution_mark_hit_areas, Bar, ChartEngine, ExecutionMarkHitArea, HitZone,
-    InteractionHandler, MainChartType, OrderLineHit, OrderLineId, OverlayRenderer, PriceAxisRenderer, PriceLineHit,
-    PriceLineId, TimeAxisRenderer,
+    InteractionHandler, MainChartType, OrderLineHit, OrderLineId, OverlayRenderer,
+    PriceAxisRenderer, PriceLineHit, PriceLineId, TimeAxisRenderer,
 };
 
 use crate::canvas_manager::WidgetLayout;
@@ -332,7 +332,12 @@ impl ChartInner {
     }
 
     fn emit_drawing_created_event(&mut self, drawing_id: u64) {
-        let Some(tool) = self.engine.drawings.get(drawing_id).map(|drawing| drawing.tool()) else {
+        let Some(tool) = self
+            .engine
+            .drawings
+            .get(drawing_id)
+            .map(|drawing| drawing.tool())
+        else {
             return;
         };
         let Ok(id) = u32::try_from(drawing_id) else {
@@ -930,11 +935,11 @@ impl ChartInner {
                     drawings.hit_test(x, y, &self.engine.viewport, pw, ph)
                 {
                     use axiuscharts::core::drawings::types::cursor_for_drawing_hit;
-                    let tool = drawings
+                    let (tool, locked) = drawings
                         .get(hit_id)
-                        .map(|d| d.tool())
-                        .unwrap_or(axiuscharts::DrawingTool::None);
-                    hover_cursor = Some(cursor_for_drawing_hit(tool, result.part, None));
+                        .map(|d| (d.tool(), d.locked()))
+                        .unwrap_or((axiuscharts::DrawingTool::None, false));
+                    hover_cursor = Some(cursor_for_drawing_hit(tool, result.part, None, locked));
                     drawings.set_hovered(Some(hit_id));
                 } else {
                     drawings.clear_hovered();
@@ -1189,19 +1194,21 @@ impl ChartInner {
                                 line.options.quantity,
                             )
                         });
-                        
+
                         // Remove the order line
                         self.engine.order_lines.remove(&id);
-                        
+
                         // Emit cancel event via EventBus
                         if let Some((price, order_type, side, quantity)) = order_info {
-                            self.engine.event_bus.emit(axiuscharts::ChartEvent::OrderLineCancelled {
-                                id: id.0.clone(),
-                                price,
-                                order_type,
-                                side,
-                                quantity,
-                            });
+                            self.engine.event_bus.emit(
+                                axiuscharts::ChartEvent::OrderLineCancelled {
+                                    id: id.0.clone(),
+                                    price,
+                                    order_type,
+                                    side,
+                                    quantity,
+                                },
+                            );
                         }
                         return;
                     }
@@ -1292,10 +1299,10 @@ impl ChartInner {
                     let hit = drawings.hit_test(x, y, &self.engine.viewport, pw, ph);
                     if let Some((id, result)) = hit {
                         use axiuscharts::core::drawings::types::{cursor_for_drawing_hit, HitPart};
-                        let tool = drawings
+                        let (tool, locked) = drawings
                             .get(id)
-                            .map(|d| d.tool())
-                            .unwrap_or(axiuscharts::DrawingTool::None);
+                            .map(|d| (d.tool(), d.locked()))
+                            .unwrap_or((axiuscharts::DrawingTool::None, false));
                         let anchor_idx = match result.part {
                             HitPart::Anchor(i) => Some(i),
                             _ => None,
@@ -1305,16 +1312,24 @@ impl ChartInner {
                         selected_id_after_interaction = Some(id);
                         if result.part == HitPart::Label {
                             drawings.begin_text_edit(id);
-                            drag_cursor =
-                                Some(cursor_for_drawing_hit(tool, result.part, anchor_idx));
+                            drag_cursor = Some(cursor_for_drawing_hit(
+                                tool,
+                                result.part,
+                                anchor_idx,
+                                locked,
+                            ));
                         } else {
                             // Allow body-dragging again for rectangles and other drawings.
                             // Rectangle edges/corners still resize because they are exposed
                             // as dedicated anchor hits, while body hits move the whole shape.
                             drawings.start_drag(id, anchor_idx, bar, price);
-                            drag_cursor =
-                                Some(cursor_for_drawing_hit(tool, result.part, anchor_idx));
-                            activate_drawing_drag = true;
+                            drag_cursor = Some(cursor_for_drawing_hit(
+                                tool,
+                                result.part,
+                                anchor_idx,
+                                locked,
+                            ));
+                            activate_drawing_drag = !locked;
                         }
                         should_return = true;
                     } else {
@@ -1363,7 +1378,7 @@ impl ChartInner {
         // End order line drag
         if let Some(id) = self.order_line_drag_id.take() {
             let order_id = OrderLineId::new(id.clone());
-            
+
             // Capture order info before ending drag (old_price is in drag_start_price)
             let order_info = self.engine.order_lines.get(&order_id).map(|line| {
                 (
@@ -1373,18 +1388,20 @@ impl ChartInner {
                     line.options.quantity,
                 )
             });
-            
+
             if let Some(new_price) = self.engine.order_lines.end_drag(&order_id) {
                 // Emit order modified event via EventBus
                 if let Some((old_price, order_type, side, quantity)) = order_info {
-                    self.engine.event_bus.emit(axiuscharts::ChartEvent::OrderLineModified {
-                        id: id.clone(),
-                        old_price,
-                        new_price,
-                        order_type,
-                        side,
-                        quantity,
-                    });
+                    self.engine
+                        .event_bus
+                        .emit(axiuscharts::ChartEvent::OrderLineModified {
+                            id: id.clone(),
+                            old_price,
+                            new_price,
+                            order_type,
+                            side,
+                            quantity,
+                        });
                 }
             }
             self.interaction.cancel_pointer_gesture();

@@ -123,7 +123,12 @@ pub fn cursor_for_drawing_hit(
     tool: DrawingTool,
     part: HitPart,
     _anchor_index: Option<usize>,
+    locked: bool,
 ) -> &'static str {
+    if locked && part != HitPart::None {
+        return "not-allowed";
+    }
+
     match part {
         HitPart::None => "crosshair",
         HitPart::Anchor(idx) => {
@@ -411,6 +416,7 @@ pub struct DrawingTextEditorTarget {
 pub struct SelectedDrawingInfo {
     pub id: u64,
     pub tool: String,
+    pub locked: bool,
     pub supports_text: bool,
     pub supports_text_style: bool,
     pub placeholder: String,
@@ -463,6 +469,14 @@ pub struct SelectedDrawingInfo {
     /// Fill alpha in [0, 1], when applicable. Surfaced separately from
     /// `fill_color` so the UI can edit opacity without parsing #RRGGBBAA.
     pub fill_alpha: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DrawingsLockSummary {
+    pub total: usize,
+    pub locked_count: usize,
+    pub all_locked: bool,
 }
 
 #[cfg(test)]

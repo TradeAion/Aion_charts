@@ -12,6 +12,7 @@ use crate::impl_drawing_accessors;
 pub struct ScaleDrawing {
     id: u64,
     state: DrawingState,
+    locked: bool,
     style: DrawingStyle,
     anchors: Vec<AnchorPoint>,
 }
@@ -22,6 +23,7 @@ impl ScaleDrawing {
         Self {
             id,
             state: DrawingState::Creating { step: 1 },
+            locked: false,
             style: DrawingStyle::scale_from_theme(
                 &crate::core::renderer::theme::ThemeConfig::default(),
             ),

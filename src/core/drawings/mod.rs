@@ -428,6 +428,9 @@ impl DrawingManager {
         h_pixel_ratio: f64,
         v_pixel_ratio: f64,
     ) {
+        if drawing.locked() {
+            return;
+        }
         let Some(text) = Self::drawing_text_ref(drawing) else {
             return;
         };
@@ -616,7 +619,9 @@ impl DrawingManager {
 
     pub fn begin_text_edit(&mut self, id: u64) -> bool {
         let Some(original_value) = self.get(id).and_then(|drawing| {
-            Self::drawing_text_ref(drawing.as_ref()).map(|text| text.value.clone())
+            (!drawing.locked())
+                .then(|| Self::drawing_text_ref(drawing.as_ref()).map(|text| text.value.clone()))
+                .flatten()
         }) else {
             return false;
         };
@@ -922,6 +927,9 @@ impl DrawingManager {
         pane_css_w: f64,
         pane_css_h: f64,
     ) -> Option<DrawingTextEditorTarget> {
+        if drawing.locked() {
+            return None;
+        }
         Self::editor_target_for_drawing_sized(drawing, vp, pane_css_w, pane_css_h, true)
     }
 
@@ -1299,6 +1307,7 @@ impl DrawingManager {
         Some(SelectedDrawingInfo {
             id,
             tool: drawing_tool_to_key(tool).to_string(),
+            locked: drawing.locked(),
             supports_text,
             supports_text_style,
             placeholder: "+ Add text".to_string(),
@@ -1333,6 +1342,35 @@ impl DrawingManager {
             fill_color: fill_color_hex,
             fill_alpha,
         })
+    }
+
+    pub fn set_selected_locked(&mut self, locked: bool) -> bool {
+        let Some(id) = self.selected_id else {
+            return false;
+        };
+
+        if locked
+            && self
+                .text_edit
+                .as_ref()
+                .map(|state| state.drawing_id == id)
+                .unwrap_or(false)
+        {
+            self.commit_text_edit();
+        }
+
+        let Some(drawing) = self.get_mut(id) else {
+            return false;
+        };
+        if drawing.locked() == locked {
+            return false;
+        }
+
+        if matches!(drawing.state(), DrawingState::Dragging { .. }) {
+            drawing.set_state(DrawingState::Selected);
+        }
+        drawing.set_locked(locked);
+        true
     }
 
     pub fn set_selected_drawing_text(&mut self, text: String) -> bool {
@@ -1542,6 +1580,42 @@ impl DrawingManager {
     /// Number of drawings.
     pub fn len(&self) -> usize {
         self.drawings.len()
+    }
+
+    /// Number of drawings currently locked against editing/dragging.
+    pub fn locked_count(&self) -> usize {
+        self.drawings
+            .iter()
+            .filter(|drawing| drawing.locked())
+            .count()
+    }
+
+    /// Whether every drawing in this manager is currently locked.
+    pub fn all_locked(&self) -> bool {
+        !self.drawings.is_empty() && self.locked_count() == self.drawings.len()
+    }
+
+    /// Lock or unlock every drawing owned by this manager.
+    pub fn set_all_locked(&mut self, locked: bool) -> bool {
+        if locked {
+            self.commit_text_edit();
+        }
+
+        let mut changed = false;
+        for drawing in &mut self.drawings {
+            if drawing.locked() == locked {
+                continue;
+            }
+
+            if locked && matches!(drawing.state(), DrawingState::Dragging { .. }) {
+                drawing.set_state(DrawingState::Selected);
+            }
+
+            drawing.set_locked(locked);
+            changed = true;
+        }
+
+        changed
     }
 
     /// Remove all drawings and reset interaction state.
@@ -1815,6 +1889,9 @@ impl DrawingManager {
     pub fn start_drag(&mut self, id: u64, anchor_index: Option<usize>, bar_index: f64, price: f64) {
         self.commit_text_edit();
         if let Some(d) = self.get_mut(id) {
+            if d.locked() {
+                return;
+            }
             let (initial_bar, initial_price) = (bar_index, price);
 
             // For rectangle corner/edge drag, pin the opposite reference for the
@@ -1934,7 +2011,7 @@ impl DrawingManager {
             let show_anchors = matches!(
                 d.state(),
                 DrawingState::Selected | DrawingState::Dragging { .. }
-            );
+            ) && !d.locked();
             let mut geom = d.generate_geometry(
                 vp,
                 pane_css_w,
@@ -2056,6 +2133,7 @@ impl DrawingManager {
                 SerializedDrawing {
                     id: drawing.id(),
                     tool: drawing_tool_to_key(drawing.tool()).to_string(),
+                    locked: drawing.locked(),
                     style: drawing.style().into(),
                     anchors: drawing
                         .anchors()
@@ -2203,6 +2281,7 @@ impl DrawingManager {
         let SerializedDrawing {
             id,
             tool,
+            locked,
             style,
             anchors,
             points,
@@ -2278,6 +2357,7 @@ impl DrawingManager {
         }
 
         *drawing.style_mut() = style.into();
+        drawing.set_locked(locked);
         *drawing.anchors_mut() = anchors.into_iter().map(Into::into).collect();
 
         if tool == DrawingTool::Brush {
@@ -2426,6 +2506,88 @@ mod tests {
             .expect("selected drawing info");
         assert_eq!(info.text, "De");
         assert!(!info.text_editing);
+    }
+
+    #[test]
+    fn locking_selected_drawing_blocks_drag_and_surfaces_locked_state() {
+        let mut manager = DrawingManager::new();
+        let id = complete_trend_line(&mut manager);
+
+        assert!(manager.set_selected_locked(true));
+        let info = manager
+            .selected_drawing_info(&test_viewport(), 800.0, 600.0)
+            .expect("selected drawing info");
+        assert!(info.locked);
+
+        let before = manager
+            .get(id)
+            .expect("drawing before drag")
+            .anchors()
+            .iter()
+            .map(|anchor| (anchor.point.bar_index, anchor.point.price))
+            .collect::<Vec<_>>();
+        manager.start_drag(id, None, 20.0, 110.0);
+        manager.update_drag(id, 35.0, 130.0);
+        let drawing = manager.get(id).expect("drawing after drag");
+        let after = drawing
+            .anchors()
+            .iter()
+            .map(|anchor| (anchor.point.bar_index, anchor.point.price))
+            .collect::<Vec<_>>();
+
+        assert_eq!(drawing.state(), DrawingState::Selected);
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn locking_selected_drawing_blocks_text_edit() {
+        let mut manager = DrawingManager::new();
+        complete_trend_line(&mut manager);
+
+        assert!(manager.set_selected_locked(true));
+        assert!(!manager.begin_text_edit_selected());
+        assert!(!manager.is_text_editing_selected());
+    }
+
+    #[test]
+    fn locking_all_drawings_locks_every_drawing_and_blocks_drag() {
+        let mut manager = DrawingManager::new();
+        let first_id = complete_trend_line(&mut manager);
+        let second_id = complete_trend_line(&mut manager);
+
+        assert_eq!(manager.len(), 2);
+        assert_eq!(manager.locked_count(), 0);
+        assert!(!manager.all_locked());
+        assert!(manager.set_all_locked(true));
+        assert_eq!(manager.locked_count(), 2);
+        assert!(manager.all_locked());
+        assert!(
+            manager.get(first_id).expect("first drawing").locked()
+                && manager.get(second_id).expect("second drawing").locked()
+        );
+
+        manager.select(first_id);
+        let before = manager
+            .get(first_id)
+            .expect("drawing before drag")
+            .anchors()
+            .iter()
+            .map(|anchor| (anchor.point.bar_index, anchor.point.price))
+            .collect::<Vec<_>>();
+        manager.start_drag(first_id, None, 20.0, 110.0);
+        manager.update_drag(first_id, 35.0, 130.0);
+        let after = manager
+            .get(first_id)
+            .expect("drawing after drag")
+            .anchors()
+            .iter()
+            .map(|anchor| (anchor.point.bar_index, anchor.point.price))
+            .collect::<Vec<_>>();
+        assert_eq!(after, before);
+
+        assert!(manager.set_all_locked(false));
+        assert_eq!(manager.locked_count(), 0);
+        assert!(!manager.all_locked());
     }
 
     #[test]

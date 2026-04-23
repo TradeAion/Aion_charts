@@ -65,6 +65,12 @@ macro_rules! impl_drawing_accessors {
         fn set_state(&mut self, state: DrawingState) {
             self.state = state;
         }
+        fn locked(&self) -> bool {
+            self.locked
+        }
+        fn set_locked(&mut self, locked: bool) {
+            self.locked = locked;
+        }
         fn style(&self) -> &DrawingStyle {
             &self.style
         }
@@ -98,6 +104,10 @@ pub trait Drawing: std::fmt::Debug {
     /// Current interaction state.
     fn state(&self) -> DrawingState;
     fn set_state(&mut self, state: DrawingState);
+
+    /// Whether pointer editing/dragging is blocked for this drawing.
+    fn locked(&self) -> bool;
+    fn set_locked(&mut self, locked: bool);
 
     /// Style (color, width, dash, etc.)
     fn style(&self) -> &DrawingStyle;

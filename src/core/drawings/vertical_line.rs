@@ -18,6 +18,7 @@ use crate::impl_drawing_accessors;
 pub struct VerticalLineDrawing {
     id: u64,
     state: DrawingState,
+    locked: bool,
     style: DrawingStyle,
     anchors: Vec<AnchorPoint>,
     text: DrawingText,
@@ -31,6 +32,7 @@ impl VerticalLineDrawing {
             // Single-anchor tool: start at step 0 so finalize_creation_step()
             // completes without creating a phantom second anchor.
             state: DrawingState::Creating { step: 0 },
+            locked: false,
             style: DrawingStyle::default(),
             anchors: vec![AnchorPoint::new(bar_index, price)],
             text: DrawingText::default(),

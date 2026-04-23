@@ -14,6 +14,7 @@ use crate::impl_drawing_accessors;
 pub struct TrendLineDrawing {
     id: u64,
     state: DrawingState,
+    locked: bool,
     style: DrawingStyle,
     anchors: Vec<AnchorPoint>,
     text: DrawingText,
@@ -25,6 +26,7 @@ impl TrendLineDrawing {
         Self {
             id,
             state: DrawingState::Creating { step: 1 },
+            locked: false,
             style: DrawingStyle::default(),
             anchors: vec![
                 AnchorPoint::new(bar_index, price),

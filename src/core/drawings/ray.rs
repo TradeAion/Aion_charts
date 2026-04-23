@@ -15,6 +15,7 @@ use crate::impl_drawing_accessors;
 pub struct RayDrawing {
     id: u64,
     state: DrawingState,
+    locked: bool,
     style: DrawingStyle,
     anchors: Vec<AnchorPoint>,
     text: DrawingText,
@@ -26,6 +27,7 @@ impl RayDrawing {
         Self {
             id,
             state: DrawingState::Creating { step: 1 },
+            locked: false,
             style: DrawingStyle::default(),
             anchors: vec![
                 AnchorPoint::new(bar_index, price),
