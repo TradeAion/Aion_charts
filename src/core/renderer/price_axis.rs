@@ -869,7 +869,7 @@ impl PriceAxisRenderer {
 ///
 /// Uses inferred bar interval from timestamp deltas and `js_sys::Date::now()`
 /// to compute the time remaining until the current bar closes.
-/// The countdown is appended as ` MM:SS` (or `H:MM:SS` / `Xd HH:MM:SS`).
+/// Daily-or-higher intervals are rendered in coarse `Xd Hh` / `Hh` format.
 fn append_countdown_to_labels(
     labels: &mut [ProjectedLastValue],
     bars: &crate::core::data::BarArray,
@@ -886,7 +886,7 @@ fn append_countdown_to_labels(
     let bar_close_ms = last_ts + interval_ms;
     let remaining_ms = bar_close_ms - now_ms;
 
-    if let Some(countdown_str) = format_countdown(remaining_ms) {
+    if let Some(countdown_str) = format_countdown(remaining_ms, Some(interval_ms)) {
         labels[0].countdown = Some(countdown_str);
     }
 }

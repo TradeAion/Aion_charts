@@ -280,10 +280,12 @@ pub fn format_crosshair_time(ms: u64) -> String {
 ///
 /// - Less than 1 hour: `MM:SS`
 /// - 1 hour to < 24 hours: `H:MM:SS`
-/// - 24 hours or more: `Xd HH:MM:SS`
+/// - 24 hours or more:
+///   - Intraday intervals: `Xd HH:MM:SS`
+///   - Daily-or-higher intervals: `Xd HHh` (or `HHh` when under one day)
 ///
 /// Returns `None` if `remaining_ms` is zero or negative.
-pub fn format_countdown(remaining_ms: f64) -> Option<String> {
+pub fn format_countdown(remaining_ms: f64, interval_ms: Option<f64>) -> Option<String> {
     if remaining_ms <= 0.0 {
         return None;
     }
@@ -294,6 +296,17 @@ pub fn format_countdown(remaining_ms: f64) -> Option<String> {
     let total_hours = total_mins / 60;
     let hours = total_hours % 24;
     let days = total_hours / 24;
+    let is_daily_or_higher = interval_ms.unwrap_or_default() >= 86_400_000.0;
+
+    if is_daily_or_higher {
+        if total_hours == 0 {
+            return Some("<1h".to_string());
+        }
+        if days > 0 {
+            return Some(format!("{}d {}h", days, hours));
+        }
+        return Some(format!("{}h", total_hours));
+    }
 
     if days > 0 {
         Some(format!("{}d {:02}:{:02}:{:02}", days, hours, mins, secs))
@@ -352,7 +365,7 @@ pub fn nice_step_ceiling(raw: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::format_price;
+    use super::{format_countdown, format_price};
 
     #[test]
     fn format_price_follows_step_precision() {
@@ -364,5 +377,31 @@ mod tests {
     fn format_price_preserves_higher_precision_when_needed() {
         assert_eq!(format_price(1.234, 0.001), "1.234");
         assert_eq!(format_price(-1_234.5, 0.1), "\u{2212}1,234.5");
+    }
+
+    #[test]
+    fn format_countdown_daily_or_higher_is_coarse() {
+        let thirteen_days_eighteen_hours =
+            ((13 * 24 + 18) as f64) * 60.0 * 60.0 * 1000.0 + 48.0 * 60.0 * 1000.0 + 5_000.0;
+        assert_eq!(
+            format_countdown(thirteen_days_eighteen_hours, Some(86_400_000.0)),
+            Some("13d 18h".to_string())
+        );
+    }
+
+    #[test]
+    fn format_countdown_intraday_keeps_seconds() {
+        assert_eq!(
+            format_countdown(90_000.0, Some(60_000.0)),
+            Some("01:30".to_string())
+        );
+    }
+
+    #[test]
+    fn format_countdown_daily_or_higher_under_one_hour() {
+        assert_eq!(
+            format_countdown(30.0 * 60.0 * 1000.0, Some(86_400_000.0)),
+            Some("<1h".to_string())
+        );
     }
 }
