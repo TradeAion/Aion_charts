@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+pub const DEFAULT_MAX_INDICATOR_PANES: usize = 32;
+pub const DEFAULT_MAX_BARS_PER_LOAD: usize = 250_000;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GuardrailViolation {
     WorkspacePaneLimit {
@@ -84,12 +87,35 @@ impl WorkspaceGuardrails {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChartGuardrails {
+    #[serde(default = "default_max_indicator_panes")]
     pub max_indicator_panes: Option<usize>,
+    #[serde(default = "default_max_bars_per_load")]
     pub max_bars_per_load: Option<usize>,
+    #[serde(default)]
     pub allowed_intervals: Option<Vec<String>>,
+    #[serde(default)]
     pub lock_interval_change: bool,
+}
+
+impl Default for ChartGuardrails {
+    fn default() -> Self {
+        Self {
+            max_indicator_panes: Some(DEFAULT_MAX_INDICATOR_PANES),
+            max_bars_per_load: Some(DEFAULT_MAX_BARS_PER_LOAD),
+            allowed_intervals: None,
+            lock_interval_change: false,
+        }
+    }
+}
+
+fn default_max_indicator_panes() -> Option<usize> {
+    Some(DEFAULT_MAX_INDICATOR_PANES)
+}
+
+fn default_max_bars_per_load() -> Option<usize> {
+    Some(DEFAULT_MAX_BARS_PER_LOAD)
 }
 
 impl ChartGuardrails {
@@ -218,7 +244,10 @@ fn normalize_interval(interval: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ChartGuardrails, GuardrailViolation, WorkspaceGuardrails};
+    use super::{
+        ChartGuardrails, GuardrailViolation, WorkspaceGuardrails, DEFAULT_MAX_BARS_PER_LOAD,
+        DEFAULT_MAX_INDICATOR_PANES,
+    };
 
     #[test]
     fn workspace_guardrails_allow_unlimited_splits_by_default() {
@@ -240,10 +269,23 @@ mod tests {
     }
 
     #[test]
-    fn chart_guardrails_allow_unlimited_indicator_panes_by_default() {
+    fn chart_guardrails_apply_safe_limits_by_default() {
         let guardrails = ChartGuardrails::default();
         assert!(guardrails.can_add_indicator_pane(4));
         assert!(guardrails.enforce_indicator_pane_total(12).is_ok());
+        assert_eq!(
+            guardrails.enforce_indicator_pane_total(DEFAULT_MAX_INDICATOR_PANES + 1),
+            Err(GuardrailViolation::IndicatorPaneLimit {
+                max_indicator_panes: DEFAULT_MAX_INDICATOR_PANES,
+            })
+        );
+        assert_eq!(
+            guardrails.enforce_bar_load(DEFAULT_MAX_BARS_PER_LOAD + 1),
+            Err(GuardrailViolation::BarLoadLimit {
+                requested: DEFAULT_MAX_BARS_PER_LOAD + 1,
+                max_bars_per_load: DEFAULT_MAX_BARS_PER_LOAD,
+            })
+        );
     }
 
     #[test]

@@ -632,14 +632,8 @@ impl SubPane {
                 }));
             let observer = web_sys::ResizeObserver::new(cb.as_ref().unchecked_ref())?;
 
-            let observe_with_dpcb = js_sys::Function::new_with_args(
-                "observer,element",
-                "try { observer.observe(element, { box: 'device-pixel-content-box' }); return true; } catch(e) { observer.observe(element); return false; }",
-            );
-            let _ =
-                observe_with_dpcb.call2(&JsValue::NULL, observer.as_ref(), &chart_container_for_ro);
-            let _ =
-                observe_with_dpcb.call2(&JsValue::NULL, observer.as_ref(), &axis_container_for_ro);
+            crate::observe_resize_with_device_pixel_box(&observer, &chart_container_for_ro);
+            crate::observe_resize_with_device_pixel_box(&observer, &axis_container_for_ro);
 
             (Some(cb), Some(observer))
         };

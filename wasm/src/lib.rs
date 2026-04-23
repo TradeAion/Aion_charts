@@ -53,6 +53,7 @@
 )]
 #![cfg(target_arch = "wasm32")]
 
+use axiuscharts::core::guardrails::{DEFAULT_MAX_BARS_PER_LOAD, DEFAULT_MAX_INDICATOR_PANES};
 use axiuscharts::{
     generate_footprint_sample_data, generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions,
     BaselineSeriesOptions, Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup,
@@ -123,6 +124,32 @@ fn has_exact_widget_sizes(s: &ChartInner) -> bool {
         && es.time_axis_ph > 0
 }
 
+fn exact_widget_sizes_match_layout(s: &ChartInner, dpr: f64) -> bool {
+    if !has_exact_widget_sizes(s) {
+        return false;
+    }
+
+    fn close_to_css_px(exact_px: u32, css_px: f64, dpr: f64) -> bool {
+        if css_px <= 0.0 || dpr <= 0.0 {
+            return false;
+        }
+        let expected = (css_px * dpr).round().max(1.0);
+        (exact_px as f64 - expected).abs() <= 1.0
+    }
+
+    let es = s.exact_sizes;
+    let (pcw, pch) = s.layout.pane_css_size();
+    let (acw, ach) = s.layout.price_axis_css_size();
+    let (tcw, tch) = s.layout.time_axis_css_size();
+
+    close_to_css_px(es.pane_pw, pcw, dpr)
+        && close_to_css_px(es.pane_ph, pch, dpr)
+        && close_to_css_px(es.price_axis_pw, acw, dpr)
+        && close_to_css_px(es.price_axis_ph, ach, dpr)
+        && close_to_css_px(es.time_axis_pw, tcw, dpr)
+        && close_to_css_px(es.time_axis_ph, tch, dpr)
+}
+
 fn parse_main_viewport_preset(mode: Option<&str>) -> MainViewportPreset {
     match mode.unwrap_or("default") {
         "fit_all" | "fit-all" | "fitAll" => MainViewportPreset::FitAll,
@@ -156,7 +183,7 @@ struct ResizeSignature {
 
 fn read_resize_signature(s: &ChartInner, dpr: f64) -> ResizeSignature {
     let (cw, ch) = s.layout.container_css_size();
-    let exact_available = has_exact_widget_sizes(s);
+    let exact_available = exact_widget_sizes_match_layout(s, dpr);
     let es = s.exact_sizes;
 
     let ((pane_pw, pane_ph), (price_axis_pw, price_axis_ph), (time_axis_pw, time_axis_ph)) =
@@ -244,12 +271,38 @@ fn extract_device_pixel_content_box_size(
     Some((inline_size as u32, block_size as u32))
 }
 
+pub(crate) fn observe_resize_with_device_pixel_box(
+    observer: &web_sys::ResizeObserver,
+    element: &web_sys::Element,
+) {
+    let options = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &options,
+        &JsValue::from_str("box"),
+        &JsValue::from_str("device-pixel-content-box"),
+    );
+    let observe = js_sys::Reflect::get(observer.as_ref(), &JsValue::from_str("observe"))
+        .ok()
+        .and_then(|value| value.dyn_into::<js_sys::Function>().ok());
+    if let Some(observe) = observe {
+        if observe
+            .call2(observer.as_ref(), element.as_ref(), options.as_ref())
+            .is_ok()
+        {
+            return;
+        }
+        let _ = observe.call1(observer.as_ref(), element.as_ref());
+        return;
+    }
+    observer.observe(element);
+}
+
 /// Synchronize all widget canvases + renderers from current layout sizes.
 ///
 /// If `prefer_exact` is true and device-pixel-content-box sizes are available,
 /// exact bitmap sizes are used; otherwise it falls back to `round(css * dpr)`.
 fn sync_widget_sizes(s: &mut ChartInner, dpr: f64, prefer_exact: bool) {
-    if prefer_exact && has_exact_widget_sizes(s) {
+    if prefer_exact && exact_widget_sizes_match_layout(s, dpr) {
         let es = s.exact_sizes;
 
         let (pcw, pch) = s.layout.pane_css_size();
@@ -523,6 +576,94 @@ async fn resolve_renderer_backend(
 
 fn js_err(message: impl Into<String>) -> JsValue {
     JsValue::from_str(&message.into())
+}
+
+const MAX_BULK_JSON_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
+const MAX_CONFIG_JSON_PAYLOAD_BYTES: usize = 1024 * 1024;
+const MAX_DRAWING_JSON_PAYLOAD_BYTES: usize = 16 * 1024 * 1024;
+const MAX_INDICATOR_SOURCE_BYTES: usize = 512 * 1024;
+const MAX_DRAWINGS_PER_PANE_IMPORT: usize = 10_000;
+const MAX_DRAWING_SUBPANES_PER_IMPORT: usize = DEFAULT_MAX_INDICATOR_PANES;
+const MAX_EXECUTION_MARKS_PER_IMPORT: usize = 100_000;
+const MAX_FOOTPRINT_LEVELS_PER_PAYLOAD: usize = 2_000_000;
+const MAX_FIBONACCI_LEVELS_PER_IMPORT: usize = 256;
+const MAX_MTF_SERIES_PER_IMPORT: usize = 512;
+const MAX_MTF_POINTS_PER_SERIES: usize = DEFAULT_MAX_BARS_PER_LOAD;
+const HARD_MAX_OPS_PER_BAR: u64 = 1_000_000;
+const HARD_MAX_WALL_TIME_PER_BAR_MS: u64 = 16;
+const HARD_MAX_MEMORY_BYTES_PER_INSTANCE: usize = 64 * 1024 * 1024;
+const HARD_MAX_OBJECTS_PER_INSTANCE: usize = 10_000;
+const HARD_MAX_VERTICES_PER_FRAME: usize = 4_000_000;
+
+fn enforce_json_payload_size(context: &str, json: &str, max_bytes: usize) -> Result<(), JsValue> {
+    let bytes = json.len();
+    if bytes > max_bytes {
+        return Err(js_err(format!(
+            "{context}: JSON payload is {bytes} bytes; max is {max_bytes}"
+        )));
+    }
+    Ok(())
+}
+
+fn enforce_count_limit(
+    context: &str,
+    label: &str,
+    count: usize,
+    max: usize,
+) -> Result<(), JsValue> {
+    if count > max {
+        return Err(js_err(format!(
+            "{context}: {label} count {count} exceeds max {max}"
+        )));
+    }
+    Ok(())
+}
+
+fn enforce_count_limit_str(
+    context: &str,
+    label: &str,
+    count: usize,
+    max: usize,
+) -> Result<(), String> {
+    if count > max {
+        return Err(format!(
+            "{context}: {label} count {count} exceeds max {max}"
+        ));
+    }
+    Ok(())
+}
+
+fn capped_u64_field(root: &JsonValue, field: &str, default: u64, hard_max: u64) -> u64 {
+    root.get(field)
+        .and_then(|v| v.as_u64())
+        .unwrap_or(default)
+        .min(hard_max)
+}
+
+fn capped_usize_field(root: &JsonValue, field: &str, default: usize, hard_max: usize) -> usize {
+    root.get(field)
+        .and_then(|v| v.as_u64())
+        .map(|v| (v as u128).min(hard_max as u128) as usize)
+        .unwrap_or(default)
+        .min(hard_max)
+}
+
+fn indicator_error_result(code: &str, message: &str, hint: &str) -> JsValue {
+    let diagnostics = vec![axiuscharts::CompileDiagnostic {
+        code: code.to_string(),
+        severity: axiuscharts::DiagnosticSeverity::Error,
+        message: message.to_string(),
+        hint: Some(hint.to_string()),
+        span: None,
+    }];
+    let obj = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("indicatorId"), &JsValue::NULL);
+    let _ = js_sys::Reflect::set(
+        &obj,
+        &JsValue::from_str("diagnostics"),
+        &diagnostics_to_js(&diagnostics),
+    );
+    obj.into()
 }
 
 fn json_value_to_js(value: &JsonValue) -> JsValue {
@@ -1391,7 +1532,13 @@ fn parse_color_json_value(value: &serde_json::Value) -> Option<[f32; 4]> {
 
 fn parse_historical_footprint_json_dataset(
     json: &str,
+    guardrails: &ChartGuardrails,
 ) -> Result<(Vec<Bar>, axiuscharts::FootprintData), JsValue> {
+    enforce_json_payload_size(
+        "set_data_with_footprint_json",
+        json,
+        MAX_BULK_JSON_PAYLOAD_BYTES,
+    )?;
     let parsed: serde_json::Value =
         serde_json::from_str(json).map_err(|e| js_err(format!("JSON parse error: {}", e)))?;
 
@@ -1410,9 +1557,11 @@ fn parse_historical_footprint_json_dataset(
             ))
         }
     };
+    enforce_bar_load_guardrail("set_data_with_footprint_json", guardrails, items.len())?;
 
     let mut bars = Vec::with_capacity(items.len());
     let mut footprint = axiuscharts::FootprintData::new();
+    let mut total_level_count = 0usize;
 
     for (bar_index, item) in items.iter().enumerate() {
         let timestamp = item
@@ -1479,6 +1628,17 @@ fn parse_historical_footprint_json_dataset(
         if levels_arr.is_empty() {
             continue;
         }
+        total_level_count = total_level_count
+            .checked_add(levels_arr.len())
+            .ok_or_else(|| {
+                js_err("set_data_with_footprint_json: footprint level count overflow")
+            })?;
+        enforce_count_limit(
+            "set_data_with_footprint_json",
+            "footprint levels",
+            total_level_count,
+            MAX_FOOTPRINT_LEVELS_PER_PAYLOAD,
+        )?;
 
         let mut prices = Vec::with_capacity(levels_arr.len());
         let mut bids = Vec::with_capacity(levels_arr.len());
@@ -1558,10 +1718,24 @@ fn normalize_price_range(min: f64, max: f64, fallback_min: f64, fallback_max: f6
     if hi < lo {
         std::mem::swap(&mut lo, &mut hi);
     }
+    if hi <= lo || !lo.is_finite() || !hi.is_finite() {
+        let center = finite_or(lo, finite_or(fallback_min, 0.0));
+        let fallback_span =
+            (finite_or(fallback_max, center + 1.0) - finite_or(fallback_min, center - 1.0)).abs();
+        let span = fallback_span.max(axiuscharts::core::constants::DEGENERATE_PRICE_RANGE_FALLBACK);
+        lo = center - span * 0.5;
+        hi = center + span * 0.5;
+    }
     (lo, hi)
 }
 
 fn validate_drawing_snapshot(snapshot: &axiuscharts::DrawingSnapshot) -> Result<(), String> {
+    enforce_count_limit_str(
+        "drawing snapshot",
+        "drawings",
+        snapshot.drawings.len(),
+        MAX_DRAWINGS_PER_PANE_IMPORT,
+    )?;
     let mut manager = axiuscharts::DrawingManager::new();
     manager.replace_from_snapshot(snapshot.clone())
 }
@@ -2827,17 +3001,9 @@ impl AxiusCharts {
                 }));
             let observer = web_sys::ResizeObserver::new(cb.as_ref().unchecked_ref())?;
 
-            // Try to observe with device-pixel-content-box; fall back to content-box
-            let observe_with_dpcb = js_sys::Function::new_with_args(
-                "observer,element",
-                "try { observer.observe(element, { box: 'device-pixel-content-box' }); return true; } catch(e) { observer.observe(element); return false; }"
-            );
-            let _ =
-                observe_with_dpcb.call2(&JsValue::NULL, observer.as_ref(), &pane_container_for_ro);
-            let _ =
-                observe_with_dpcb.call2(&JsValue::NULL, observer.as_ref(), &price_container_for_ro);
-            let _ =
-                observe_with_dpcb.call2(&JsValue::NULL, observer.as_ref(), &time_container_for_ro);
+            observe_resize_with_device_pixel_box(&observer, &pane_container_for_ro);
+            observe_resize_with_device_pixel_box(&observer, &price_container_for_ro);
+            observe_resize_with_device_pixel_box(&observer, &time_container_for_ro);
 
             (cb, observer)
         };
@@ -4004,6 +4170,7 @@ impl AxiusCharts {
         volume: &[f64],
         timestamps: &[u64],
     ) -> Result<(), JsValue> {
+        enforce_bar_load_guardrail("set_data_arrays", &self.guardrails, open.len())?;
         let bars = build_main_bars_from_arrays(
             "set_data_arrays",
             open,
@@ -4048,6 +4215,17 @@ impl AxiusCharts {
         bid_volumes: &[f64],
         ask_volumes: &[f64],
     ) -> Result<(), JsValue> {
+        enforce_bar_load_guardrail(
+            "set_data_with_footprint_arrays",
+            &self.guardrails,
+            open.len(),
+        )?;
+        enforce_count_limit(
+            "set_data_with_footprint_arrays",
+            "footprint levels",
+            prices.len(),
+            MAX_FOOTPRINT_LEVELS_PER_PAYLOAD,
+        )?;
         let (bars, footprint) = build_historical_footprint_dataset_from_arrays(
             "set_data_with_footprint_arrays",
             open,
@@ -4088,7 +4266,7 @@ impl AxiusCharts {
     /// Also accepts `{ "bars": [...] }` as the top-level wrapper and the
     /// existing `bid_volume` / `bidVolume` / `ask_volume` / `askVolume` level aliases.
     pub fn set_data_with_footprint_json(&mut self, json: &str) -> Result<(), JsValue> {
-        let (bars, footprint) = parse_historical_footprint_json_dataset(json)?;
+        let (bars, footprint) = parse_historical_footprint_json_dataset(json, &self.guardrails)?;
         let count = bars.len();
         enforce_bar_load_guardrail("set_data_with_footprint_json", &self.guardrails, count)?;
 
@@ -4163,6 +4341,22 @@ impl AxiusCharts {
         bid_volumes: &[f64],
         ask_volumes: &[f64],
     ) -> Result<(), JsValue> {
+        let max_bars = self
+            .guardrails
+            .max_bars_per_load
+            .unwrap_or(DEFAULT_MAX_BARS_PER_LOAD);
+        enforce_count_limit(
+            "set_footprint_data_arrays",
+            "footprint bars",
+            bar_indices.len(),
+            max_bars,
+        )?;
+        enforce_count_limit(
+            "set_footprint_data_arrays",
+            "footprint levels",
+            prices.len(),
+            MAX_FOOTPRINT_LEVELS_PER_PAYLOAD,
+        )?;
         ensure_equal_len("prices", prices.len(), "bid_volumes", bid_volumes.len())?;
         ensure_equal_len("prices", prices.len(), "ask_volumes", ask_volumes.len())?;
         ensure_finite_slice("prices", prices)?;
@@ -4238,12 +4432,24 @@ impl AxiusCharts {
     /// - `bid_volume` / `bidVolume` for `bid`
     /// - `ask_volume` / `askVolume` for `ask`
     pub fn set_footprint_data_json(&mut self, json: &str) -> Result<(), JsValue> {
+        enforce_json_payload_size("set_footprint_data_json", json, MAX_BULK_JSON_PAYLOAD_BYTES)?;
         let parsed: Vec<serde_json::Value> = serde_json::from_str(json)
             .map_err(|e| JsValue::from_str(&format!("JSON parse error: {}", e)))?;
+        let max_bars = self
+            .guardrails
+            .max_bars_per_load
+            .unwrap_or(DEFAULT_MAX_BARS_PER_LOAD);
+        enforce_count_limit(
+            "set_footprint_data_json",
+            "footprint bars",
+            parsed.len(),
+            max_bars,
+        )?;
 
         let mut inner = self.inner.borrow_mut();
         let bar_count = inner.engine.bars.len();
         let mut bars = Vec::with_capacity(parsed.len());
+        let mut total_level_count = 0usize;
 
         for item in &parsed {
             let bar_index = item
@@ -4264,6 +4470,15 @@ impl AxiusCharts {
                 .get("levels")
                 .and_then(|v| v.as_array())
                 .ok_or_else(|| js_err("set_footprint_data_json: missing levels array"))?;
+            total_level_count = total_level_count
+                .checked_add(levels_arr.len())
+                .ok_or_else(|| js_err("set_footprint_data_json: footprint level count overflow"))?;
+            enforce_count_limit(
+                "set_footprint_data_json",
+                "footprint levels",
+                total_level_count,
+                MAX_FOOTPRINT_LEVELS_PER_PAYLOAD,
+            )?;
 
             let mut prices = Vec::with_capacity(levels_arr.len());
             let mut bids = Vec::with_capacity(levels_arr.len());
@@ -4355,6 +4570,7 @@ impl AxiusCharts {
     /// - `show_unfinished_auction`: boolean
     /// - `zoom_price_with_time`: boolean (footprint wheel/pinch X+Y zoom)
     pub fn set_footprint_options(&mut self, json: &str) -> Result<(), JsValue> {
+        enforce_json_payload_size("set_footprint_options", json, MAX_CONFIG_JSON_PAYLOAD_BYTES)?;
         let v: serde_json::Value = serde_json::from_str(json)
             .map_err(|e| JsValue::from_str(&format!("JSON parse error: {}", e)))?;
 
@@ -5174,8 +5390,19 @@ impl AxiusCharts {
             label: Option<String>,
         }
 
+        enforce_json_payload_size(
+            "set_selected_fibonacci_levels_json",
+            json,
+            MAX_CONFIG_JSON_PAYLOAD_BYTES,
+        )?;
         let parsed: Vec<FibLevelInput> = serde_json::from_str(json)
             .map_err(|err| js_err(format!("Invalid fibonacci levels JSON: {err}")))?;
+        enforce_count_limit(
+            "set_selected_fibonacci_levels_json",
+            "fibonacci levels",
+            parsed.len(),
+            MAX_FIBONACCI_LEVELS_PER_IMPORT,
+        )?;
         let levels = parsed
             .into_iter()
             .filter(|level| level.ratio.is_finite())
@@ -5423,6 +5650,11 @@ impl AxiusCharts {
 
     /// Restore a full chart persistence snapshot (styles + viewport + pane layout + drawings).
     pub fn import_persistence_state(&mut self, json: &str) -> Result<(), JsValue> {
+        enforce_json_payload_size(
+            "import_persistence_state",
+            json,
+            MAX_DRAWING_JSON_PAYLOAD_BYTES,
+        )?;
         let snapshot: ChartPersistenceState = serde_json::from_str(json)
             .map_err(|e| js_err(format!("Invalid persistence JSON: {e}")))?;
 
@@ -5432,6 +5664,18 @@ impl AxiusCharts {
                 snapshot.version, CHART_PERSISTENCE_VERSION
             )));
         }
+        enforce_count_limit(
+            "import_persistence_state",
+            "indicator panes",
+            snapshot.panes.len(),
+            DEFAULT_MAX_INDICATOR_PANES,
+        )?;
+        enforce_count_limit(
+            "import_persistence_state",
+            "drawing subpanes",
+            snapshot.drawings.subpanes.len(),
+            MAX_DRAWING_SUBPANES_PER_IMPORT,
+        )?;
 
         validate_drawing_snapshot(&snapshot.drawings.main).map_err(|e| {
             js_err(format!(
@@ -5634,6 +5878,7 @@ impl AxiusCharts {
     ///
     /// Existing drawings are replaced atomically. Unknown subpane IDs in the payload are ignored.
     pub fn import_drawings(&mut self, json: &str) -> Result<(), JsValue> {
+        enforce_json_payload_size("import_drawings", json, MAX_DRAWING_JSON_PAYLOAD_BYTES)?;
         let payload: DrawingStore = serde_json::from_str(json)
             .map_err(|e| js_err(format!("Invalid drawing snapshot JSON: {e}")))?;
 
@@ -5643,6 +5888,12 @@ impl AxiusCharts {
                 payload.version, DRAWING_STORE_VERSION
             )));
         }
+        enforce_count_limit(
+            "import_drawings",
+            "drawing subpanes",
+            payload.subpanes.len(),
+            MAX_DRAWING_SUBPANES_PER_IMPORT,
+        )?;
 
         validate_drawing_snapshot(&payload.main)
             .map_err(|e| js_err(format!("Invalid main-pane drawing snapshot: {e}")))?;
@@ -6819,10 +7070,21 @@ impl AxiusCharts {
     /// }
     /// ```
     pub fn set_execution_marks_json(&mut self, json: &str) -> Result<(), JsValue> {
+        enforce_json_payload_size(
+            "set_execution_marks_json",
+            json,
+            MAX_BULK_JSON_PAYLOAD_BYTES,
+        )?;
         let payload: serde_json::Value = serde_json::from_str(json)
             .map_err(|e| js_err(format!("Invalid execution marks JSON: {}", e)))?;
         let snapshot =
             axiuscharts::parse_execution_marks_snapshot_value(&payload).map_err(js_err)?;
+        enforce_count_limit(
+            "set_execution_marks_json",
+            "execution marks",
+            snapshot.marks.len(),
+            MAX_EXECUTION_MARKS_PER_IMPORT,
+        )?;
         let marks: Vec<_> = snapshot
             .marks
             .into_iter()
@@ -7355,6 +7617,28 @@ impl AxiusCharts {
     /// Compile user indicator source into the internal IR program artifact.
     /// Returns: `{ indicatorId, diagnostics }`.
     pub fn indicator_compile(&self, source: &str, meta_json: &str) -> JsValue {
+        if source.len() > MAX_INDICATOR_SOURCE_BYTES {
+            return indicator_error_result(
+                "INDL-3005",
+                &format!(
+                    "indicator source is {} bytes; max is {}",
+                    source.len(),
+                    MAX_INDICATOR_SOURCE_BYTES
+                ),
+                "reduce the indicator source size",
+            );
+        }
+        if meta_json.len() > MAX_CONFIG_JSON_PAYLOAD_BYTES {
+            return indicator_error_result(
+                "INDL-3006",
+                &format!(
+                    "indicator metadata is {} bytes; max is {}",
+                    meta_json.len(),
+                    MAX_CONFIG_JSON_PAYLOAD_BYTES
+                ),
+                "reduce the indicator metadata payload",
+            );
+        }
         let feature_flags = serde_json::from_str::<JsonValue>(meta_json)
             .ok()
             .and_then(|v| v.get("featureFlags").cloned())
@@ -7410,6 +7694,9 @@ impl AxiusCharts {
     /// Attach a compiled indicator program to the current chart.
     /// Returns a runtime instance ID, or 0 on failure.
     pub fn indicator_attach(&self, indicator_id: u32, opts_json: &str) -> u32 {
+        if opts_json.len() > MAX_CONFIG_JSON_PAYLOAD_BYTES {
+            return 0;
+        }
         let inputs = serde_json::from_str::<JsonValue>(opts_json)
             .ok()
             .and_then(|v| v.get("inputs").cloned())
@@ -7450,6 +7737,9 @@ impl AxiusCharts {
 
     /// Set runtime inputs for an attached indicator instance.
     pub fn indicator_set_inputs(&self, instance_id: u32, inputs_json: &str) -> bool {
+        if inputs_json.len() > MAX_CONFIG_JSON_PAYLOAD_BYTES {
+            return false;
+        }
         let inputs = serde_json::from_str::<JsonValue>(inputs_json).unwrap_or(JsonValue::Null);
         let inputs = self.with_indicator_input_defaults(inputs);
         let updated = {
@@ -7473,6 +7763,9 @@ impl AxiusCharts {
     /// JSON payload:
     /// `{ clear?: bool, series: [{ symbol, chartTimeframe, requestId?, timeframe, field, mode?, points: [...] }] }`
     pub fn indicator_set_mtf_snapshot(&self, snapshot_json: &str) -> bool {
+        if snapshot_json.len() > MAX_BULK_JSON_PAYLOAD_BYTES {
+            return false;
+        }
         fn json_u64(raw: Option<&JsonValue>) -> Option<u64> {
             match raw {
                 Some(JsonValue::Number(v)) => v
@@ -7494,6 +7787,9 @@ impl AxiusCharts {
         }
 
         if let Some(series_list) = root.get("series").and_then(|v| v.as_array()) {
+            if series_list.len() > MAX_MTF_SERIES_PER_IMPORT {
+                return false;
+            }
             for (idx, series) in series_list.iter().enumerate() {
                 let Some(item) = series.as_object() else {
                     continue;
@@ -7544,6 +7840,9 @@ impl AxiusCharts {
 
                 let mut samples = Vec::<MtfResolvedSample>::new();
                 if let Some(points) = item.get("points").and_then(|v| v.as_array()) {
+                    if points.len() > MAX_MTF_POINTS_PER_SERIES {
+                        return false;
+                    }
                     for point in points {
                         let Some(p) = point.as_object() else {
                             continue;
@@ -7831,31 +8130,42 @@ impl AxiusCharts {
 
     /// Privileged runtime-only resource limit override for an indicator instance.
     pub fn indicator_set_resource_limits(&mut self, instance_id: u32, limits_json: &str) -> bool {
+        if limits_json.len() > MAX_CONFIG_JSON_PAYLOAD_BYTES {
+            return false;
+        }
         let parsed = serde_json::from_str::<JsonValue>(limits_json).unwrap_or(JsonValue::Null);
+        let defaults = ResourceLimits::default();
         let limits = ResourceLimits {
-            max_ops_per_bar: parsed
-                .get("max_ops_per_bar")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(ResourceLimits::default().max_ops_per_bar),
-            max_wall_time_per_bar_ms: parsed
-                .get("max_wall_time_per_bar_ms")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(ResourceLimits::default().max_wall_time_per_bar_ms),
-            max_memory_bytes_per_instance: parsed
-                .get("max_memory_bytes_per_instance")
-                .and_then(|v| v.as_u64())
-                .map(|v| v as usize)
-                .unwrap_or(ResourceLimits::default().max_memory_bytes_per_instance),
-            max_objects_per_instance: parsed
-                .get("max_objects_per_instance")
-                .and_then(|v| v.as_u64())
-                .map(|v| v as usize)
-                .unwrap_or(ResourceLimits::default().max_objects_per_instance),
-            max_vertices_per_frame: parsed
-                .get("max_vertices_per_frame")
-                .and_then(|v| v.as_u64())
-                .map(|v| v as usize)
-                .unwrap_or(ResourceLimits::default().max_vertices_per_frame),
+            max_ops_per_bar: capped_u64_field(
+                &parsed,
+                "max_ops_per_bar",
+                defaults.max_ops_per_bar,
+                HARD_MAX_OPS_PER_BAR,
+            ),
+            max_wall_time_per_bar_ms: capped_u64_field(
+                &parsed,
+                "max_wall_time_per_bar_ms",
+                defaults.max_wall_time_per_bar_ms,
+                HARD_MAX_WALL_TIME_PER_BAR_MS,
+            ),
+            max_memory_bytes_per_instance: capped_usize_field(
+                &parsed,
+                "max_memory_bytes_per_instance",
+                defaults.max_memory_bytes_per_instance,
+                HARD_MAX_MEMORY_BYTES_PER_INSTANCE,
+            ),
+            max_objects_per_instance: capped_usize_field(
+                &parsed,
+                "max_objects_per_instance",
+                defaults.max_objects_per_instance,
+                HARD_MAX_OBJECTS_PER_INSTANCE,
+            ),
+            max_vertices_per_frame: capped_usize_field(
+                &parsed,
+                "max_vertices_per_frame",
+                defaults.max_vertices_per_frame,
+                HARD_MAX_VERTICES_PER_FRAME,
+            ),
         };
         self.inner
             .borrow_mut()
@@ -9991,7 +10301,9 @@ mod tests {
     };
     use axiuscharts::core::events::ChartEvent;
     use axiuscharts::core::renderer::value_projection::TimeScaleIndex;
-    use axiuscharts::{Bar, BarArray, ChartEngine, MainViewportPreset, RendererBackend, Viewport};
+    use axiuscharts::{
+        Bar, BarArray, ChartEngine, ChartGuardrails, MainViewportPreset, RendererBackend, Viewport,
+    };
 
     fn sample_bars(count: usize, start_ts: u64) -> Vec<Bar> {
         (0..count)
@@ -10227,7 +10539,8 @@ mod tests {
             ]
         }"#;
 
-        let (bars, footprint) = parse_historical_footprint_json_dataset(json).unwrap();
+        let (bars, footprint) =
+            parse_historical_footprint_json_dataset(json, &ChartGuardrails::default()).unwrap();
 
         assert_eq!(bars.len(), 2);
         assert_eq!(bars[1].timestamp, 2_000);

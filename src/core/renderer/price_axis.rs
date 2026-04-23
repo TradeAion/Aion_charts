@@ -287,8 +287,11 @@ impl PriceAxisRenderer {
         let h_css = h / dpr;
         self.base_ctx
             .set_fill_style_str(&rgba(&style.axis_text_color));
+        let label_half_css = style.font_size as f64 * 0.5;
+        let min_label_y_css = label_half_css;
+        let max_label_y_css = (h_css - label_half_css).max(min_label_y_css);
         for t in ticks {
-            let y_css = t.pixel / dpr;
+            let y_css = (t.pixel / dpr).clamp(min_label_y_css, max_label_y_css);
             if y_css < 0.0 || y_css > h_css {
                 continue;
             }
@@ -358,7 +361,7 @@ impl PriceAxisRenderer {
 
         let metrics = RightAxisLabelMetrics::from_style(style, dpr);
         let extra_inset = style.crosshair_label_extra_inset() * dpr;
-        let geom = match compute_right_axis_label_geometry(
+        let geom = match compute_right_axis_label_geometry_with_vertical_mode(
             w,
             pane_limit_h,
             my,
@@ -367,6 +370,7 @@ impl PriceAxisRenderer {
             &metrics,
             extra_inset,
             RightAxisLabelWidthMode::AxisFull,
+            RightAxisLabelVerticalMode::FollowValue,
         ) {
             Some(v) => v,
             None => return,

@@ -273,12 +273,12 @@ export const chartworkspace_set_workspace_pane_background_color: (a: number, b: 
 export const chartworkspace_split_active: (a: number, b: number, c: number, d: number) => void;
 export const chartworkspace_split_pane: (a: number, b: number, c: number, d: number, e: number) => void;
 export const chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
-export const __wasm_bindgen_func_elem_451: (a: number, b: number) => void;
+export const __wasm_bindgen_func_elem_458: (a: number, b: number) => void;
+export const __wasm_bindgen_func_elem_469: (a: number, b: number, c: number) => void;
+export const __wasm_bindgen_func_elem_2637: (a: number, b: number, c: number, d: number) => void;
+export const __wasm_bindgen_func_elem_459: (a: number, b: number, c: number) => void;
 export const __wasm_bindgen_func_elem_462: (a: number, b: number, c: number) => void;
-export const __wasm_bindgen_func_elem_2618: (a: number, b: number, c: number, d: number) => void;
-export const __wasm_bindgen_func_elem_452: (a: number, b: number, c: number) => void;
-export const __wasm_bindgen_func_elem_455: (a: number, b: number, c: number) => void;
-export const __wasm_bindgen_func_elem_460: (a: number, b: number) => void;
+export const __wasm_bindgen_func_elem_467: (a: number, b: number) => void;
 export const __wbindgen_export: (a: number, b: number) => number;
 export const __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
 export const __wbindgen_export3: (a: number) => void;

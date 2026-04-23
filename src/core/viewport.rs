@@ -190,11 +190,16 @@ impl Viewport {
 
     #[inline]
     pub fn visible_bar_range(&self, len: usize) -> Option<(usize, usize)> {
-        if len == 0 {
+        if len == 0 || !self.start_bar.is_finite() || !self.end_bar.is_finite() {
             return None;
         }
-        let start = (self.start_bar.floor() as usize).min(len.saturating_sub(1));
-        let end = (self.end_bar.ceil() as usize).min(len);
+        let start_f = self.start_bar.floor();
+        let end_f = self.end_bar.ceil();
+        if end_f <= 0.0 || start_f >= len as f64 {
+            return None;
+        }
+        let start = start_f.max(0.0) as usize;
+        let end = end_f.min(len as f64).max(0.0) as usize;
         (start < end).then_some((start, end))
     }
 
@@ -288,7 +293,11 @@ impl Viewport {
     #[inline]
     pub fn price_to_frac(&self, price: f64) -> f64 {
         let internal = self.price_to_internal(price);
-        (internal - self.price_min) / (self.price_max - self.price_min)
+        let range = self.price_max - self.price_min;
+        if !internal.is_finite() || !range.is_finite() || range <= 0.0 {
+            return 0.0;
+        }
+        (internal - self.price_min) / range
     }
 
     /// Convert a raw price to internal coordinate space based on scale mode.
@@ -434,10 +443,13 @@ impl Viewport {
     #[inline]
     pub fn price_to_css_y(&self, price: f64, pane_css_h: f64) -> f64 {
         let range = self.price_max - self.price_min;
-        if range <= 0.0 {
+        if !range.is_finite() || range <= 0.0 {
             return 0.0;
         }
         let internal = self.price_to_internal(price);
+        if !internal.is_finite() {
+            return 0.0;
+        }
         let frac = (internal - self.price_min) / range;
         let candle_css_h = pane_css_h * self.candle_height_frac();
         (1.0 - frac) * candle_css_h
@@ -544,6 +556,35 @@ mod tests {
         assert_eq!(vp.price_to_frac(100.0), 0.0);
         assert_eq!(vp.price_to_frac(150.0), 0.5);
         assert_eq!(vp.price_to_frac(200.0), 1.0);
+    }
+
+    #[test]
+    fn visible_bar_range_returns_none_when_viewport_is_fully_offscreen() {
+        let mut vp = Viewport::new(800, 600);
+
+        vp.set_range(10.0, 20.0);
+        assert_eq!(vp.visible_bar_range(10), None);
+
+        vp.set_range(-20.0, -10.0);
+        assert_eq!(vp.visible_bar_range(10), None);
+    }
+
+    #[test]
+    fn visible_bar_range_clips_partial_overlap_without_forcing_last_bar() {
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(8.25, 15.0);
+
+        assert_eq!(vp.visible_bar_range(10), Some((8, 10)));
+    }
+
+    #[test]
+    fn price_to_frac_handles_degenerate_price_range() {
+        let mut vp = Viewport::new(800, 600);
+        vp.price_min = 100.0;
+        vp.price_max = 100.0;
+
+        assert_eq!(vp.price_to_frac(100.0), 0.0);
+        assert!(vp.price_to_frac(100.0).is_finite());
     }
 
     #[test]

@@ -31,18 +31,41 @@
       display: flex;
       align-items: center;
       gap: 6px;
-      padding: 6px 12px;
+      padding: 8px 12px;
       background: #1a1a1e;
       border-bottom: 1px solid #2a2a30;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       flex-shrink: 0;
+      width: 100%;
+      min-width: 0;
+      max-width: 100vw;
+      overflow-x: auto;
+      overflow-y: visible;
+      scrollbar-width: thin;
+      scrollbar-color: #3a3a44 transparent;
     }
+    .toolbar::-webkit-scrollbar { height: 5px; }
+    .toolbar::-webkit-scrollbar-thumb { background: #3a3a44; border-radius: 999px; }
     body.light .toolbar { background: #fff; border-color: #ddd; }
 
-    .toolbar-section { display: flex; align-items: center; gap: 4px; }
-    .toolbar-divider { width: 1px; height: 20px; background: #333; margin: 0 6px; }
+    .toolbar-section {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex: 0 0 auto;
+    }
+    .toolbar-section.compact-tools { gap: 3px; }
+    .toolbar-section.demo-actions { margin-left: auto; }
+    .toolbar-divider { width: 1px; height: 20px; background: #333; margin: 0 6px; flex: 0 0 auto; }
     body.light .toolbar-divider { background: #ccc; }
-    .toolbar-title { font-size: 14px; font-weight: 600; color: #22C55E; margin-right: 8px; }
+    .toolbar-title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: #22C55E;
+      margin-right: 8px;
+      white-space: nowrap;
+    }
 
     .badge {
       font-size: 10px;
@@ -75,6 +98,12 @@
     body.light .btn { background: #eee; color: #555; border-color: #ccc; }
     body.light .btn:hover { background: #ddd; color: #222; }
     body.light .btn.active { background: #dcfce7; color: #16a34a; border-color: #22C55E44; }
+    .demo-advanced,
+    #execution-marks-toggle,
+    #execution-text-toggle,
+    #order-lines-toggle {
+      display: none !important;
+    }
 
     .toolbar-select {
       font-size: 11px;
@@ -140,6 +169,8 @@
       position: relative;
       overflow: hidden;
       min-height: 0;
+      min-width: 0;
+      width: 100%;
     }
     #loading {
       position: absolute;
@@ -255,6 +286,10 @@
       backdrop-filter: blur(12px);
       z-index: 13;
       display: block;
+    }
+    body.demo-simple #drawing-panel {
+      display: none !important;
+      pointer-events: none !important;
     }
     body.light #drawing-panel {
       background: #ffffffdd;
@@ -500,7 +535,7 @@
     }
   </style>
 </head>
-<body>
+<body class="demo-simple">
   <div id="error-banner"></div>
 
   <!-- Toolbar -->
@@ -518,7 +553,7 @@
     <div class="toolbar-section" id="chart-type-buttons"></div>
     <div class="toolbar-divider"></div>
 
-    <div class="toolbar-section">
+    <div class="toolbar-section compact-tools">
       <button class="btn" id="draw-trendline" title="Shift: angle snap, Ctrl: OHLC snap">Line</button>
       <button class="btn" id="draw-hline">H-Line</button>
       <button class="btn" id="draw-vline">V-Line</button>
@@ -530,23 +565,23 @@
       <button class="btn" id="draw-brush">Brush</button>
       <button class="btn" id="draw-clear">Clear</button>
     </div>
-    <div class="toolbar-divider hide-mobile"></div>
+    <div class="toolbar-divider demo-advanced hide-mobile"></div>
 
-    <div class="toolbar-section hide-mobile">
+    <div class="toolbar-section demo-advanced hide-mobile">
       <button class="btn" id="sma-toggle">SMA</button>
       <button class="btn" id="ema-toggle">EMA</button>
       <button class="btn" id="bollinger-toggle">BB</button>
       <button class="btn" id="vwap-toggle">VWAP</button>
     </div>
-    <div class="toolbar-divider hide-mobile"></div>
+    <div class="toolbar-divider demo-advanced hide-mobile"></div>
 
-    <div class="toolbar-section hide-mobile">
+    <div class="toolbar-section demo-advanced hide-mobile">
       <button class="btn" id="rsi-pane-btn">RSI</button>
       <button class="btn" id="macd-pane-btn">MACD</button>
     </div>
-    <div class="toolbar-divider"></div>
+    <div class="toolbar-divider demo-advanced"></div>
 
-    <div class="toolbar-section">
+    <div class="toolbar-section demo-advanced">
       <details class="replay-menu" id="replay-menu">
         <summary class="btn" id="replay-menu-trigger">⏯ Replay</summary>
         <div class="replay-panel">
@@ -578,9 +613,9 @@
         </div>
       </details>
     </div>
-    <div class="toolbar-divider"></div>
+    <div class="toolbar-divider demo-advanced"></div>
 
-    <div class="toolbar-section">
+    <div class="toolbar-section demo-actions">
       <button class="btn" id="execution-marks-toggle" title="Toggle demo execution marks">Exec</button>
       <button class="btn active" id="execution-text-toggle" title="Toggle execution mark text labels">Text</button>
       <button class="btn" id="order-lines-toggle" title="Toggle demo order lines">Orders</button>
@@ -591,7 +626,7 @@
       <button class="btn active" id="footprint-xy-zoom-toggle">XY Zoom</button>
     </div>
 
-    <div class="toolbar-section" style="margin-left: auto;" id="renderer-group"></div>
+    <div class="toolbar-section" id="renderer-group"></div>
   </div>
 
   <!-- Chart -->
@@ -1028,6 +1063,7 @@
     const drawingPlaceholder = $('drawing-placeholder');
     const drawingTextEditor = $('drawing-text-editor');
     const drawingPanel = $('drawing-panel');
+    const drawingInspectorEnabled = false;
     const drawingPanelTool = $('drawing-panel-tool');
     const drawingPanelHint = $('drawing-panel-hint');
     const drawingTextActions = $('drawing-text-actions');
@@ -1347,6 +1383,13 @@
     }
 
     function syncDrawingInspector() {
+      if (!drawingInspectorEnabled) {
+        selectedDrawingInfo = null;
+        drawingInfoMissStreak = 0;
+        drawingPanel.style.display = 'none';
+        return;
+      }
+
       const previousId = selectedDrawingInfo?.id ?? null;
       let next = readSelectedDrawingInfo();
       if (next) {
@@ -1765,7 +1808,7 @@
     // ═══════════════════════════════════════════════════════════════════════
     // Order Lines Demo
     // ═══════════════════════════════════════════════════════════════════════
-    let orderLinesVisible = true;
+    let orderLinesVisible = false;
     let demoPositionEntryPrice = null;
     const demoPositionQuantity = 2.5;
 
@@ -1989,7 +2032,7 @@
         applyReplaySessionOptions();
         syncReplayControls();
         applyDemoExecutionMarks();
-        applyDemoOrderLines();  // Show Stop Loss & Take Profit lines by default
+        applyDemoOrderLines();  // Demo order placement lines stay opt-in to keep chart testing clean.
         syncOrderLinesToggle();
 
       } catch (e) {

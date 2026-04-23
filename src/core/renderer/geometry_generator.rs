@@ -20,13 +20,16 @@ use crate::core::renderer::transforms::{bar_to_x, color4, price_to_y};
 use crate::core::renderer::value_projection::TimeScaleIndex;
 use crate::core::viewport::Viewport;
 
-/// Cap wick thickness to a slimmer CSS width for a TradingView-like look.
+/// Keep wick thickness stable across high-DPI/mobile layouts.
 /// Returned value is in physical pixels.
 #[inline]
 fn effective_wick_width(sizing: &CandleSizing) -> f64 {
-    const MAX_WICK_CSS_PX: f64 = 0.8;
-    let max_phys = (MAX_WICK_CSS_PX * sizing.h_pixel_ratio).floor().max(1.0);
-    sizing.wick_width.min(max_phys).max(1.0)
+    let min_visible_phys = sizing.h_pixel_ratio.ceil().max(1.0);
+    sizing
+        .wick_width
+        .max(min_visible_phys)
+        .min(sizing.bar_width)
+        .max(1.0)
 }
 
 #[inline]
@@ -317,10 +320,22 @@ pub fn project_candles(
         let Some(center_x) = main_bar_center_x(i, vp, time_scale, chart_w).map(f64::round) else {
             continue;
         };
-        let body_top = price_to_y(b.open.max(b.close) as f64, vp, candle_h).round();
-        let body_bottom = price_to_y(b.open.min(b.close) as f64, vp, candle_h).round();
-        let high_y = price_to_y(b.high as f64, vp, candle_h).round();
-        let low_y = price_to_y(b.low as f64, vp, candle_h).round();
+        let body_price_high = b.open.max(b.close);
+        let body_price_low = b.open.min(b.close);
+        let body_top = price_to_y(body_price_high as f64, vp, candle_h).round();
+        let body_bottom = price_to_y(body_price_low as f64, vp, candle_h).round();
+        let mut high_y = price_to_y(b.high as f64, vp, candle_h).round();
+        let mut low_y = price_to_y(b.low as f64, vp, candle_h).round();
+
+        // Rounding can collapse a real wick to the body edge at some scroll /
+        // autoscale positions. Keep data-present wicks visible by at least one
+        // physical pixel so they do not flicker in and out while panning.
+        if b.high > body_price_high && high_y >= body_top {
+            high_y = body_top - 1.0;
+        }
+        if b.low < body_price_low && low_y <= body_bottom {
+            low_y = body_bottom + 1.0;
+        }
 
         // Wick X edges with anti-overlap clamp.
         let mut wick_left = center_x - wick_offset;
@@ -1151,10 +1166,18 @@ fn generate_heikin_ashi_into(
         let Some(phys_x) = main_bar_center_x(i, vp, time_scale, chart_w).map(f64::round) else {
             continue;
         };
-        let body_top = price_to_y(ha_open.max(ha_close), vp, candle_h).round();
-        let body_bottom = price_to_y(ha_open.min(ha_close), vp, candle_h).round();
-        let high_y = price_to_y(ha_high, vp, candle_h).round();
-        let low_y = price_to_y(ha_low, vp, candle_h).round();
+        let ha_body_high = ha_open.max(ha_close);
+        let ha_body_low = ha_open.min(ha_close);
+        let body_top = price_to_y(ha_body_high, vp, candle_h).round();
+        let body_bottom = price_to_y(ha_body_low, vp, candle_h).round();
+        let mut high_y = price_to_y(ha_high, vp, candle_h).round();
+        let mut low_y = price_to_y(ha_low, vp, candle_h).round();
+        if ha_high > ha_body_high && high_y >= body_top {
+            high_y = body_top - 1.0;
+        }
+        if ha_low < ha_body_low && low_y <= body_bottom {
+            low_y = body_bottom + 1.0;
+        }
 
         // Wick (high to body top)
         if body_top > high_y {
@@ -1207,7 +1230,7 @@ fn generate_heikin_ashi_into(
 
 #[cfg(test)]
 mod tests {
-    use super::project_candles;
+    use super::{effective_wick_width, project_candles};
     use crate::core::data::{Bar, BarArray};
     use crate::core::renderer::series::CandleSizing;
     use crate::core::renderer::value_projection::TimeScaleIndex;
@@ -1275,5 +1298,54 @@ mod tests {
             .expect("expected at least one overlap-clamped border rect");
         assert_eq!(overlapped.body_width, 3.0);
         assert_eq!(overlapped.bar_width, 2.0);
+    }
+
+    #[test]
+    fn wick_width_stays_one_css_pixel_on_high_dpr() {
+        let sizing = CandleSizing {
+            bar_width: 12.0,
+            wick_width: 2.0,
+            border_width: 3.0,
+            draw_body: true,
+            bar_spacing: 5.0,
+            h_pixel_ratio: 3.0,
+            v_pixel_ratio: 3.0,
+        };
+
+        assert_eq!(effective_wick_width(&sizing), 3.0);
+    }
+
+    #[test]
+    fn real_wicks_survive_subpixel_price_projection() {
+        let mut bars = BarArray::new();
+        bars.set(vec![Bar {
+            timestamp: 1,
+            open: 500.0,
+            high: 501.1,
+            low: 499.9,
+            close: 501.0,
+            volume: 100.0,
+        }])
+        .expect("bar");
+        let time_scale = TimeScaleIndex::from_bars(&bars);
+        let mut viewport = Viewport::new(100, 100);
+        viewport.volume_height_ratio = 0.0;
+        viewport.set_range(0.0, 1.0);
+        viewport.price_min = 0.0;
+        viewport.price_max = 1000.0;
+
+        let sizing = CandleSizing::compute_from_pane(100.0, &viewport, 1.0, 1.0);
+        let projected = project_candles(&bars, &time_scale, &viewport, 100.0, 100.0, &sizing);
+
+        assert_eq!(projected.len(), 1);
+        let candle = projected[0];
+        assert!(
+            candle.high_y < candle.body_top,
+            "upper wick should remain visible after rounding"
+        );
+        assert!(
+            candle.low_y > candle.body_bottom,
+            "lower wick should remain visible after rounding"
+        );
     }
 }

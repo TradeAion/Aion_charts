@@ -579,12 +579,18 @@ impl OverlayRenderer {
                         slot_center
                     };
                     let y_phys = projected.y_phys;
-                    // Clip to full pane height (LWC: y < 0 || y > bitmapSize.height)
-                    if x_anchor >= 0.0 && x_anchor < pane_pw && y_phys >= 0.0 && y_phys <= pane_ph {
+                    // Keep the live line connected to the axis label even after
+                    // horizontal panning moves the printing bar off the left edge.
+                    if y_phys >= 0.0 && y_phys <= pane_ph {
                         let y = y_phys.round() + correction;
+                        let x_start = if x_anchor.is_finite() {
+                            x_anchor.clamp(0.0, pane_pw)
+                        } else {
+                            0.0
+                        };
                         self.ctx.set_stroke_style_str(&rgba(&projected.color));
                         self.ctx.begin_path();
-                        self.ctx.move_to(x_anchor.max(0.0), y);
+                        self.ctx.move_to(x_start, y);
                         self.ctx.line_to(pane_pw + line_w + 1.0, y);
                         self.ctx.stroke();
                     }
@@ -643,14 +649,19 @@ impl OverlayRenderer {
             let x_anchor = bar_to_x(bar_idx + 0.5, viewport, pane_pw);
             let y_phys = price_to_pane_y_phys(last_price, viewport, pane_ph);
             // Clip to full pane height (LWC behaviour)
-            if x_anchor < 0.0 || x_anchor >= pane_pw || y_phys < 0.0 || y_phys > pane_ph {
+            if y_phys < 0.0 || y_phys > pane_ph {
                 continue;
             }
 
             let y = y_phys.round() + correction;
+            let x_start = if x_anchor.is_finite() {
+                x_anchor.clamp(0.0, pane_pw)
+            } else {
+                0.0
+            };
             self.ctx.set_stroke_style_str(&rgba(&color));
             self.ctx.begin_path();
-            self.ctx.move_to(x_anchor.max(0.0), y);
+            self.ctx.move_to(x_start, y);
             self.ctx.line_to(pane_pw + line_w + 1.0, y);
             self.ctx.stroke();
         }

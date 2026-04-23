@@ -40,6 +40,8 @@ use persistence::{
 };
 use types::*;
 
+type LineTextEndpointsDev = ((f64, f64), (f64, f64), TextAlign, TextVerticalAlign);
+
 /// Returns the default anchor circle fill color from the theme.
 /// Used by all drawing geometry methods for consistent anchor appearance.
 pub fn default_anchor_color() -> [f32; 4] {
@@ -590,71 +592,70 @@ impl DrawingManager {
         // and rotation between placeholder and typed text on tilted lines.
         let snap_to_pixel = true;
         let anchors = drawing.anchors();
-        let line_endpoints_dev: Option<((f64, f64), (f64, f64), TextAlign, TextVerticalAlign)> =
-            match drawing.tool() {
-                DrawingTool::TrendLine | DrawingTool::Ray => {
-                    if anchors.len() >= 2 {
-                        Some((
-                            point_to_bitmap(
-                                &anchors[0].point,
-                                vp,
-                                pane_css_w,
-                                pane_css_h,
-                                h_pixel_ratio,
-                                v_pixel_ratio,
-                                snap_to_pixel,
-                            ),
-                            point_to_bitmap(
-                                &anchors[1].point,
-                                vp,
-                                pane_css_w,
-                                pane_css_h,
-                                h_pixel_ratio,
-                                v_pixel_ratio,
-                                snap_to_pixel,
-                            ),
-                            h_align,
-                            v_align,
-                        ))
-                    } else {
-                        None
-                    }
+        let line_endpoints_dev: Option<LineTextEndpointsDev> = match drawing.tool() {
+            DrawingTool::TrendLine | DrawingTool::Ray => {
+                if anchors.len() >= 2 {
+                    Some((
+                        point_to_bitmap(
+                            &anchors[0].point,
+                            vp,
+                            pane_css_w,
+                            pane_css_h,
+                            h_pixel_ratio,
+                            v_pixel_ratio,
+                            snap_to_pixel,
+                        ),
+                        point_to_bitmap(
+                            &anchors[1].point,
+                            vp,
+                            pane_css_w,
+                            pane_css_h,
+                            h_pixel_ratio,
+                            v_pixel_ratio,
+                            snap_to_pixel,
+                        ),
+                        h_align,
+                        v_align,
+                    ))
+                } else {
+                    None
                 }
-                DrawingTool::HorizontalLine => {
-                    if !anchors.is_empty() {
-                        let y_css = vp.price_to_css_y(anchors[0].point.price, pane_css_h);
-                        let y_dev = y_css * v_pixel_ratio;
-                        Some((
-                            (0.0, y_dev),
-                            (pane_css_w * h_pixel_ratio, y_dev),
-                            h_align,
-                            v_align,
-                        ))
-                    } else {
-                        None
-                    }
+            }
+            DrawingTool::HorizontalLine => {
+                if !anchors.is_empty() {
+                    let y_css = vp.price_to_css_y(anchors[0].point.price, pane_css_h);
+                    let y_dev = y_css * v_pixel_ratio;
+                    Some((
+                        (0.0, y_dev),
+                        (pane_css_w * h_pixel_ratio, y_dev),
+                        h_align,
+                        v_align,
+                    ))
+                } else {
+                    None
                 }
-                DrawingTool::VerticalLine => {
-                    if !anchors.is_empty() {
-                        let x_css = (anchors[0].point.bar_index - vp.start_bar)
-                            / (vp.end_bar - vp.start_bar)
-                            * pane_css_w
-                            - 1.0;
-                        let x_dev = (x_css + 1.0) * h_pixel_ratio - 1.0;
-                        let (along_align, side_align) =
-                            vertical_line_label_alignments(h_align, v_align);
-                        Some((
-                            (x_dev, 0.0),
-                            (x_dev, pane_css_h * v_pixel_ratio),
-                            along_align,
-                            side_align,
-                        ))
-                    } else {
-                        None
-                    }
+            }
+            DrawingTool::VerticalLine => {
+                if !anchors.is_empty() {
+                    let x_css = (anchors[0].point.bar_index - vp.start_bar)
+                        / (vp.end_bar - vp.start_bar)
+                        * pane_css_w
+                        - 1.0;
+                    let x_dev = (x_css + 1.0) * h_pixel_ratio - 1.0;
+                    let (along_align, side_align) =
+                        vertical_line_label_alignments(h_align, v_align);
+                    Some((
+                        (x_dev, 0.0),
+                        (x_dev, pane_css_h * v_pixel_ratio),
+                        along_align,
+                        side_align,
+                    ))
+                } else {
+                    None
                 }
-                _ => None,
-            };
+            }
+            _ => None,
+        };
 
         if let Some(((bx0, by0), (bx1, by1), label_h_align, label_v_align)) = line_endpoints_dev {
             let fs_dev = (font_size * avg_ratio) as f32;
