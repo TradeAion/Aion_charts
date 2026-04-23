@@ -26,6 +26,7 @@ pub fn rgba_str(c: &[f32; 4]) -> String {
         c[3]
     )
 }
+pub mod axis_label_geometry;
 pub mod baseline_utils;
 pub mod draw_list;
 pub mod footprint_generator;

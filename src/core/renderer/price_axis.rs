@@ -14,6 +14,12 @@ use crate::core::footprint::{FootprintData, FootprintOptions};
 use crate::core::formatters::format_countdown;
 use crate::core::order_line::OrderLineManager;
 use crate::core::price_line::PriceLineManager;
+use crate::core::renderer::axis_label_geometry::{
+    centered_full_width_label_text_x_css, compute_right_axis_label_geometry,
+    compute_right_axis_label_geometry_with_vertical_mode, right_axis_label_height_bmp,
+    RightAxisLabelGeometry, RightAxisLabelMetrics, RightAxisLabelVerticalMode,
+    RightAxisLabelWidthMode,
+};
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
 use crate::core::renderer::theme::contrast_text_color;
@@ -149,14 +155,8 @@ impl PriceAxisRenderer {
         self.base_ctx.set_font(&font);
         let mut max_w: f64 = 0.0;
 
-        if let Some(first) = ticks.first() {
-            let w = self.text_cache.measure(&self.base_ctx, &first.label, &font);
-            if w > max_w {
-                max_w = w;
-            }
-        }
-        if let Some(last) = ticks.last() {
-            let w = self.text_cache.measure(&self.base_ctx, &last.label, &font);
+        for tick in ticks {
+            let w = self.text_cache.measure(&self.base_ctx, &tick.label, &font);
             if w > max_w {
                 max_w = w;
             }
@@ -433,8 +433,6 @@ impl PriceAxisRenderer {
         append_countdown_to_labels(&mut labels, bars);
 
         let dpr = self.dpr;
-        let candle_h = candle_area_height_ph(vp, pane_ph);
-        let label_h = candle_h.min(self.ph as f64);
 
         let _step = y_tick_step_internal(vp, pane_ph, dpr, style);
         let font = style.axis_font(dpr);
@@ -443,6 +441,9 @@ impl PriceAxisRenderer {
 
         let css_font = format!("{}px {}", style.font_size, style.font_family);
         for (_i, item) in labels.iter().enumerate() {
+            if item.y_phys < 0.0 || item.y_phys > self.ph as f64 {
+                continue;
+            }
             let text_color = contrast_text_color(item.color);
             let price_text_w = self
                 .text_cache
@@ -460,15 +461,16 @@ impl PriceAxisRenderer {
             // Keep both rows centered within the same chip by anchoring geometry
             // with the widest rendered row width.
             let anchor_text_w = price_text_w.max(countdown_text_w);
-            let mut geom = match compute_right_axis_label_geometry(
+            let mut geom = match compute_right_axis_label_geometry_with_vertical_mode(
                 w,
-                label_h,
+                self.ph as f64,
                 item.y_phys,
                 anchor_text_w,
                 dpr,
                 &metrics,
                 0.0,
                 RightAxisLabelWidthMode::AxisFull,
+                RightAxisLabelVerticalMode::FollowValue,
             ) {
                 Some(v) => v,
                 None => continue,
@@ -484,26 +486,11 @@ impl PriceAxisRenderer {
             } else {
                 single_h_bmp
             };
-            // `geom` is already edge-clamped by `compute_right_axis_label_geometry`.
-            // Keep that clamped anchor and only extend downward for the optional
-            // countdown row. The previous code replaced it with unclamped Y which
-            // caused chips to clip/disappear at aggressive zoom levels.
-            let mut y_top = geom.y_top;
-            let mut y_bottom = y_top + total_h_bmp;
-            if y_bottom > label_h {
-                let shift = y_bottom - label_h;
-                y_top -= shift;
-                y_bottom -= shift;
-            }
-            if y_top < 0.0 {
-                let shift = -y_top;
-                y_top += shift;
-                y_bottom += shift;
-            }
+            // Live labels are attachment-first: the first row follows the live
+            // price line exactly and naturally clips at pane edges.
+            let y_top = geom.y_top;
+            let y_bottom = y_top + total_h_bmp;
 
-            // Keep the tick aligned to the first (price) row center after clamping.
-            let y_shift = y_top - geom.y_top;
-            geom.y_mid += y_shift;
             geom.y_top = y_top;
             geom.y_bottom = y_bottom;
             // Price text is vertically centered in the first row.
@@ -986,7 +973,7 @@ impl PriceAxisRenderer {
 /// Uses inferred bar interval from timestamp deltas and `js_sys::Date::now()`
 /// to compute the time remaining until the current bar closes.
 /// Daily-or-higher intervals are rendered in coarse `Xd Hh` / `Hh` format.
-fn append_countdown_to_labels(
+pub(crate) fn append_countdown_to_labels(
     labels: &mut [ProjectedLastValue],
     bars: &crate::core::data::BarArray,
 ) {
@@ -1005,158 +992,6 @@ fn append_countdown_to_labels(
     if let Some(countdown_str) = format_countdown(remaining_ms, Some(interval_ms)) {
         labels[0].countdown = Some(countdown_str);
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct RightAxisLabelMetrics {
-    fs: f64,
-    inset_inner: f64,
-    inset_outer: f64,
-    inset_tb: f64,
-    tick_size: f64,
-    border_size: f64,
-    edge_inset: f64,
-    full_label_inside_gap: f64,
-}
-
-impl RightAxisLabelMetrics {
-    fn from_style(style: &ChartStyle, dpr: f64) -> Self {
-        Self {
-            fs: style.font_size as f64 * dpr,
-            inset_inner: style.price_axis_inset_inner() * dpr,
-            inset_outer: style.price_axis_inset_outer() * dpr,
-            inset_tb: style.price_axis_inset_tb() * dpr,
-            // Axis tick marks are hidden in compact mode; don't reserve connector width.
-            tick_size: 0.0,
-            border_size: (style.axis_border_size as f64 * dpr).max(1.0).floor(),
-            edge_inset: (style.price_axis_label_edge_inset() * dpr).round(),
-            full_label_inside_gap: (style.price_axis_full_label_inside_gap() * dpr).round(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct RightAxisLabelGeometry {
-    y_mid: f64,
-    y_top: f64,
-    y_bottom: f64,
-    x_inside: f64,
-    x_outside: f64,
-    text_x_css: f64,
-    text_y_css: f64,
-    text_align_right: bool,
-    radius: f64,
-    tick_size: f64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RightAxisLabelWidthMode {
-    TextFit,
-    AxisFull,
-}
-
-fn right_axis_label_height_bmp(
-    metrics: &RightAxisLabelMetrics,
-    dpr: f64,
-    extra_tb_inset: f64,
-) -> f64 {
-    let total_h = metrics.fs + (metrics.inset_tb + extra_tb_inset) * 2.0;
-    let tick_h_bmp = dpr.floor().max(1.0) as i32;
-    let mut total_h_bmp = total_h.round() as i32;
-    if total_h_bmp % 2 != tick_h_bmp % 2 {
-        total_h_bmp += 1;
-    }
-    total_h_bmp.max(1) as f64
-}
-
-fn compute_right_axis_label_geometry(
-    axis_w: f64,
-    pane_h: f64,
-    y_coord_phys: f64,
-    text_w_phys: f64,
-    dpr: f64,
-    metrics: &RightAxisLabelMetrics,
-    extra_tb_inset: f64,
-    width_mode: RightAxisLabelWidthMode,
-) -> Option<RightAxisLabelGeometry> {
-    if axis_w <= 0.0 || pane_h <= 0.0 || dpr <= 0.0 {
-        return None;
-    }
-
-    let total_h_bmp = right_axis_label_height_bmp(metrics, dpr, extra_tb_inset);
-    let total_w_raw = metrics.border_size
-        + metrics.inset_inner
-        + metrics.inset_outer
-        + text_w_phys
-        + metrics.tick_size;
-    // Right price scale in LWC uses align='left':
-    // separator/border is at x=0, label extends from inside edge to the right.
-    // For full-width labels (crosshair/live), keep a small extra inset so
-    // the label body stays visually inside and does not ride the separator.
-    let inside_gap = if matches!(width_mode, RightAxisLabelWidthMode::AxisFull) {
-        metrics.full_label_inside_gap.max(0.0)
-    } else {
-        0.0
-    };
-    let x_inside = (metrics.border_size + inside_gap).min(axis_w).max(0.0);
-    let available_w = (axis_w - x_inside).max(1.0);
-    let total_w_bmp = match width_mode {
-        RightAxisLabelWidthMode::AxisFull => available_w.round().max(1.0),
-        RightAxisLabelWidthMode::TextFit => total_w_raw.min(available_w).round().max(1.0),
-    };
-
-    let y_mid_raw = y_coord_phys.round() - (dpr * 0.5).floor();
-    let half = total_h_bmp / 2.0;
-    let edge_inset = metrics.edge_inset.max(0.0);
-    let min_mid = half + edge_inset;
-    let max_mid = pane_h - half - edge_inset;
-    let y_mid = if max_mid >= min_mid {
-        y_mid_raw.clamp(min_mid, max_mid)
-    } else {
-        (pane_h * 0.5).round()
-    };
-    let tick_h_bmp = dpr.floor().max(1.0);
-    let y_top = (y_mid + tick_h_bmp / 2.0 - total_h_bmp / 2.0).floor();
-    let y_bottom = y_top + total_h_bmp;
-
-    let x_outside = match width_mode {
-        RightAxisLabelWidthMode::AxisFull => axis_w,
-        RightAxisLabelWidthMode::TextFit => (x_inside + total_w_bmp).min(axis_w),
-    };
-    let (text_x_css, text_align_right) = match width_mode {
-        // Full-width labels (crosshair / live-price): center the text
-        // horizontally within the label box [x_inside, axis_w].
-        // Previously the text was anchored at `axis_w - padding_outer` with
-        // align="right", which pushed it to the extreme right and left a large
-        // blank gap on the left side of the pill.
-        RightAxisLabelWidthMode::AxisFull => {
-            let center_x_phys = (x_inside + axis_w) / 2.0;
-            // Keep centered when possible, but clamp both sides so the text
-            // never clips outside the full-width label body.
-            let min_left = x_inside + metrics.tick_size + metrics.inset_inner;
-            let max_left = (axis_w - metrics.inset_outer - text_w_phys).max(min_left);
-            let text_left_phys = (center_x_phys - text_w_phys / 2.0).clamp(min_left, max_left);
-            (text_left_phys / dpr, false) // "left" align at manually centred position
-        }
-        RightAxisLabelWidthMode::TextFit => (
-            (x_inside + metrics.tick_size + metrics.inset_inner) / dpr,
-            false,
-        ),
-    };
-    let radius = (2.0 * dpr).round().min(total_h_bmp / 4.0).max(0.0);
-
-    Some(RightAxisLabelGeometry {
-        y_mid,
-        y_top,
-        y_bottom,
-        x_inside,
-        x_outside,
-        text_x_css,
-        text_y_css: (y_top + y_bottom) / 2.0 / dpr,
-        text_align_right,
-        radius,
-        tick_size: metrics.tick_size,
-    })
 }
 
 fn draw_right_axis_label_background(
@@ -1222,20 +1057,6 @@ fn draw_right_axis_label_text(
     let m = text_cache.measure_full(ctx, text, font_css);
     let _ = ctx.fill_text(text, geom.text_x_css, geom.text_y_css + m.y_mid_correction);
     ctx.restore();
-}
-
-#[inline]
-fn centered_full_width_label_text_x_css(
-    geom: &RightAxisLabelGeometry,
-    text_w_phys: f64,
-    dpr: f64,
-    metrics: &RightAxisLabelMetrics,
-) -> f64 {
-    let center_x_phys = (geom.x_inside + geom.x_outside) / 2.0;
-    let min_left = geom.x_inside + geom.tick_size + metrics.inset_inner;
-    let max_left = (geom.x_outside - metrics.inset_outer - text_w_phys).max(min_left);
-    let text_left_phys = (center_x_phys - text_w_phys / 2.0).clamp(min_left, max_left);
-    text_left_phys / dpr
 }
 
 fn get_2d_ctx(canvas: &HtmlCanvasElement, label: &str) -> Result<CanvasRenderingContext2d, String> {

@@ -23,6 +23,10 @@ use crate::core::indicators::render::types::DrawInstruction;
 use crate::core::markers::{MarkerManager, MarkerPosition, MarkerShape};
 use crate::core::order_line::OrderLineManager;
 use crate::core::price_line::PriceLineManager;
+use crate::core::renderer::axis_label_geometry::{
+    compute_right_axis_label_geometry_with_vertical_mode, right_axis_label_height_bmp,
+    RightAxisLabelMetrics, RightAxisLabelVerticalMode, RightAxisLabelWidthMode,
+};
 use crate::core::renderer::canvas_dash::{clear_canvas_line_dash, set_canvas_line_dash};
 use crate::core::renderer::line_generator;
 use crate::core::renderer::rgba_str as rgba;
@@ -502,8 +506,8 @@ impl OverlayRenderer {
         footprint_opts: &FootprintOptions,
         viewport: &Viewport,
         style: &ChartStyle,
-        pane_css_w: f64,
-        pane_css_h: f64,
+        _pane_css_w: f64,
+        _pane_css_h: f64,
         h_pixel_ratio: f64,
         v_pixel_ratio: f64,
         _time_ms: f64,
@@ -523,8 +527,8 @@ impl OverlayRenderer {
         } else {
             dpr
         };
-        let pane_pw = pane_css_w * h_ratio;
-        let pane_ph = pane_css_h * v_ratio;
+        let pane_pw = self.pw as f64;
+        let pane_ph = self.ph as f64;
 
         let line_w = (style.last_price_line.width * dpr).floor().max(1.0);
         let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
@@ -672,8 +676,8 @@ impl OverlayRenderer {
         footprint_opts: &FootprintOptions,
         viewport: &Viewport,
         style: &ChartStyle,
-        pane_css_w: f64,
-        pane_css_h: f64,
+        _pane_css_w: f64,
+        _pane_css_h: f64,
         v_pixel_ratio: f64,
     ) {
         if symbol.is_empty() || !style.last_price_line.label_visible {
@@ -686,8 +690,8 @@ impl OverlayRenderer {
         } else {
             dpr
         };
-        let pane_ph = pane_css_h * v_ratio;
-        if pane_css_w <= 0.0 || pane_css_h <= 0.0 || pane_ph <= 0.0 {
+        let pane_ph = self.ph as f64;
+        if self.pw == 0 || self.ph == 0 || pane_ph <= 0.0 {
             return;
         }
 
@@ -700,7 +704,7 @@ impl OverlayRenderer {
             viewport,
             style,
             pane_ph,
-            v_pixel_ratio,
+            v_ratio,
             dpr,
         ) {
             Some(v) => v,
@@ -708,33 +712,29 @@ impl OverlayRenderer {
         };
         let color = projected.color;
         let y_phys = projected.y_phys;
-
-        // ── Replicate price-axis label height calculation exactly ──
-        // (same math as right_axis_label_height_bmp + y_top in price_axis.rs)
-        let fs_phys = style.font_size as f64 * dpr;
-        let vertical_inset_phys = style.price_axis_inset_tb() * dpr;
-        let total_h_raw = fs_phys + vertical_inset_phys * 2.0;
-        let tick_h_bmp = dpr.floor().max(1.0) as i32;
-        let mut single_h_bmp = total_h_raw.round() as i32;
-        if single_h_bmp % 2 != tick_h_bmp % 2 {
-            single_h_bmp += 1;
+        if y_phys < 0.0 || y_phys > pane_ph {
+            return;
         }
-        let single_h_bmp = single_h_bmp.max(1) as f64;
 
-        // Clamp like the axis label geometry so the chip remains visible at
-        // zoom extremes instead of disappearing once the raw Y leaves bounds.
-        let y_mid_raw = y_phys.round() - (dpr * 0.5).floor();
-        let tick_h = dpr.floor().max(1.0);
-        let half = single_h_bmp / 2.0;
-        let edge_inset = (style.price_axis_label_edge_inset() * dpr).round().max(0.0);
-        let min_mid = half + edge_inset;
-        let max_mid = pane_ph - half - edge_inset;
-        let y_mid = if max_mid >= min_mid {
-            y_mid_raw.clamp(min_mid, max_mid)
-        } else {
-            (pane_ph * 0.5).round()
+        // Match the price-axis live label exactly: attachment wins over
+        // visibility, so the chip follows the live-price row and clips naturally.
+        let metrics = RightAxisLabelMetrics::from_style(style, dpr);
+        let single_h_bmp = right_axis_label_height_bmp(&metrics, dpr, 0.0);
+        let geom = match compute_right_axis_label_geometry_with_vertical_mode(
+            self.pw as f64,
+            pane_ph,
+            y_phys,
+            1.0,
+            dpr,
+            &metrics,
+            0.0,
+            RightAxisLabelWidthMode::AxisFull,
+            RightAxisLabelVerticalMode::FollowValue,
+        ) {
+            Some(v) => v,
+            None => return,
         };
-        let y_top_phys = (y_mid + tick_h / 2.0 - single_h_bmp / 2.0).floor();
+        let y_top_phys = geom.y_top;
 
         // Convert to CSS for overlay drawing.
         let chip_h_css = single_h_bmp / dpr;
