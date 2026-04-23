@@ -726,6 +726,24 @@ pub fn line_label_placement(
     }
 }
 
+#[inline]
+pub fn vertical_line_label_alignments(
+    horizontal_align: TextAlign,
+    vertical_align: TextVerticalAlign,
+) -> (TextAlign, TextVerticalAlign) {
+    let along_line_align = match vertical_align {
+        TextVerticalAlign::Top => TextAlign::Left,
+        TextVerticalAlign::Middle => TextAlign::Center,
+        TextVerticalAlign::Bottom => TextAlign::Right,
+    };
+    let side_align = match horizontal_align {
+        TextAlign::Left => TextVerticalAlign::Bottom,
+        TextAlign::Center => TextVerticalAlign::Middle,
+        TextAlign::Right => TextVerticalAlign::Top,
+    };
+    (along_line_align, side_align)
+}
+
 pub fn line_middle_gap_range(
     placement: &LineLabelPlacement,
     block: &PreparedTextBlock,

@@ -9,6 +9,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use crate::core::chart_type::MainChartType;
+use crate::core::drawings::types::HorizontalLineAxisLabel;
 use crate::core::footprint::{FootprintData, FootprintOptions};
 use crate::core::formatters::format_countdown;
 use crate::core::order_line::OrderLineManager;
@@ -762,6 +763,105 @@ impl PriceAxisRenderer {
                 &entry.text,
                 &css_font,
                 &entry.text_color,
+                &geom,
+                dpr,
+            );
+        }
+    }
+
+    /// Render Y-axis labels for horizontal line drawings.
+    pub fn render_horizontal_line_labels(
+        &mut self,
+        labels: &[HorizontalLineAxisLabel],
+        vp: &Viewport,
+        style: &ChartStyle,
+        pane_ph: f64,
+    ) {
+        if labels.is_empty() {
+            return;
+        }
+
+        let w = self.pw as f64;
+        let dpr = self.dpr;
+        let candle_h = candle_area_height_ph(vp, pane_ph);
+        let label_h = candle_h.min(self.ph as f64);
+        let step = y_tick_step_internal(vp, pane_ph, dpr, style);
+        let font = style.axis_font(dpr);
+        self.base_ctx.set_font(&font);
+        let metrics = RightAxisLabelMetrics::from_style(style, dpr);
+        let half_h = right_axis_label_height_bmp(&metrics, dpr, 0.0) / 2.0;
+
+        struct DrawingLabel {
+            text: String,
+            y_phys: f64,
+            color: [f32; 4],
+        }
+
+        let mut entries: Vec<DrawingLabel> = Vec::new();
+        for label in labels {
+            if !label.price.is_finite() {
+                continue;
+            }
+            let y_phys = price_to_pane_y_phys(label.price, vp, pane_ph);
+            if y_phys < 0.0 || y_phys > candle_h {
+                continue;
+            }
+            entries.push(DrawingLabel {
+                text: format_scale_value(vp, label.price, step),
+                y_phys,
+                color: label.color,
+            });
+        }
+
+        if entries.is_empty() {
+            return;
+        }
+
+        let mut layout: Vec<LabelRect> = entries
+            .iter()
+            .enumerate()
+            .map(|(i, entry)| LabelRect {
+                y_center: entry.y_phys.round(),
+                half_height: half_h,
+                priority: 25,
+                index: i,
+            })
+            .collect();
+        resolve_label_overlaps(&mut layout, label_h);
+
+        let css_font = format!("{}px {}", style.font_size, style.font_family);
+        for (i, entry) in entries.iter().enumerate() {
+            let text_w = self
+                .text_cache
+                .measure(&self.base_ctx, &entry.text, &font)
+                .ceil();
+            let y_mid = layout
+                .get(i)
+                .map(|label| label.y_center)
+                .unwrap_or_else(|| entry.y_phys.round());
+            let geom = match compute_right_axis_label_geometry(
+                w,
+                label_h,
+                y_mid,
+                text_w,
+                dpr,
+                &metrics,
+                0.0,
+                RightAxisLabelWidthMode::TextFit,
+            ) {
+                Some(value) => value,
+                None => continue,
+            };
+
+            let text_color = contrast_text_color(entry.color);
+            draw_right_axis_label_background(&self.base_ctx, &geom, &entry.color);
+            draw_right_axis_label_tick(&self.base_ctx, &geom, &text_color, dpr);
+            draw_right_axis_label_text(
+                &self.base_ctx,
+                &mut self.text_cache,
+                &entry.text,
+                &css_font,
+                &text_color,
                 &geom,
                 dpr,
             );

@@ -394,6 +394,13 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
             ..
         } = *s;
         price_axis_renderer.render_base(&engine.style, &y_ticks);
+        let horizontal_line_labels = engine.drawings.horizontal_line_axis_labels();
+        price_axis_renderer.render_horizontal_line_labels(
+            &horizontal_line_labels,
+            &engine.viewport,
+            &engine.style,
+            pane_ph,
+        );
         price_axis_renderer.render_last_price_labels(
             &engine.series,
             &engine.bars,
@@ -441,15 +448,29 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
         let ChartInner {
             ref mut time_axis_renderer,
             ref engine,
+            ref subpanes,
             ..
         } = *s;
         let crosshair_style = replay_crosshair_style_override
             .as_ref()
             .unwrap_or(&engine.style);
+        let mut vertical_line_labels = engine.drawings.vertical_line_axis_labels();
+        for subpane in subpanes.iter() {
+            vertical_line_labels.extend(subpane.drawings.vertical_line_axis_labels());
+        }
         time_axis_renderer.render_base(
             &engine.style,
             &x_ticks,
             pane_pw,
+            time_axis_css_w,
+            time_axis_css_h,
+        );
+        time_axis_renderer.render_vertical_line_labels(
+            &vertical_line_labels,
+            &engine.time_scale,
+            &engine.viewport,
+            &engine.style,
+            pane_css_w,
             time_axis_css_w,
             time_axis_css_h,
         );

@@ -918,6 +918,13 @@ impl SubPane {
         );
 
         self.price_axis.render_base(style, &y_ticks);
+        let horizontal_line_labels = self.drawings.horizontal_line_axis_labels();
+        self.price_axis.render_horizontal_line_labels(
+            &horizontal_line_labels,
+            &self.viewport,
+            style,
+            ph,
+        );
 
         // Render last-value indicator labels on the price axis (colored pills)
         let last_values: Vec<(f64, [f32; 4])> = self

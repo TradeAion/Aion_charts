@@ -30,7 +30,7 @@ use crate::core::viewport::Viewport;
 use drawing::{
     ensure_next_drawing_id_at_least, line_label_placement, point_to_bitmap, point_to_css,
     prepare_text_block, push_rotated_text_block, rect_text_anchor, rotated_text_box_top_left,
-    Drawing, PreparedTextBlock, TEXT_DRAWING_GAP_CSS,
+    vertical_line_label_alignments, Drawing, PreparedTextBlock, TEXT_DRAWING_GAP_CSS,
 };
 use persistence::{
     drawing_tool_from_key, drawing_tool_to_key, migrate_snapshot, DrawingSnapshot,
@@ -153,6 +153,51 @@ impl DrawingManager {
     /// Get a mutable drawing by ID.
     pub fn get_mut(&mut self, id: u64) -> Option<&mut Box<dyn Drawing>> {
         self.drawings.iter_mut().find(|d| d.id() == id)
+    }
+
+    pub fn horizontal_line_axis_labels(&self) -> Vec<HorizontalLineAxisLabel> {
+        self.drawings
+            .iter()
+            .filter_map(|drawing| {
+                (drawing.tool() == DrawingTool::HorizontalLine)
+                    .then(|| {
+                        drawing
+                            .as_any()
+                            .downcast_ref::<horizontal_line::HorizontalLineDrawing>()
+                    })
+                    .flatten()
+                    .and_then(|line| {
+                        line.anchors()
+                            .first()
+                            .map(|anchor| HorizontalLineAxisLabel {
+                                price: anchor.point.price,
+                                color: line.style().color,
+                            })
+                    })
+            })
+            .collect()
+    }
+
+    pub fn vertical_line_axis_labels(&self) -> Vec<VerticalLineAxisLabel> {
+        self.drawings
+            .iter()
+            .filter_map(|drawing| {
+                (drawing.tool() == DrawingTool::VerticalLine)
+                    .then(|| {
+                        drawing
+                            .as_any()
+                            .downcast_ref::<vertical_line::VerticalLineDrawing>()
+                    })
+                    .flatten()
+                    .and_then(|line| {
+                        line.anchors().first().map(|anchor| VerticalLineAxisLabel {
+                            bar_index: anchor.point.bar_index,
+                            timestamp: anchor.point.timestamp,
+                            color: line.style().color,
+                        })
+                    })
+            })
+            .collect()
     }
 
     fn drawing_text_ref(drawing: &dyn Drawing) -> Option<&DrawingText> {
@@ -495,46 +540,73 @@ impl DrawingManager {
         // and rotation between placeholder and typed text on tilted lines.
         let snap_to_pixel = true;
         let anchors = drawing.anchors();
-        let line_endpoints_dev: Option<((f64, f64), (f64, f64))> = match drawing.tool() {
-            DrawingTool::TrendLine | DrawingTool::Ray => {
-                if anchors.len() >= 2 {
-                    Some((
-                        point_to_bitmap(
-                            &anchors[0].point,
-                            vp,
-                            pane_css_w,
-                            pane_css_h,
-                            h_pixel_ratio,
-                            v_pixel_ratio,
-                            snap_to_pixel,
-                        ),
-                        point_to_bitmap(
-                            &anchors[1].point,
-                            vp,
-                            pane_css_w,
-                            pane_css_h,
-                            h_pixel_ratio,
-                            v_pixel_ratio,
-                            snap_to_pixel,
-                        ),
-                    ))
-                } else {
-                    None
+        let line_endpoints_dev: Option<((f64, f64), (f64, f64), TextAlign, TextVerticalAlign)> =
+            match drawing.tool() {
+                DrawingTool::TrendLine | DrawingTool::Ray => {
+                    if anchors.len() >= 2 {
+                        Some((
+                            point_to_bitmap(
+                                &anchors[0].point,
+                                vp,
+                                pane_css_w,
+                                pane_css_h,
+                                h_pixel_ratio,
+                                v_pixel_ratio,
+                                snap_to_pixel,
+                            ),
+                            point_to_bitmap(
+                                &anchors[1].point,
+                                vp,
+                                pane_css_w,
+                                pane_css_h,
+                                h_pixel_ratio,
+                                v_pixel_ratio,
+                                snap_to_pixel,
+                            ),
+                            h_align,
+                            v_align,
+                        ))
+                    } else {
+                        None
+                    }
                 }
-            }
-            DrawingTool::HorizontalLine => {
-                if !anchors.is_empty() {
-                    let y_css = vp.price_to_css_y(anchors[0].point.price, pane_css_h);
-                    let y_dev = y_css * v_pixel_ratio;
-                    Some(((0.0, y_dev), (pane_css_w * h_pixel_ratio, y_dev)))
-                } else {
-                    None
+                DrawingTool::HorizontalLine => {
+                    if !anchors.is_empty() {
+                        let y_css = vp.price_to_css_y(anchors[0].point.price, pane_css_h);
+                        let y_dev = y_css * v_pixel_ratio;
+                        Some((
+                            (0.0, y_dev),
+                            (pane_css_w * h_pixel_ratio, y_dev),
+                            h_align,
+                            v_align,
+                        ))
+                    } else {
+                        None
+                    }
                 }
-            }
-            _ => None,
-        };
+                DrawingTool::VerticalLine => {
+                    if !anchors.is_empty() {
+                        let x_css = (anchors[0].point.bar_index - vp.start_bar)
+                            / (vp.end_bar - vp.start_bar)
+                            * pane_css_w
+                            - 1.0;
+                        let x_dev = (x_css + 1.0) * h_pixel_ratio - 1.0;
+                        let (along_align, side_align) =
+                            vertical_line_label_alignments(h_align, v_align);
+                        Some((
+                            (x_dev, 0.0),
+                            (x_dev, pane_css_h * v_pixel_ratio),
+                            along_align,
+                            side_align,
+                        ))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
 
-        if let Some(((bx0, by0), (bx1, by1))) = line_endpoints_dev {
+        if let Some(((bx0, by0), (bx1, by1), label_h_align, label_v_align)) = line_endpoints_dev {
             let fs_dev = (font_size * avg_ratio) as f32;
             let block = prepare_text_block(Self::DRAWING_PLACEHOLDER, fs_dev).unwrap_or(
                 PreparedTextBlock {
@@ -550,7 +622,16 @@ impl DrawingManager {
             let inset = TEXT_DRAWING_GAP_CSS * avg_ratio;
             let gap = Self::LINE_LABEL_SIDE_GAP_CSS * avg_ratio;
             let placement = line_label_placement(
-                bx0, by0, bx1, by1, h_align, v_align, &block, fs_dev, inset, gap,
+                bx0,
+                by0,
+                bx1,
+                by1,
+                label_h_align,
+                label_v_align,
+                &block,
+                fs_dev,
+                inset,
+                gap,
             );
             push_rotated_text_block(
                 &mut geom.texts,
@@ -1003,54 +1084,20 @@ impl DrawingManager {
                     return None;
                 }
                 let (x, _) = point_to_css(&anchors[0].point, vp, pane_css_w, pane_css_h);
-                let is_empty = text.value.trim().is_empty();
-                let display_text = if is_empty && use_placeholder_when_empty {
-                    Self::DRAWING_PLACEHOLDER
-                } else {
-                    text.value.as_str()
-                };
-                let block = prepare_text_block(display_text, effective_font_size as f32).unwrap_or(
-                    PreparedTextBlock {
-                        lines: vec![display_text.to_string()],
-                        line_height: (effective_font_size as f32 * 1.2)
-                            .max(effective_font_size as f32),
-                        total_height: effective_font_size as f32,
-                        max_width: ((display_text.len() as f64) * effective_font_size * 0.6) as f32,
-                    },
-                );
-                let width = if is_empty && !use_placeholder_when_empty {
-                    1.0
-                } else {
-                    (block.max_width as f64 + 2.0).clamp(1.0, 240.0)
-                };
-                let height = (block.total_height as f64 + 2.0).clamp(1.0, 120.0);
-                let gap = Self::LINE_LABEL_SIDE_GAP_CSS;
-                let left = match text.horizontal_align {
-                    TextAlign::Left => x - width - gap,
-                    TextAlign::Center => x - width * 0.5,
-                    TextAlign::Right => x + gap,
-                };
-                let top = match text.vertical_align {
-                    crate::core::renderer::draw_list::TextVerticalAlign::Top => {
-                        TEXT_DRAWING_GAP_CSS
-                    }
-                    crate::core::renderer::draw_list::TextVerticalAlign::Middle => {
-                        pane_css_h * 0.5 - height * 0.5
-                    }
-                    crate::core::renderer::draw_list::TextVerticalAlign::Bottom => {
-                        pane_css_h - height - TEXT_DRAWING_GAP_CSS
-                    }
-                };
-                Some(Self::clamp_editor_target(
-                    DrawingTextEditorTarget {
-                        left,
-                        top,
-                        width,
-                        height,
-                        rotation_deg: 0.0,
-                    },
+                let (along_align, side_align) =
+                    vertical_line_label_alignments(text.horizontal_align, text.vertical_align);
+                Some(Self::line_editor_target(
+                    x,
+                    0.0,
+                    x,
+                    pane_css_h,
+                    &text.value,
+                    along_align,
+                    side_align,
+                    effective_font_size,
                     pane_css_w,
                     pane_css_h,
+                    use_placeholder_when_empty,
                 ))
             }
             DrawingTool::Rectangle => {
@@ -3662,6 +3709,57 @@ mod tests {
         assert!(
             anchors.iter().all(|anchor| anchor.border != anchor_fill),
             "anchor border should keep the drawing color instead of the chart background"
+        );
+    }
+
+    #[test]
+    fn vertical_line_editor_target_uses_vertical_rotation() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::VerticalLine;
+        let id = manager
+            .start_creating(12.5, 100.0)
+            .expect("vertical line id");
+        assert!(manager.finalize_creation_step(12.5, 100.0));
+        manager.select(id);
+        assert!(manager.set_selected_drawing_text("Event".to_string()));
+
+        let target = manager
+            .selected_drawing_info(&test_viewport(), 800.0, 600.0)
+            .and_then(|info| info.editor_target)
+            .expect("vertical line editor target");
+
+        assert!(
+            (target.rotation_deg - 90.0).abs() < 1e-6,
+            "vertical-line editor target should rotate with rendered text"
+        );
+    }
+
+    #[test]
+    fn axis_label_collectors_include_line_drawings() {
+        let mut manager = DrawingManager::new();
+
+        manager.active_tool = DrawingTool::HorizontalLine;
+        let horizontal_id = manager
+            .start_creating(10.5, 101.25)
+            .expect("horizontal line id");
+        assert!(manager.finalize_creation_step(10.5, 101.25));
+
+        manager.active_tool = DrawingTool::VerticalLine;
+        let vertical_id = manager
+            .start_creating(14.5, 99.0)
+            .expect("vertical line id");
+        assert!(manager.finalize_creation_step(14.5, 99.0));
+
+        let horizontal_labels = manager.horizontal_line_axis_labels();
+        let vertical_labels = manager.vertical_line_axis_labels();
+
+        assert_eq!(horizontal_labels.len(), 1);
+        assert!((horizontal_labels[0].price - 101.25).abs() < 1e-9);
+        assert_eq!(vertical_labels.len(), 1);
+        assert!((vertical_labels[0].bar_index - 14.5).abs() < 1e-9);
+        assert!(
+            manager.get(horizontal_id).is_some() && manager.get(vertical_id).is_some(),
+            "drawings should remain intact after label collection"
         );
     }
 }

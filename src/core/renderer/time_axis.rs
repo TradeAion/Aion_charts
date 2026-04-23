@@ -8,9 +8,11 @@
 
 #![cfg(target_arch = "wasm32")]
 
+use crate::core::drawings::types::VerticalLineAxisLabel;
 use crate::core::formatters::format_crosshair_time;
 use crate::core::renderer::rgba_str as rgba;
 use crate::core::renderer::text_cache::TextWidthCache;
+use crate::core::renderer::theme::contrast_text_color;
 use crate::core::renderer::tick_marks::{
     collect_visible_time_points, nearest_visible_time_point, timestamp_for_logical_index,
 };
@@ -174,6 +176,141 @@ impl TimeAxisRenderer {
             let _ = self.base_ctx.fill_text(&t.label, x_css, text_y_css);
         }
         self.base_ctx.restore();
+    }
+
+    /// Render X-axis labels for vertical line drawings on the base axis canvas.
+    pub fn render_vertical_line_labels(
+        &mut self,
+        labels: &[VerticalLineAxisLabel],
+        time_scale: &TimeScaleIndex,
+        vp: &Viewport,
+        style: &ChartStyle,
+        pane_css_w: f64,
+        axis_css_w: f64,
+        axis_css_h: f64,
+    ) {
+        if labels.is_empty() {
+            return;
+        }
+
+        let w = self.pw as f64;
+        let h = self.ph as f64;
+        let dpr = self.dpr;
+        let h_ratio = if axis_css_w > 0.0 {
+            w / axis_css_w
+        } else {
+            dpr
+        };
+        let v_ratio = if axis_css_h > 0.0 {
+            h / axis_css_h
+        } else {
+            dpr
+        };
+        let axis_css_w = if axis_css_w > 0.0 {
+            axis_css_w
+        } else if dpr > 0.0 {
+            w / dpr
+        } else {
+            pane_css_w
+        };
+        let axis_css_h = if axis_css_h > 0.0 {
+            axis_css_h
+        } else if dpr > 0.0 {
+            h / dpr
+        } else {
+            0.0
+        };
+
+        let visible_time_points = collect_visible_time_points(vp, time_scale);
+        let css_font = format!("{}px {}", style.font_size, style.font_family);
+        let border_size = style.axis_border_size as f64;
+        let tick_length = style.axis_tick_length as f64;
+        let inset_top = style.time_axis_inset_top();
+        let inset_bottom = style.time_axis_inset_bottom();
+        let fs = style.font_size as f64;
+        let by1_css = style.time_axis_crosshair_label_top_inset();
+        let by2_css = (by1_css + border_size + tick_length + inset_top + fs + inset_bottom)
+            .ceil()
+            .min(axis_css_h.max(0.0));
+        let by1_bmp = (by1_css * v_ratio).round();
+        let by2_bmp = (by2_css * v_ratio).round();
+        let radius = (2.0 * v_ratio.min(h_ratio.max(1.0))).round();
+        let h_margin = style.time_axis_inset_horizontal();
+        self.base_ctx.set_font(&css_font);
+
+        for label in labels {
+            let mx_css = vp.bar_to_frac(label.bar_index) * pane_css_w - 1.0;
+            if mx_css < 0.0 || mx_css > pane_css_w {
+                continue;
+            }
+
+            let timestamp = label
+                .timestamp
+                .or_else(|| {
+                    nearest_visible_time_point(&visible_time_points, label.bar_index)
+                        .filter(|point| (point.logical_index - label.bar_index).abs() <= 0.75)
+                        .map(|point| point.timestamp)
+                })
+                .or_else(|| timestamp_for_logical_index(time_scale, label.bar_index.floor() as i64))
+                .filter(|&ts| ts > 0);
+            let Some(timestamp) = timestamp else {
+                continue;
+            };
+            let text = format_crosshair_time(timestamp);
+            let text_w = self
+                .text_cache
+                .measure(&self.base_ctx, &text, &css_font)
+                .round();
+            let label_w = text_w + 2.0 * h_margin;
+            let label_half = label_w / 2.0;
+
+            let mut coord = mx_css;
+            let mut lx1 = (coord - label_half).floor() + 0.5;
+            if lx1 < 0.0 {
+                coord += -lx1;
+                lx1 = (coord - label_half).floor() + 0.5;
+            } else if lx1 + label_w > axis_css_w {
+                coord -= (lx1 + label_w) - axis_css_w;
+                lx1 = (coord - label_half).floor() + 0.5;
+            }
+            let lx2 = lx1 + label_w;
+            let lx1_bmp = (lx1 * h_ratio).round();
+            let lx2_bmp = (lx2 * h_ratio).round();
+            let text_color = contrast_text_color(label.color);
+
+            self.base_ctx.set_fill_style_str(&rgba(&label.color));
+            self.base_ctx.begin_path();
+            self.base_ctx.move_to(lx1_bmp, by1_bmp);
+            self.base_ctx.line_to(lx1_bmp, by2_bmp - radius);
+            let _ = self
+                .base_ctx
+                .arc_to(lx1_bmp, by2_bmp, lx1_bmp + radius, by2_bmp, radius);
+            self.base_ctx.line_to(lx2_bmp - radius, by2_bmp);
+            let _ = self
+                .base_ctx
+                .arc_to(lx2_bmp, by2_bmp, lx2_bmp, by2_bmp - radius, radius);
+            self.base_ctx.line_to(lx2_bmp, by1_bmp);
+            self.base_ctx.close_path();
+            self.base_ctx.fill();
+
+            self.base_ctx.save();
+            let _ = self
+                .base_ctx
+                .set_transform(h_ratio, 0.0, 0.0, v_ratio, 0.0, 0.0);
+            self.base_ctx.set_font(&css_font);
+            self.base_ctx.set_fill_style_str(&rgba(&text_color));
+            self.base_ctx.set_text_align("left");
+            self.base_ctx.set_text_baseline("middle");
+            let text_x_css = lx1 + h_margin;
+            let text_y_css = by1_css + border_size + tick_length + inset_top + fs / 2.0;
+            let metrics = self
+                .text_cache
+                .measure_full(&self.base_ctx, "Apr0", &css_font);
+            let _ =
+                self.base_ctx
+                    .fill_text(&text, text_x_css, text_y_css + metrics.y_mid_correction);
+            self.base_ctx.restore();
+        }
     }
 
     /// Render the top layer: crosshair time label.

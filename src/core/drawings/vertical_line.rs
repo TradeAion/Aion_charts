@@ -4,13 +4,13 @@
 //! Completes on the first click (1 anchor).
 
 use super::drawing::{
-    generate_anchor_circles, next_drawing_id, optical_middle_top, point_to_bitmap, point_to_css,
-    prepare_text_block, push_line_with_gap, push_text_block, text_block_bounds, Drawing,
-    TEXT_DRAWING_GAP_CSS,
+    generate_anchor_circles, line_label_placement, line_middle_gap_range, next_drawing_id,
+    point_to_bitmap, point_to_css, prepare_text_block, push_line_with_gap_range,
+    push_rotated_text_block, vertical_line_label_alignments, Drawing, TEXT_DRAWING_GAP_CSS,
 };
 use super::hit_test;
 use super::types::*;
-use crate::core::renderer::draw_list::{TextAlign, TextVerticalAlign};
+use crate::core::renderer::draw_list::TextAlign;
 use crate::core::viewport::Viewport;
 use crate::impl_drawing_accessors;
 
@@ -111,40 +111,46 @@ impl Drawing for VerticalLineDrawing {
             ((d[0] * avg_ratio) as f32, (d[1] * avg_ratio) as f32)
         });
 
-        let mut line_gap_bounds = None;
+        let mut line_gap_range = None;
 
         if let Some(block) = prepare_text_block(&self.text.value, fs) {
-            // Universal 2px shape↔text spacing for both the horizontal offset
-            // from the vertical line and the vertical padding from the pane edges.
+            let inset = TEXT_DRAWING_GAP_CSS * avg_ratio;
             let gap = TEXT_DRAWING_GAP_CSS * avg_ratio;
-            let pad_y = TEXT_DRAWING_GAP_CSS * avg_ratio;
-            let (text_x, text_align) = match self.text.horizontal_align {
-                TextAlign::Left => (x as f64 - gap, TextAlign::Right),
-                TextAlign::Center => (x as f64, TextAlign::Center),
-                TextAlign::Right => (x as f64 + gap, TextAlign::Left),
-            };
-            let top_y = match self.text.vertical_align {
-                TextVerticalAlign::Top => pad_y as f32,
-                TextVerticalAlign::Middle => optical_middle_top(pane_ph * 0.5, &block, fs),
-                TextVerticalAlign::Bottom => pane_ph - pad_y as f32 - block.total_height,
-            };
+            let (along_align, side_align) = vertical_line_label_alignments(
+                self.text.horizontal_align,
+                self.text.vertical_align,
+            );
+            let placement = line_label_placement(
+                x as f64,
+                0.0,
+                x as f64,
+                pane_ph as f64,
+                along_align,
+                side_align,
+                &block,
+                fs,
+                inset,
+                gap,
+            );
             if self.text.horizontal_align == TextAlign::Center {
-                line_gap_bounds = Some(text_block_bounds(&block, text_x as f32, top_y, text_align));
+                line_gap_range = line_middle_gap_range(&placement, &block, -avg_ratio as f32);
             }
-            push_text_block(
+            push_rotated_text_block(
                 &mut geom.texts,
                 &block,
-                text_x as f32,
-                top_y,
+                placement.anchor_x,
+                placement.anchor_y,
+                placement.top_local_y,
                 fs,
                 600,
                 self.text.style.italic,
                 text_color,
-                text_align,
+                placement.align,
+                placement.rotation_rad,
             );
         }
 
-        push_line_with_gap(
+        push_line_with_gap_range(
             &mut geom.lines,
             x as f64,
             0.0,
@@ -154,8 +160,7 @@ impl Drawing for VerticalLineDrawing {
             *c,
             dash,
             gap,
-            line_gap_bounds,
-            (2.0 * avg_ratio) as f32,
+            line_gap_range,
         );
 
         if show_anchors {
@@ -231,5 +236,21 @@ mod tests {
         assert_eq!(geom.lines.len(), 1);
         assert!((geom.lines[0].x0 as f64 - expected_x).abs() < 1e-9);
         assert!((geom.lines[0].x1 as f64 - expected_x).abs() < 1e-9);
+    }
+
+    #[test]
+    fn vertical_line_text_renders_rotated_with_line_axis() {
+        let vp = test_viewport();
+        let mut drawing = VerticalLineDrawing::new(14.5, 100.0);
+        drawing.set_state(DrawingState::Idle);
+        drawing.text_mut().value = "Event".to_string();
+
+        let geom = drawing.generate_geometry(&vp, 1000.0, 600.0, 1.0, 1.0, 1.0, false);
+
+        assert_eq!(geom.texts.len(), 1);
+        assert!(
+            (geom.texts[0].rotation_rad - std::f32::consts::FRAC_PI_2).abs() < 1e-6,
+            "expected vertical-line text rotation to align with the line"
+        );
     }
 }

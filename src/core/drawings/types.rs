@@ -621,6 +621,19 @@ impl DrawingGeometry {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct HorizontalLineAxisLabel {
+    pub price: f64,
+    pub color: [f32; 4],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct VerticalLineAxisLabel {
+    pub bar_index: f64,
+    pub timestamp: Option<u64>,
+    pub color: [f32; 4],
+}
+
 /// An anchor circle to render (for selected drawings).
 #[derive(Debug, Clone, Copy)]
 pub struct AnchorCircle {
