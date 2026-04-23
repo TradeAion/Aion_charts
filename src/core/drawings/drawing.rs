@@ -14,6 +14,7 @@ static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new
 /// to keep the visual spacing between the shape edge and its text consistent.
 /// Multiply by `avg_ratio` (devicePixelRatio average) when emitting bitmap geometry.
 pub const TEXT_DRAWING_GAP_CSS: f64 = 2.0;
+pub const ANCHOR_BORDER_WIDTH_CSS: f64 = 2.0;
 
 pub fn next_drawing_id() -> u64 {
     NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -188,6 +189,26 @@ pub trait Drawing: std::fmt::Debug {
         }
     }
 
+    /// Whether releasing the pointer should commit/complete the current tool.
+    ///
+    /// Most tools finish or advance on pointer-up. Multi-click tools like Path
+    /// override this and use explicit completion (double-click / Enter) instead.
+    fn completes_on_pointer_up(&self) -> bool {
+        true
+    }
+
+    /// Explicitly complete an in-progress creation gesture.
+    ///
+    /// Returns true when the drawing transitioned out of `Creating`.
+    fn complete_creation(&mut self) -> bool {
+        if matches!(self.state(), DrawingState::Creating { .. }) {
+            self.set_state(DrawingState::Idle);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Update the "live preview" anchor during creation (mouse move).
     fn update_creation_preview(&mut self, bar_index: f64, price: f64) {
         let step = match self.state() {
@@ -299,7 +320,7 @@ pub fn generate_anchor_circles(
                 radius: (a.hit_radius * avg_ratio).round(),
                 fill: super::default_anchor_color(),
                 border: *color,
-                border_width: (1.0 * avg_ratio).floor().max(1.0),
+                border_width: (ANCHOR_BORDER_WIDTH_CSS * avg_ratio).floor().max(1.0),
             }
         })
         .collect()
@@ -774,8 +795,8 @@ pub fn rect_text_anchor(
 #[cfg(test)]
 mod tests {
     use super::{
-        point_to_bitmap, point_to_css, prepare_text_block, push_line_with_gap, text_block_bounds,
-        DrawingPoint,
+        generate_anchor_circles, point_to_bitmap, point_to_css, prepare_text_block,
+        push_line_with_gap, text_block_bounds, AnchorPoint, DrawingPoint,
     };
     use crate::core::renderer::draw_list::TextAlign;
     use crate::core::renderer::transforms::bar_to_x;
@@ -880,5 +901,24 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert!(lines[0].x1 < 100.0);
         assert!(lines[1].x0 > 100.0);
+    }
+
+    #[test]
+    fn anchor_circles_use_two_pixel_border_width_at_unit_ratio() {
+        let vp = test_viewport();
+        let anchors = vec![AnchorPoint::new(13.5, 100.0)];
+        let circles = generate_anchor_circles(
+            &anchors,
+            &vp,
+            1000.0,
+            600.0,
+            1.0,
+            1.0,
+            &[0.35, 0.55, 0.95, 1.0],
+            true,
+        );
+
+        assert_eq!(circles.len(), 1);
+        assert_eq!(circles[0].border_width, 2.0);
     }
 }

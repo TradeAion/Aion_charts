@@ -2281,6 +2281,26 @@ impl AxiusCharts {
             touch_closures.push(cb);
         }
 
+        // pane: dblclick
+        {
+            let inner = Rc::clone(&inner);
+            let pane_c = pane_container_el.clone();
+            let dirty = Rc::clone(&dirty);
+            let cb =
+                Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_e: web_sys::Event| {
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
+                    if s.on_chart_double_click() {
+                        let html_el: &web_sys::HtmlElement = pane_c.unchecked_ref();
+                        let _ = html_el.style().set_property("cursor", s.cursor_css());
+                        dirty.set(true);
+                    }
+                }));
+            pane_el.add_event_listener_with_callback("dblclick", cb.as_ref().unchecked_ref())?;
+            closures.push(cb);
+        }
+
         // ── PRICE AXIS events (on container div) ──
         let price_el: web_sys::Element = {
             let borrow = inner.borrow();
@@ -4663,7 +4683,7 @@ impl AxiusCharts {
     // ── Drawing tools ─────────────────────────────────────────────────────────
 
     /// Set active drawing tool: "none", "trend_line", "rectangle", "fibonacci",
-    /// "scale", "brush", "horizontal_line", "vertical_line", "ray".
+    /// "scale", "brush", "horizontal_line", "vertical_line", "ray", "path".
     pub fn set_drawing_tool(&mut self, tool: &str) {
         let mut s = self.inner.borrow_mut();
         s.engine.drawings.active_tool =
@@ -4703,6 +4723,32 @@ impl AxiusCharts {
             drop(s);
             self.mark_dirty();
             return true;
+        }
+
+        if key == "Enter" {
+            if s.engine.drawings.is_creating()
+                && !s.engine.drawings.creation_completes_on_pointer_up()
+            {
+                let completed = s.engine.drawings.complete_creation();
+                s.engine.stamp_drawing_timestamps();
+                if completed {
+                    drop(s);
+                    self.mark_dirty();
+                    return true;
+                }
+                drop(s);
+                self.mark_dirty();
+                return true;
+            }
+
+            for sp in s.subpanes.iter_mut() {
+                if sp.drawings.is_creating() && !sp.drawings.creation_completes_on_pointer_up() {
+                    let _ = sp.drawings.complete_creation();
+                    drop(s);
+                    self.mark_dirty();
+                    return true;
+                }
+            }
         }
 
         let handled = match key {
@@ -8474,7 +8520,9 @@ impl AxiusCharts {
 
                             // Finalize drawing creation (drag-to-create style)
                             if sp.drawings.is_creating() {
-                                sp.drawings.finalize_creation_step(bar, price);
+                                if sp.drawings.creation_completes_on_pointer_up() {
+                                    sp.drawings.finalize_creation_step(bar, price);
+                                }
                             }
 
                             // End any drawing drag
@@ -8812,6 +8860,13 @@ impl AxiusCharts {
                         return;
                     };
                     if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
+                        if sp.drawings.is_creating()
+                            && !sp.drawings.creation_completes_on_pointer_up()
+                        {
+                            let _ = sp.drawings.complete_creation();
+                            dirty.set(true);
+                            return;
+                        }
                         sp.reset_price_viewport();
                         log::info!("SubPane {} viewport reset via double-click", pid);
                     }

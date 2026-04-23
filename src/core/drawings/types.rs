@@ -533,6 +533,8 @@ pub enum DrawingTool {
     VerticalLine,
     /// Ray / extended line (two anchors, extends to visible edges).
     Ray,
+    /// Multi-click polyline/path drawing (double-click or Enter to finish).
+    Path,
     /// Brush / freehand (variable points, recorded from pointer drag).
     Brush,
     /// Text annotation (single anchor, auto-sized to text content).
@@ -550,6 +552,7 @@ impl DrawingTool {
             DrawingTool::HorizontalLine => "horizontal_line",
             DrawingTool::VerticalLine => "vertical_line",
             DrawingTool::Ray => "ray",
+            DrawingTool::Path => "path",
             DrawingTool::Brush => "brush",
             DrawingTool::Text => "text",
         }
@@ -565,6 +568,7 @@ impl DrawingTool {
             "horizontal_line" => Some(DrawingTool::HorizontalLine),
             "vertical_line" => Some(DrawingTool::VerticalLine),
             "ray" => Some(DrawingTool::Ray),
+            "path" => Some(DrawingTool::Path),
             "brush" => Some(DrawingTool::Brush),
             "text" => Some(DrawingTool::Text),
             _ => None,

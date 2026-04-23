@@ -3,7 +3,8 @@
 use super::drawing::{
     line_label_placement, line_middle_gap_range, next_drawing_id, optical_middle_top,
     point_to_bitmap, point_to_css, prepare_text_block, push_line_with_gap_range,
-    push_rotated_text_block, push_text_block, rect_text_anchor, Drawing, TEXT_DRAWING_GAP_CSS,
+    push_rotated_text_block, push_text_block, rect_text_anchor, Drawing, ANCHOR_BORDER_WIDTH_CSS,
+    TEXT_DRAWING_GAP_CSS,
 };
 use super::hit_test;
 use super::types::*;
@@ -499,7 +500,7 @@ impl Drawing for RectangleDrawing {
         if show_anchors {
             let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
             let radius = (self.anchors[0].hit_radius * avg_ratio).round();
-            let border_width = (1.0 * avg_ratio).floor().max(1.0);
+            let border_width = (ANCHOR_BORDER_WIDTH_CSS * avg_ratio).floor().max(1.0);
             let mx = ((px0 + px1) * 0.5) as f64;
             let my = ((py0 + py1) * 0.5) as f64;
             geom.anchors = vec![

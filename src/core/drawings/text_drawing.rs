@@ -13,7 +13,7 @@
 
 use super::drawing::{
     next_drawing_id, optical_middle_top, point_to_bitmap, point_to_css, prepare_text_block,
-    push_text_block, Drawing, TEXT_DRAWING_GAP_CSS,
+    push_text_block, Drawing, ANCHOR_BORDER_WIDTH_CSS, TEXT_DRAWING_GAP_CSS,
 };
 use super::hit_test;
 use super::types::*;
@@ -317,7 +317,7 @@ impl Drawing for TextDrawing {
 
         if show_anchors {
             let radius = (self.anchors[0].hit_radius * avg_ratio).round();
-            let border_width = (1.0 * avg_ratio).floor().max(1.0);
+            let border_width = (ANCHOR_BORDER_WIDTH_CSS * avg_ratio).floor().max(1.0);
             geom.anchors.push(AnchorCircle {
                 cx: ax_bmp,
                 cy: ay_bmp,

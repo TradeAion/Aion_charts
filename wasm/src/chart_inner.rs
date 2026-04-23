@@ -858,6 +858,7 @@ impl ChartInner {
                             | Some(axiuscharts::DrawingTool::Fibonacci)
                             | Some(axiuscharts::DrawingTool::Scale)
                             | Some(axiuscharts::DrawingTool::Rectangle)
+                            | Some(axiuscharts::DrawingTool::Path)
                     );
                     if should_snap {
                         if let Some((anchor_bar, anchor_price)) = drawings.creation_first_anchor() {
@@ -1417,6 +1418,15 @@ impl ChartInner {
         {
             let drawings = &mut self.engine.drawings;
             if drawings.is_creating() {
+                if !drawings.creation_completes_on_pointer_up() {
+                    self.interaction.cancel_pointer_gesture();
+                    self.interaction.drawing_drag_active = false;
+                    self.interaction.set_drawing_cursor(None);
+                    if !self.interaction.is_touch {
+                        self.engine.crosshair.active = true;
+                    }
+                    return;
+                }
                 finalized_creation = true;
                 // Read the preview anchor position first (immutable borrow scope)
                 let anchor_pos: Option<(f64, f64)> = {
@@ -1554,6 +1564,31 @@ impl ChartInner {
                 self.selected_execution_mark_id = None;
             }
         }
+    }
+
+    pub fn on_chart_double_click(&mut self) -> bool {
+        if !self.engine.drawings.is_creating()
+            || self.engine.drawings.creation_completes_on_pointer_up()
+        {
+            return false;
+        }
+
+        let completed_drawing_id = if self.engine.drawings.complete_creation() {
+            self.engine.drawings.selected_id
+        } else {
+            None
+        };
+        self.engine.stamp_drawing_timestamps();
+        self.interaction.cancel_pointer_gesture();
+        self.interaction.drawing_drag_active = false;
+        self.interaction.set_drawing_cursor(None);
+        if let Some(id) = completed_drawing_id {
+            self.emit_drawing_created_event(id);
+        }
+        if !self.interaction.is_touch {
+            self.engine.crosshair.active = true;
+        }
+        true
     }
 
     pub fn on_pointer_cancel(&mut self) {
@@ -1842,6 +1877,10 @@ impl ChartInner {
     }
 
     pub fn on_touch_double_tap(&mut self) {
+        if self.on_chart_double_click() {
+            return;
+        }
+
         let before_start = self.engine.viewport.start_bar;
         let before_end = self.engine.viewport.end_bar;
         let before_price_min = self.engine.viewport.price_min;

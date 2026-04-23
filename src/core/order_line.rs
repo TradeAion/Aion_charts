@@ -619,10 +619,17 @@ impl OrderLineManager {
 
     /// Number of active order lines.
     pub fn active_count(&self) -> usize {
-        self.lines.iter().filter(|l| l.options.status.is_active()).count()
+        self.lines
+            .iter()
+            .filter(|l| l.options.status.is_active())
+            .count()
     }
 
-    fn has_active_linked_order_of_type(&self, parent_id: &OrderLineId, order_type: OrderType) -> bool {
+    fn has_active_linked_order_of_type(
+        &self,
+        parent_id: &OrderLineId,
+        order_type: OrderType,
+    ) -> bool {
         self.lines.iter().any(|line| {
             line.options.status.is_active()
                 && line.options.order_type == order_type
@@ -645,7 +652,12 @@ impl OrderLineManager {
         if opts.is_position_line() {
             let qty_len = opts.quantity_label().map(|s| s.len()).unwrap_or(1) as f64;
             let pnl_len = opts.pnl_label().map(|s| s.len()).unwrap_or(5) as f64;
-            return 16.0 + (qty_len.max(2.0) * 7.0) + 10.0 + (pnl_len.max(5.0) * 7.0) + 10.0 + self.cancel_button_width;
+            return 16.0
+                + (qty_len.max(2.0) * 7.0)
+                + 10.0
+                + (pnl_len.max(5.0) * 7.0)
+                + 10.0
+                + self.cancel_button_width;
         }
 
         let label = opts.generate_label(self.price_precision);
@@ -691,9 +703,13 @@ impl OrderLineManager {
 
                 let mut main_text = String::new();
                 if opts.is_position_line() {
-                    if let Some(qty) = opts.quantity_label() { main_text.push_str(&qty); }
+                    if let Some(qty) = opts.quantity_label() {
+                        main_text.push_str(&qty);
+                    }
                     if let Some(pnl) = opts.pnl_label() {
-                        if !main_text.is_empty() { main_text.push_str("   "); }
+                        if !main_text.is_empty() {
+                            main_text.push_str("   ");
+                        }
                         main_text.push_str(&pnl);
                     }
                 } else {
@@ -748,7 +764,17 @@ impl OrderLineManager {
                     }
                 }
 
-                let approx_label_width = main_pill_w + if show_sl_button { sec_btn_w + btn_gap } else { 0.0 } + if show_tp_button { sec_btn_w + btn_gap } else { 0.0 };
+                let approx_label_width = main_pill_w
+                    + if show_sl_button {
+                        sec_btn_w + btn_gap
+                    } else {
+                        0.0
+                    }
+                    + if show_tp_button {
+                        sec_btn_w + btn_gap
+                    } else {
+                        0.0
+                    };
                 let label_x_start = right_edge - approx_label_width;
 
                 if x_css >= label_x_start && x_css <= right_edge {
@@ -827,7 +853,8 @@ impl OrderLineManager {
                 // Convert Y coordinate to price
                 let candle_h = pane_css_h * viewport.candle_height_frac();
                 let frac = 1.0 - (y_css / candle_h).clamp(0.0, 1.0);
-                let internal = viewport.price_min + frac * (viewport.price_max - viewport.price_min);
+                let internal =
+                    viewport.price_min + frac * (viewport.price_max - viewport.price_min);
                 let price = viewport.internal_to_price(internal);
                 line.set_price(price);
             }
@@ -960,7 +987,10 @@ impl OrderLineManager {
                 .map(OrderStatus::from_str)
                 .unwrap_or_default();
 
-            let quantity = order.get("quantity").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let quantity = order
+                .get("quantity")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
             let filled_quantity = order
                 .get("filled_quantity")
                 .and_then(|v| v.as_f64())
@@ -994,7 +1024,7 @@ impl OrderLineManager {
                 .map(String::from);
 
             let pnl = order.get("pnl").and_then(|v| v.as_f64());
-            
+
             let show_sl_button = order
                 .get("show_sl_button")
                 .and_then(|v| v.as_bool())
@@ -1004,7 +1034,10 @@ impl OrderLineManager {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
 
-            let visible = order.get("visible").and_then(|v| v.as_bool()).unwrap_or(true);
+            let visible = order
+                .get("visible")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
             let cancellable = order
                 .get("cancellable")
                 .and_then(|v| v.as_bool())
@@ -1035,7 +1068,8 @@ impl OrderLineManager {
                 ..Default::default()
             };
 
-            self.lines.push(OrderLine::new(OrderLineId::new(id), options));
+            self.lines
+                .push(OrderLine::new(OrderLineId::new(id), options));
         }
 
         Ok(())

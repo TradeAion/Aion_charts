@@ -880,7 +880,7 @@ impl OverlayRenderer {
         let dpr = self.dpr;
         let pane_pw = self.pw as f64;
         let pane_ph = self.ph as f64;
-        
+
         // Compact sizing aligned with right-axis label typography metrics.
         let font_size_phys = style.font_size as f64 * dpr;
         let font_size = font_size_phys.round();
@@ -920,7 +920,12 @@ impl OverlayRenderer {
 
             let base_color = opts.effective_color();
             let line_color = if line.hovered {
-                [(base_color[0] * 1.2).min(1.0), (base_color[1] * 1.2).min(1.0), (base_color[2] * 1.2).min(1.0), base_color[3]]
+                [
+                    (base_color[0] * 1.2).min(1.0),
+                    (base_color[1] * 1.2).min(1.0),
+                    (base_color[2] * 1.2).min(1.0),
+                    base_color[3],
+                ]
             } else {
                 base_color
             };
@@ -931,16 +936,41 @@ impl OverlayRenderer {
             let mut main_text = String::new();
 
             if is_position {
-                if let Some(qty) = opts.quantity_label() { qty_text = qty; }
-                if let Some(pnl) = opts.pnl_label() { pnl_text = pnl; }
+                if let Some(qty) = opts.quantity_label() {
+                    qty_text = qty;
+                }
+                if let Some(pnl) = opts.pnl_label() {
+                    pnl_text = pnl;
+                }
             } else {
                 main_text = opts.generate_label(price_precision);
             }
 
-            let qty_w = if !qty_text.is_empty() { self.ctx.measure_text(&qty_text).map(|m| m.width()).unwrap_or(0.0) } else { 0.0 };
-            let pnl_w = if !pnl_text.is_empty() { self.ctx.measure_text(&pnl_text).map(|m| m.width()).unwrap_or(0.0) } else { 0.0 };
-            let main_w = if !main_text.is_empty() { self.ctx.measure_text(&main_text).map(|m| m.width()).unwrap_or(0.0) } else { 0.0 };
-            
+            let qty_w = if !qty_text.is_empty() {
+                self.ctx
+                    .measure_text(&qty_text)
+                    .map(|m| m.width())
+                    .unwrap_or(0.0)
+            } else {
+                0.0
+            };
+            let pnl_w = if !pnl_text.is_empty() {
+                self.ctx
+                    .measure_text(&pnl_text)
+                    .map(|m| m.width())
+                    .unwrap_or(0.0)
+            } else {
+                0.0
+            };
+            let main_w = if !main_text.is_empty() {
+                self.ctx
+                    .measure_text(&main_text)
+                    .map(|m| m.width())
+                    .unwrap_or(0.0)
+            } else {
+                0.0
+            };
+
             let close_btn_size = if has_close { 10.0 * dpr } else { 0.0 };
             let div_margin = 6.0 * dpr;
             let div_w = 1.0 * dpr;
@@ -977,7 +1007,7 @@ impl OverlayRenderer {
             // Cursor X is the RIGHT edge of the main pill
             let main_pill_x = cursor_x - main_pill_w;
             let main_pill_y = y_phys - (pill_h / 2.0);
-            
+
             let cluster_left_x = main_pill_x
                 - if show_sl { sec_btn_w + btn_gap } else { 0.0 }
                 - if show_tp { sec_btn_w + btn_gap } else { 0.0 };
@@ -1002,30 +1032,46 @@ impl OverlayRenderer {
 
             // Draw TP/SL Buttons (left of main pill)
             let mut btn_cursor = main_pill_x - btn_gap;
-            
-            let draw_secondary_pill = |ctx: &web_sys::CanvasRenderingContext2d, text: &str, right_x: f64, color: [f32; 4], is_hovered: bool| {
+
+            let draw_secondary_pill = |ctx: &web_sys::CanvasRenderingContext2d,
+                                       text: &str,
+                                       right_x: f64,
+                                       color: [f32; 4],
+                                       is_hovered: bool| {
                 let w = sec_btn_w;
                 let x = right_x - w;
-                
+
                 // If hovered, fill it solid. Otherwise subtle fill.
                 let bg_color = if is_hovered {
                     [color[0], color[1], color[2], 0.9]
                 } else {
                     [color[0], color[1], color[2], 0.15]
                 };
-                
+
                 ctx.set_fill_style_str(&rgba(&bg_color));
                 ctx.set_stroke_style_str(&rgba(&color));
                 ctx.set_line_width(1.0 * dpr);
-                
+
                 ctx.begin_path();
                 ctx.move_to(x + radius, main_pill_y);
                 ctx.line_to(x + w - radius, main_pill_y);
                 let _ = ctx.arc_to(x + w, main_pill_y, x + w, main_pill_y + radius, radius);
                 ctx.line_to(x + w, main_pill_y + pill_h - radius);
-                let _ = ctx.arc_to(x + w, main_pill_y + pill_h, x + w - radius, main_pill_y + pill_h, radius);
+                let _ = ctx.arc_to(
+                    x + w,
+                    main_pill_y + pill_h,
+                    x + w - radius,
+                    main_pill_y + pill_h,
+                    radius,
+                );
                 ctx.line_to(x + radius, main_pill_y + pill_h);
-                let _ = ctx.arc_to(x, main_pill_y + pill_h, x, main_pill_y + pill_h - radius, radius);
+                let _ = ctx.arc_to(
+                    x,
+                    main_pill_y + pill_h,
+                    x,
+                    main_pill_y + pill_h - radius,
+                    radius,
+                );
                 ctx.line_to(x, main_pill_y + radius);
                 let _ = ctx.arc_to(x, main_pill_y, x + radius, main_pill_y, radius);
                 ctx.close_path();
@@ -1040,15 +1086,27 @@ impl OverlayRenderer {
                 ctx.set_fill_style_str(&rgba(&text_color));
                 ctx.set_text_align("center");
                 let _ = ctx.fill_text(text, x + w / 2.0, y_phys);
-                
+
                 x
             };
 
             if show_sl {
-                btn_cursor = draw_secondary_pill(&self.ctx, "SL", btn_cursor, [0.98, 0.21, 0.28, 0.9], line.sl_hovered) - btn_gap;
+                btn_cursor = draw_secondary_pill(
+                    &self.ctx,
+                    "SL",
+                    btn_cursor,
+                    [0.98, 0.21, 0.28, 0.9],
+                    line.sl_hovered,
+                ) - btn_gap;
             }
             if show_tp {
-                let _ = draw_secondary_pill(&self.ctx, "TP", btn_cursor, [0.20, 0.36, 1.0, 0.9], line.tp_hovered);
+                let _ = draw_secondary_pill(
+                    &self.ctx,
+                    "TP",
+                    btn_cursor,
+                    [0.20, 0.36, 1.0, 0.9],
+                    line.tp_hovered,
+                );
             }
 
             // Draw Main Pill Background
@@ -1061,9 +1119,13 @@ impl OverlayRenderer {
             self.ctx.line_to(x + w - radius, y);
             let _ = self.ctx.arc_to(x + w, y, x + w, y + radius, radius);
             self.ctx.line_to(x + w, y + pill_h - radius);
-            let _ = self.ctx.arc_to(x + w, y + pill_h, x + w - radius, y + pill_h, radius);
+            let _ = self
+                .ctx
+                .arc_to(x + w, y + pill_h, x + w - radius, y + pill_h, radius);
             self.ctx.line_to(x + radius, y + pill_h);
-            let _ = self.ctx.arc_to(x, y + pill_h, x, y + pill_h - radius, radius);
+            let _ = self
+                .ctx
+                .arc_to(x, y + pill_h, x, y + pill_h - radius, radius);
             self.ctx.line_to(x, y + radius);
             let _ = self.ctx.arc_to(x, y, x + radius, y, radius);
             self.ctx.close_path();
@@ -1094,9 +1156,13 @@ impl OverlayRenderer {
                         draw_divider(text_cursor);
                         text_cursor += div_w + div_margin;
                     }
-                    
+
                     let is_profit = opts.pnl_is_profit().unwrap_or(true);
-                    let pnl_color = if is_profit { [0.15, 0.85, 0.25, 1.0] } else { [0.98, 0.21, 0.28, 1.0] };
+                    let pnl_color = if is_profit {
+                        [0.15, 0.85, 0.25, 1.0]
+                    } else {
+                        [0.98, 0.21, 0.28, 1.0]
+                    };
                     self.ctx.set_fill_style_str(&rgba(&pnl_color));
                     let _ = self.ctx.fill_text(&pnl_text, text_cursor, y_phys);
                     text_cursor += pnl_w;
@@ -1129,10 +1195,12 @@ impl OverlayRenderer {
                 }
 
                 let x_alpha = if line.cancel_hovered { 1.0 } else { 0.8 };
-                self.ctx.set_stroke_style_str(&rgba(&[1.0, 1.0, 1.0, x_alpha]));
-                self.ctx.set_line_width((if line.cancel_hovered { 2.0 } else { 1.5 }) * dpr);
+                self.ctx
+                    .set_stroke_style_str(&rgba(&[1.0, 1.0, 1.0, x_alpha]));
+                self.ctx
+                    .set_line_width((if line.cancel_hovered { 2.0 } else { 1.5 }) * dpr);
                 self.ctx.set_line_cap("round");
-                
+
                 self.ctx.begin_path();
                 self.ctx.move_to(cx - hs, cy - hs);
                 self.ctx.line_to(cx + hs, cy + hs);

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
 
-pub const DRAWINGS_SNAPSHOT_VERSION: u32 = 6;
+pub const DRAWINGS_SNAPSHOT_VERSION: u32 = 7;
 
 fn snapshot_version() -> u32 {
     DRAWINGS_SNAPSHOT_VERSION
@@ -336,6 +336,17 @@ fn apply_snapshot_migration_step(
             // v5 → v6: introduces the persisted per-drawing `locked` flag.
             // The field is `bool` with serde default, so legacy snapshots
             // deserialize as unlocked drawings without mutating payload data.
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert(
+                    "version".to_string(),
+                    serde_json::Value::from((from_version + 1) as u64),
+                );
+            }
+            Ok(payload)
+        }
+        6 => {
+            // v6 → v7: introduces the `path` drawing tool key. The serialized
+            // shape does not change, so existing payloads only need a version bump.
             if let Some(obj) = payload.as_object_mut() {
                 obj.insert(
                     "version".to_string(),

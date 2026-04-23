@@ -438,7 +438,8 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
                 &JsValue::from_str("orderType"),
                 &JsValue::from_str(order_type),
             );
-            let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("side"), &JsValue::from_str(side));
+            let _ =
+                js_sys::Reflect::set(&obj, &JsValue::from_str("side"), &JsValue::from_str(side));
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("quantity"),
@@ -453,14 +454,18 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
             quantity,
         } => {
             let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("id"), &JsValue::from_str(id));
-            let _ =
-                js_sys::Reflect::set(&obj, &JsValue::from_str("price"), &JsValue::from_f64(*price));
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("price"),
+                &JsValue::from_f64(*price),
+            );
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("orderType"),
                 &JsValue::from_str(order_type),
             );
-            let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("side"), &JsValue::from_str(side));
+            let _ =
+                js_sys::Reflect::set(&obj, &JsValue::from_str("side"), &JsValue::from_str(side));
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("quantity"),

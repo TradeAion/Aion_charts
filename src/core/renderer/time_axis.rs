@@ -94,8 +94,16 @@ impl TimeAxisRenderer {
         let w = self.pw as f64;
         let h = self.ph as f64;
         let dpr = self.dpr;
-        let h_ratio = if axis_css_w > 0.0 { w / axis_css_w } else { dpr };
-        let v_ratio = if axis_css_h > 0.0 { h / axis_css_h } else { dpr };
+        let h_ratio = if axis_css_w > 0.0 {
+            w / axis_css_w
+        } else {
+            dpr
+        };
+        let v_ratio = if axis_css_h > 0.0 {
+            h / axis_css_h
+        } else {
+            dpr
+        };
 
         // Clear + background
         self.base_ctx.clear_rect(0.0, 0.0, w, h);
@@ -185,8 +193,16 @@ impl TimeAxisRenderer {
         let w = self.pw as f64;
         let h = self.ph as f64;
         let dpr = self.dpr;
-        let h_ratio = if axis_css_w > 0.0 { w / axis_css_w } else { dpr };
-        let v_ratio = if axis_css_h > 0.0 { h / axis_css_h } else { dpr };
+        let h_ratio = if axis_css_w > 0.0 {
+            w / axis_css_w
+        } else {
+            dpr
+        };
+        let v_ratio = if axis_css_h > 0.0 {
+            h / axis_css_h
+        } else {
+            dpr
+        };
         let axis_css_w = if axis_css_w > 0.0 {
             axis_css_w
         } else if dpr > 0.0 {

@@ -906,7 +906,7 @@ impl SubPane {
         // Subpanes have no volume area, so pane_h == candle_h.
         // Drawings now stay on the overlay bucket by default.
         let y_ticks = compute_y_ticks(&self.viewport, ph, ph, dpr, style);
-        let (bottom_drawings, top_drawings) = self.generate_drawing_geometry(main_viewport);
+        let (bottom_drawings, top_drawings) = self.generate_drawing_geometry(main_viewport, style);
 
         self.render_chart(
             main_viewport,
@@ -1185,6 +1185,7 @@ impl SubPane {
     pub fn generate_drawing_geometry(
         &self,
         main_viewport: &Viewport,
+        style: &ChartStyle,
     ) -> (Vec<DrawingGeometry>, Vec<DrawingGeometry>) {
         let dpr = self.dpr;
         let pw = self.chart_base.width() as f64;
@@ -1206,13 +1207,14 @@ impl SubPane {
         hybrid_viewport.price_max = self.viewport.price_max;
         hybrid_viewport.volume_height_ratio = 0.0; // Subpanes don't have volume
 
-        self.drawings.generate_all_geometry(
+        self.drawings.generate_all_geometry_with_anchor_fill(
             &hybrid_viewport,
             css_w,
             css_h,
             dpr,
             h_pixel_ratio,
             v_pixel_ratio,
+            style.bg_color,
         )
     }
 

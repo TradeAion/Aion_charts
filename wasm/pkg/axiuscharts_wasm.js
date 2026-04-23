@@ -1974,7 +1974,7 @@ export class AxiusCharts {
     }
     /**
      * Set active drawing tool: "none", "trend_line", "rectangle", "fibonacci",
-     * "scale", "brush", "horizontal_line", "vertical_line", "ray".
+     * "scale", "brush", "horizontal_line", "vertical_line", "ray", "path".
      * @param {string} tool
      */
     set_drawing_tool(tool) {
@@ -4387,7 +4387,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_2592(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_2615(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -5103,8 +5103,8 @@ function __wasm_bindgen_func_elem_455(arg0, arg1, arg2) {
     wasm.__wasm_bindgen_func_elem_455(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_2592(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_2592(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_2615(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_2615(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 function __wasm_bindgen_func_elem_462(arg0, arg1, arg2) {

@@ -712,7 +712,7 @@ export class AxiusCharts {
     set_data_with_footprint_json(json: string): void;
     /**
      * Set active drawing tool: "none", "trend_line", "rectangle", "fibonacci",
-     * "scale", "brush", "horizontal_line", "vertical_line", "ray".
+     * "scale", "brush", "horizontal_line", "vertical_line", "ray", "path".
      */
     set_drawing_tool(tool: string): void;
     /**
@@ -1509,7 +1509,7 @@ export interface InitOutput {
     readonly chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
     readonly __wasm_bindgen_func_elem_451: (a: number, b: number) => void;
     readonly __wasm_bindgen_func_elem_462: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_2592: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_2615: (a: number, b: number, c: number, d: number) => void;
     readonly __wasm_bindgen_func_elem_452: (a: number, b: number, c: number) => void;
     readonly __wasm_bindgen_func_elem_455: (a: number, b: number, c: number) => void;
     readonly __wasm_bindgen_func_elem_460: (a: number, b: number) => void;

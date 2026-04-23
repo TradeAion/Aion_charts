@@ -13,6 +13,7 @@ pub mod drawing;
 pub mod fibonacci;
 pub mod hit_test;
 pub mod horizontal_line;
+pub mod path;
 pub mod persistence;
 pub mod ray;
 pub mod rectangle;
@@ -1759,6 +1760,7 @@ impl DrawingManager {
                 Box::new(vertical_line::VerticalLineDrawing::new(bar_index, price))
             }
             DrawingTool::Ray => Box::new(ray::RayDrawing::new(bar_index, price)),
+            DrawingTool::Path => Box::new(path::PathDrawing::new(bar_index, price)),
             DrawingTool::Text => Box::new(text_drawing::TextDrawing::new(bar_index, price)),
             DrawingTool::None => unreachable!(),
         };
@@ -1787,6 +1789,10 @@ impl DrawingManager {
         if anchors.is_empty() {
             return None;
         }
+        if d.tool() == DrawingTool::Path && anchors.len() >= 2 {
+            let anchor = &anchors[anchors.len() - 2].point;
+            return Some((anchor.bar_index, anchor.price));
+        }
         Some((anchors[0].point.bar_index, anchors[0].point.price))
     }
 
@@ -1794,6 +1800,33 @@ impl DrawingManager {
     pub fn creation_tool(&self) -> Option<DrawingTool> {
         let id = self.creating_id?;
         self.get(id).map(|d| d.tool())
+    }
+
+    /// Whether the active in-progress creation expects pointer-up to commit it.
+    pub fn creation_completes_on_pointer_up(&self) -> bool {
+        let id = match self.creating_id {
+            Some(id) => id,
+            None => return false,
+        };
+        self.get(id)
+            .map(|drawing| drawing.completes_on_pointer_up())
+            .unwrap_or(true)
+    }
+
+    fn finish_creation(&mut self, id: u64) {
+        let tool = self
+            .drawings
+            .iter()
+            .find(|d| d.id() == id)
+            .map(|d| d.tool());
+        self.creating_id = None;
+        self.selected_id = Some(id);
+        if let Some(d) = self.drawings.iter_mut().find(|d| d.id() == id) {
+            d.set_state(DrawingState::Selected);
+        }
+        if tool != Some(DrawingTool::Scale) {
+            self.active_tool = DrawingTool::None;
+        }
     }
 
     /// Get the fixed reference point for angle snapping during single-anchor drag.
@@ -1855,26 +1888,34 @@ impl DrawingManager {
         };
 
         if complete {
-            let tool = self
-                .drawings
-                .iter()
-                .find(|d| d.id() == id)
-                .map(|d| d.tool());
-            self.creating_id = None;
-            self.selected_id = Some(id);
-            if let Some(d) = self.drawings.iter_mut().find(|d| d.id() == id) {
-                d.set_state(DrawingState::Selected);
-            }
-            // Scale tool is hold-only: keep it active so user can immediately create another
-            if tool != Some(DrawingTool::Scale) {
-                self.active_tool = DrawingTool::None;
-            }
+            self.finish_creation(id);
             // Note: we intentionally do NOT auto-enter text edit on finalize.
             // The "+ Add text" placeholder only appears when the user later
             // re-selects (or hovers) the drawing — never as a hard interruption
             // immediately after drawing. This matches what users expect: draw
             // first, decide to label later.
         }
+        complete
+    }
+
+    /// Explicitly complete an in-progress drawing creation.
+    pub fn complete_creation(&mut self) -> bool {
+        let id = match self.creating_id {
+            Some(id) => id,
+            None => return false,
+        };
+
+        let complete = {
+            match self.drawings.iter_mut().find(|d| d.id() == id) {
+                Some(d) => d.complete_creation(),
+                None => return false,
+            }
+        };
+
+        if complete {
+            self.finish_creation(id);
+        }
+
         complete
     }
 
@@ -2004,6 +2045,31 @@ impl DrawingManager {
         h_pixel_ratio: f64,
         v_pixel_ratio: f64,
     ) -> (Vec<DrawingGeometry>, Vec<DrawingGeometry>) {
+        self.generate_all_geometry_with_anchor_fill(
+            vp,
+            pane_css_w,
+            pane_css_h,
+            dpr,
+            h_pixel_ratio,
+            v_pixel_ratio,
+            crate::core::renderer::theme::ThemeConfig::default()
+                .colors
+                .background,
+        )
+    }
+
+    /// Generate all drawing geometry for rendering, overriding selected-anchor
+    /// fill so it matches the live chart background color.
+    pub fn generate_all_geometry_with_anchor_fill(
+        &self,
+        vp: &Viewport,
+        pane_css_w: f64,
+        pane_css_h: f64,
+        dpr: f64,
+        h_pixel_ratio: f64,
+        v_pixel_ratio: f64,
+        anchor_fill_color: [f32; 4],
+    ) -> (Vec<DrawingGeometry>, Vec<DrawingGeometry>) {
         let base = Vec::new();
         let mut top = Vec::new();
 
@@ -2021,6 +2087,11 @@ impl DrawingManager {
                 v_pixel_ratio,
                 show_anchors,
             );
+            if show_anchors {
+                for anchor in &mut geom.anchors {
+                    anchor.fill = anchor_fill_color;
+                }
+            }
             self.append_native_placeholder(
                 &mut geom,
                 d.as_ref(),
@@ -2336,6 +2407,10 @@ impl DrawingManager {
                 first.point.price,
             )),
             DrawingTool::Ray => Box::new(ray::RayDrawing::new(
+                first.point.bar_index,
+                first.point.price,
+            )),
+            DrawingTool::Path => Box::new(path::PathDrawing::new(
                 first.point.bar_index,
                 first.point.price,
             )),
@@ -3505,5 +3580,88 @@ mod tests {
         assert_eq!(td.style().dash, Some([4.0, 4.0]));
         let fc = td.style().fill_color.expect("fill color preserved");
         assert!((fc[3] - 0.4).abs() < 1e-6);
+    }
+
+    #[test]
+    fn path_creation_requires_explicit_completion() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Path;
+
+        let id = manager.start_creating(10.0, 100.0).expect("path id");
+        assert!(manager.is_creating());
+        assert!(!manager.creation_completes_on_pointer_up());
+
+        assert!(!manager.finalize_creation_step(15.0, 105.0));
+        let drawing = manager.get(id).expect("path drawing");
+        assert_eq!(drawing.anchors().len(), 3);
+        assert!(contains_point(drawing.anchors(), 10.0, 100.0));
+        assert!(contains_point(drawing.anchors(), 15.0, 105.0));
+
+        assert!(manager.complete_creation());
+        assert_eq!(manager.selected_id, Some(id));
+        assert_eq!(manager.active_tool, DrawingTool::None);
+
+        let drawing = manager.get(id).expect("completed path");
+        assert_eq!(drawing.tool(), DrawingTool::Path);
+        assert_eq!(drawing.anchors().len(), 2);
+        assert!(contains_point(drawing.anchors(), 10.0, 100.0));
+        assert!(contains_point(drawing.anchors(), 15.0, 105.0));
+        assert_eq!(drawing.state(), DrawingState::Selected);
+    }
+
+    #[test]
+    fn path_snapshot_roundtrip_preserves_vertices() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Path;
+
+        let id = manager.start_creating(10.0, 100.0).expect("path id");
+        assert!(!manager.finalize_creation_step(15.0, 105.0));
+        assert!(!manager.finalize_creation_step(20.0, 102.0));
+        assert!(manager.complete_creation());
+
+        let snapshot = manager.snapshot();
+        let mut restored = DrawingManager::new();
+        restored
+            .replace_from_snapshot(snapshot)
+            .expect("restore path snapshot");
+
+        let drawing = restored.get(id).expect("restored path");
+        assert_eq!(drawing.tool(), DrawingTool::Path);
+        assert_eq!(drawing.anchors().len(), 3);
+        assert!(contains_point(drawing.anchors(), 10.0, 100.0));
+        assert!(contains_point(drawing.anchors(), 15.0, 105.0));
+        assert!(contains_point(drawing.anchors(), 20.0, 102.0));
+    }
+
+    #[test]
+    fn selected_anchor_fill_tracks_live_chart_background() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::TrendLine;
+        let id = manager.start_creating(10.0, 100.0).expect("trend line id");
+        assert!(manager.finalize_creation_step(20.0, 110.0));
+        manager.select(id);
+
+        let anchor_fill = [1.0, 0.55, 0.0, 1.0];
+        let vp = test_viewport();
+        let (_base, top) = manager.generate_all_geometry_with_anchor_fill(
+            &vp,
+            800.0,
+            600.0,
+            1.0,
+            1.0,
+            1.0,
+            anchor_fill,
+        );
+
+        let anchors: Vec<_> = top.iter().flat_map(|geom| geom.anchors.iter()).collect();
+        assert!(
+            !anchors.is_empty(),
+            "selected drawing should expose anchor handles"
+        );
+        assert!(anchors.iter().all(|anchor| anchor.fill == anchor_fill));
+        assert!(
+            anchors.iter().all(|anchor| anchor.border != anchor_fill),
+            "anchor border should keep the drawing color instead of the chart background"
+        );
     }
 }

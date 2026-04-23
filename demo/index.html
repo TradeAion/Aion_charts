@@ -523,6 +523,7 @@
       <button class="btn" id="draw-hline">H-Line</button>
       <button class="btn" id="draw-vline">V-Line</button>
       <button class="btn" id="draw-ray">Ray</button>
+      <button class="btn" id="draw-path" title="Click to add arrow-path vertices, double-click or Enter to finish">Path</button>
       <button class="btn" id="draw-rectangle">Rect</button>
       <button class="btn" id="draw-text">Text</button>
       <button class="btn" id="draw-fibonacci">Fib</button>
@@ -604,6 +605,7 @@
         <b>Shortcuts:</b><br>
         <span class="shortcut-key">Shift</span> Angle snap (45°)<br>
         <span class="shortcut-key">Ctrl</span> OHLC snap<br>
+        <span class="shortcut-key">Enter</span> Finish Path<br>
         <span class="shortcut-key">Type</span> Add text to selected drawing<br>
         <span class="shortcut-key">Esc</span> Cancel / Deselect<br>
         <span class="shortcut-key">Del</span> Delete selected<br>
@@ -1005,10 +1007,10 @@
   <script type="module">
     // Demo uses the current local wasm/pkg artifact directly.
     const cacheBust = Date.now().toString();
-    const wasmModule = await import(`../wasm/pkg_dragfix/axiuscharts_wasm.js?v=${cacheBust}`);
+    const wasmModule = await import(`../wasm/pkg/axiuscharts_wasm.js?v=${cacheBust}`);
     const init = wasmModule.default;
     const { AxiusCharts, ChartGroup, ChartWorkspace } = wasmModule;
-    const wasmBinaryUrl = `../wasm/pkg_dragfix/axiuscharts_wasm_bg.wasm?v=${cacheBust}`;
+    const wasmBinaryUrl = `../wasm/pkg/axiuscharts_wasm_bg.wasm?v=${cacheBust}`;
 
     // ═══════════════════════════════════════════════════════════════════════
     // DOM & State
@@ -2285,7 +2287,7 @@
     // ═══════════════════════════════════════════════════════════════════════
     const drawTools = {
       'draw-trendline': 'trend_line', 'draw-hline': 'horizontal_line', 'draw-vline': 'vertical_line',
-      'draw-ray': 'ray', 'draw-rectangle': 'rectangle', 'draw-text': 'text',
+      'draw-ray': 'ray', 'draw-path': 'path', 'draw-rectangle': 'rectangle', 'draw-text': 'text',
       'draw-fibonacci': 'fibonacci', 'draw-brush': 'brush',
     };
     Object.entries(drawTools).forEach(([id, tool]) => {
