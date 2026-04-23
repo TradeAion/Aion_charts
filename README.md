@@ -64,8 +64,8 @@ Use `0` to disable a cap.
 
 ## Implemented Surface
 
-- Main chart types: candlestick, OHLC, line, area, Heikin-Ashi, baseline, footprint
-- Overlay series: line, area, histogram, bar, baseline
+- Main chart types: candlestick, OHLC, line, area, Heikin-Ashi, footprint
+- Overlay series: line, area, histogram, bar
 - Drawings: trend line, horizontal line, vertical line, ray, rectangle, Fibonacci, scale, brush
 - Built-in studies: SMA, EMA, RSI, MACD, Bollinger Bands, Stochastic, ATR, VWAP
 - Trade annotation: markers, draggable price lines, execution marks

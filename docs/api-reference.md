@@ -64,7 +64,7 @@ Use this path for canonical historical footprint loads. `set_footprint_bar(...)`
 
 ### Overlay series
 
-- `add_line_series`, `add_area_series`, `add_histogram_series`, `add_bar_series`, `add_baseline_series`
+- `add_line_series`, `add_area_series`, `add_histogram_series`, `add_bar_series`
 - `set_series_data(...)` uses `Float64Array` values
 - `set_histogram_data(...)` uses `Float64Array` values plus per-point color arrays
 - `set_bar_series_data(...)` uses `Float64Array` OHLC arrays
@@ -98,7 +98,6 @@ See [price-domain.md](./price-domain.md) for the precision contract.
 - `line`
 - `area`
 - `heikin_ashi`
-- `baseline`
 - `footprint`
 
 Aliases such as `candles`, `bars`, `ha`, `fp`, and `order_flow` are preserved.

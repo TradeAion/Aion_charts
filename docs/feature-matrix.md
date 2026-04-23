@@ -11,13 +11,11 @@ Last verified: 2026-04-17 against commit 97ae55b
 | Main line chart | Implemented | Primary close/value line |
 | Main area chart | Implemented | Filled line variant |
 | Main Heikin-Ashi chart | Implemented | Derived from source bars |
-| Main baseline chart | Implemented | Baseline shading supported |
 | Main footprint chart | Implemented | Bid/ask, delta, and profile modes |
 | Overlay line series | Implemented | Separate series collection |
 | Overlay area series | Implemented | Separate series collection |
 | Overlay histogram series | Implemented | Color-per-point support |
 | Overlay bar series | Implemented | OHLC overlay path |
-| Overlay baseline series | Implemented | Base value support |
 
 ## Multi-Pane And Groups
 

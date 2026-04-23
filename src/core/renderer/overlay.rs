@@ -533,7 +533,7 @@ impl OverlayRenderer {
         self.ctx.set_line_cap("butt");
         set_canvas_line_dash(&self.ctx, style.last_price_line.style, line_w);
 
-        // Main series (candles / line / area / bars / baseline / footprint)
+        // Main series (candles / line / area / bars / footprint)
         // LWC clips against pane bounds, not candle area — the line stays
         // visible as long as it's within the pane, even if the price scale
         // has scrolled the last value near or into the volume region.
