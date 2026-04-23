@@ -53,15 +53,41 @@ struct DrawingTextEditState {
     drawing_id: u64,
     caret: usize,
     original_value: String,
-    /// Whether the caret is currently rendered (drives blink phase).
-    caret_visible: bool,
-    /// Timestamp (ms, monotonic-ish) of the last blink toggle or keystroke reset.
+    /// Current caret opacity used by the native editor feedback pass.
+    caret_alpha: f32,
+    /// Timestamp (ms, monotonic-ish) of the current blink cycle origin.
     last_blink_ms: f64,
 }
 
 impl DrawingTextEditState {
-    /// Caret blink half-period in milliseconds (TradingView ~530ms).
-    const BLINK_HALF_PERIOD_MS: f64 = 530.0;
+    /// Use a VS Code-like phase blink instead of a hard visible/hidden toggle.
+    const BLINK_CYCLE_MS: f64 = 1060.0;
+    const BLINK_HOLD_MS: f64 = 530.0;
+    const BLINK_FADE_MS: f64 = 140.0;
+    const MIN_CARET_ALPHA: f32 = 0.22;
+
+    fn caret_alpha_for_elapsed(elapsed_ms: f64) -> f32 {
+        let cycle_ms = elapsed_ms.rem_euclid(Self::BLINK_CYCLE_MS);
+        let fade_out_start = Self::BLINK_HOLD_MS;
+        let fade_out_end = fade_out_start + Self::BLINK_FADE_MS;
+        let fade_in_end = fade_out_end + Self::BLINK_FADE_MS;
+
+        if cycle_ms <= fade_out_start {
+            return 1.0;
+        }
+        if cycle_ms <= fade_out_end {
+            let t = ((cycle_ms - fade_out_start) / Self::BLINK_FADE_MS).clamp(0.0, 1.0);
+            let eased = t * t * (3.0 - 2.0 * t);
+            return 1.0 - (1.0 - Self::MIN_CARET_ALPHA) * eased as f32;
+        }
+        if cycle_ms <= fade_in_end {
+            let t = ((cycle_ms - fade_out_end) / Self::BLINK_FADE_MS).clamp(0.0, 1.0);
+            let eased = t * t * (3.0 - 2.0 * t);
+            return Self::MIN_CARET_ALPHA + (1.0 - Self::MIN_CARET_ALPHA) * eased as f32;
+        }
+
+        1.0
+    }
 }
 
 /// Manages all drawings on the chart.
@@ -416,10 +442,9 @@ impl DrawingManager {
         else {
             return;
         };
-        // Blink: when the caret is in its "off" phase, render nothing.
-        // The host calls `tick_caret_blink` from its animation loop, which
-        // toggles `caret_visible` and triggers a repaint.
-        if !edit_state.caret_visible {
+        // Drive the caret with an editor-like phase blink instead of a hard
+        // visible/hidden toggle. Very low alpha is treated as effectively off.
+        if edit_state.caret_alpha <= 0.01 {
             return;
         }
         let Some(target) =
@@ -432,7 +457,8 @@ impl DrawingManager {
         }
 
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
-        let color = contrast_text_color(chart_bg_color);
+        let mut color = contrast_text_color(chart_bg_color);
+        color[3] *= edit_state.caret_alpha;
         let theta = target.rotation_deg.to_radians();
         let (sin_theta, cos_theta) = theta.sin_cos();
 
@@ -736,7 +762,7 @@ impl DrawingManager {
             drawing_id: id,
             caret: original_value.len(),
             original_value,
-            caret_visible: true,
+            caret_alpha: 1.0,
             last_blink_ms: 0.0,
         });
         true
@@ -758,8 +784,8 @@ impl DrawingManager {
 
     /// Advance the caret blink phase. Call once per animation frame from the host.
     ///
-    /// Returns `true` when the visible state of the caret changed (host should
-    /// schedule a repaint). When no text edit is active this is a no-op returning
+    /// Returns `true` when the rendered caret alpha changed enough that the host
+    /// should repaint. When no text edit is active this is a no-op returning
     /// `false`.
     pub fn tick_caret_blink(&mut self, now_ms: f64) -> bool {
         let Some(state) = self.text_edit.as_mut() else {
@@ -768,14 +794,16 @@ impl DrawingManager {
         // First tick after begin_text_edit / reset: prime the timer.
         if state.last_blink_ms <= 0.0 {
             state.last_blink_ms = now_ms;
-            state.caret_visible = true;
+            state.caret_alpha = 1.0;
             return false;
         }
-        if now_ms - state.last_blink_ms >= DrawingTextEditState::BLINK_HALF_PERIOD_MS {
-            state.caret_visible = !state.caret_visible;
-            state.last_blink_ms = now_ms;
+
+        let new_alpha = DrawingTextEditState::caret_alpha_for_elapsed(now_ms - state.last_blink_ms);
+        if (new_alpha - state.caret_alpha).abs() > 0.01 {
+            state.caret_alpha = new_alpha;
             return true;
         }
+
         false
     }
 
@@ -783,7 +811,7 @@ impl DrawingManager {
     /// every keystroke / caret movement so typing never hides the caret.
     fn reset_caret_blink(&mut self) {
         if let Some(state) = self.text_edit.as_mut() {
-            state.caret_visible = true;
+            state.caret_alpha = 1.0;
             // Setting to 0 makes the next tick re-prime against the host clock,
             // which avoids needing to thread `now_ms` into the key handler.
             state.last_blink_ms = 0.0;
@@ -2847,20 +2875,34 @@ mod tests {
     }
 
     #[test]
-    fn caret_blink_toggles_visibility_after_half_period() {
+    fn caret_blink_uses_editor_style_phase_animation() {
         let mut manager = DrawingManager::new();
         complete_trend_line(&mut manager);
         assert!(manager.begin_text_edit_selected());
         assert!(manager.is_text_editing_selected());
 
-        // Initial tick primes the timer (no flip).
+        // Initial tick primes the cycle origin.
         assert!(!manager.tick_caret_blink(1000.0));
-        // Same frame: nothing happens.
-        assert!(!manager.tick_caret_blink(1100.0));
-        // Past the half-period (530ms): caret toggles off.
+        let state = manager.text_edit.as_ref().expect("edit state");
+        assert!((state.caret_alpha - 1.0).abs() <= 0.001);
+
+        // During the hold phase the caret stays fully visible.
+        assert!(!manager.tick_caret_blink(1200.0));
+        let state = manager.text_edit.as_ref().expect("edit state");
+        assert!((state.caret_alpha - 1.0).abs() <= 0.001);
+
+        // Into the fade phase, opacity should dip instead of hard-toggling off.
         assert!(manager.tick_caret_blink(1600.0));
-        // Past another half-period: caret toggles back on.
+        let faded_alpha = manager.text_edit.as_ref().expect("edit state").caret_alpha;
+        assert!(
+            faded_alpha < 1.0 && faded_alpha > DrawingTextEditState::MIN_CARET_ALPHA,
+            "caret should be mid-fade, got alpha={faded_alpha}"
+        );
+
+        // By the next cycle the caret should be fully visible again.
         assert!(manager.tick_caret_blink(2200.0));
+        let restored_alpha = manager.text_edit.as_ref().expect("edit state").caret_alpha;
+        assert!((restored_alpha - 1.0).abs() <= 0.001);
 
         // No active edit -> tick is a cheap no-op.
         manager.cancel_text_edit();
