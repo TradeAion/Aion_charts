@@ -2,12 +2,13 @@
 //! and extends infinitely in that direction to the pane boundary.
 
 use super::drawing::{
-    generate_anchor_circles, line_label_placement, line_middle_gap_range, next_drawing_id,
-    point_to_bitmap, point_to_css, prepare_text_block, push_line_with_gap_range,
-    push_rotated_text_block, Drawing, TEXT_DRAWING_GAP_CSS,
+    generate_anchor_circles, line_label_placement, next_drawing_id, point_to_bitmap, point_to_css,
+    prepare_text_block, push_line_with_gap_range, push_rotated_text_block, Drawing,
+    LineLabelPlacement, PreparedTextBlock, TEXT_DRAWING_GAP_CSS,
 };
 use super::hit_test;
 use super::types::*;
+use crate::core::renderer::draw_list::TextAlign;
 use crate::core::viewport::Viewport;
 use crate::impl_drawing_accessors;
 
@@ -72,6 +73,76 @@ impl RayDrawing {
             t_max = 1.0;
         }
         (x0 + t_max * dx, y0 + t_max * dy)
+    }
+
+    fn middle_text_gap_range_on_ray(
+        ray_start_x: f64,
+        ray_start_y: f64,
+        ray_end_x: f64,
+        ray_end_y: f64,
+        placement: &LineLabelPlacement,
+        block: &PreparedTextBlock,
+        padding: f32,
+    ) -> Option<(f64, f64)> {
+        let ray_dx = ray_end_x - ray_start_x;
+        let ray_dy = ray_end_y - ray_start_y;
+        let ray_len = (ray_dx * ray_dx + ray_dy * ray_dy).sqrt();
+        if ray_len <= f64::EPSILON {
+            return None;
+        }
+
+        let ux = ray_dx / ray_len;
+        let uy = ray_dy / ray_len;
+        let anchor_t = (placement.anchor_x as f64 - ray_start_x) * ux
+            + (placement.anchor_y as f64 - ray_start_y) * uy;
+
+        let width = block.max_width as f64;
+        let local_left_x = match placement.align {
+            TextAlign::Left => 0.0,
+            TextAlign::Center => -width * 0.5,
+            TextAlign::Right => -width,
+        };
+        let local_right_x = local_left_x + width;
+
+        let (sin_theta, cos_theta) = placement.rotation_rad.sin_cos();
+        let orientation = if ux * cos_theta as f64 + uy * sin_theta as f64 >= 0.0 {
+            1.0
+        } else {
+            -1.0
+        };
+        let projected_a = anchor_t + orientation * local_left_x;
+        let projected_b = anchor_t + orientation * local_right_x;
+        let padding = padding as f64;
+        Some((
+            projected_a.min(projected_b) - padding,
+            projected_a.max(projected_b) + padding,
+        ))
+    }
+
+    fn text_label_placement(
+        &self,
+        anchor_start_x: f64,
+        anchor_start_y: f64,
+        anchor_end_x: f64,
+        anchor_end_y: f64,
+        block: &PreparedTextBlock,
+        font_size: f32,
+        avg_ratio: f64,
+    ) -> LineLabelPlacement {
+        let inset = TEXT_DRAWING_GAP_CSS * avg_ratio;
+        let gap = TEXT_DRAWING_GAP_CSS * avg_ratio;
+        line_label_placement(
+            anchor_start_x,
+            anchor_start_y,
+            anchor_end_x,
+            anchor_end_y,
+            self.text.horizontal_align,
+            self.text.vertical_align,
+            block,
+            font_size,
+            inset,
+            gap,
+        )
     }
 
     pub fn text(&self) -> &DrawingText {
@@ -159,25 +230,22 @@ impl Drawing for RayDrawing {
         let mut line_gap_range = None;
 
         if let Some(block) = prepare_text_block(&self.text.value, fs) {
-            // Universal 2px shape↔text spacing.
-            let inset = TEXT_DRAWING_GAP_CSS * avg_ratio;
-            let gap = TEXT_DRAWING_GAP_CSS * avg_ratio;
-            let placement = line_label_placement(
-                bx0,
-                by0,
-                far_x,
-                far_y,
-                self.text.horizontal_align,
-                self.text.vertical_align,
-                &block,
-                fs,
-                inset,
-                gap,
-            );
+            // Ray labels are anchored against the finite anchor span, not the
+            // infinite body. That keeps "left/center/right" placements within
+            // the user-defined anchor region instead of drifting to the pane edge.
+            let placement = self.text_label_placement(bx0, by0, bx1, by1, &block, fs, avg_ratio);
             if self.text.vertical_align
                 == crate::core::renderer::draw_list::TextVerticalAlign::Middle
             {
-                line_gap_range = line_middle_gap_range(&placement, &block, -avg_ratio as f32);
+                line_gap_range = Self::middle_text_gap_range_on_ray(
+                    bx0,
+                    by0,
+                    far_x,
+                    far_y,
+                    &placement,
+                    &block,
+                    -avg_ratio as f32,
+                );
             }
             push_rotated_text_block(
                 &mut geom.texts,
@@ -220,5 +288,66 @@ impl Drawing for RayDrawing {
             );
         }
         geom
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::renderer::draw_list::{TextAlign, TextVerticalAlign};
+
+    fn test_viewport() -> Viewport {
+        let mut vp = Viewport::new(1000, 600);
+        vp.start_bar = 10.0;
+        vp.end_bar = 20.0;
+        vp.price_min = 90.0;
+        vp.price_max = 110.0;
+        vp
+    }
+
+    #[test]
+    fn left_aligned_ray_text_anchor_stays_between_anchors_for_leftward_rays() {
+        let vp = test_viewport();
+        let mut drawing = RayDrawing::new(18.0, 100.0);
+        drawing.set_state(DrawingState::Idle);
+        drawing.move_anchor(1, 14.0, 96.0);
+        drawing.text_mut().value = "Ray".to_string();
+        drawing.text_mut().horizontal_align = TextAlign::Left;
+        drawing.text_mut().vertical_align = TextVerticalAlign::Top;
+
+        let font_size = drawing
+            .text()
+            .style
+            .resolved_font_size(drawing.style().font_size) as f32;
+        let block = prepare_text_block(&drawing.text().value, font_size).expect("text block");
+        let (ax0, ay0) = point_to_bitmap(
+            &drawing.anchors[0].point,
+            &vp,
+            1000.0,
+            600.0,
+            1.0,
+            1.0,
+            true,
+        );
+        let (ax1, ay1) = point_to_bitmap(
+            &drawing.anchors[1].point,
+            &vp,
+            1000.0,
+            600.0,
+            1.0,
+            1.0,
+            true,
+        );
+        let placement = drawing.text_label_placement(ax0, ay0, ax1, ay1, &block, font_size, 1.0);
+        let anchor_x = placement.anchor_x as f64;
+
+        assert!(
+            anchor_x >= ax0.min(ax1),
+            "anchor_x={anchor_x}, anchors=({ax0}, {ax1})"
+        );
+        assert!(
+            anchor_x <= ax0.max(ax1),
+            "anchor_x={anchor_x}, anchors=({ax0}, {ax1})"
+        );
     }
 }

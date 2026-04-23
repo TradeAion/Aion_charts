@@ -369,15 +369,10 @@ fn estimate_text_line_width(line: &str, font_size: f32) -> f32 {
 }
 
 pub fn prepare_text_block(text: &str, font_size: f32) -> Option<PreparedTextBlock> {
-    let lines = text
-        .lines()
-        .map(str::trim_end)
-        .filter(|line| !line.is_empty())
-        .map(ToOwned::to_owned)
-        .collect::<Vec<_>>();
-    if lines.is_empty() {
+    if text.trim().is_empty() {
         return None;
     }
+    let lines = text.split('\n').map(ToOwned::to_owned).collect::<Vec<_>>();
 
     let line_height = (font_size * 1.2).max(font_size);
     let total_height = font_size + line_height * (lines.len().saturating_sub(1) as f32);
@@ -919,6 +914,26 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert!(lines[0].x1 < 100.0);
         assert!(lines[1].x0 > 100.0);
+    }
+
+    #[test]
+    fn prepare_text_block_preserves_trailing_spaces_for_width() {
+        let tight = prepare_text_block("Ray", 12.0).expect("tight block");
+        let spaced = prepare_text_block("Ray ", 12.0).expect("spaced block");
+
+        assert!(
+            spaced.max_width > tight.max_width,
+            "trailing spaces must contribute width so caret gaps and label spacing stay visible"
+        );
+    }
+
+    #[test]
+    fn prepare_text_block_preserves_trailing_empty_line() {
+        let block = prepare_text_block("Ray\n", 12.0).expect("multiline block");
+
+        assert_eq!(block.lines.len(), 2);
+        assert_eq!(block.lines[0], "Ray");
+        assert_eq!(block.lines[1], "");
     }
 
     #[test]

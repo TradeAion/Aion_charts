@@ -25,6 +25,7 @@ pub mod vertical_line;
 
 use crate::core::data::BarArray;
 use crate::core::renderer::draw_list::{DrawText, TextAlign, TextVerticalAlign};
+use crate::core::renderer::theme::contrast_text_color;
 use crate::core::renderer::value_projection::TimeScaleIndex;
 use crate::core::viewport::Viewport;
 use drawing::{
@@ -83,6 +84,7 @@ impl DrawingManager {
     const DRAWING_PLACEHOLDER: &'static str = "+ Add text";
     const LINE_LABEL_SIDE_GAP_CSS: f64 = TEXT_DRAWING_GAP_CSS;
     const RECT_OUTSIDE_GAP_CSS: f64 = TEXT_DRAWING_GAP_CSS;
+    const TEXT_CARET_GAP_CSS: f64 = 1.0;
 
     pub fn new() -> Self {
         Self {
@@ -357,7 +359,13 @@ impl DrawingManager {
             * font_size
     }
 
-    fn text_edit_caret_local_metrics(text: &str, caret: usize, font_size: f64) -> (f64, f64, f64) {
+    fn text_edit_caret_local_metrics(
+        text: &str,
+        caret: usize,
+        font_size: f64,
+        align: TextAlign,
+        target_width: f64,
+    ) -> (f64, f64, f64) {
         let mut caret = caret.min(text.len());
         while caret > 0 && !text.is_char_boundary(caret) {
             caret -= 1;
@@ -374,7 +382,18 @@ impl DrawingManager {
         }
         let line_idx = line_count.saturating_sub(1) as f64;
         let line_height = (font_size * 1.2).max(font_size);
-        let caret_x = 1.0 + Self::estimate_text_line_width(current_line, font_size);
+        let line_width = Self::estimate_text_line_width(current_line, font_size);
+        let caret_gap = if current_line.is_empty() {
+            0.0
+        } else {
+            Self::TEXT_CARET_GAP_CSS
+        };
+        let text_left = match align {
+            TextAlign::Left => 0.0,
+            TextAlign::Center => (target_width - line_width) * 0.5,
+            TextAlign::Right => target_width - line_width,
+        };
+        let caret_x = text_left + line_width + caret_gap;
         let top = line_idx * line_height;
         let bottom = top + line_height;
         (caret_x, top, bottom)
@@ -389,6 +408,7 @@ impl DrawingManager {
         pane_css_h: f64,
         h_pixel_ratio: f64,
         v_pixel_ratio: f64,
+        chart_bg_color: [f32; 4],
     ) {
         let Some(edit_state) = self
             .text_edit_ref()
@@ -412,8 +432,7 @@ impl DrawingManager {
         }
 
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
-        let mut color = drawing.style().color;
-        color[3] = color[3].max(0.8);
+        let color = contrast_text_color(chart_bg_color);
         let theta = target.rotation_deg.to_radians();
         let (sin_theta, cos_theta) = theta.sin_cos();
 
@@ -436,9 +455,14 @@ impl DrawingManager {
         let font_size = Self::drawing_text_style_ref(drawing)
             .map(|style| style.resolved_font_size(drawing.style().font_size))
             .unwrap_or(drawing.style().font_size);
-        let (caret_x, caret_top, caret_bottom) =
-            Self::text_edit_caret_local_metrics(&text.value, edit_state.caret, font_size);
-        let clamped_caret_x = caret_x.clamp(1.0, (target.width - 1.0).max(1.0));
+        let (caret_x, caret_top, caret_bottom) = Self::text_edit_caret_local_metrics(
+            &text.value,
+            edit_state.caret,
+            font_size,
+            text.horizontal_align,
+            target.width,
+        );
+        let clamped_caret_x = caret_x.clamp(0.0, target.width.max(1.0) + Self::TEXT_CARET_GAP_CSS);
         let clamped_caret_top = caret_top.clamp(0.0, target.height.max(1.0));
         let clamped_caret_bottom = caret_bottom.clamp(
             clamped_caret_top + 1.0,
@@ -2156,6 +2180,7 @@ impl DrawingManager {
                 pane_css_h,
                 h_pixel_ratio,
                 v_pixel_ratio,
+                anchor_fill_color,
             );
             if geom.is_empty() {
                 continue;
@@ -2885,6 +2910,80 @@ mod tests {
             !still_present,
             "placeholder must disappear as soon as the user types any character"
         );
+    }
+
+    #[test]
+    fn caret_feedback_uses_background_contrast_color() {
+        let vp = test_viewport();
+        let mut manager = DrawingManager::new();
+        complete_trend_line(&mut manager);
+        assert!(manager.begin_text_edit_selected());
+
+        let (_, light_top) = manager.generate_all_geometry_with_anchor_fill(
+            &vp,
+            800.0,
+            600.0,
+            1.0,
+            1.0,
+            1.0,
+            [1.0, 1.0, 1.0, 1.0],
+        );
+        let light_caret = light_top
+            .first()
+            .and_then(|geom| geom.lines.last())
+            .expect("light caret line");
+        assert_eq!(
+            (light_caret.r, light_caret.g, light_caret.b, light_caret.a),
+            (0.0, 0.0, 0.0, 1.0)
+        );
+
+        let (_, dark_top) = manager.generate_all_geometry_with_anchor_fill(
+            &vp,
+            800.0,
+            600.0,
+            1.0,
+            1.0,
+            1.0,
+            [0.0, 0.0, 0.0, 1.0],
+        );
+        let dark_caret = dark_top
+            .first()
+            .and_then(|geom| geom.lines.last())
+            .expect("dark caret line");
+        assert_eq!(
+            (dark_caret.r, dark_caret.g, dark_caret.b, dark_caret.a),
+            (1.0, 1.0, 1.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn caret_metrics_keep_visible_gap_after_non_empty_text() {
+        let font_size = 12.0;
+        let line_width = DrawingManager::estimate_text_line_width("Ray", font_size);
+        let target_width = line_width + 2.0;
+
+        for align in [TextAlign::Left, TextAlign::Center, TextAlign::Right] {
+            let (caret_x, _, _) = DrawingManager::text_edit_caret_local_metrics(
+                "Ray",
+                3,
+                font_size,
+                align,
+                target_width,
+            );
+            let text_right = match align {
+                TextAlign::Left => line_width,
+                TextAlign::Center => target_width - 1.0,
+                TextAlign::Right => target_width,
+            };
+            let gap = caret_x - text_right;
+
+            assert!(
+                (gap - DrawingManager::TEXT_CARET_GAP_CSS).abs() <= 0.001,
+                "caret gap must stay at 1px for {:?} align (got {})",
+                align,
+                gap
+            );
+        }
     }
 
     #[test]
