@@ -1010,7 +1010,7 @@ impl SubPane {
         if !self.crosshair_active.get() {
             // Clear price axis top layer when not active
             self.price_axis
-                .render_top(&CrosshairState::default(), &self.viewport, style, ph);
+                .render_top(&CrosshairState::default(), &self.viewport, style, ph, dpr);
             return;
         }
 
@@ -1052,7 +1052,7 @@ impl SubPane {
             mode: CrosshairMode::Normal,
         };
         self.price_axis
-            .render_top(&crosshair_state, &self.viewport, style, ph);
+            .render_top(&crosshair_state, &self.viewport, style, ph, dpr);
     }
 
     // ── Low-level chart rendering ──────────────────────────────────────

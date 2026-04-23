@@ -180,6 +180,7 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
 
     // 4. Recompute pane dimensions + final ticks after layout sync.
     let (pane_css_w, pane_css_h) = s.layout.pane_css_size();
+    let (time_axis_css_w, time_axis_css_h) = s.layout.time_axis_css_size();
     pane_pw = s.engine.viewport.width as f64;
     pane_ph = s.engine.viewport.height as f64;
     if pane_pw <= 0.0 || pane_ph <= 0.0 {
@@ -424,7 +425,13 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
         let crosshair_style = replay_crosshair_style_override
             .as_ref()
             .unwrap_or(&engine.style);
-        price_axis_renderer.render_top(&main_ch, &engine.viewport, crosshair_style, pane_ph);
+        price_axis_renderer.render_top(
+            &main_ch,
+            &engine.viewport,
+            crosshair_style,
+            pane_ph,
+            engine.v_pixel_ratio,
+        );
     }
 
     // 8. Time axis — base (ticks + labels) + top (crosshair label)
@@ -437,7 +444,13 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
         let crosshair_style = replay_crosshair_style_override
             .as_ref()
             .unwrap_or(&engine.style);
-        time_axis_renderer.render_base(&engine.style, &x_ticks, pane_pw);
+        time_axis_renderer.render_base(
+            &engine.style,
+            &x_ticks,
+            pane_pw,
+            time_axis_css_w,
+            time_axis_css_h,
+        );
         time_axis_renderer.render_top(
             &engine.crosshair,
             &engine.bars,
@@ -446,6 +459,8 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
             &engine.viewport,
             crosshair_style,
             pane_css_w,
+            time_axis_css_w,
+            time_axis_css_h,
         );
     }
 

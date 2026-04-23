@@ -681,7 +681,15 @@ impl OverlayRenderer {
         }
 
         let dpr = self.dpr;
-        let pane_ph = pane_css_h * dpr;
+        let v_ratio = if v_pixel_ratio > 0.0 {
+            v_pixel_ratio
+        } else {
+            dpr
+        };
+        let pane_ph = pane_css_h * v_ratio;
+        if pane_css_w <= 0.0 || pane_css_h <= 0.0 || pane_ph <= 0.0 {
+            return;
+        }
 
         // Get the last price and its color (same source as the price-axis label).
         let projected = match project_main_last_value(
@@ -700,10 +708,6 @@ impl OverlayRenderer {
         };
         let color = projected.color;
         let y_phys = projected.y_phys;
-        // Clip: if Y is outside pane bounds, skip.
-        if y_phys < 0.0 || y_phys > pane_ph {
-            return;
-        }
 
         // ── Replicate price-axis label height calculation exactly ──
         // (same math as right_axis_label_height_bmp + y_top in price_axis.rs)
@@ -717,10 +721,20 @@ impl OverlayRenderer {
         }
         let single_h_bmp = single_h_bmp.max(1) as f64;
 
-        // Same y_top as price chip's first row (physical pixels).
+        // Clamp like the axis label geometry so the chip remains visible at
+        // zoom extremes instead of disappearing once the raw Y leaves bounds.
         let y_mid_raw = y_phys.round() - (dpr * 0.5).floor();
         let tick_h = dpr.floor().max(1.0);
-        let y_top_phys = (y_mid_raw + tick_h / 2.0 - single_h_bmp / 2.0).floor();
+        let half = single_h_bmp / 2.0;
+        let edge_inset = (style.price_axis_label_edge_inset() * dpr).round().max(0.0);
+        let min_mid = half + edge_inset;
+        let max_mid = pane_ph - half - edge_inset;
+        let y_mid = if max_mid >= min_mid {
+            y_mid_raw.clamp(min_mid, max_mid)
+        } else {
+            (pane_ph * 0.5).round()
+        };
+        let y_top_phys = (y_mid + tick_h / 2.0 - single_h_bmp / 2.0).floor();
 
         // Convert to CSS for overlay drawing.
         let chip_h_css = single_h_bmp / dpr;
@@ -738,7 +752,11 @@ impl OverlayRenderer {
         let text_w = self.text_cache.measure(&self.ctx, symbol, &css_font);
 
         let chip_w_css = text_w + padding_lr * 2.0;
-        let chip_x_css = pane_css_w - chip_w_css; // flush right
+        // Anchor against the actual overlay bitmap width, not `pane_css_w`.
+        // With device-pixel-content-box sizing the pane canvas width can differ
+        // from `css * dpr` by enough pixels to push the whole chip offscreen.
+        let chip_w_phys = chip_w_css * dpr;
+        let chip_x_css = ((self.pw as f64 - chip_w_phys).max(0.0)) / dpr;
 
         let r = radius_css;
 

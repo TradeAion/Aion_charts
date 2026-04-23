@@ -311,10 +311,16 @@ impl PriceAxisRenderer {
         vp: &Viewport,
         style: &ChartStyle,
         pane_ph: f64,
+        v_pixel_ratio: f64,
     ) {
         let w = self.pw as f64;
         let h = self.ph as f64;
         let dpr = self.dpr;
+        let v_ratio = if v_pixel_ratio > 0.0 {
+            v_pixel_ratio
+        } else {
+            dpr
+        };
 
         self.top_ctx.clear_rect(0.0, 0.0, w, h);
 
@@ -323,7 +329,8 @@ impl PriceAxisRenderer {
         }
 
         let pane_limit_h = pane_ph.min(h);
-        let my = crosshair.y * dpr; // physical Y in pane space
+        // Must match overlay crosshair line projection (uses vertical pixel ratio).
+        let my = crosshair.y * v_ratio; // physical Y in pane space
         if my < 0.0 || my > pane_limit_h {
             return;
         }
@@ -476,19 +483,28 @@ impl PriceAxisRenderer {
             } else {
                 single_h_bmp
             };
-            let tick_h_bmp = dpr.floor().max(1.0);
-            let y_mid_raw = item.y_phys.round() - (dpr * 0.5).floor();
+            // `geom` is already edge-clamped by `compute_right_axis_label_geometry`.
+            // Keep that clamped anchor and only extend downward for the optional
+            // countdown row. The previous code replaced it with unclamped Y which
+            // caused chips to clip/disappear at aggressive zoom levels.
+            let mut y_top = geom.y_top;
+            let mut y_bottom = y_top + total_h_bmp;
+            if y_bottom > label_h {
+                let shift = y_bottom - label_h;
+                y_top -= shift;
+                y_bottom -= shift;
+            }
+            if y_top < 0.0 {
+                let shift = -y_top;
+                y_top += shift;
+                y_bottom += shift;
+            }
 
-            // Position the chip so the price row is centered on y_mid_raw,
-            // with the countdown row extending below.
-            let y_top = if has_countdown {
-                (y_mid_raw + tick_h_bmp / 2.0 - single_h_bmp / 2.0).floor()
-            } else {
-                (y_mid_raw + tick_h_bmp / 2.0 - total_h_bmp / 2.0).floor()
-            };
-            geom.y_mid = y_mid_raw;
+            // Keep the tick aligned to the first (price) row center after clamping.
+            let y_shift = y_top - geom.y_top;
+            geom.y_mid += y_shift;
             geom.y_top = y_top;
-            geom.y_bottom = y_top + total_h_bmp;
+            geom.y_bottom = y_bottom;
             // Price text is vertically centered in the first row.
             geom.text_y_css = (y_top + y_top + single_h_bmp) / 2.0 / dpr;
             geom.text_x_css =
@@ -1015,9 +1031,11 @@ fn compute_right_axis_label_geometry(
         // blank gap on the left side of the pill.
         RightAxisLabelWidthMode::AxisFull => {
             let center_x_phys = (x_inside + axis_w) / 2.0;
-            let text_left_phys = (center_x_phys - text_w_phys / 2.0)
-                // never overlap the tick + inner-padding zone
-                .max(x_inside + metrics.tick_size + metrics.inset_inner);
+            // Keep centered when possible, but clamp both sides so the text
+            // never clips outside the full-width label body.
+            let min_left = x_inside + metrics.tick_size + metrics.inset_inner;
+            let max_left = (axis_w - metrics.inset_outer - text_w_phys).max(min_left);
+            let text_left_phys = (center_x_phys - text_w_phys / 2.0).clamp(min_left, max_left);
             (text_left_phys / dpr, false) // "left" align at manually centred position
         }
         RightAxisLabelWidthMode::TextFit => (
@@ -1114,8 +1132,9 @@ fn centered_full_width_label_text_x_css(
     metrics: &RightAxisLabelMetrics,
 ) -> f64 {
     let center_x_phys = (geom.x_inside + geom.x_outside) / 2.0;
-    let text_left_phys = (center_x_phys - text_w_phys / 2.0)
-        .max(geom.x_inside + geom.tick_size + metrics.inset_inner);
+    let min_left = geom.x_inside + geom.tick_size + metrics.inset_inner;
+    let max_left = (geom.x_outside - metrics.inset_outer - text_w_phys).max(min_left);
+    let text_left_phys = (center_x_phys - text_w_phys / 2.0).clamp(min_left, max_left);
     text_left_phys / dpr
 }
 

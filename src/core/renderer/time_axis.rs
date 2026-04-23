@@ -83,10 +83,19 @@ impl TimeAxisRenderer {
 
     /// Render the base layer: background, border, tick marks, tick labels.
     /// `pane_w` is the pane width in physical pixels (only draw ticks within this range).
-    pub fn render_base(&mut self, style: &ChartStyle, ticks: &[TickMark], pane_w: f64) {
+    pub fn render_base(
+        &mut self,
+        style: &ChartStyle,
+        ticks: &[TickMark],
+        pane_w: f64,
+        axis_css_w: f64,
+        axis_css_h: f64,
+    ) {
         let w = self.pw as f64;
         let h = self.ph as f64;
         let dpr = self.dpr;
+        let h_ratio = if axis_css_w > 0.0 { w / axis_css_w } else { dpr };
+        let v_ratio = if axis_css_h > 0.0 { h / axis_css_h } else { dpr };
 
         // Clear + background
         self.base_ctx.clear_rect(0.0, 0.0, w, h);
@@ -94,7 +103,7 @@ impl TimeAxisRenderer {
         self.base_ctx.fill_rect(0.0, 0.0, w, h);
 
         // Border line at top edge (LWC: time axis border is at its top)
-        let border_size = (style.axis_border_size as f64 * dpr).max(1.0).floor();
+        let border_size = (style.axis_border_size as f64 * v_ratio).max(1.0).floor();
         if style.axis_border_visible {
             self.base_ctx
                 .set_fill_style_str(&rgba(&style.axis_border_color));
@@ -104,8 +113,8 @@ impl TimeAxisRenderer {
         if style.axis_border_visible && style.axis_ticks_visible {
             self.base_ctx
                 .set_fill_style_str(&rgba(&style.axis_border_color));
-            let tick_width = dpr.floor().max(1.0);
-            let tick_height = (style.axis_tick_length as f64 * dpr).round().max(1.0);
+            let tick_width = h_ratio.floor().max(1.0);
+            let tick_height = (style.axis_tick_length as f64 * v_ratio).round().max(1.0);
             for t in ticks {
                 if t.pixel < 0.0 || t.pixel > pane_w {
                     continue;
@@ -118,7 +127,9 @@ impl TimeAxisRenderer {
 
         // Tick labels — draw in media (CSS) coordinate space for sharp text.
         self.base_ctx.save();
-        let _ = self.base_ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
+        let _ = self
+            .base_ctx
+            .set_transform(h_ratio, 0.0, 0.0, v_ratio, 0.0, 0.0);
 
         let css_font_normal = format!("{}px {}", style.font_size, style.font_family);
         let css_font_major = format!("600 {}px {}", style.font_size, style.font_family);
@@ -131,8 +142,8 @@ impl TimeAxisRenderer {
         let tick_length_css = style.axis_tick_length as f64;
         let fs_css = style.font_size as f64;
         // LWC: yText = borderSize + tickLength + paddingTop + fontSize/2
-        let text_y_css = border_size / dpr + tick_length_css + inset_top_css + fs_css / 2.0;
-        let pane_css_w_axis = pane_w / dpr;
+        let text_y_css = border_size / v_ratio + tick_length_css + inset_top_css + fs_css / 2.0;
+        let pane_css_w_axis = pane_w / h_ratio;
 
         for t in ticks {
             if t.pixel < 0.0 || t.pixel > pane_w || t.label.is_empty() {
@@ -149,7 +160,7 @@ impl TimeAxisRenderer {
                 &self.base_ctx,
                 css_font,
                 &t.label,
-                t.pixel / dpr,
+                t.pixel / h_ratio,
                 pane_css_w_axis,
             );
             let _ = self.base_ctx.fill_text(&t.label, x_css, text_y_css);
@@ -168,11 +179,28 @@ impl TimeAxisRenderer {
         vp: &Viewport,
         style: &ChartStyle,
         pane_css_w: f64,
+        axis_css_w: f64,
+        axis_css_h: f64,
     ) {
         let w = self.pw as f64;
         let h = self.ph as f64;
         let dpr = self.dpr;
-        let axis_css_w = if dpr > 0.0 { w / dpr } else { pane_css_w };
+        let h_ratio = if axis_css_w > 0.0 { w / axis_css_w } else { dpr };
+        let v_ratio = if axis_css_h > 0.0 { h / axis_css_h } else { dpr };
+        let axis_css_w = if axis_css_w > 0.0 {
+            axis_css_w
+        } else if dpr > 0.0 {
+            w / dpr
+        } else {
+            pane_css_w
+        };
+        let axis_css_h = if axis_css_h > 0.0 {
+            axis_css_h
+        } else if dpr > 0.0 {
+            h / dpr
+        } else {
+            0.0
+        };
 
         self.top_ctx.clear_rect(0.0, 0.0, w, h);
 
@@ -237,13 +265,13 @@ impl TimeAxisRenderer {
         let by1_css = style.time_axis_crosshair_label_top_inset();
         let by2_css = (by1_css + border_size + tick_length + inset_top + fs + inset_bottom)
             .ceil()
-            .min(h / dpr);
+            .min(axis_css_h.max(0.0));
 
-        let lx1_bmp = (lx1 * dpr).round();
-        let lx2_bmp = (lx2 * dpr).round();
-        let by1_bmp = (by1_css * dpr).round();
-        let by2_bmp = (by2_css * dpr).round();
-        let radius = (2.0 * dpr).round();
+        let lx1_bmp = (lx1 * h_ratio).round();
+        let lx2_bmp = (lx2 * h_ratio).round();
+        let by1_bmp = (by1_css * v_ratio).round();
+        let by2_bmp = (by2_css * v_ratio).round();
+        let radius = (2.0 * v_ratio.min(h_ratio.max(1.0))).round();
 
         // Rounded rect: top corners square, bottom corners rounded
         self.top_ctx
@@ -264,7 +292,9 @@ impl TimeAxisRenderer {
 
         // Time text — draw in media (CSS) coordinate space for sharp text.
         self.top_ctx.save();
-        let _ = self.top_ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
+        let _ = self
+            .top_ctx
+            .set_transform(h_ratio, 0.0, 0.0, v_ratio, 0.0, 0.0);
         self.top_ctx.set_font(&css_font);
         self.top_ctx
             .set_fill_style_str(&rgba(&style.crosshair_label_text));
