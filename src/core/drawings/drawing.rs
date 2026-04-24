@@ -4,6 +4,10 @@ use super::types::*;
 use crate::core::renderer::draw_list::{ColoredLine, DrawText, TextAlign, TextVerticalAlign};
 use crate::core::viewport::Viewport;
 use std::any::Any;
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
 
 /// Unique ID counter for drawings.
 static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -354,18 +358,102 @@ pub struct LineLabelPlacement {
     pub line_len: f64,
 }
 
-fn estimate_text_line_width(line: &str, font_size: f32) -> f32 {
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static TEXT_MEASURE_CTX: RefCell<Option<web_sys::CanvasRenderingContext2d>> =
+        const { RefCell::new(None) };
+}
+
+#[cfg(target_arch = "wasm32")]
+fn browser_text_measure_context() -> Option<web_sys::CanvasRenderingContext2d> {
+    TEXT_MEASURE_CTX.with(|cell| {
+        if cell.borrow().is_none() {
+            let ctx = web_sys::window()
+                .and_then(|window| window.document())
+                .and_then(|document| document.create_element("canvas").ok())
+                .and_then(|canvas| canvas.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+                .and_then(|canvas| canvas.get_context("2d").ok().flatten())
+                .and_then(|ctx| ctx.dyn_into::<web_sys::CanvasRenderingContext2d>().ok());
+            *cell.borrow_mut() = ctx;
+        }
+        cell.borrow().clone()
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn browser_text_line_width(
+    line: &str,
+    font_size: f32,
+    font_weight: u16,
+    italic: bool,
+) -> Option<f32> {
+    let ctx = browser_text_measure_context()?;
+    let font = if italic {
+        format!(
+            "italic {} {}px {}",
+            font_weight,
+            font_size,
+            crate::core::renderer::theme::FONT_FAMILY
+        )
+    } else {
+        format!(
+            "{} {}px {}",
+            font_weight,
+            font_size,
+            crate::core::renderer::theme::FONT_FAMILY
+        )
+    };
+    ctx.set_font(&font);
+    ctx.measure_text(line)
+        .ok()
+        .map(|metrics| metrics.width() as f32)
+        .filter(|width| width.is_finite())
+}
+
+fn estimate_text_line_width_fallback(line: &str, font_size: f32) -> f32 {
     line.chars()
         .map(|ch| match ch {
-            'i' | 'l' | '!' | '|' | '.' | ',' | ':' | ';' | '\'' => 0.32,
-            ' ' => 0.33,
-            'm' | 'w' | 'M' | 'W' | '@' | '#' | '%' | '&' => 0.9,
-            '0'..='9' => 0.62,
-            'A'..='Z' => 0.7,
-            _ => 0.58,
+            'i' | 'j' | 'l' | '.' | ',' | ' ' => 0.28,
+            '\'' => 0.24,
+            '!' | ':' | ';' | 'f' | 't' => 0.33,
+            '|' => 0.28,
+            'r' => 0.39,
+            'z' => 0.5,
+            'm' | '%' => 0.89,
+            'w' => 0.78,
+            'M' => 0.83,
+            'W' => 0.94,
+            '@' => 0.98,
+            '#' | '0'..='9' => 0.56,
+            '&' | 'A' | 'B' | 'C' | 'D' | 'H' | 'K' | 'N' | 'R' | 'U' => 0.72,
+            'G' | 'O' | 'Q' => 0.78,
+            'E' | 'P' | 'S' | 'V' | 'X' | 'Y' => 0.67,
+            'F' | 'J' | 'L' | 'T' | 'Z' => 0.61,
+            'b' | 'd' | 'g' | 'h' | 'n' | 'o' | 'p' | 'q' | 'u' => 0.61,
+            _ => 0.56,
         })
         .sum::<f32>()
         * font_size
+}
+
+pub fn estimate_text_line_width(line: &str, font_size: f32) -> f32 {
+    estimate_text_line_width_with_style(line, font_size, 600, false)
+}
+
+pub fn estimate_text_line_width_with_style(
+    line: &str,
+    font_size: f32,
+    font_weight: u16,
+    italic: bool,
+) -> f32 {
+    #[cfg(target_arch = "wasm32")]
+    if let Some(width) = browser_text_line_width(line, font_size, font_weight, italic) {
+        return width;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = (font_weight, italic);
+
+    estimate_text_line_width_fallback(line, font_size)
 }
 
 pub fn prepare_text_block(text: &str, font_size: f32) -> Option<PreparedTextBlock> {

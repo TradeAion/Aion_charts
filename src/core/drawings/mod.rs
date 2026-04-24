@@ -29,8 +29,9 @@ use crate::core::renderer::theme::contrast_text_color;
 use crate::core::renderer::value_projection::TimeScaleIndex;
 use crate::core::viewport::Viewport;
 use drawing::{
-    ensure_next_drawing_id_at_least, line_label_placement, point_to_bitmap, point_to_css,
-    prepare_text_block, push_rotated_text_block, rect_text_anchor, rotated_text_box_top_left,
+    ensure_next_drawing_id_at_least, estimate_text_line_width as estimate_drawing_text_line_width,
+    line_label_placement, optical_middle_top, point_to_bitmap, point_to_css, prepare_text_block,
+    push_rotated_text_block, rect_text_anchor, rotated_text_box_top_left,
     vertical_line_label_alignments, Drawing, PreparedTextBlock, TEXT_DRAWING_GAP_CSS,
 };
 use persistence::{
@@ -384,17 +385,7 @@ impl DrawingManager {
     }
 
     fn estimate_text_line_width(line: &str, font_size: f64) -> f64 {
-        line.chars()
-            .map(|ch| match ch {
-                'i' | 'l' | '!' | '|' | '.' | ',' | ':' | ';' | '\'' => 0.32,
-                ' ' => 0.33,
-                'm' | 'w' | 'M' | 'W' | '@' | '#' | '%' | '&' => 0.9,
-                '0'..='9' => 0.62,
-                'A'..='Z' => 0.7,
-                _ => 0.58,
-            })
-            .sum::<f64>()
-            * font_size
+        estimate_drawing_text_line_width(line, font_size as f32) as f64
     }
 
     fn text_edit_caret_local_metrics(
@@ -501,6 +492,40 @@ impl DrawingManager {
         best_idx.min(text.len())
     }
 
+    fn text_edit_align_for_drawing(drawing: &dyn Drawing, text: &DrawingText) -> TextAlign {
+        match drawing.tool() {
+            // Free text drawings render their glyphs centered inside the
+            // auto-sized text box. Their horizontal alignment controls how
+            // the box is anchored to the click point, not where glyphs sit
+            // inside the box.
+            DrawingTool::Text => TextAlign::Center,
+            // Vertical-line labels remap the user's inspector alignment into
+            // "along the line" alignment before rendering/target placement.
+            // Caret metrics must use that same along-line alignment or the
+            // caret gets anchored to the wrong end of the rotated target.
+            DrawingTool::VerticalLine => {
+                vertical_line_label_alignments(text.horizontal_align, text.vertical_align).0
+            }
+            _ => text.horizontal_align,
+        }
+    }
+
+    fn text_drawing_local_text_top(text_value: &str, font_size: f64, target_height: f64) -> f64 {
+        let display_text = if text_value.trim().is_empty() {
+            " "
+        } else {
+            text_value
+        };
+        let block =
+            prepare_text_block(display_text, font_size as f32).unwrap_or(PreparedTextBlock {
+                lines: vec![display_text.to_string()],
+                line_height: (font_size as f32 * 1.2).max(font_size as f32),
+                total_height: font_size as f32,
+                max_width: 0.0,
+            });
+        optical_middle_top((target_height * 0.5) as f32, &block, font_size as f32) as f64
+    }
+
     pub fn place_text_edit_caret_at_point(
         &mut self,
         id: u64,
@@ -537,12 +562,18 @@ impl DrawingManager {
         let dy = y - target.top;
         let local_x = dx * cos_theta + dy * sin_theta;
         let local_y = -dx * sin_theta + dy * cos_theta;
+        let align = Self::text_edit_align_for_drawing(drawing.as_ref(), text);
+        let local_y = if drawing.tool() == DrawingTool::Text {
+            local_y - Self::text_drawing_local_text_top(&text.value, font_size, target.height)
+        } else {
+            local_y
+        };
         let caret = Self::text_edit_caret_index_from_local_point(
             &text.value,
             local_x,
             local_y,
             font_size,
-            text.horizontal_align,
+            align,
             target.width,
         );
         if let Some(edit) = self.text_edit.as_mut().filter(|edit| edit.drawing_id == id) {
@@ -612,18 +643,23 @@ impl DrawingManager {
         let font_size = Self::drawing_text_style_ref(drawing)
             .map(|style| style.resolved_font_size(drawing.style().font_size))
             .unwrap_or(drawing.style().font_size);
-        let (caret_x, caret_top, caret_bottom) = Self::text_edit_caret_local_metrics(
+        let align = Self::text_edit_align_for_drawing(drawing, text);
+        let (caret_x, mut caret_top, mut caret_bottom) = Self::text_edit_caret_local_metrics(
             &text.value,
             edit_state.caret,
             font_size,
-            text.horizontal_align,
+            align,
             target.width,
         );
+        if drawing.tool() == DrawingTool::Text {
+            let text_top = Self::text_drawing_local_text_top(&text.value, font_size, target.height);
+            caret_top += text_top;
+            caret_bottom += text_top;
+        }
         let stroke_edge_bias = 0.5 / local_x_device_scale;
-        let caret_x = if Self::text_edit_caret_touches_text_on_right(&text.value, edit_state.caret)
+        let caret_x = if edit_state.caret > 0
+            || Self::text_edit_caret_touches_text_on_right(&text.value, edit_state.caret)
         {
-            caret_x - stroke_edge_bias
-        } else if edit_state.caret > 0 {
             caret_x + stroke_edge_bias
         } else {
             caret_x
@@ -3346,13 +3382,47 @@ mod tests {
             manager.generate_all_geometry(&test_viewport(), 800.0, 600.0, 2.0, 2.0, 2.0);
         let geom = top.first().expect("text geometry");
         let caret = geom.lines.last().expect("caret line");
-        let text_boundary_x = DrawingManager::css_to_bitmap_x(target.left, 2.0) as f32;
+        let line_width = DrawingManager::estimate_text_line_width("dr", 12.0);
+        let text_boundary_css_x = target.left + (target.width - line_width) * 0.5;
+        let text_boundary_x = DrawingManager::css_to_bitmap_x(text_boundary_css_x, 2.0) as f32;
 
         assert!(
-            (f64::from(text_boundary_x - caret.x0) - 0.5).abs() <= 0.001,
-            "front caret center should be half a physical pixel before text boundary, got text_x={} caret_x={}",
+            (f64::from(caret.x0 - text_boundary_x) - 0.5).abs() <= 0.001,
+            "front caret center should be half a physical pixel after centered text boundary, got text_x={} caret_x={}",
             text_boundary_x,
             caret.x0
+        );
+    }
+
+    #[test]
+    fn text_tool_caret_uses_centered_glyph_origin_inside_auto_box() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Text;
+        let id = manager.start_creating(10.0, 110.0).expect("text id");
+        manager.finalize_creation_step(10.0, 110.0);
+        manager.select(id);
+        assert!(manager.set_selected_drawing_text("Ray".to_string()));
+        assert!(manager.set_selected_text_alignment(TextAlign::Left, TextVerticalAlign::Top));
+        assert!(manager.begin_text_edit_selected());
+        manager.text_edit.as_mut().expect("edit state").caret = 0;
+
+        let target = manager
+            .selected_drawing_info(&test_viewport(), 800.0, 600.0)
+            .and_then(|info| info.editor_target)
+            .expect("editor target");
+        let line_width = DrawingManager::estimate_text_line_width("Ray", 12.0);
+        let expected_start_css_x = target.left + (target.width - line_width) * 0.5;
+
+        let (_bottom, top) =
+            manager.generate_all_geometry(&test_viewport(), 800.0, 600.0, 1.0, 1.0, 1.0);
+        let caret = top
+            .first()
+            .and_then(|geom| geom.lines.last())
+            .expect("caret line");
+
+        assert!(
+            (f64::from(caret.x0) - expected_start_css_x).abs() <= 1.0,
+            "text tool caret must use the same centered glyph origin as rendered text"
         );
     }
 
@@ -4272,6 +4342,45 @@ mod tests {
         assert!(
             (target.rotation_deg - 90.0).abs() < 1e-6,
             "vertical-line editor target should rotate with rendered text"
+        );
+    }
+
+    #[test]
+    fn vertical_line_caret_starts_at_top_aligned_text_origin() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::VerticalLine;
+        let id = manager
+            .start_creating(12.5, 100.0)
+            .expect("vertical line id");
+        assert!(manager.finalize_creation_step(12.5, 100.0));
+        manager.select(id);
+        assert!(manager.set_selected_drawing_text("Event".to_string()));
+        assert!(manager.begin_text_edit_selected());
+        manager.text_edit.as_mut().expect("edit state").caret = 0;
+
+        let target = manager
+            .selected_drawing_info(&test_viewport(), 800.0, 600.0)
+            .and_then(|info| info.editor_target)
+            .expect("vertical line editor target");
+
+        let (_bottom, top) =
+            manager.generate_all_geometry(&test_viewport(), 800.0, 600.0, 1.0, 1.0, 1.0);
+        let caret = top
+            .first()
+            .and_then(|geom| geom.lines.last())
+            .expect("caret line");
+
+        assert!(
+            (f64::from(caret.y0) - (target.top + 0.5)).abs() <= 0.001,
+            "vertical-line caret should start at the top-aligned text origin, got target_top={} caret_y={}",
+            target.top,
+            caret.y0
+        );
+        assert!(
+            (f64::from(caret.y1) - (target.top + 0.5)).abs() <= 0.001,
+            "vertical-line caret should stay on the same row at the text origin, got target_top={} caret_y={}",
+            target.top,
+            caret.y1
         );
     }
 
