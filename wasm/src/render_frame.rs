@@ -42,15 +42,28 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
         let scroll = subpane.scroll_state.borrow();
         scroll.dragging || scroll.animation.is_active()
     });
+    let text_edit_animation_active = s.engine.drawings.is_text_editing_selected()
+        || s.subpanes
+            .iter()
+            .any(|subpane| subpane.drawings.is_text_editing_selected());
     let needs_continuous_render = s.interaction.is_gliding
         || subpane_animation_active
-        || (s.replay_active && s.replay_playing);
+        || (s.replay_active && s.replay_playing)
+        || text_edit_animation_active;
     if !dirty.get() && !needs_continuous_render {
         return false;
     }
 
     let dpr = s.engine.dpr;
     let anim_time = js_sys::Date::now(); // For pulsing animations
+
+    let mut caret_dirty = s.engine.drawings.tick_caret_blink(anim_time);
+    for subpane in s.subpanes.iter_mut() {
+        caret_dirty |= subpane.drawings.tick_caret_blink(anim_time);
+    }
+    if caret_dirty {
+        dirty.set(true);
+    }
 
     if let Err(err) = s.replay_tick(anim_time) {
         log::warn!("replay tick failed: {}", err);
