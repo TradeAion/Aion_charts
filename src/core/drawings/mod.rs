@@ -122,8 +122,6 @@ impl DrawingManager {
     const DRAWING_PLACEHOLDER: &'static str = "+ Add text";
     const LINE_LABEL_SIDE_GAP_CSS: f64 = TEXT_DRAWING_GAP_CSS;
     const RECT_OUTSIDE_GAP_CSS: f64 = TEXT_DRAWING_GAP_CSS;
-    const TEXT_CARET_GAP_CSS: f64 = 1.0;
-    const TEXT_CARET_ITALIC_OVERHANG_CSS: f64 = 2.0;
     const TEXT_CARET_OVERSHOOT_CSS: f64 = 1.0;
 
     pub fn new() -> Self {
@@ -421,20 +419,27 @@ impl DrawingManager {
         let line_height = (font_size * 1.2).max(font_size);
         let full_line_width = Self::estimate_text_line_width(full_line, font_size);
         let prefix_width = Self::estimate_text_line_width(prefix_line, font_size);
-        let caret_gap = if prefix_line.is_empty() {
-            0.0
-        } else {
-            Self::TEXT_CARET_ITALIC_OVERHANG_CSS + Self::TEXT_CARET_GAP_CSS
-        };
         let text_left = match align {
             TextAlign::Left => 0.0,
             TextAlign::Center => (target_width - full_line_width) * 0.5,
             TextAlign::Right => target_width - full_line_width,
         };
-        let caret_x = text_left + prefix_width + caret_gap;
+        let caret_x = text_left + prefix_width;
         let top = line_idx * line_height;
         let bottom = top + line_height;
         (caret_x, top, bottom)
+    }
+
+    fn text_edit_caret_touches_text_on_right(text: &str, caret: usize) -> bool {
+        let mut caret = caret.min(text.len());
+        while caret > 0 && !text.is_char_boundary(caret) {
+            caret -= 1;
+        }
+        let line_end = text[caret..]
+            .find('\n')
+            .map(|offset| caret + offset)
+            .unwrap_or(text.len());
+        caret < line_end
     }
 
     fn text_edit_caret_index_from_local_point(
@@ -480,13 +485,7 @@ impl DrawingManager {
         let mut best_distance = x_in_line.abs();
         for (idx, _) in line.char_indices() {
             let prefix = &line[..idx];
-            let candidate_x = if prefix.is_empty() {
-                0.0
-            } else {
-                Self::estimate_text_line_width(prefix, font_size)
-                    + Self::TEXT_CARET_ITALIC_OVERHANG_CSS
-                    + Self::TEXT_CARET_GAP_CSS
-            };
+            let candidate_x = Self::estimate_text_line_width(prefix, font_size);
             let distance = (candidate_x - x_in_line).abs();
             if distance < best_distance {
                 best_distance = distance;
@@ -494,9 +493,7 @@ impl DrawingManager {
             }
         }
 
-        let end_x = Self::estimate_text_line_width(line, font_size)
-            + Self::TEXT_CARET_ITALIC_OVERHANG_CSS
-            + Self::TEXT_CARET_GAP_CSS;
+        let end_x = Self::estimate_text_line_width(line, font_size);
         if (end_x - x_in_line).abs() <= best_distance {
             return (line_start + line.len()).min(text.len());
         }
@@ -587,11 +584,14 @@ impl DrawingManager {
             return;
         }
 
-        let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let mut color = contrast_text_color(chart_bg_color);
         color[3] *= edit_state.caret_alpha;
         let theta = target.rotation_deg.to_radians();
         let (sin_theta, cos_theta) = theta.sin_cos();
+        let local_x_device_scale = ((h_pixel_ratio * cos_theta).powi(2)
+            + (v_pixel_ratio * sin_theta).powi(2))
+        .sqrt()
+        .max(1.0);
 
         let local_to_css = |lx: f64, ly: f64| -> (f64, f64) {
             (
@@ -619,7 +619,17 @@ impl DrawingManager {
             text.horizontal_align,
             target.width,
         );
-        let clamped_caret_x = caret_x.clamp(0.0, target.width.max(1.0) + Self::TEXT_CARET_GAP_CSS);
+        let stroke_edge_bias = 0.5 / local_x_device_scale;
+        let caret_x = if Self::text_edit_caret_touches_text_on_right(&text.value, edit_state.caret)
+        {
+            caret_x - stroke_edge_bias
+        } else if edit_state.caret > 0 {
+            caret_x + stroke_edge_bias
+        } else {
+            caret_x
+        };
+        let clamped_caret_x =
+            caret_x.clamp(-stroke_edge_bias, target.width.max(1.0) + stroke_edge_bias);
         let clamped_caret_top = caret_top.clamp(0.0, target.height.max(1.0));
         let clamped_caret_bottom = caret_bottom.clamp(
             clamped_caret_top + 1.0,
@@ -646,7 +656,7 @@ impl DrawingManager {
                 y0: caret_top_y as f32,
                 x1: caret_bottom_x as f32,
                 y1: caret_bottom_y as f32,
-                width: avg_ratio.max(1.0) as f32,
+                width: 1.0,
                 r: color[0],
                 g: color[1],
                 b: color[2],
@@ -654,146 +664,6 @@ impl DrawingManager {
                 dash: 0.0,
                 gap: 0.0,
             });
-    }
-
-    fn append_native_text_edit_text_feedback(
-        &self,
-        geom: &mut DrawingGeometry,
-        drawing: &dyn Drawing,
-        vp: &Viewport,
-        pane_css_w: f64,
-        pane_css_h: f64,
-        h_pixel_ratio: f64,
-        v_pixel_ratio: f64,
-    ) {
-        let Some(edit_state) = self
-            .text_edit_ref()
-            .filter(|state| state.drawing_id == drawing.id())
-        else {
-            return;
-        };
-        let Some(text) = Self::drawing_text_ref(drawing) else {
-            return;
-        };
-        if text.value.is_empty() {
-            return;
-        }
-        let Some(target) =
-            Self::editor_target_for_drawing_sized(drawing, vp, pane_css_w, pane_css_h, false)
-        else {
-            return;
-        };
-        if target.width <= 0.0 || target.height <= 0.0 {
-            return;
-        }
-
-        let style = Self::drawing_text_style_ref(drawing);
-        let font_size = style
-            .map(|text_style| text_style.resolved_font_size(drawing.style().font_size))
-            .unwrap_or(drawing.style().font_size);
-        let font_size_dev = (font_size * ((h_pixel_ratio + v_pixel_ratio) * 0.5)) as f32;
-        let color = style
-            .map(|text_style| text_style.resolved_color(drawing.style().color))
-            .unwrap_or(drawing.style().color);
-        let italic = style.map(|text_style| text_style.italic).unwrap_or(false);
-        let theta = target.rotation_deg.to_radians();
-        let (sin_theta, cos_theta) = theta.sin_cos();
-        let line_height = (font_size * 1.2).max(font_size);
-        let caret_stroke_css = 1.0;
-
-        let local_to_bitmap = |lx: f64, ly: f64| -> (f32, f32) {
-            let css_x = target.left + lx * cos_theta - ly * sin_theta;
-            let css_y = target.top + lx * sin_theta + ly * cos_theta;
-            (
-                Self::css_to_bitmap_x(css_x, h_pixel_ratio) as f32,
-                Self::css_to_bitmap_y(css_y, v_pixel_ratio) as f32,
-            )
-        };
-
-        let mut line_start = 0_usize;
-        for (line_idx, line) in text.value.split('\n').enumerate() {
-            let line_end = line_start + line.len();
-            let full_line_width = Self::estimate_text_line_width(line, font_size);
-            let text_left = match text.horizontal_align {
-                TextAlign::Left => 0.0,
-                TextAlign::Center => (target.width - full_line_width) * 0.5,
-                TextAlign::Right => target.width - full_line_width,
-            };
-            let top = line_idx as f64 * line_height;
-
-            if edit_state.caret >= line_start && edit_state.caret <= line_end {
-                let caret_in_line = edit_state.caret - line_start;
-                let prefix = &line[..caret_in_line];
-                let suffix = &line[caret_in_line..];
-                let prefix_width = Self::estimate_text_line_width(prefix, font_size);
-                let before_caret_gap = if prefix.is_empty() {
-                    0.0
-                } else {
-                    Self::TEXT_CARET_ITALIC_OVERHANG_CSS + Self::TEXT_CARET_GAP_CSS
-                };
-                let suffix_left = text_left
-                    + prefix_width
-                    + before_caret_gap
-                    + caret_stroke_css
-                    + Self::TEXT_CARET_GAP_CSS;
-
-                if !prefix.is_empty() {
-                    let (x, y) = local_to_bitmap(text_left, top);
-                    geom.texts.push(DrawText {
-                        text: prefix.to_string(),
-                        x,
-                        y,
-                        font_size: font_size_dev,
-                        font_weight: 600,
-                        italic,
-                        rotation_rad: theta as f32,
-                        r: color[0],
-                        g: color[1],
-                        b: color[2],
-                        a: color[3],
-                        align: TextAlign::Left,
-                        vertical_align: TextVerticalAlign::Top,
-                    });
-                }
-                if !suffix.is_empty() {
-                    let (x, y) = local_to_bitmap(suffix_left, top);
-                    geom.texts.push(DrawText {
-                        text: suffix.to_string(),
-                        x,
-                        y,
-                        font_size: font_size_dev,
-                        font_weight: 600,
-                        italic,
-                        rotation_rad: theta as f32,
-                        r: color[0],
-                        g: color[1],
-                        b: color[2],
-                        a: color[3],
-                        align: TextAlign::Left,
-                        vertical_align: TextVerticalAlign::Top,
-                    });
-                }
-            } else {
-                let (x, y) = local_to_bitmap(text_left, top);
-                geom.texts.push(DrawText {
-                    text: line.to_string(),
-                    x,
-                    y,
-                    font_size: font_size_dev,
-                    font_weight: 600,
-                    italic,
-                    rotation_rad: theta as f32,
-                    r: color[0],
-                    g: color[1],
-                    b: color[2],
-                    a: color[3],
-                    align: TextAlign::Left,
-                    vertical_align: TextVerticalAlign::Top,
-                });
-            }
-
-            line_start = line_end + 1;
-        }
     }
 
     fn append_native_placeholder(
@@ -2474,22 +2344,6 @@ impl DrawingManager {
                 v_pixel_ratio,
                 show_anchors,
             );
-            let is_text_editing_this = self
-                .text_edit_ref()
-                .map(|state| state.drawing_id == d.id())
-                .unwrap_or(false);
-            if is_text_editing_this {
-                geom.texts.clear();
-                self.append_native_text_edit_text_feedback(
-                    &mut geom,
-                    d.as_ref(),
-                    vp,
-                    pane_css_w,
-                    pane_css_h,
-                    h_pixel_ratio,
-                    v_pixel_ratio,
-                );
-            }
             if show_anchors {
                 for anchor in &mut geom.anchors {
                     anchor.fill = anchor_fill_color;
@@ -3403,7 +3257,7 @@ mod tests {
     }
 
     #[test]
-    fn caret_metrics_keep_visible_gap_after_non_empty_text() {
+    fn caret_metrics_do_not_insert_artificial_gap_after_text() {
         let font_size = 12.0;
         let line_width = DrawingManager::estimate_text_line_width("Ray", font_size);
         let target_width = line_width + 2.0;
@@ -3421,38 +3275,19 @@ mod tests {
                 TextAlign::Center => target_width - 1.0,
                 TextAlign::Right => target_width,
             };
-            let gap = caret_x - text_right - DrawingManager::TEXT_CARET_ITALIC_OVERHANG_CSS;
+            let drift = caret_x - text_right;
 
             assert!(
-                (gap - DrawingManager::TEXT_CARET_GAP_CSS).abs() <= 0.001,
-                "caret visible gap must stay at 1px after italic overhang for {:?} align (got {})",
+                drift.abs() <= 0.001,
+                "caret must sit on the text boundary without an artificial gap for {:?} align (got drift {})",
                 align,
-                gap
+                drift
             );
         }
     }
 
     #[test]
-    fn caret_metrics_clear_italic_end_overhang() {
-        let font_size = 12.0;
-        let line_width = DrawingManager::estimate_text_line_width("dddd", font_size);
-        let target_width = line_width + 2.0;
-        let (caret_x, _, _) = DrawingManager::text_edit_caret_local_metrics(
-            "dddd",
-            4,
-            font_size,
-            TextAlign::Left,
-            target_width,
-        );
-
-        assert!(
-            caret_x >= line_width + DrawingManager::TEXT_CARET_ITALIC_OVERHANG_CSS,
-            "caret must sit after the italic glyph overhang, got caret_x={caret_x} line_width={line_width}"
-        );
-    }
-
-    #[test]
-    fn edit_mode_text_splits_around_middle_caret_slot() {
+    fn edit_mode_keeps_text_as_single_run_while_caret_moves() {
         let mut manager = DrawingManager::new();
         complete_trend_line(&mut manager);
         assert!(manager.set_selected_drawing_text("dddddd".to_string()));
@@ -3464,16 +3299,60 @@ mod tests {
         let texts: Vec<_> = top.iter().flat_map(|geom| geom.texts.iter()).collect();
 
         assert!(
-            texts.iter().any(|text| text.text == "dd"),
-            "edit renderer should draw the prefix before the caret"
+            texts.iter().any(|text| text.text == "dddddd"),
+            "edit renderer must keep the original text as one run so caret movement cannot create spacing drift"
         );
         assert!(
-            texts.iter().any(|text| text.text == "dddd"),
-            "edit renderer should draw the suffix after the caret slot"
+            !texts
+                .iter()
+                .any(|text| text.text == "dd" || text.text == "dddd"),
+            "edit renderer must not split text around the caret"
         );
+    }
+
+    #[test]
+    fn caret_feedback_uses_one_physical_pixel_stroke() {
+        let mut manager = DrawingManager::new();
+        complete_trend_line(&mut manager);
+        assert!(manager.set_selected_drawing_text("dddd".to_string()));
+        assert!(manager.begin_text_edit_selected());
+
+        let (_bottom, top) =
+            manager.generate_all_geometry(&test_viewport(), 800.0, 600.0, 2.0, 2.0, 2.0);
+        let caret = top
+            .first()
+            .and_then(|geom| geom.lines.last())
+            .expect("caret line");
+
+        assert_eq!(caret.width, 1.0);
+    }
+
+    #[test]
+    fn front_caret_stroke_edge_stops_at_text_boundary() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Text;
+        let id = manager.start_creating(10.0, 110.0).expect("text id");
+        manager.finalize_creation_step(10.0, 110.0);
+        manager.select(id);
+        assert!(manager.set_selected_drawing_text("dr".to_string()));
+        assert!(manager.begin_text_edit_selected());
+        manager.text_edit.as_mut().expect("edit state").caret = 0;
+        let target = manager
+            .selected_drawing_info(&test_viewport(), 800.0, 600.0)
+            .and_then(|info| info.editor_target)
+            .expect("editor target");
+
+        let (_bottom, top) =
+            manager.generate_all_geometry(&test_viewport(), 800.0, 600.0, 2.0, 2.0, 2.0);
+        let geom = top.first().expect("text geometry");
+        let caret = geom.lines.last().expect("caret line");
+        let text_boundary_x = DrawingManager::css_to_bitmap_x(target.left, 2.0) as f32;
+
         assert!(
-            !texts.iter().any(|text| text.text == "dddddd"),
-            "edit renderer must not draw a continuous string behind the caret"
+            (f64::from(text_boundary_x - caret.x0) - 0.5).abs() <= 0.001,
+            "front caret center should be half a physical pixel before text boundary, got text_x={} caret_x={}",
+            text_boundary_x,
+            caret.x0
         );
     }
 
