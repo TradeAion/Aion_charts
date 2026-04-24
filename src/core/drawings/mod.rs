@@ -57,6 +57,8 @@ struct DrawingTextEditState {
     original_value: String,
     /// Current caret opacity used by the native editor feedback pass.
     caret_alpha: f32,
+    /// Current caret height multiplier used for the smooth spatial blink.
+    caret_height_factor: f32,
     /// Timestamp (ms, monotonic-ish) of the current blink cycle origin.
     last_blink_ms: f64,
 }
@@ -67,28 +69,36 @@ impl DrawingTextEditState {
     const BLINK_HOLD_MS: f64 = 530.0;
     const BLINK_FADE_MS: f64 = 140.0;
     const MIN_CARET_ALPHA: f32 = 0.22;
+    const MIN_CARET_HEIGHT_FACTOR: f32 = 0.18;
 
-    fn caret_alpha_for_elapsed(elapsed_ms: f64) -> f32 {
+    fn caret_visual_for_elapsed(elapsed_ms: f64) -> (f32, f32) {
         let cycle_ms = elapsed_ms.rem_euclid(Self::BLINK_CYCLE_MS);
         let fade_out_start = Self::BLINK_HOLD_MS;
         let fade_out_end = fade_out_start + Self::BLINK_FADE_MS;
         let fade_in_end = fade_out_end + Self::BLINK_FADE_MS;
 
         if cycle_ms <= fade_out_start {
-            return 1.0;
+            return (1.0, 1.0);
         }
         if cycle_ms <= fade_out_end {
             let t = ((cycle_ms - fade_out_start) / Self::BLINK_FADE_MS).clamp(0.0, 1.0);
             let eased = t * t * (3.0 - 2.0 * t);
-            return 1.0 - (1.0 - Self::MIN_CARET_ALPHA) * eased as f32;
+            let eased = eased as f32;
+            let alpha = 1.0 - (1.0 - Self::MIN_CARET_ALPHA) * eased;
+            let height = 1.0 - (1.0 - Self::MIN_CARET_HEIGHT_FACTOR) * eased;
+            return (alpha, height);
         }
         if cycle_ms <= fade_in_end {
             let t = ((cycle_ms - fade_out_end) / Self::BLINK_FADE_MS).clamp(0.0, 1.0);
             let eased = t * t * (3.0 - 2.0 * t);
-            return Self::MIN_CARET_ALPHA + (1.0 - Self::MIN_CARET_ALPHA) * eased as f32;
+            let eased = eased as f32;
+            let alpha = Self::MIN_CARET_ALPHA + (1.0 - Self::MIN_CARET_ALPHA) * eased;
+            let height =
+                Self::MIN_CARET_HEIGHT_FACTOR + (1.0 - Self::MIN_CARET_HEIGHT_FACTOR) * eased;
+            return (alpha, height);
         }
 
-        1.0
+        (1.0, 1.0)
     }
 }
 
@@ -112,7 +122,8 @@ impl DrawingManager {
     const DRAWING_PLACEHOLDER: &'static str = "+ Add text";
     const LINE_LABEL_SIDE_GAP_CSS: f64 = TEXT_DRAWING_GAP_CSS;
     const RECT_OUTSIDE_GAP_CSS: f64 = TEXT_DRAWING_GAP_CSS;
-    const TEXT_CARET_GAP_CSS: f64 = 1.0;
+    const TEXT_CARET_GAP_CSS: f64 = 2.0;
+    const TEXT_CARET_OVERSHOOT_CSS: f64 = 1.0;
 
     pub fn new() -> Self {
         Self {
@@ -398,33 +409,146 @@ impl DrawingManager {
         while caret > 0 && !text.is_char_boundary(caret) {
             caret -= 1;
         }
-        let prefix = &text[..caret];
-        let mut line_count = 0usize;
-        let mut current_line = "";
-        for segment in prefix.split('\n') {
-            current_line = segment;
-            line_count += 1;
-        }
-        if line_count == 0 {
-            line_count = 1;
-        }
-        let line_idx = line_count.saturating_sub(1) as f64;
+        let line_start = text[..caret].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
+        let line_end = text[caret..]
+            .find('\n')
+            .map(|offset| caret + offset)
+            .unwrap_or(text.len());
+        let full_line = &text[line_start..line_end];
+        let prefix_line = &text[line_start..caret];
+        let line_idx = text[..line_start].bytes().filter(|b| *b == b'\n').count() as f64;
         let line_height = (font_size * 1.2).max(font_size);
-        let line_width = Self::estimate_text_line_width(current_line, font_size);
-        let caret_gap = if current_line.is_empty() {
+        let full_line_width = Self::estimate_text_line_width(full_line, font_size);
+        let prefix_width = Self::estimate_text_line_width(prefix_line, font_size);
+        let caret_gap = if prefix_line.is_empty() {
             0.0
         } else {
             Self::TEXT_CARET_GAP_CSS
         };
         let text_left = match align {
             TextAlign::Left => 0.0,
-            TextAlign::Center => (target_width - line_width) * 0.5,
-            TextAlign::Right => target_width - line_width,
+            TextAlign::Center => (target_width - full_line_width) * 0.5,
+            TextAlign::Right => target_width - full_line_width,
         };
-        let caret_x = text_left + line_width + caret_gap;
+        let caret_x = text_left + prefix_width + caret_gap;
         let top = line_idx * line_height;
         let bottom = top + line_height;
         (caret_x, top, bottom)
+    }
+
+    fn text_edit_caret_index_from_local_point(
+        text: &str,
+        local_x: f64,
+        local_y: f64,
+        font_size: f64,
+        align: TextAlign,
+        target_width: f64,
+    ) -> usize {
+        let line_height = (font_size * 1.2).max(font_size);
+        let mut lines: Vec<(usize, &str)> = Vec::new();
+        let mut start = 0usize;
+        for line in text.split('\n') {
+            lines.push((start, line));
+            start += line.len() + 1;
+        }
+        if lines.is_empty() {
+            lines.push((0, ""));
+        }
+
+        let line_idx = (local_y / line_height)
+            .floor()
+            .max(0.0)
+            .min((lines.len() - 1) as f64) as usize;
+        let (line_start, line) = lines[line_idx];
+        if line.is_empty() {
+            return line_start.min(text.len());
+        }
+
+        let full_line_width = Self::estimate_text_line_width(line, font_size);
+        let text_left = match align {
+            TextAlign::Left => 0.0,
+            TextAlign::Center => (target_width - full_line_width) * 0.5,
+            TextAlign::Right => target_width - full_line_width,
+        };
+        let x_in_line = local_x - text_left;
+        if x_in_line <= 0.0 {
+            return line_start;
+        }
+
+        let mut best_idx = line_start;
+        let mut best_distance = x_in_line.abs();
+        for (idx, _) in line.char_indices() {
+            let prefix = &line[..idx];
+            let candidate_x = if prefix.is_empty() {
+                0.0
+            } else {
+                Self::estimate_text_line_width(prefix, font_size) + Self::TEXT_CARET_GAP_CSS
+            };
+            let distance = (candidate_x - x_in_line).abs();
+            if distance < best_distance {
+                best_distance = distance;
+                best_idx = line_start + idx;
+            }
+        }
+
+        let end_x = Self::estimate_text_line_width(line, font_size) + Self::TEXT_CARET_GAP_CSS;
+        if (end_x - x_in_line).abs() <= best_distance {
+            return (line_start + line.len()).min(text.len());
+        }
+
+        best_idx.min(text.len())
+    }
+
+    pub fn place_text_edit_caret_at_point(
+        &mut self,
+        id: u64,
+        x: f64,
+        y: f64,
+        vp: &Viewport,
+        pane_css_w: f64,
+        pane_css_h: f64,
+    ) -> bool {
+        let Some(_) = self.text_edit.as_ref().filter(|edit| edit.drawing_id == id) else {
+            return false;
+        };
+        let Some(drawing) = self.get(id) else {
+            return false;
+        };
+        let Some(target) = Self::editor_target_for_drawing_sized(
+            drawing.as_ref(),
+            vp,
+            pane_css_w,
+            pane_css_h,
+            false,
+        ) else {
+            return false;
+        };
+        let Some(text) = Self::drawing_text_ref(drawing.as_ref()) else {
+            return false;
+        };
+        let font_size = Self::drawing_text_style_ref(drawing.as_ref())
+            .map(|style| style.resolved_font_size(drawing.style().font_size))
+            .unwrap_or(drawing.style().font_size);
+        let theta = target.rotation_deg.to_radians();
+        let (sin_theta, cos_theta) = theta.sin_cos();
+        let dx = x - target.left;
+        let dy = y - target.top;
+        let local_x = dx * cos_theta + dy * sin_theta;
+        let local_y = -dx * sin_theta + dy * cos_theta;
+        let caret = Self::text_edit_caret_index_from_local_point(
+            &text.value,
+            local_x,
+            local_y,
+            font_size,
+            text.horizontal_align,
+            target.width,
+        );
+        if let Some(edit) = self.text_edit.as_mut().filter(|edit| edit.drawing_id == id) {
+            edit.caret = caret;
+            self.reset_caret_blink();
+            return true;
+        }
+        false
     }
 
     fn append_native_text_edit_feedback(
@@ -496,8 +620,19 @@ impl DrawingManager {
             clamped_caret_top + 1.0,
             target.height.max(clamped_caret_top + 1.0),
         );
-        let (caret_top_x, caret_top_y) = local_to_css(clamped_caret_x, clamped_caret_top);
-        let (caret_bottom_x, caret_bottom_y) = local_to_css(clamped_caret_x, clamped_caret_bottom);
+        let line_height = clamped_caret_bottom - clamped_caret_top;
+        let full_height = (font_size + Self::TEXT_CARET_OVERSHOOT_CSS)
+            .min(line_height)
+            .max(1.0);
+        let full_half_height = full_height * 0.5;
+        let glyph_mid = clamped_caret_top + font_size * 0.5;
+        let caret_mid = glyph_mid;
+        let animated_half_height =
+            (full_half_height * edit_state.caret_height_factor as f64).max(0.5);
+        let animated_top = caret_mid - animated_half_height;
+        let animated_bottom = caret_mid + animated_half_height;
+        let (caret_top_x, caret_top_y) = local_to_css(clamped_caret_x, animated_top);
+        let (caret_bottom_x, caret_bottom_y) = local_to_css(clamped_caret_x, animated_bottom);
         let (caret_top_x, caret_top_y) = css_to_bitmap(caret_top_x, caret_top_y);
         let (caret_bottom_x, caret_bottom_y) = css_to_bitmap(caret_bottom_x, caret_bottom_y);
         geom.lines
@@ -764,6 +899,7 @@ impl DrawingManager {
             caret: original_value.len(),
             original_value,
             caret_alpha: 1.0,
+            caret_height_factor: 1.0,
             last_blink_ms: 0.0,
         });
         true
@@ -796,12 +932,17 @@ impl DrawingManager {
         if state.last_blink_ms <= 0.0 {
             state.last_blink_ms = now_ms;
             state.caret_alpha = 1.0;
+            state.caret_height_factor = 1.0;
             return false;
         }
 
-        let new_alpha = DrawingTextEditState::caret_alpha_for_elapsed(now_ms - state.last_blink_ms);
-        if (new_alpha - state.caret_alpha).abs() > 0.01 {
+        let (new_alpha, new_height_factor) =
+            DrawingTextEditState::caret_visual_for_elapsed(now_ms - state.last_blink_ms);
+        if (new_alpha - state.caret_alpha).abs() > 0.01
+            || (new_height_factor - state.caret_height_factor).abs() > 0.01
+        {
             state.caret_alpha = new_alpha;
+            state.caret_height_factor = new_height_factor;
             return true;
         }
 
@@ -813,6 +954,7 @@ impl DrawingManager {
     fn reset_caret_blink(&mut self) {
         if let Some(state) = self.text_edit.as_mut() {
             state.caret_alpha = 1.0;
+            state.caret_height_factor = 1.0;
             // Setting to 0 makes the next tick re-prime against the host clock,
             // which avoids needing to thread `now_ms` into the key handler.
             state.last_blink_ms = 0.0;
@@ -2685,6 +2827,43 @@ mod tests {
     }
 
     #[test]
+    fn native_text_editing_preserves_caret_position_for_middle_edits() {
+        let mut manager = DrawingManager::new();
+        complete_trend_line(&mut manager);
+        assert!(manager.set_selected_drawing_text("Dev".to_string()));
+        assert!(manager.begin_text_edit_selected());
+
+        assert!(manager.handle_text_key("ArrowLeft", false, false, false));
+        assert!(manager.handle_text_key("ArrowLeft", false, false, false));
+        assert!(manager.handle_text_key("X", false, false, false));
+        assert_eq!(
+            manager
+                .selected_drawing_info(&test_viewport(), 800.0, 600.0)
+                .expect("selected drawing info")
+                .text,
+            "DXev"
+        );
+
+        assert!(manager.handle_text_key("Backspace", false, false, false));
+        assert_eq!(
+            manager
+                .selected_drawing_info(&test_viewport(), 800.0, 600.0)
+                .expect("selected drawing info")
+                .text,
+            "Dev"
+        );
+
+        assert!(manager.handle_text_key("Delete", false, false, false));
+        assert_eq!(
+            manager
+                .selected_drawing_info(&test_viewport(), 800.0, 600.0)
+                .expect("selected drawing info")
+                .text,
+            "Dv"
+        );
+    }
+
+    #[test]
     fn locking_selected_drawing_blocks_drag_and_surfaces_locked_state() {
         let mut manager = DrawingManager::new();
         let id = complete_trend_line(&mut manager);
@@ -2886,24 +3065,49 @@ mod tests {
         assert!(!manager.tick_caret_blink(1000.0));
         let state = manager.text_edit.as_ref().expect("edit state");
         assert!((state.caret_alpha - 1.0).abs() <= 0.001);
+        assert!((state.caret_height_factor - 1.0).abs() <= 0.001);
 
         // During the hold phase the caret stays fully visible.
         assert!(!manager.tick_caret_blink(1200.0));
         let state = manager.text_edit.as_ref().expect("edit state");
         assert!((state.caret_alpha - 1.0).abs() <= 0.001);
+        assert!((state.caret_height_factor - 1.0).abs() <= 0.001);
 
-        // Into the fade phase, opacity should dip instead of hard-toggling off.
+        // Into the fade phase, opacity and height should ease instead of
+        // hard-toggling off.
         assert!(manager.tick_caret_blink(1600.0));
-        let faded_alpha = manager.text_edit.as_ref().expect("edit state").caret_alpha;
+        let state = manager.text_edit.as_ref().expect("edit state");
+        let faded_alpha = state.caret_alpha;
+        let faded_height = state.caret_height_factor;
         assert!(
             faded_alpha < 1.0 && faded_alpha > DrawingTextEditState::MIN_CARET_ALPHA,
             "caret should be mid-fade, got alpha={faded_alpha}"
         );
+        assert!(
+            faded_height < 1.0 && faded_height > DrawingTextEditState::MIN_CARET_HEIGHT_FACTOR,
+            "caret should spatially shorten while fading, got height factor={faded_height}"
+        );
+
+        // Fade-in grows the short centered segment back to full text height.
+        assert!(manager.tick_caret_blink(1720.0));
+        let expanded_height = manager
+            .text_edit
+            .as_ref()
+            .expect("edit state")
+            .caret_height_factor;
+        assert!(
+            expanded_height > DrawingTextEditState::MIN_CARET_HEIGHT_FACTOR
+                && expanded_height < 1.0,
+            "caret should expand in height while fading back in, got height factor={expanded_height}"
+        );
 
         // By the next cycle the caret should be fully visible again.
         assert!(manager.tick_caret_blink(2200.0));
-        let restored_alpha = manager.text_edit.as_ref().expect("edit state").caret_alpha;
+        let state = manager.text_edit.as_ref().expect("edit state");
+        let restored_alpha = state.caret_alpha;
+        let restored_height = state.caret_height_factor;
         assert!((restored_alpha - 1.0).abs() <= 0.001);
+        assert!((restored_height - 1.0).abs() <= 0.001);
 
         // No active edit -> tick is a cheap no-op.
         manager.cancel_text_edit();
@@ -2953,6 +3157,44 @@ mod tests {
             !still_present,
             "placeholder must disappear as soon as the user types any character"
         );
+    }
+
+    #[test]
+    fn caret_feedback_evenly_overshoots_glyph_height() {
+        let mut manager = DrawingManager::new();
+        complete_trend_line(&mut manager);
+        assert!(manager.set_selected_drawing_text("Ray".to_string()));
+        assert!(manager.begin_text_edit_selected());
+
+        let font_size = manager
+            .selected_drawing_info(&test_viewport(), 800.0, 600.0)
+            .expect("selected drawing info")
+            .text_font_size;
+        let (_bottom, top) =
+            manager.generate_all_geometry(&test_viewport(), 800.0, 600.0, 1.0, 1.0, 1.0);
+        let caret = top
+            .first()
+            .and_then(|geom| geom.lines.last())
+            .expect("caret line");
+        let rendered_height = f64::from((caret.x1 - caret.x0).hypot(caret.y1 - caret.y0));
+        let expected_height = font_size + DrawingManager::TEXT_CARET_OVERSHOOT_CSS;
+
+        assert!(
+            (rendered_height - expected_height).abs() <= 0.01,
+            "caret should overshoot glyph height evenly, got {rendered_height} expected {expected_height}"
+        );
+    }
+
+    #[test]
+    fn drawing_text_default_size_is_twelve_px() {
+        let mut manager = DrawingManager::new();
+        complete_trend_line(&mut manager);
+
+        let info = manager
+            .selected_drawing_info(&test_viewport(), 800.0, 600.0)
+            .expect("selected drawing info");
+
+        assert_eq!(info.text_font_size, 12.0);
     }
 
     #[test]
@@ -3027,6 +3269,78 @@ mod tests {
                 gap
             );
         }
+    }
+
+    #[test]
+    fn caret_metrics_anchor_to_full_line_for_center_and_right_alignments() {
+        let font_size = 12.0;
+        let line_width = DrawingManager::estimate_text_line_width("Ray", font_size);
+        let target_width = line_width + 40.0;
+
+        let (center_start, _, _) = DrawingManager::text_edit_caret_local_metrics(
+            "Ray",
+            0,
+            font_size,
+            TextAlign::Center,
+            target_width,
+        );
+        assert!((center_start - 20.0).abs() <= 0.001);
+
+        let (right_start, _, _) = DrawingManager::text_edit_caret_local_metrics(
+            "Ray",
+            0,
+            font_size,
+            TextAlign::Right,
+            target_width,
+        );
+        assert!((right_start - 40.0).abs() <= 0.001);
+
+        let (center_mid, _, _) = DrawingManager::text_edit_caret_local_metrics(
+            "Ray",
+            1,
+            font_size,
+            TextAlign::Center,
+            target_width,
+        );
+        assert!(center_mid > center_start);
+        assert!(center_mid < center_start + line_width);
+    }
+
+    #[test]
+    fn pointer_caret_placement_uses_full_line_anchor_for_aligned_text() {
+        let font_size = 12.0;
+        let line_width = DrawingManager::estimate_text_line_width("Ray", font_size);
+        let target_width = line_width + 40.0;
+
+        let center_front = DrawingManager::text_edit_caret_index_from_local_point(
+            "Ray",
+            20.0,
+            0.0,
+            font_size,
+            TextAlign::Center,
+            target_width,
+        );
+        assert_eq!(center_front, 0);
+
+        let right_front = DrawingManager::text_edit_caret_index_from_local_point(
+            "Ray",
+            40.0,
+            0.0,
+            font_size,
+            TextAlign::Right,
+            target_width,
+        );
+        assert_eq!(right_front, 0);
+
+        let end = DrawingManager::text_edit_caret_index_from_local_point(
+            "Ray",
+            target_width,
+            0.0,
+            font_size,
+            TextAlign::Right,
+            target_width,
+        );
+        assert_eq!(end, "Ray".len());
     }
 
     #[test]

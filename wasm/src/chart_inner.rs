@@ -1313,6 +1313,14 @@ impl ChartInner {
                         selected_id_after_interaction = Some(id);
                         if result.part == HitPart::Label {
                             drawings.begin_text_edit(id);
+                            drawings.place_text_edit_caret_at_point(
+                                id,
+                                x,
+                                y,
+                                &self.engine.viewport,
+                                pw,
+                                ph,
+                            );
                             drag_cursor = Some(cursor_for_drawing_hit(
                                 tool,
                                 result.part,
