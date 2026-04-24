@@ -58,48 +58,22 @@ struct DrawingTextEditState {
     original_value: String,
     /// Current caret opacity used by the native editor feedback pass.
     caret_alpha: f32,
-    /// Current caret height multiplier used for the smooth spatial blink.
-    caret_height_factor: f32,
     /// Timestamp (ms, monotonic-ish) of the current blink cycle origin.
     last_blink_ms: f64,
 }
 
 impl DrawingTextEditState {
-    /// Use a VS Code-like phase blink instead of a hard visible/hidden toggle.
+    /// Use a native-style hard blink instead of a spatial fade/scale effect.
     const BLINK_CYCLE_MS: f64 = 1060.0;
-    const BLINK_HOLD_MS: f64 = 530.0;
-    const BLINK_FADE_MS: f64 = 140.0;
-    const MIN_CARET_ALPHA: f32 = 0.22;
-    const MIN_CARET_HEIGHT_FACTOR: f32 = 0.18;
+    const BLINK_VISIBLE_MS: f64 = 530.0;
 
-    fn caret_visual_for_elapsed(elapsed_ms: f64) -> (f32, f32) {
+    fn caret_alpha_for_elapsed(elapsed_ms: f64) -> f32 {
         let cycle_ms = elapsed_ms.rem_euclid(Self::BLINK_CYCLE_MS);
-        let fade_out_start = Self::BLINK_HOLD_MS;
-        let fade_out_end = fade_out_start + Self::BLINK_FADE_MS;
-        let fade_in_end = fade_out_end + Self::BLINK_FADE_MS;
-
-        if cycle_ms <= fade_out_start {
-            return (1.0, 1.0);
+        if cycle_ms < Self::BLINK_VISIBLE_MS {
+            1.0
+        } else {
+            0.0
         }
-        if cycle_ms <= fade_out_end {
-            let t = ((cycle_ms - fade_out_start) / Self::BLINK_FADE_MS).clamp(0.0, 1.0);
-            let eased = t * t * (3.0 - 2.0 * t);
-            let eased = eased as f32;
-            let alpha = 1.0 - (1.0 - Self::MIN_CARET_ALPHA) * eased;
-            let height = 1.0 - (1.0 - Self::MIN_CARET_HEIGHT_FACTOR) * eased;
-            return (alpha, height);
-        }
-        if cycle_ms <= fade_in_end {
-            let t = ((cycle_ms - fade_out_end) / Self::BLINK_FADE_MS).clamp(0.0, 1.0);
-            let eased = t * t * (3.0 - 2.0 * t);
-            let eased = eased as f32;
-            let alpha = Self::MIN_CARET_ALPHA + (1.0 - Self::MIN_CARET_ALPHA) * eased;
-            let height =
-                Self::MIN_CARET_HEIGHT_FACTOR + (1.0 - Self::MIN_CARET_HEIGHT_FACTOR) * eased;
-            return (alpha, height);
-        }
-
-        (1.0, 1.0)
     }
 }
 
@@ -123,7 +97,8 @@ impl DrawingManager {
     const DRAWING_PLACEHOLDER: &'static str = "+ Add text";
     const LINE_LABEL_SIDE_GAP_CSS: f64 = TEXT_DRAWING_GAP_CSS;
     const RECT_OUTSIDE_GAP_CSS: f64 = TEXT_DRAWING_GAP_CSS;
-    const TEXT_CARET_OVERSHOOT_CSS: f64 = 1.0;
+    const TEXT_CARET_VERTICAL_INSET_CSS: f64 = 1.0;
+    const TEXT_CARET_CLEAR_WIDTH_PX: f32 = 3.0;
 
     pub fn new() -> Self {
         Self {
@@ -421,18 +396,6 @@ impl DrawingManager {
         (caret_x, top, bottom)
     }
 
-    fn text_edit_caret_touches_text_on_right(text: &str, caret: usize) -> bool {
-        let mut caret = caret.min(text.len());
-        while caret > 0 && !text.is_char_boundary(caret) {
-            caret -= 1;
-        }
-        let line_end = text[caret..]
-            .find('\n')
-            .map(|offset| caret + offset)
-            .unwrap_or(text.len());
-        caret < line_end
-    }
-
     fn text_edit_caret_index_from_local_point(
         text: &str,
         local_x: f64,
@@ -601,8 +564,8 @@ impl DrawingManager {
         else {
             return;
         };
-        // Drive the caret with an editor-like phase blink instead of a hard
-        // visible/hidden toggle. Very low alpha is treated as effectively off.
+        // Drive the caret with a native-style hard blink. Fully hidden frames
+        // simply skip emitting caret geometry.
         if edit_state.caret_alpha <= 0.01 {
             return;
         }
@@ -619,10 +582,6 @@ impl DrawingManager {
         color[3] *= edit_state.caret_alpha;
         let theta = target.rotation_deg.to_radians();
         let (sin_theta, cos_theta) = theta.sin_cos();
-        let local_x_device_scale = ((h_pixel_ratio * cos_theta).powi(2)
-            + (v_pixel_ratio * sin_theta).powi(2))
-        .sqrt()
-        .max(1.0);
 
         let local_to_css = |lx: f64, ly: f64| -> (f64, f64) {
             (
@@ -656,36 +615,35 @@ impl DrawingManager {
             caret_top += text_top;
             caret_bottom += text_top;
         }
-        let stroke_edge_bias = 0.5 / local_x_device_scale;
-        let caret_x = if edit_state.caret > 0
-            || Self::text_edit_caret_touches_text_on_right(&text.value, edit_state.caret)
-        {
-            caret_x + stroke_edge_bias
-        } else {
-            caret_x
-        };
-        let clamped_caret_x =
-            caret_x.clamp(-stroke_edge_bias, target.width.max(1.0) + stroke_edge_bias);
+        let clamped_caret_x = caret_x.clamp(0.0, target.width.max(1.0));
         let clamped_caret_top = caret_top.clamp(0.0, target.height.max(1.0));
         let clamped_caret_bottom = caret_bottom.clamp(
             clamped_caret_top + 1.0,
             target.height.max(clamped_caret_top + 1.0),
         );
         let line_height = clamped_caret_bottom - clamped_caret_top;
-        let full_height = (font_size + Self::TEXT_CARET_OVERSHOOT_CSS)
-            .min(line_height)
-            .max(1.0);
-        let full_half_height = full_height * 0.5;
-        let glyph_mid = clamped_caret_top + font_size * 0.5;
-        let caret_mid = glyph_mid;
-        let animated_half_height =
-            (full_half_height * edit_state.caret_height_factor as f64).max(0.5);
-        let animated_top = caret_mid - animated_half_height;
-        let animated_bottom = caret_mid + animated_half_height;
+        let caret_inset = Self::TEXT_CARET_VERTICAL_INSET_CSS.min((line_height - 1.0) * 0.5);
+        let animated_top = (clamped_caret_top + caret_inset).min(clamped_caret_bottom - 1.0);
+        let animated_bottom = (clamped_caret_top + font_size - caret_inset)
+            .clamp(animated_top + 1.0, clamped_caret_bottom);
         let (caret_top_x, caret_top_y) = local_to_css(clamped_caret_x, animated_top);
         let (caret_bottom_x, caret_bottom_y) = local_to_css(clamped_caret_x, animated_bottom);
         let (caret_top_x, caret_top_y) = css_to_bitmap(caret_top_x, caret_top_y);
         let (caret_bottom_x, caret_bottom_y) = css_to_bitmap(caret_bottom_x, caret_bottom_y);
+        geom.lines
+            .push(crate::core::renderer::draw_list::ColoredLine {
+                x0: caret_top_x as f32,
+                y0: caret_top_y as f32,
+                x1: caret_bottom_x as f32,
+                y1: caret_bottom_y as f32,
+                width: Self::TEXT_CARET_CLEAR_WIDTH_PX,
+                r: chart_bg_color[0],
+                g: chart_bg_color[1],
+                b: chart_bg_color[2],
+                a: chart_bg_color[3],
+                dash: 0.0,
+                gap: 0.0,
+            });
         geom.lines
             .push(crate::core::renderer::draw_list::ColoredLine {
                 x0: caret_top_x as f32,
@@ -950,7 +908,6 @@ impl DrawingManager {
             caret: original_value.len(),
             original_value,
             caret_alpha: 1.0,
-            caret_height_factor: 1.0,
             last_blink_ms: 0.0,
         });
         true
@@ -983,17 +940,12 @@ impl DrawingManager {
         if state.last_blink_ms <= 0.0 {
             state.last_blink_ms = now_ms;
             state.caret_alpha = 1.0;
-            state.caret_height_factor = 1.0;
             return false;
         }
 
-        let (new_alpha, new_height_factor) =
-            DrawingTextEditState::caret_visual_for_elapsed(now_ms - state.last_blink_ms);
-        if (new_alpha - state.caret_alpha).abs() > 0.01
-            || (new_height_factor - state.caret_height_factor).abs() > 0.01
-        {
+        let new_alpha = DrawingTextEditState::caret_alpha_for_elapsed(now_ms - state.last_blink_ms);
+        if (new_alpha - state.caret_alpha).abs() > 0.01 {
             state.caret_alpha = new_alpha;
-            state.caret_height_factor = new_height_factor;
             return true;
         }
 
@@ -1005,7 +957,6 @@ impl DrawingManager {
     fn reset_caret_blink(&mut self) {
         if let Some(state) = self.text_edit.as_mut() {
             state.caret_alpha = 1.0;
-            state.caret_height_factor = 1.0;
             // Setting to 0 makes the next tick re-prime against the host clock,
             // which avoids needing to thread `now_ms` into the key handler.
             state.last_blink_ms = 0.0;
@@ -3106,7 +3057,7 @@ mod tests {
     }
 
     #[test]
-    fn caret_blink_uses_editor_style_phase_animation() {
+    fn caret_blink_uses_native_visibility_toggle() {
         let mut manager = DrawingManager::new();
         complete_trend_line(&mut manager);
         assert!(manager.begin_text_edit_selected());
@@ -3116,49 +3067,25 @@ mod tests {
         assert!(!manager.tick_caret_blink(1000.0));
         let state = manager.text_edit.as_ref().expect("edit state");
         assert!((state.caret_alpha - 1.0).abs() <= 0.001);
-        assert!((state.caret_height_factor - 1.0).abs() <= 0.001);
 
-        // During the hold phase the caret stays fully visible.
+        // During the visible phase the caret stays fully visible.
         assert!(!manager.tick_caret_blink(1200.0));
         let state = manager.text_edit.as_ref().expect("edit state");
         assert!((state.caret_alpha - 1.0).abs() <= 0.001);
-        assert!((state.caret_height_factor - 1.0).abs() <= 0.001);
 
-        // Into the fade phase, opacity and height should ease instead of
-        // hard-toggling off.
+        // After the visible phase it should hard-toggle off.
         assert!(manager.tick_caret_blink(1600.0));
         let state = manager.text_edit.as_ref().expect("edit state");
-        let faded_alpha = state.caret_alpha;
-        let faded_height = state.caret_height_factor;
         assert!(
-            faded_alpha < 1.0 && faded_alpha > DrawingTextEditState::MIN_CARET_ALPHA,
-            "caret should be mid-fade, got alpha={faded_alpha}"
-        );
-        assert!(
-            faded_height < 1.0 && faded_height > DrawingTextEditState::MIN_CARET_HEIGHT_FACTOR,
-            "caret should spatially shorten while fading, got height factor={faded_height}"
-        );
-
-        // Fade-in grows the short centered segment back to full text height.
-        assert!(manager.tick_caret_blink(1720.0));
-        let expanded_height = manager
-            .text_edit
-            .as_ref()
-            .expect("edit state")
-            .caret_height_factor;
-        assert!(
-            expanded_height > DrawingTextEditState::MIN_CARET_HEIGHT_FACTOR
-                && expanded_height < 1.0,
-            "caret should expand in height while fading back in, got height factor={expanded_height}"
+            state.caret_alpha <= 0.001,
+            "caret should be fully hidden in the off phase, got alpha={}",
+            state.caret_alpha
         );
 
         // By the next cycle the caret should be fully visible again.
         assert!(manager.tick_caret_blink(2200.0));
         let state = manager.text_edit.as_ref().expect("edit state");
-        let restored_alpha = state.caret_alpha;
-        let restored_height = state.caret_height_factor;
-        assert!((restored_alpha - 1.0).abs() <= 0.001);
-        assert!((restored_height - 1.0).abs() <= 0.001);
+        assert!((state.caret_alpha - 1.0).abs() <= 0.001);
 
         // No active edit -> tick is a cheap no-op.
         manager.cancel_text_edit();
@@ -3211,7 +3138,7 @@ mod tests {
     }
 
     #[test]
-    fn caret_feedback_evenly_overshoots_glyph_height() {
+    fn caret_feedback_stays_inside_glyph_height() {
         let mut manager = DrawingManager::new();
         complete_trend_line(&mut manager);
         assert!(manager.set_selected_drawing_text("Ray".to_string()));
@@ -3228,11 +3155,11 @@ mod tests {
             .and_then(|geom| geom.lines.last())
             .expect("caret line");
         let rendered_height = f64::from((caret.x1 - caret.x0).hypot(caret.y1 - caret.y0));
-        let expected_height = font_size + DrawingManager::TEXT_CARET_OVERSHOOT_CSS;
+        let expected_height = font_size - DrawingManager::TEXT_CARET_VERTICAL_INSET_CSS * 2.0;
 
         assert!(
             (rendered_height - expected_height).abs() <= 0.01,
-            "caret should overshoot glyph height evenly, got {rendered_height} expected {expected_height}"
+            "caret should stay slightly inside the glyph height, got {rendered_height} expected {expected_height}"
         );
     }
 
@@ -3387,8 +3314,8 @@ mod tests {
         let text_boundary_x = DrawingManager::css_to_bitmap_x(text_boundary_css_x, 2.0) as f32;
 
         assert!(
-            (f64::from(caret.x0 - text_boundary_x) - 0.5).abs() <= 0.001,
-            "front caret center should be half a physical pixel after centered text boundary, got text_x={} caret_x={}",
+            (f64::from(caret.x0) - f64::from(text_boundary_x)).abs() <= 0.001,
+            "front caret center should sit exactly on the centered text boundary, got text_x={} caret_x={}",
             text_boundary_x,
             caret.x0
         );
@@ -4371,13 +4298,13 @@ mod tests {
             .expect("caret line");
 
         assert!(
-            (f64::from(caret.y0) - (target.top + 0.5)).abs() <= 0.001,
+            (f64::from(caret.y0) - target.top).abs() <= 0.001,
             "vertical-line caret should start at the top-aligned text origin, got target_top={} caret_y={}",
             target.top,
             caret.y0
         );
         assert!(
-            (f64::from(caret.y1) - (target.top + 0.5)).abs() <= 0.001,
+            (f64::from(caret.y1) - target.top).abs() <= 0.001,
             "vertical-line caret should stay on the same row at the text origin, got target_top={} caret_y={}",
             target.top,
             caret.y1
