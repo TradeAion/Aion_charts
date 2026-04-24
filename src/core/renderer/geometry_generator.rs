@@ -306,9 +306,6 @@ pub fn project_candles(
     }
 
     let half_bar = (sizing.bar_width * 0.5).floor();
-    let wick_width = effective_wick_width(sizing);
-    let wick_offset = (wick_width * 0.5).floor();
-    let mut prev_wick_right: Option<f64> = None;
     let mut prev_bar_right: Option<f64> = None;
 
     let mut projected = Vec::with_capacity(end - start);
@@ -337,27 +334,26 @@ pub fn project_candles(
             low_y = body_bottom + 1.0;
         }
 
-        // Wick X edges with anti-overlap clamp.
-        let mut wick_left = center_x - wick_offset;
-        let wick_right = wick_left + wick_width - 1.0;
-        if let Some(prev) = prev_wick_right {
-            wick_left = wick_left.max(prev + 1.0).min(wick_right);
-        }
-        let wick_width = (wick_right - wick_left + 1.0).max(1.0);
-        prev_wick_right = Some(wick_right);
-
-        // Body X edges with anti-overlap clamp.
-        let body_left = center_x - half_bar;
-        let body_right = body_left + sizing.bar_width - 1.0;
-        let body_width = (body_right - body_left + 1.0).max(1.0);
-
-        let mut bar_left = body_left;
-        let bar_right = body_right;
+        // Resolve a single visible candle footprint first, then derive border,
+        // fill, and wick from it. Independent overlap clamps make the body and
+        // wick drift apart at tight spacing.
+        let ideal_bar_left = center_x - half_bar;
+        let bar_right = ideal_bar_left + sizing.bar_width - 1.0;
+        let mut bar_left = ideal_bar_left;
         if let Some(prev) = prev_bar_right {
             bar_left = bar_left.max(prev + 1.0).min(bar_right);
         }
         let bar_width = (bar_right - bar_left + 1.0).max(1.0);
         prev_bar_right = Some(bar_right);
+
+        let body_left = bar_left;
+        let body_width = bar_width;
+
+        let wick_width = effective_wick_width(sizing).min(bar_width).max(1.0);
+        let visible_center_x = ((bar_left + bar_right) * 0.5).round();
+        let wick_left = (visible_center_x - (wick_width * 0.5).floor())
+            .max(bar_left)
+            .min(bar_right - wick_width + 1.0);
 
         projected.push(ProjectedCandle {
             body_left,
@@ -1277,7 +1273,7 @@ mod tests {
     }
 
     #[test]
-    fn body_width_stays_unclamped_when_border_rect_is_narrowed() {
+    fn body_fill_border_and_wick_share_clamped_footprint() {
         let bars = sample_bars();
         let time_scale = TimeScaleIndex::from_bars(&bars);
         let mut viewport = Viewport::new(8, 200);
@@ -1292,12 +1288,23 @@ mod tests {
         assert_eq!(sizing.bar_width, 3.0);
         assert_eq!(projected.len(), 4);
 
-        let overlapped = projected
+        let clamped = projected
             .iter()
             .find(|c| c.bar_width < c.body_width)
-            .expect("expected at least one overlap-clamped border rect");
-        assert_eq!(overlapped.body_width, 3.0);
-        assert_eq!(overlapped.bar_width, 2.0);
+            .is_none();
+        assert!(
+            clamped,
+            "body fill should use the same clamped width as border"
+        );
+
+        let narrow = projected
+            .iter()
+            .find(|c| c.bar_width < sizing.bar_width)
+            .expect("expected at least one overlap-clamped candle");
+        assert_eq!(narrow.body_width, narrow.bar_width);
+        assert!(narrow.wick_width <= narrow.bar_width);
+        assert!(narrow.wick_left >= narrow.bar_left);
+        assert!(narrow.wick_left + narrow.wick_width <= narrow.bar_left + narrow.bar_width);
     }
 
     #[test]
