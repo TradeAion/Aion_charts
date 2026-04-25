@@ -7,7 +7,7 @@
 use super::drawing::{
     generate_anchor_circles, line_label_placement, line_middle_gap_range, next_drawing_id,
     point_to_css, prepare_text_block, push_line_with_gap_range, push_rotated_text_block, Drawing,
-    TEXT_DRAWING_GAP_CSS,
+    TEXT_DRAWING_GAP_CSS, TEXT_LABEL_CLEARANCE_CSS,
 };
 use super::hit_test;
 use super::types::*;
@@ -115,7 +115,7 @@ impl Drawing for HorizontalLineDrawing {
             // distance from the line to the text baseline) both use the
             // universal 2px shape↔text spacing.
             let inset = TEXT_DRAWING_GAP_CSS * avg_ratio;
-            let gap = TEXT_DRAWING_GAP_CSS * avg_ratio;
+            let gap = TEXT_LABEL_CLEARANCE_CSS * avg_ratio;
             let placement = line_label_placement(
                 0.0,
                 y as f64,
@@ -131,7 +131,11 @@ impl Drawing for HorizontalLineDrawing {
             if self.text.vertical_align
                 == crate::core::renderer::draw_list::TextVerticalAlign::Middle
             {
-                line_gap_range = line_middle_gap_range(&placement, &block, -avg_ratio as f32);
+                line_gap_range = line_middle_gap_range(
+                    &placement,
+                    &block,
+                    (TEXT_LABEL_CLEARANCE_CSS * avg_ratio) as f32,
+                );
             }
             push_rotated_text_block(
                 &mut geom.texts,
@@ -216,5 +220,30 @@ mod tests {
         let geom = drawing.generate_geometry(&vp, 1000.0, 600.0, 1.0, 1.0, 1.0, false);
 
         assert_eq!(geom.lines.len(), 2);
+    }
+
+    #[test]
+    fn centered_middle_text_gap_keeps_line_outside_text_bounds() {
+        let vp = test_viewport();
+        let mut drawing = HorizontalLineDrawing::new(14.5, 100.0);
+        drawing.set_state(DrawingState::Idle);
+        drawing.text_mut().value = "Dev".to_string();
+        drawing.text_mut().horizontal_align = TextAlign::Center;
+        drawing.text_mut().vertical_align = TextVerticalAlign::Middle;
+
+        let geom = drawing.generate_geometry(&vp, 1000.0, 600.0, 1.0, 1.0, 1.0, false);
+        let text = geom.texts.first().expect("text label");
+        let block = prepare_text_block("Dev", text.font_size).expect("text block");
+        let text_left = text.x - block.max_width * 0.5;
+        let text_right = text.x + block.max_width * 0.5;
+
+        assert!(
+            geom.lines[0].x1 <= text_left - 1.0,
+            "left segment should stop before the text bounds"
+        );
+        assert!(
+            geom.lines[1].x0 >= text_right + 1.0,
+            "right segment should start after the text bounds"
+        );
     }
 }

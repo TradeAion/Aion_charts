@@ -7,6 +7,7 @@ use super::drawing::{
     generate_anchor_circles, line_label_placement, line_middle_gap_range, next_drawing_id,
     point_to_bitmap, point_to_css, prepare_text_block, push_line_with_gap_range,
     push_rotated_text_block, vertical_line_label_alignments, Drawing, TEXT_DRAWING_GAP_CSS,
+    TEXT_LABEL_CLEARANCE_CSS,
 };
 use super::hit_test;
 use super::types::*;
@@ -115,7 +116,7 @@ impl Drawing for VerticalLineDrawing {
 
         if let Some(block) = prepare_text_block(&self.text.value, fs) {
             let inset = TEXT_DRAWING_GAP_CSS * avg_ratio;
-            let gap = TEXT_DRAWING_GAP_CSS * avg_ratio;
+            let gap = TEXT_LABEL_CLEARANCE_CSS * avg_ratio;
             let (along_align, side_align) = vertical_line_label_alignments(
                 self.text.horizontal_align,
                 self.text.vertical_align,
@@ -133,7 +134,11 @@ impl Drawing for VerticalLineDrawing {
                 gap,
             );
             if self.text.horizontal_align == TextAlign::Center {
-                line_gap_range = line_middle_gap_range(&placement, &block, -avg_ratio as f32);
+                line_gap_range = line_middle_gap_range(
+                    &placement,
+                    &block,
+                    (TEXT_LABEL_CLEARANCE_CSS * avg_ratio) as f32,
+                );
             }
             push_rotated_text_block(
                 &mut geom.texts,

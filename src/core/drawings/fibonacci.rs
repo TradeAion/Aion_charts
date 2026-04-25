@@ -6,7 +6,7 @@
 use super::drawing::{
     generate_anchor_circles, line_label_placement, line_middle_gap_range, next_drawing_id,
     point_to_bitmap, point_to_css, prepare_text_block, push_line_with_gap_range,
-    push_rotated_text_block, Drawing,
+    push_rotated_text_block, Drawing, TEXT_LABEL_CLEARANCE_CSS,
 };
 use super::hit_test;
 use super::types::*;
@@ -235,7 +235,11 @@ impl Drawing for FibonacciDrawing {
                     gap_px as f64,
                 );
                 if self.label_vertical_align == TextVerticalAlign::Middle {
-                    line_gap_range = line_middle_gap_range(&placement, &block, -avg_ratio as f32);
+                    line_gap_range = line_middle_gap_range(
+                        &placement,
+                        &block,
+                        (TEXT_LABEL_CLEARANCE_CSS * avg_ratio) as f32,
+                    );
                 }
                 push_rotated_text_block(
                     &mut geom.texts,

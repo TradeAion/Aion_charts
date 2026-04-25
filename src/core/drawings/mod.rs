@@ -33,6 +33,7 @@ use drawing::{
     line_label_placement, optical_middle_top, point_to_bitmap, point_to_css, prepare_text_block,
     push_rotated_text_block, rect_text_anchor, rotated_text_box_top_left,
     vertical_line_label_alignments, Drawing, PreparedTextBlock, TEXT_DRAWING_GAP_CSS,
+    TEXT_LABEL_CLEARANCE_CSS,
 };
 use persistence::{
     drawing_tool_from_key, drawing_tool_to_key, migrate_snapshot, DrawingSnapshot,
@@ -95,10 +96,9 @@ pub struct DrawingManager {
 
 impl DrawingManager {
     const DRAWING_PLACEHOLDER: &'static str = "+ Add text";
-    const LINE_LABEL_SIDE_GAP_CSS: f64 = TEXT_DRAWING_GAP_CSS;
+    const LINE_LABEL_SIDE_GAP_CSS: f64 = TEXT_LABEL_CLEARANCE_CSS;
     const RECT_OUTSIDE_GAP_CSS: f64 = TEXT_DRAWING_GAP_CSS;
     const TEXT_CARET_VERTICAL_INSET_CSS: f64 = 1.0;
-    const TEXT_CARET_CLEAR_WIDTH_PX: f32 = 3.0;
 
     pub fn new() -> Self {
         Self {
@@ -630,20 +630,6 @@ impl DrawingManager {
         let (caret_bottom_x, caret_bottom_y) = local_to_css(clamped_caret_x, animated_bottom);
         let (caret_top_x, caret_top_y) = css_to_bitmap(caret_top_x, caret_top_y);
         let (caret_bottom_x, caret_bottom_y) = css_to_bitmap(caret_bottom_x, caret_bottom_y);
-        geom.lines
-            .push(crate::core::renderer::draw_list::ColoredLine {
-                x0: caret_top_x as f32,
-                y0: caret_top_y as f32,
-                x1: caret_bottom_x as f32,
-                y1: caret_bottom_y as f32,
-                width: Self::TEXT_CARET_CLEAR_WIDTH_PX,
-                r: chart_bg_color[0],
-                g: chart_bg_color[1],
-                b: chart_bg_color[2],
-                a: chart_bg_color[3],
-                dash: 0.0,
-                gap: 0.0,
-            });
         geom.lines
             .push(crate::core::renderer::draw_list::ColoredLine {
                 x0: caret_top_x as f32,
@@ -2132,12 +2118,11 @@ impl DrawingManager {
         };
 
         if complete {
+            let tool = self.get(id).map(|drawing| drawing.tool());
             self.finish_creation(id);
-            // Note: we intentionally do NOT auto-enter text edit on finalize.
-            // The "+ Add text" placeholder only appears when the user later
-            // re-selects (or hovers) the drawing — never as a hard interruption
-            // immediately after drawing. This matches what users expect: draw
-            // first, decide to label later.
+            if tool == Some(DrawingTool::Text) {
+                self.begin_text_edit(id);
+            }
         }
         complete
     }
@@ -2317,11 +2302,15 @@ impl DrawingManager {
         let base = Vec::new();
         let mut top = Vec::new();
 
+        let text_edit_drawing_id = self.text_edit_ref().map(|state| state.drawing_id);
+
         for d in &self.drawings {
+            let editing_this = text_edit_drawing_id == Some(d.id());
             let show_anchors = matches!(
                 d.state(),
                 DrawingState::Selected | DrawingState::Dragging { .. }
-            ) && !d.locked();
+            ) && !d.locked()
+                && !editing_this;
             let mut geom = d.generate_geometry(
                 vp,
                 pane_css_w,
@@ -3038,7 +3027,48 @@ mod tests {
             manager.generate_all_geometry(&vp, 800.0, 600.0, 1.0, 1.0, 1.0);
         let after_lines = after_top.first().map(|geom| geom.lines.len()).unwrap_or(0);
 
-        assert!(after_lines > before_lines);
+        assert_eq!(
+            after_lines,
+            before_lines + 1,
+            "edit mode should only add the canvas caret line"
+        );
+    }
+
+    #[test]
+    fn text_editing_hides_selected_drawing_anchors() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Text;
+        manager.start_creating(10.0, 110.0).expect("text id");
+        manager.finalize_creation_step(10.0, 110.0);
+        assert!(manager.is_text_editing_selected());
+
+        let (_base, top) =
+            manager.generate_all_geometry(&test_viewport(), 800.0, 600.0, 1.0, 1.0, 1.0);
+        let anchor_count: usize = top.iter().map(|geom| geom.anchors.len()).sum();
+
+        assert_eq!(
+            anchor_count, 0,
+            "active text editor should not show drawing handles"
+        );
+    }
+
+    #[test]
+    fn text_editing_keeps_canvas_text_renderer() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Text;
+        manager.start_creating(10.0, 110.0).expect("text id");
+        manager.finalize_creation_step(10.0, 110.0);
+        assert!(manager.set_selected_drawing_text("aa dev".to_string()));
+        assert!(manager.is_text_editing_selected());
+
+        let (_base, top) =
+            manager.generate_all_geometry(&test_viewport(), 800.0, 600.0, 1.0, 1.0, 1.0);
+        let text_count: usize = top.iter().map(|geom| geom.texts.len()).sum();
+
+        assert_eq!(
+            text_count, 1,
+            "active edit should keep one canvas text renderer"
+        );
     }
 
     #[test]
@@ -3053,6 +3083,19 @@ mod tests {
         assert!(
             !manager.is_text_editing_selected(),
             "finalize must not auto-enter text-edit mode"
+        );
+    }
+
+    #[test]
+    fn finalizing_text_tool_enters_native_text_edit_mode() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Text;
+        manager.start_creating(10.0, 110.0).expect("text id");
+        manager.finalize_creation_step(10.0, 110.0);
+
+        assert!(
+            manager.is_text_editing_selected(),
+            "Text tool should immediately accept native keyboard input after placement"
         );
     }
 

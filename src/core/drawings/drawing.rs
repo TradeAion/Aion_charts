@@ -18,6 +18,8 @@ static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new
 /// to keep the visual spacing between the shape edge and its text consistent.
 /// Multiply by `avg_ratio` (devicePixelRatio average) when emitting bitmap geometry.
 pub const TEXT_DRAWING_GAP_CSS: f64 = 2.0;
+/// Visual clearance between line-like drawing strokes and attached labels.
+pub const TEXT_LABEL_CLEARANCE_CSS: f64 = 3.0;
 pub const ANCHOR_BORDER_WIDTH_CSS: f64 = 2.0;
 
 pub fn next_drawing_id() -> u64 {

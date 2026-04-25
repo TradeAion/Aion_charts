@@ -3,7 +3,7 @@
 use super::drawing::{
     generate_anchor_circles, line_label_placement, line_middle_gap_range, next_drawing_id,
     point_to_bitmap, point_to_css, prepare_text_block, push_line_with_gap_range,
-    push_rotated_text_block, Drawing, TEXT_DRAWING_GAP_CSS,
+    push_rotated_text_block, Drawing, TEXT_DRAWING_GAP_CSS, TEXT_LABEL_CLEARANCE_CSS,
 };
 use super::hit_test;
 use super::types::*;
@@ -126,7 +126,7 @@ impl Drawing for TrendLineDrawing {
             // Universal 2px shape↔text spacing for both end inset and
             // perpendicular gap from the trend line.
             let inset = TEXT_DRAWING_GAP_CSS * avg_ratio;
-            let gap = TEXT_DRAWING_GAP_CSS * avg_ratio;
+            let gap = TEXT_LABEL_CLEARANCE_CSS * avg_ratio;
             let placement = line_label_placement(
                 bx0,
                 by0,
@@ -142,7 +142,11 @@ impl Drawing for TrendLineDrawing {
             if self.text.vertical_align
                 == crate::core::renderer::draw_list::TextVerticalAlign::Middle
             {
-                line_gap_range = line_middle_gap_range(&placement, &block, -avg_ratio as f32);
+                line_gap_range = line_middle_gap_range(
+                    &placement,
+                    &block,
+                    (TEXT_LABEL_CLEARANCE_CSS * avg_ratio) as f32,
+                );
             }
             push_rotated_text_block(
                 &mut geom.texts,

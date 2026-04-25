@@ -4,7 +4,7 @@
 use super::drawing::{
     generate_anchor_circles, line_label_placement, next_drawing_id, point_to_bitmap, point_to_css,
     prepare_text_block, push_line_with_gap_range, push_rotated_text_block, Drawing,
-    LineLabelPlacement, PreparedTextBlock, TEXT_DRAWING_GAP_CSS,
+    LineLabelPlacement, PreparedTextBlock, TEXT_DRAWING_GAP_CSS, TEXT_LABEL_CLEARANCE_CSS,
 };
 use super::hit_test;
 use super::types::*;
@@ -130,7 +130,7 @@ impl RayDrawing {
         avg_ratio: f64,
     ) -> LineLabelPlacement {
         let inset = TEXT_DRAWING_GAP_CSS * avg_ratio;
-        let gap = TEXT_DRAWING_GAP_CSS * avg_ratio;
+        let gap = TEXT_LABEL_CLEARANCE_CSS * avg_ratio;
         line_label_placement(
             anchor_start_x,
             anchor_start_y,
@@ -244,7 +244,7 @@ impl Drawing for RayDrawing {
                     far_y,
                     &placement,
                     &block,
-                    -avg_ratio as f32,
+                    (TEXT_LABEL_CLEARANCE_CSS * avg_ratio) as f32,
                 );
             }
             push_rotated_text_block(
