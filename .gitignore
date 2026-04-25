@@ -3,6 +3,7 @@
 /pkg
 /wasm/*.wasm
 /wasm/target
+/node_modules
 
 # Stale root-level wasm-pack outputs (only wasm/pkg/ should have these)
 /axiuscharts_wasm*.js
@@ -13,6 +14,8 @@
 debug.log
 *.log
 /.playwright-cli/
+/playwright-report/
+/test-results/
 /output/
 chrome_*.png
 

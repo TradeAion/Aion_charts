@@ -9,6 +9,8 @@
   "scripts": {
     "build": "wasm-pack build --target web wasm && node -e \"require('fs').writeFileSync('wasm/pkg/.gitignore', '!axiuscharts_wasm_bg.wasm\\n!axiuscharts_wasm_bg.wasm.d.ts\\n!axiuscharts_wasm.d.ts\\n!axiuscharts_wasm.js\\n!package.json\\n')\"",
     "build:release": "wasm-pack build --target web --release wasm && node -e \"require('fs').writeFileSync('wasm/pkg/.gitignore', '!axiuscharts_wasm_bg.wasm\\n!axiuscharts_wasm_bg.wasm.d.ts\\n!axiuscharts_wasm.d.ts\\n!axiuscharts_wasm.js\\n!package.json\\n')\"",
+    "test:e2e": "playwright test",
+    "test:artifacts": "node scripts/check-wasm-artifacts.mjs",
     "prepack": "npm run build",
     "serve": "python serve.py",
     "dev": "python dev.py"
@@ -40,5 +42,8 @@
   ],
   "sideEffects": [
     "./snippets/*"
-  ]
+  ],
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
+  }
 }

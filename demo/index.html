@@ -1107,7 +1107,10 @@
     let executionTextVisible = true;
     let footprintXyZoomEnabled = true;
     let hudBaseStatus = '';
-    let requestedRenderer = 'webgpu';
+    const requestedRendererParam = new URLSearchParams(window.location.search).get('renderer');
+    let requestedRenderer = ['webgpu', 'auto', 'canvas2d'].includes(requestedRendererParam)
+      ? requestedRendererParam
+      : 'webgpu';
     let rendererFallbackText = '';
     let selectedDrawingInfo = null;
     let drawingInfoMissStreak = 0;
