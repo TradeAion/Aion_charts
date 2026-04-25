@@ -364,6 +364,22 @@ pub struct LineLabelPlacement {
 thread_local! {
     static TEXT_MEASURE_CTX: RefCell<Option<web_sys::CanvasRenderingContext2d>> =
         const { RefCell::new(None) };
+    static TEXT_MEASURE_FONT_FAMILY: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn with_text_measure_font_family<T>(font_family: &str, f: impl FnOnce() -> T) -> T {
+    TEXT_MEASURE_FONT_FAMILY.with(|cell| {
+        let previous = cell.replace(Some(font_family.to_string()));
+        let result = f();
+        cell.replace(previous);
+        result
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn with_text_measure_font_family<T>(_font_family: &str, f: impl FnOnce() -> T) -> T {
+    f()
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -391,18 +407,24 @@ fn browser_text_line_width(
 ) -> Option<f32> {
     let ctx = browser_text_measure_context()?;
     let font = if italic {
+        let font_family = TEXT_MEASURE_FONT_FAMILY
+            .with(|cell| cell.borrow().clone())
+            .unwrap_or_else(|| crate::core::renderer::theme::FONT_FAMILY.to_string());
         format!(
             "italic {} {}px {}",
             font_weight,
             font_size,
-            crate::core::renderer::theme::FONT_FAMILY
+            font_family
         )
     } else {
+        let font_family = TEXT_MEASURE_FONT_FAMILY
+            .with(|cell| cell.borrow().clone())
+            .unwrap_or_else(|| crate::core::renderer::theme::FONT_FAMILY.to_string());
         format!(
             "{} {}px {}",
             font_weight,
             font_size,
-            crate::core::renderer::theme::FONT_FAMILY
+            font_family
         )
     };
     ctx.set_font(&font);

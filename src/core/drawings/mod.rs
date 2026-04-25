@@ -32,6 +32,7 @@ use drawing::{
     ensure_next_drawing_id_at_least, estimate_text_line_width as estimate_drawing_text_line_width,
     line_label_placement, optical_middle_top, point_to_bitmap, point_to_css, prepare_text_block,
     push_rotated_text_block, rect_text_anchor, rotated_text_box_top_left,
+    with_text_measure_font_family,
     vertical_line_label_alignments, Drawing, PreparedTextBlock, TEXT_DRAWING_GAP_CSS,
     TEXT_LABEL_CLEARANCE_CSS,
 };
@@ -641,7 +642,11 @@ impl DrawingManager {
                 g: color[1],
                 b: color[2],
                 a: color[3],
-                dash: 0.0,
+                // Negative dash is a sentinel for native editor carets: the
+                // canvas line renderer must not add its generic crisp-line
+                // half-pixel correction, or the caret visually drifts between
+                // glyphs despite geometry already sitting on the text advance.
+                dash: -1.0,
                 gap: 0.0,
             });
     }
@@ -2320,6 +2325,10 @@ impl DrawingManager {
                 v_pixel_ratio,
                 show_anchors,
             );
+            if editing_this && d.tool() == DrawingTool::Text {
+                geom.rects.clear();
+                geom.lines.clear();
+            }
             if show_anchors {
                 for anchor in &mut geom.anchors {
                     anchor.fill = anchor_fill_color;
@@ -2352,6 +2361,34 @@ impl DrawingManager {
         }
 
         (base, top)
+    }
+
+    /// Generate drawing geometry using the same font family the canvas renderer
+    /// will use for drawing text. Canvas `measureText()` is font-sensitive; if
+    /// caret metrics use a different family than `fillText()`, insertion points
+    /// drift between glyphs.
+    pub fn generate_all_geometry_with_text_font_family(
+        &self,
+        vp: &Viewport,
+        pane_css_w: f64,
+        pane_css_h: f64,
+        dpr: f64,
+        h_pixel_ratio: f64,
+        v_pixel_ratio: f64,
+        anchor_fill_color: [f32; 4],
+        font_family: &str,
+    ) -> (Vec<DrawingGeometry>, Vec<DrawingGeometry>) {
+        with_text_measure_font_family(font_family, || {
+            self.generate_all_geometry_with_anchor_fill(
+                vp,
+                pane_css_w,
+                pane_css_h,
+                dpr,
+                h_pixel_ratio,
+                v_pixel_ratio,
+                anchor_fill_color,
+            )
+        })
     }
 
     /// Export all drawings to a versioned snapshot.
@@ -3035,6 +3072,27 @@ mod tests {
     }
 
     #[test]
+    fn free_text_editing_suppresses_box_lines_behind_caret() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Text;
+        let id = manager.start_creating(10.0, 110.0).expect("text id");
+        manager.finalize_creation_step(10.0, 110.0);
+        manager.select(id);
+        assert!(manager.set_selected_drawing_text("aaaade".to_string()));
+        assert!(manager.set_selected_text_border(true, [0.3, 0.5, 1.0, 1.0], 1.0, None));
+        assert!(manager.begin_text_edit_selected());
+
+        let (_base, top) =
+            manager.generate_all_geometry(&test_viewport(), 800.0, 600.0, 1.0, 1.0, 1.0);
+        let geom = top.first().expect("text edit geometry");
+        let caret_lines = geom.lines.iter().filter(|line| line.dash < 0.0).count();
+
+        assert_eq!(caret_lines, 1, "free text edit should only draw the caret line");
+        assert_eq!(geom.lines.len(), 1, "free text edit must not draw box/border underline lines");
+        assert!(geom.rects.is_empty(), "free text edit must not draw box fill behind text");
+    }
+
+    #[test]
     fn text_editing_hides_selected_drawing_anchors() {
         let mut manager = DrawingManager::new();
         manager.active_tool = DrawingTool::Text;
@@ -3331,6 +3389,28 @@ mod tests {
             .expect("caret line");
 
         assert_eq!(caret.width, 1.0);
+    }
+
+    #[test]
+    fn caret_feedback_marks_line_as_unsnapped_editor_stroke() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Text;
+        let id = manager.start_creating(10.0, 110.0).expect("text id");
+        manager.finalize_creation_step(10.0, 110.0);
+        manager.select(id);
+        assert!(manager.set_selected_drawing_text("dr".to_string()));
+        assert!(manager.begin_text_edit_selected());
+        manager.text_edit.as_mut().expect("edit state").caret = 1;
+
+        let (_bottom, top) =
+            manager.generate_all_geometry(&test_viewport(), 800.0, 600.0, 1.0, 1.0, 1.0);
+        let caret = top
+            .first()
+            .and_then(|geom| geom.lines.last())
+            .expect("caret line");
+
+        assert_eq!(caret.dash, -1.0);
+        assert_eq!(caret.gap, 0.0);
     }
 
     #[test]

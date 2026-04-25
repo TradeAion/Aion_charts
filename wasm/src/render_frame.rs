@@ -211,7 +211,7 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
     // 5. Generate drawing geometry. Drawings now stay on the overlay bucket by
     // default; the base bucket remains for compatibility with the engine render path.
     let (mut base_drawings, mut top_drawings) =
-        s.engine.drawings.generate_all_geometry_with_anchor_fill(
+        s.engine.drawings.generate_all_geometry_with_text_font_family(
             &s.engine.viewport,
             pane_css_w,
             pane_css_h,
@@ -219,6 +219,7 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
             s.engine.h_pixel_ratio,
             s.engine.v_pixel_ratio,
             s.engine.style.bg_color,
+            &s.engine.style.font_family,
         );
 
     let webgpu_backend = s.engine.renderer_name() == "webgpu";

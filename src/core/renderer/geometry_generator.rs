@@ -21,15 +21,11 @@ use crate::core::renderer::value_projection::TimeScaleIndex;
 use crate::core::viewport::Viewport;
 
 /// Keep wick thickness stable across high-DPI/mobile layouts.
-/// Returned value is in physical pixels.
+/// Returned value is in physical pixels and must stay integer-aligned because
+/// candle geometry is rendered as filled rects by every backend.
 #[inline]
 fn effective_wick_width(sizing: &CandleSizing) -> f64 {
-    let min_visible_phys = sizing.h_pixel_ratio.ceil().max(1.0);
-    sizing
-        .wick_width
-        .max(min_visible_phys)
-        .min(sizing.bar_width)
-        .max(1.0)
+    sizing.wick_width.round().clamp(1.0, sizing.bar_width.max(1.0))
 }
 
 #[inline]
@@ -1308,18 +1304,33 @@ mod tests {
     }
 
     #[test]
-    fn wick_width_stays_one_css_pixel_on_high_dpr() {
+    fn wick_width_stays_stable_when_exact_pixel_ratio_drifts() {
         let sizing = CandleSizing {
             bar_width: 12.0,
-            wick_width: 2.0,
+            wick_width: 3.0,
             border_width: 3.0,
             draw_body: true,
             bar_spacing: 5.0,
+            h_pixel_ratio: 3.01,
+            v_pixel_ratio: 3.01,
+        };
+
+        assert_eq!(effective_wick_width(&sizing), 3.0);
+    }
+
+    #[test]
+    fn wick_width_never_exceeds_visible_bar_footprint() {
+        let sizing = CandleSizing {
+            bar_width: 2.0,
+            wick_width: 3.0,
+            border_width: 1.0,
+            draw_body: false,
+            bar_spacing: 1.0,
             h_pixel_ratio: 3.0,
             v_pixel_ratio: 3.0,
         };
 
-        assert_eq!(effective_wick_width(&sizing), 3.0);
+        assert_eq!(effective_wick_width(&sizing), 2.0);
     }
 
     #[test]

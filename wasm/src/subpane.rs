@@ -1208,7 +1208,7 @@ impl SubPane {
         hybrid_viewport.price_max = self.viewport.price_max;
         hybrid_viewport.volume_height_ratio = 0.0; // Subpanes don't have volume
 
-        self.drawings.generate_all_geometry_with_anchor_fill(
+        self.drawings.generate_all_geometry_with_text_font_family(
             &hybrid_viewport,
             css_w,
             css_h,
@@ -1216,6 +1216,7 @@ impl SubPane {
             h_pixel_ratio,
             v_pixel_ratio,
             style.bg_color,
+            &style.font_family,
         )
     }
 
@@ -1243,10 +1244,14 @@ impl SubPane {
         }
 
         // Lines
-        for l in &geom.lines {
+        for l in geom.lines.iter().filter(|line| line.dash >= 0.0) {
             ctx.set_stroke_style_str(&rgba(&[l.r, l.g, l.b, l.a]));
             ctx.set_line_width(l.width as f64);
-            ctx.set_line_cap("round");
+            if l.dash < 0.0 {
+                ctx.set_line_cap("butt");
+            } else {
+                ctx.set_line_cap("round");
+            }
             ctx.set_line_join("round");
 
             if l.dash > 0.0 && l.gap > 0.0 {
@@ -1259,7 +1264,13 @@ impl SubPane {
             }
 
             // LWC strokeInPixel: add 0.5px offset for odd-width lines
-            let correction = if (l.width as i32) % 2 == 1 { 0.5 } else { 0.0 };
+            let correction = if l.dash < 0.0 {
+                0.0
+            } else if (l.width as i32) % 2 == 1 {
+                0.5
+            } else {
+                0.0
+            };
 
             ctx.begin_path();
             ctx.move_to(l.x0 as f64 + correction, l.y0 as f64 + correction);
@@ -1291,6 +1302,31 @@ impl SubPane {
                 let _ = ctx.fill_text(&t.text, t.x as f64, t.y as f64);
             }
             ctx.restore();
+        }
+
+        for l in geom.lines.iter().filter(|line| line.dash < 0.0) {
+            ctx.set_stroke_style_str(&rgba(&[l.r, l.g, l.b, l.a]));
+            ctx.set_line_width(l.width as f64);
+            ctx.set_line_cap("butt");
+            ctx.set_line_join("round");
+            let _ = ctx.set_line_dash(&js_sys::Array::new());
+            let mut x0 = l.x0 as f64;
+            let mut y0 = l.y0 as f64;
+            let mut x1 = l.x1 as f64;
+            let mut y1 = l.y1 as f64;
+            if (x1 - x0).abs() <= f64::EPSILON {
+                let x = x0.round() + 0.5;
+                x0 = x;
+                x1 = x;
+            } else if (y1 - y0).abs() <= f64::EPSILON {
+                let y = y0.round() + 0.5;
+                y0 = y;
+                y1 = y;
+            }
+            ctx.begin_path();
+            ctx.move_to(x0, y0);
+            ctx.line_to(x1, y1);
+            ctx.stroke();
         }
 
         // Anchor circles

@@ -183,8 +183,9 @@ impl OverlayRenderer {
             ctx.fill_rect(r.x as f64, r.y as f64, r.w as f64, r.h as f64);
         }
 
-        // Lines
-        for l in &geom.lines {
+        // Lines. Editor carets are drawn after text so they sit between glyphs
+        // instead of being partially covered by the edited text run.
+        for l in geom.lines.iter().filter(|line| line.dash >= 0.0) {
             ctx.set_stroke_style_str(&rgba(&[l.r, l.g, l.b, l.a]));
             let line_w = (l.width as f64).round().max(1.0);
             ctx.set_line_width(line_w);
@@ -201,7 +202,13 @@ impl OverlayRenderer {
 
             // LWC strokeInPixel: add 0.5px offset for odd-width lines
             // to snap to pixel center and prevent blurry sub-pixel rendering
-            let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
+            let correction = if l.dash < 0.0 {
+                0.0
+            } else if (line_w as i32) % 2 == 1 {
+                0.5
+            } else {
+                0.0
+            };
             let mut x0 = l.x0 as f64;
             let mut y0 = l.y0 as f64;
             let mut x1 = l.x1 as f64;
@@ -211,7 +218,9 @@ impl OverlayRenderer {
             // This keeps Ctrl/angle-snapped straight lines and rectangle borders crisp.
             let is_vertical = (x1 - x0).abs() <= f64::EPSILON;
             let is_horizontal = (y1 - y0).abs() <= f64::EPSILON;
-            if is_vertical {
+            if l.dash < 0.0 {
+                ctx.set_line_cap("butt");
+            } else if is_vertical {
                 let x = x0.round() + correction;
                 x0 = x;
                 x1 = x;
@@ -261,6 +270,31 @@ impl OverlayRenderer {
                 let _ = ctx.fill_text(&t.text, t.x as f64, t.y as f64);
             }
             ctx.restore();
+        }
+
+        for l in geom.lines.iter().filter(|line| line.dash < 0.0) {
+            ctx.set_stroke_style_str(&rgba(&[l.r, l.g, l.b, l.a]));
+            ctx.set_line_width((l.width as f64).round().max(1.0));
+            ctx.set_line_join("round");
+            ctx.set_line_cap("butt");
+            let _ = ctx.set_line_dash(&js_sys::Array::new());
+            let mut x0 = l.x0 as f64;
+            let mut y0 = l.y0 as f64;
+            let mut x1 = l.x1 as f64;
+            let mut y1 = l.y1 as f64;
+            if (x1 - x0).abs() <= f64::EPSILON {
+                let x = x0.round() + 0.5;
+                x0 = x;
+                x1 = x;
+            } else if (y1 - y0).abs() <= f64::EPSILON {
+                let y = y0.round() + 0.5;
+                y0 = y;
+                y1 = y;
+            }
+            ctx.begin_path();
+            ctx.move_to(x0, y0);
+            ctx.line_to(x1, y1);
+            ctx.stroke();
         }
 
         // Anchor circles
