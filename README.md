@@ -7,11 +7,11 @@ The logical price domain is now `f64` end-to-end. Prices remain double precision
 ## Quick Start
 
 ```bash
-npm install axiuscharts-wasm
+npm install @axiusflow/axiuscharts-wasm
 ```
 
 ```ts
-import init, { AxiusCharts } from 'axiuscharts-wasm';
+import init, { AxiusCharts } from '@axiusflow/axiuscharts-wasm';
 
 await init();
 
@@ -95,6 +95,14 @@ cargo test
 cargo clippy -- -D warnings
 wasm-pack build wasm --target web --release
 ```
+
+## Package Releases
+
+This repository publishes the charting engine as the private GitHub Package `@axiusflow/axiuscharts-wasm`.
+
+To release chart changes, bump `version` in `package.json` and push to `main`. The publish workflow builds the WASM package and publishes the new version to GitHub Packages. If the version already exists, the workflow skips publishing instead of overwriting it.
+
+Apps should consume the chart engine by package version. Update the app dependency only when the app should adopt a new chart engine release.
 
 Parity harness:
 

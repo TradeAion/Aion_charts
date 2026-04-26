@@ -1,7 +1,15 @@
 {
-  "name": "axiuscharts-wasm",
+  "name": "@axiusflow/axiuscharts-wasm",
   "version": "0.1.0",
   "type": "module",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Axiusflow/Axius_charts.git"
+  },
   "description": "High-performance Canvas2D charting engine — WASM build",
   "main": "./wasm/pkg/axiuscharts_wasm.js",
   "module": "./wasm/pkg/axiuscharts_wasm.js",
@@ -11,7 +19,7 @@
     "build:release": "wasm-pack build --target web --release wasm && node -e \"require('fs').writeFileSync('wasm/pkg/.gitignore', '!axiuscharts_wasm_bg.wasm\\n!axiuscharts_wasm_bg.wasm.d.ts\\n!axiuscharts_wasm.d.ts\\n!axiuscharts_wasm.js\\n!package.json\\n')\"",
     "test:e2e": "playwright test",
     "test:artifacts": "node scripts/check-wasm-artifacts.mjs",
-    "prepack": "npm run build",
+    "prepack": "npm run build:release",
     "serve": "python serve.py",
     "dev": "python dev.py"
   },
