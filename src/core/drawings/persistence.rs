@@ -59,8 +59,9 @@ pub struct SerializedDrawing {
     /// non-rectangle drawings, or rectangles without a midline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub middle_line: Option<SerializedMiddleLineStyle>,
-    /// Optional border-enabled flag for Text drawings. `None` for legacy /
-    /// non-text drawings (treated as the tool's default by the deserializer).
+    /// Optional border-enabled flag for Text and Rectangle drawings. `None`
+    /// for legacy / unsupported drawings (treated as the tool's default by
+    /// the deserializer).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border_enabled: Option<bool>,
     /// Optional fill-enabled flag for Text drawings. `None` for legacy /

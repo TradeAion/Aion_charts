@@ -1,6 +1,6 @@
 {
   "name": "@axiusflow/axiuscharts-wasm",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com",

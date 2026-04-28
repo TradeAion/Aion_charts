@@ -447,7 +447,7 @@ pub struct SelectedDrawingInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub middle_line_dash: Option<[f64; 2]>,
     /// True when the selected drawing supports an on/off toggle for its
-    /// border (currently: Text drawing only).
+    /// border (currently: Rectangle and Text drawings).
     pub supports_border: bool,
     /// True when the border is currently enabled on the selected drawing.
     pub border_enabled: bool,

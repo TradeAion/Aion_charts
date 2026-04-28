@@ -20,6 +20,7 @@ pub struct RectangleDrawing {
     style: DrawingStyle,
     anchors: Vec<AnchorPoint>,
     text: DrawingText,
+    border_enabled: bool,
     /// Optional horizontal midline through the rectangle's vertical center
     /// (TradingView-style). `None` means the midline is disabled.
     middle_line: Option<MiddleLineStyle>,
@@ -40,8 +41,19 @@ impl RectangleDrawing {
                 AnchorPoint::new(bar_index, price),
             ],
             text: DrawingText::rectangle_default(),
+            border_enabled: false,
             middle_line: None,
         }
+    }
+
+    #[inline]
+    pub fn border_enabled(&self) -> bool {
+        self.border_enabled
+    }
+
+    #[inline]
+    pub fn set_border_enabled(&mut self, enabled: bool) {
+        self.border_enabled = enabled;
     }
 
     /// Current optional middle-line style (None = disabled).
@@ -321,7 +333,6 @@ impl Drawing for RectangleDrawing {
             });
         }
 
-        // Border (4 edge lines)
         let c = &self.style.color;
         let avg_ratio = (h_pixel_ratio + v_pixel_ratio) * 0.5;
         let lw = (self.style.line_width * avg_ratio).floor().max(1.0) as f32;
@@ -330,62 +341,61 @@ impl Drawing for RectangleDrawing {
         let d = self.style.dash.map_or(0.0, |d| (d[0] * avg_ratio) as f32);
         let g = self.style.dash.map_or(0.0, |d| (d[1] * avg_ratio) as f32);
 
-        // Top edge
-        geom.lines.push(ColoredLine {
-            x0: px0,
-            y0: py0,
-            x1: px1,
-            y1: py0,
-            width: lw,
-            r: c[0],
-            g: c[1],
-            b: c[2],
-            a: c[3],
-            dash: d,
-            gap: g,
-        });
-        // Bottom edge
-        geom.lines.push(ColoredLine {
-            x0: px0,
-            y0: py1,
-            x1: px1,
-            y1: py1,
-            width: lw,
-            r: c[0],
-            g: c[1],
-            b: c[2],
-            a: c[3],
-            dash: d,
-            gap: g,
-        });
-        // Left edge
-        geom.lines.push(ColoredLine {
-            x0: px0,
-            y0: py0,
-            x1: px0,
-            y1: py1,
-            width: lw,
-            r: c[0],
-            g: c[1],
-            b: c[2],
-            a: c[3],
-            dash: d,
-            gap: g,
-        });
-        // Right edge
-        geom.lines.push(ColoredLine {
-            x0: px1,
-            y0: py0,
-            x1: px1,
-            y1: py1,
-            width: lw,
-            r: c[0],
-            g: c[1],
-            b: c[2],
-            a: c[3],
-            dash: d,
-            gap: g,
-        });
+        if self.border_enabled {
+            // Border (4 edge lines)
+            geom.lines.push(ColoredLine {
+                x0: px0,
+                y0: py0,
+                x1: px1,
+                y1: py0,
+                width: lw,
+                r: c[0],
+                g: c[1],
+                b: c[2],
+                a: c[3],
+                dash: d,
+                gap: g,
+            });
+            geom.lines.push(ColoredLine {
+                x0: px0,
+                y0: py1,
+                x1: px1,
+                y1: py1,
+                width: lw,
+                r: c[0],
+                g: c[1],
+                b: c[2],
+                a: c[3],
+                dash: d,
+                gap: g,
+            });
+            geom.lines.push(ColoredLine {
+                x0: px0,
+                y0: py0,
+                x1: px0,
+                y1: py1,
+                width: lw,
+                r: c[0],
+                g: c[1],
+                b: c[2],
+                a: c[3],
+                dash: d,
+                gap: g,
+            });
+            geom.lines.push(ColoredLine {
+                x0: px1,
+                y0: py0,
+                x1: px1,
+                y1: py1,
+                width: lw,
+                r: c[0],
+                g: c[1],
+                b: c[2],
+                a: c[3],
+                dash: d,
+                gap: g,
+            });
+        }
 
         // Optional horizontal middle line (TradingView-style). Independent of
         // the rectangle's border style — uses its own color, width, and dash.

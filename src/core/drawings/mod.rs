@@ -32,9 +32,8 @@ use drawing::{
     ensure_next_drawing_id_at_least, estimate_text_line_width as estimate_drawing_text_line_width,
     line_label_placement, optical_middle_top, point_to_bitmap, point_to_css, prepare_text_block,
     push_rotated_text_block, rect_text_anchor, rotated_text_box_top_left,
-    with_text_measure_font_family,
-    vertical_line_label_alignments, Drawing, PreparedTextBlock, TEXT_DRAWING_GAP_CSS,
-    TEXT_LABEL_CLEARANCE_CSS,
+    vertical_line_label_alignments, with_text_measure_font_family, Drawing, PreparedTextBlock,
+    TEXT_DRAWING_GAP_CSS, TEXT_LABEL_CLEARANCE_CSS,
 };
 use persistence::{
     drawing_tool_from_key, drawing_tool_to_key, migrate_snapshot, DrawingSnapshot,
@@ -1497,8 +1496,8 @@ impl DrawingManager {
             (false, false, String::new(), 0.0, None)
         };
 
-        // Text drawing border + fill toggles. The struct stores the colors
-        // even when disabled so toggling does not lose the user's last pick.
+        // Border + fill toggles. Text and Rectangle store border style even
+        // when disabled so toggling does not lose the user's last pick.
         let (
             supports_border,
             border_enabled,
@@ -1509,7 +1508,23 @@ impl DrawingManager {
             fill_enabled,
             fill_color_hex,
             fill_alpha,
-        ) = if tool == DrawingTool::Text {
+        ) = if tool == DrawingTool::Rectangle {
+            let rect = drawing
+                .as_any()
+                .downcast_ref::<rectangle::RectangleDrawing>()?;
+            let style = rect.style();
+            (
+                true,
+                rect.border_enabled(),
+                rgba_to_hex(style.color),
+                style.line_width,
+                style.dash,
+                false,
+                false,
+                String::new(),
+                0.0,
+            )
+        } else if tool == DrawingTool::Text {
             let td = drawing
                 .as_any()
                 .downcast_ref::<text_drawing::TextDrawing>()?;
@@ -1739,10 +1754,10 @@ impl DrawingManager {
         true
     }
 
-    /// Update the border of the currently selected Text drawing. The color,
-    /// width, and dash are always written so toggling `enabled` off and back
-    /// on preserves the user's last choices.
-    pub fn set_selected_text_border(
+    /// Update the border of the currently selected Rectangle or Text drawing.
+    /// The color, width, and dash are always written so toggling `enabled` off
+    /// and back on preserves the user's last choices.
+    pub fn set_selected_drawing_border(
         &mut self,
         enabled: bool,
         color: [f32; 4],
@@ -1755,23 +1770,55 @@ impl DrawingManager {
         let Some(drawing) = self.get_mut(id) else {
             return false;
         };
-        if drawing.tool() != DrawingTool::Text {
-            return false;
+
+        match drawing.tool() {
+            DrawingTool::Rectangle => {
+                {
+                    let style = drawing.style_mut();
+                    style.color = color;
+                    style.line_width = line_width;
+                    style.dash = dash;
+                }
+                let Some(rect) = drawing
+                    .as_any_mut()
+                    .downcast_mut::<rectangle::RectangleDrawing>()
+                else {
+                    return false;
+                };
+                rect.set_border_enabled(enabled);
+                true
+            }
+            DrawingTool::Text => {
+                {
+                    let style = drawing.style_mut();
+                    style.color = color;
+                    style.line_width = line_width;
+                    style.dash = dash;
+                }
+                let Some(td) = drawing
+                    .as_any_mut()
+                    .downcast_mut::<text_drawing::TextDrawing>()
+                else {
+                    return false;
+                };
+                td.set_border_enabled(enabled);
+                true
+            }
+            _ => false,
         }
-        {
-            let style = drawing.style_mut();
-            style.color = color;
-            style.line_width = line_width;
-            style.dash = dash;
-        }
-        let Some(td) = drawing
-            .as_any_mut()
-            .downcast_mut::<text_drawing::TextDrawing>()
-        else {
-            return false;
-        };
-        td.set_border_enabled(enabled);
-        true
+    }
+
+    /// Update the border of the currently selected Text drawing. The color,
+    /// width, and dash are always written so toggling `enabled` off and back
+    /// on preserves the user's last choices.
+    pub fn set_selected_text_border(
+        &mut self,
+        enabled: bool,
+        color: [f32; 4],
+        line_width: f64,
+        dash: Option<[f64; 2]>,
+    ) -> bool {
+        self.set_selected_drawing_border(enabled, color, line_width, dash)
     }
 
     /// Update the background fill of the currently selected Text drawing.
@@ -2462,7 +2509,13 @@ impl DrawingManager {
                     None
                 };
 
-                let (border_enabled, fill_enabled) = if drawing.tool() == DrawingTool::Text {
+                let (border_enabled, fill_enabled) = if drawing.tool() == DrawingTool::Rectangle {
+                    drawing
+                        .as_any()
+                        .downcast_ref::<rectangle::RectangleDrawing>()
+                        .map(|rect| (Some(rect.border_enabled()), None))
+                        .unwrap_or((None, None))
+                } else if drawing.tool() == DrawingTool::Text {
                     drawing
                         .as_any()
                         .downcast_ref::<text_drawing::TextDrawing>()
@@ -2721,6 +2774,10 @@ impl DrawingManager {
                 .downcast_mut::<rectangle::RectangleDrawing>()
                 .ok_or_else(|| "Rectangle type mismatch during restore".to_string())?;
             rect.set_middle_line(middle_line.map(Into::into));
+            // Legacy rectangle snapshots had no border flag and rendered a
+            // visible border. Preserve that on restore; freshly-created
+            // rectangles default to no border and persist Some(false).
+            rect.set_border_enabled(border_enabled.unwrap_or(true));
         }
 
         if tool == DrawingTool::Text {
@@ -3087,9 +3144,19 @@ mod tests {
         let geom = top.first().expect("text edit geometry");
         let caret_lines = geom.lines.iter().filter(|line| line.dash < 0.0).count();
 
-        assert_eq!(caret_lines, 1, "free text edit should only draw the caret line");
-        assert_eq!(geom.lines.len(), 1, "free text edit must not draw box/border underline lines");
-        assert!(geom.rects.is_empty(), "free text edit must not draw box fill behind text");
+        assert_eq!(
+            caret_lines, 1,
+            "free text edit should only draw the caret line"
+        );
+        assert_eq!(
+            geom.lines.len(),
+            1,
+            "free text edit must not draw box/border underline lines"
+        );
+        assert!(
+            geom.rects.is_empty(),
+            "free text edit must not draw box fill behind text"
+        );
     }
 
     #[test]
@@ -4164,9 +4231,9 @@ mod tests {
             (all_lines.len() + last.iter().count(), last)
         };
 
-        // Default: no midline → 4 border lines.
+        // Default: no midline and no border.
         let (n, _) = count_rect_lines(&manager);
-        assert_eq!(n, 4);
+        assert_eq!(n, 0);
 
         // Enable midline.
         manager.select(id);
@@ -4180,7 +4247,7 @@ mod tests {
         manager.deselect_all();
 
         let (n, last) = count_rect_lines(&manager);
-        assert_eq!(n, 5, "midline should add a 5th line");
+        assert_eq!(n, 1, "midline should render without forcing a border");
         let midline = last.expect("midline");
         // Horizontal line at vertical center, spans full width.
         assert!((midline.y0 - midline.y1).abs() < 1e-3);
@@ -4205,7 +4272,7 @@ mod tests {
         assert!((ml.line_width - 2.0).abs() < 1e-6);
         assert_eq!(ml.dash, Some([6.0, 4.0]));
 
-        // Disable midline → back to 4 border lines.
+        // Disable midline → back to no rectangle lines.
         restored.select(id);
         let disabled =
             restored.set_selected_rectangle_middle_line(false, [0.0, 0.0, 0.0, 1.0], 1.0, None);
@@ -4213,7 +4280,7 @@ mod tests {
         restored.deselect_all();
         let (base, top) = restored.generate_all_geometry(&vp, pw, ph, 1.0, 1.0, 1.0);
         let total: usize = base.iter().chain(top.iter()).map(|g| g.lines.len()).sum();
-        assert_eq!(total, 4);
+        assert_eq!(total, 0);
     }
 
     #[test]
@@ -4231,6 +4298,8 @@ mod tests {
         assert!(!info.middle_line_enabled);
         assert!(info.middle_line_width > 0.0);
         assert!(info.middle_line_color.starts_with('#'));
+        assert!(info.supports_border);
+        assert!(!info.border_enabled, "Rectangle defaults to no border");
     }
 
     #[test]

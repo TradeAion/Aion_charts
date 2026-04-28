@@ -291,8 +291,8 @@ impl PriceAxisRenderer {
         let min_label_y_css = label_half_css;
         let max_label_y_css = (h_css - label_half_css).max(min_label_y_css);
         for t in ticks {
-            let y_css = (t.pixel / dpr).clamp(min_label_y_css, max_label_y_css);
-            if y_css < 0.0 || y_css > h_css {
+            let y_css = t.pixel / dpr;
+            if y_css < min_label_y_css || y_css > max_label_y_css {
                 continue;
             }
             let m = self
