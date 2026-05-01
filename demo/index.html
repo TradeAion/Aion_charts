@@ -99,8 +99,6 @@
     body.light .btn:hover { background: #ddd; color: #222; }
     body.light .btn.active { background: #dcfce7; color: #16a34a; border-color: #22C55E44; }
     .demo-advanced,
-    #execution-marks-toggle,
-    #execution-text-toggle,
     #order-lines-toggle {
       display: none !important;
     }
@@ -618,8 +616,8 @@
     <div class="toolbar-divider demo-advanced"></div>
 
     <div class="toolbar-section demo-actions">
-      <button class="btn" id="execution-marks-toggle" title="Toggle demo execution marks">Exec</button>
-      <button class="btn active" id="execution-text-toggle" title="Toggle execution mark text labels">Text</button>
+      <button class="btn" id="execution-marks-toggle" title="Toggle demo execution marks">Executions</button>
+      <button class="btn active" id="execution-text-toggle" title="Toggle execution price labels">Price Label</button>
       <button class="btn" id="order-lines-toggle" title="Toggle demo order lines">Orders</button>
       <button class="btn" id="stream-toggle">▶ Live</button>
       <button class="btn active" id="volume-toggle">Volume</button>
@@ -781,6 +779,12 @@
       <!-- Candle Colors -->
       <div class="settings-section">
         <h3>Candle Colors</h3>
+        <div class="setting-row">
+          <span class="setting-label">Canvas</span>
+          <div class="setting-control">
+            <input type="color" class="setting-input" id="cfg-background" value="#131315" title="Chart canvas color">
+          </div>
+        </div>
         <div class="setting-row">
           <span class="setting-label">Bullish</span>
           <div class="setting-control">
@@ -1581,6 +1585,7 @@
 
     function syncThemeLinkedSettings() {
       const palette = isDark ? themeLinkedSettings.dark : themeLinkedSettings.light;
+      $('cfg-background').value = palette.background;
       $('cfg-bullish-fill').value = palette.bullishFill;
       $('cfg-bullish-wick').value = palette.bullishWick;
       $('cfg-bearish-fill').value = palette.bearishFill;
@@ -1597,8 +1602,7 @@
 
     function applyThemePreviewOverrides() {
       if (!core) return;
-      const palette = isDark ? themeLinkedSettings.dark : themeLinkedSettings.light;
-      const bg = hexToRgba(palette.background);
+      const bg = hexToRgba($('cfg-background').value);
       core.set_background_color(bg[0], bg[1], bg[2], bg[3]);
     }
 
@@ -1779,7 +1783,7 @@
       const available = !!core && activeChartType !== 'footprint';
       btn.classList.toggle('active', executionMarksVisible && available);
       btn.disabled = !core;
-      btn.textContent = available ? 'Exec' : 'Exec N/A';
+      btn.textContent = available && executionMarksVisible ? 'Executions On' : 'Executions';
       btn.title = available
         ? 'Toggle demo execution marks on the current chart'
         : 'Execution mark demo is available on the time-based demo data';
@@ -1794,12 +1798,14 @@
 
     function syncExecutionMarkDisplayToggles() {
       const textBtn = $('execution-text-toggle');
-      const available = !!core;
+      const available = !!core && executionMarksVisible && activeChartType !== 'footprint';
       if (textBtn) {
         textBtn.disabled = !available;
         textBtn.classList.toggle('active', executionTextVisible && available);
-        textBtn.textContent = executionTextVisible ? 'Text' : 'Text Off';
-        textBtn.title = 'Toggle execution mark text labels';
+        textBtn.textContent = executionTextVisible ? 'Price Label' : 'Label Off';
+        textBtn.title = available
+          ? 'Toggle execution price labels'
+          : 'Enable execution marks to toggle labels';
       }
     }
 
@@ -1810,6 +1816,7 @@
         core.clear_execution_marks();
         hudExecution.textContent = '';
         syncExecutionMarksToggle();
+        syncExecutionMarkDisplayToggles();
         return;
       }
 
@@ -1817,6 +1824,7 @@
         core.clear_execution_marks();
         hudExecution.textContent = 'Execution demo is available on the time-based chart modes.';
         syncExecutionMarksToggle();
+        syncExecutionMarkDisplayToggles();
         return;
       }
 
@@ -2113,6 +2121,10 @@
     function applyAllSettings() {
       if (!core) return;
 
+      // Canvas
+      const bg = hexToRgba($('cfg-background').value);
+      core.set_background_color(bg[0], bg[1], bg[2], bg[3]);
+
       // Candle colors
       const bullFill = hexToRgba($('cfg-bullish-fill').value);
       const bullWick = hexToRgba($('cfg-bullish-wick').value);
@@ -2176,6 +2188,7 @@
 
     // Wire up all settings inputs
     const settingsInputs = [
+      'cfg-background',
       'cfg-bullish-fill', 'cfg-bullish-wick', 'cfg-bearish-fill', 'cfg-bearish-wick', 'cfg-bar-width',
       'cfg-volume-up', 'cfg-volume-down',
       'cfg-crosshair-mode', 'cfg-crosshair-color', 'cfg-crosshair-style', 'cfg-crosshair-width',

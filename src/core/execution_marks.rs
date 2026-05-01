@@ -435,33 +435,38 @@ pub fn format_execution_pnl(realized_pnl: f64, reference_price: f64) -> String {
 /// Build the visible text lines for an execution mark.
 pub fn build_execution_text_lines(
     mark: &ExecutionMark,
-    label_mode: ExecutionLabelMode,
-    show_pnl: bool,
+    _label_mode: ExecutionLabelMode,
+    _show_pnl: bool,
     price_step: f64,
 ) -> Vec<String> {
-    let mut lines = vec![
-        format_execution_label(mark, label_mode),
-        if mark.quantity > 0.0 {
-            format!(
-                "{} @ {}",
-                crate::core::formatters::format_qty(mark.quantity),
-                crate::core::formatters::format_price(mark.price, price_step)
-            )
-        } else {
-            format!(
-                "@ {}",
-                crate::core::formatters::format_price(mark.price, price_step)
-            )
-        },
-    ];
+    let price = format_execution_text_price(mark.price, price_step);
+    let line = if mark.quantity > 0.0 {
+        format!(
+            "{} @ {}",
+            crate::core::formatters::format_qty(mark.quantity),
+            price
+        )
+    } else {
+        format!("@ {}", price)
+    };
 
-    if show_pnl && matches!(mark.role, ExecutionRole::ScaleOut | ExecutionRole::Exit) {
-        if let Some(realized_pnl) = mark.realized_pnl {
-            lines.push(format_execution_pnl(realized_pnl, mark.price));
+    vec![line]
+}
+
+fn format_execution_text_price(price: f64, price_step: f64) -> String {
+    let decimals = if price_step <= 0.0 {
+        2
+    } else {
+        let mut precision = 0usize;
+        let mut step = price_step;
+        while step < 0.9999 && precision < 8 {
+            step *= 10.0;
+            precision += 1;
         }
-    }
+        precision
+    };
 
-    lines
+    format!("{price:.decimals$}")
 }
 
 /// Find the top-most execution-mark hit area under the pointer.
@@ -1472,20 +1477,20 @@ mod tests {
     }
 
     #[test]
-    fn execution_text_lines_include_pnl_for_exit_marks() {
+    fn execution_text_lines_only_include_quantity_and_price() {
         let mark =
             sample_mark("exit", ExecutionSide::Sell, ExecutionRole::Exit).with_realized_pnl(150.0);
         let lines = build_execution_text_lines(&mark, ExecutionLabelMode::SideOnly, true, 0.01);
-        assert_eq!(lines.len(), 3);
-        assert_eq!(lines[2], "+$150.00");
+        assert_eq!(lines, vec!["1.5 @ 103842.57"]);
     }
 
     #[test]
-    fn execution_text_lines_skip_pnl_for_entry_marks() {
-        let mark =
-            sample_mark("entry", ExecutionSide::Buy, ExecutionRole::Entry).with_realized_pnl(150.0);
+    fn execution_text_lines_skip_side_role_and_custom_label_text() {
+        let mark = sample_mark("entry", ExecutionSide::Buy, ExecutionRole::Entry)
+            .with_label("BUY ENTRY")
+            .with_realized_pnl(150.0);
         let lines = build_execution_text_lines(&mark, ExecutionLabelMode::SideOnly, true, 0.01);
-        assert_eq!(lines.len(), 2);
+        assert_eq!(lines, vec!["1.5 @ 103842.57"]);
     }
 
     #[test]

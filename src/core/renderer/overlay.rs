@@ -1732,11 +1732,13 @@ impl OverlayRenderer {
 
         // Primary execution arrows follow the approved trading markup palette.
         let buy_color: [f32; 4] = [41.0 / 255.0, 98.0 / 255.0, 1.0, 1.0]; // #2962FF
-        let sell_color: [f32; 4] = [1.0, 74.0 / 255.0, 104.0 / 255.0, 1.0]; // #FF4A68
+        let sell_color: [f32; 4] = [242.0 / 255.0, 54.0 / 255.0, 69.0 / 255.0, 1.0]; // #F23645
 
         // Execution markers were visually oversized; tune closer to TV density.
         let arrow_size = 7.0 * dpr;
-        let arrow_gap_css = 8.0;
+        let arrow_wick_gap_css = 6.0;
+        let arrow_svg_half_height_css = (11.5 - 7.0) * (arrow_size / dpr / 7.0);
+        let arrow_gap_css = arrow_wick_gap_css + arrow_svg_half_height_css;
         let base_hit_radius_css = arrow_size / dpr + 4.0;
 
         let mut renderables: Vec<ExecutionRenderableMark> = Vec::new();
@@ -1836,8 +1838,8 @@ impl OverlayRenderer {
         };
 
         // Font setup
-        let font_size = (style.font_size as f64 * 0.8) * dpr;
-        let font = format!("{}px {}", font_size, style.font_family);
+        let font_size = (style.font_size as f64).max(12.0) * dpr;
+        let font = format!("600 {}px {}", font_size.round(), style.font_family);
         let background_luminance = 0.2126 * style.bg_color[0] as f64
             + 0.7152 * style.bg_color[1] as f64
             + 0.0722 * style.bg_color[2] as f64;
@@ -1846,6 +1848,7 @@ impl OverlayRenderer {
         } else {
             "#202020".to_string()
         };
+        let execution_outline_color = Self::execution_contrast_outline_color(style);
 
         // ═══════════════════════════════════════════════════════════════════
         // Draw each execution mark
@@ -1871,6 +1874,7 @@ impl OverlayRenderer {
                 arrow_size,
                 matches!(leader.side, ExecutionSide::Buy),
                 &color_str,
+                execution_outline_color,
             );
             if is_cluster {
                 self.draw_execution_cluster_badge(
@@ -1899,20 +1903,22 @@ impl OverlayRenderer {
                         .filter_map(|member_id| renderables_by_id.get(member_id.as_str()).copied())
                     {
                         self.draw_execution_price_chevron(
-                            member.x_css * dpr,
+                            self.execution_price_chevron_x(member.x_css, member.side) * dpr,
                             member.price_y_css * dpr,
-                            10.0 * dpr,
+                            8.0 * dpr,
                             matches!(member.side, ExecutionSide::Buy),
                             &rgba(&member.color),
+                            execution_outline_color,
                         );
                     }
                 } else {
                     self.draw_execution_price_chevron(
-                        leader.x_css * dpr,
+                        self.execution_price_chevron_x(leader.x_css, leader.side) * dpr,
                         leader.price_y_css * dpr,
-                        10.0 * dpr,
+                        8.0 * dpr,
                         matches!(leader.side, ExecutionSide::Buy),
                         &color_str,
+                        execution_outline_color,
                     );
                 }
             }
@@ -1924,44 +1930,25 @@ impl OverlayRenderer {
                 };
                 let text_lines =
                     build_execution_text_lines(mark, label_mode, pnl_visible, price_step);
-                let display_label = &text_lines[0];
-                let qty_text = &text_lines[1];
-                let pnl_line = text_lines.get(2).cloned();
+                let Some(execution_text) = text_lines.first() else {
+                    continue;
+                };
 
                 self.ctx.set_font(&font);
                 self.ctx.set_text_align("center");
-                let line_height = font_size * 1.2;
 
                 match leader.side {
                     ExecutionSide::Buy => {
                         self.ctx.set_text_baseline("top");
                         let text_y = arrow_y_phys + (arrow_size * 2.35) + 3.0 * dpr;
                         self.ctx.set_fill_style_str(&execution_text_color);
-                        let _ = self.ctx.fill_text(display_label, x_phys, text_y);
-                        let _ = self.ctx.fill_text(qty_text, x_phys, text_y + line_height);
-                        if let Some(pnl_line) = pnl_line {
-                            self.ctx
-                                .set_fill_style_str(&self.execution_pnl_text_color(mark, style));
-                            let _ =
-                                self.ctx
-                                    .fill_text(&pnl_line, x_phys, text_y + (line_height * 2.0));
-                        }
+                        let _ = self.ctx.fill_text(execution_text, x_phys, text_y);
                     }
                     ExecutionSide::Sell => {
                         self.ctx.set_text_baseline("bottom");
                         let text_y = arrow_y_phys - (arrow_size * 2.35) - 3.0 * dpr;
-                        if let Some(pnl_line) = pnl_line {
-                            self.ctx
-                                .set_fill_style_str(&self.execution_pnl_text_color(mark, style));
-                            let _ =
-                                self.ctx
-                                    .fill_text(&pnl_line, x_phys, text_y - (line_height * 2.0));
-                        }
                         self.ctx.set_fill_style_str(&execution_text_color);
-                        let _ = self.ctx.fill_text(qty_text, x_phys, text_y);
-                        let _ = self
-                            .ctx
-                            .fill_text(display_label, x_phys, text_y - line_height);
+                        let _ = self.ctx.fill_text(execution_text, x_phys, text_y);
                     }
                 }
             }
@@ -1988,12 +1975,14 @@ impl OverlayRenderer {
         let dpr = self.dpr;
         let pane_pw = pane_css_w * dpr;
         let buy_color = [41.0 / 255.0, 98.0 / 255.0, 1.0, 1.0];
-        let sell_color = [1.0, 74.0 / 255.0, 104.0 / 255.0, 1.0];
-        let chevron_size = 9.0 * dpr;
+        let sell_color = [242.0 / 255.0, 54.0 / 255.0, 69.0 / 255.0, 1.0];
+        let chevron_size = 8.0 * dpr;
+        let outline_color = Self::execution_contrast_outline_color(_style);
 
         self.ctx.save();
         for chevron in plan.chevrons {
-            let x = bar_to_x(chevron.time_index + 0.5, viewport, pane_pw);
+            let x_css = bar_to_x(chevron.time_index + 0.5, viewport, pane_pw) / dpr;
+            let x = self.execution_price_chevron_x(x_css, chevron.side) * dpr;
             let y = viewport.price_to_css_y(chevron.price, pane_css_h) * dpr;
             let color = chevron.color.unwrap_or(match chevron.side {
                 ExecutionSide::Buy => buy_color,
@@ -2005,6 +1994,7 @@ impl OverlayRenderer {
                 chevron_size,
                 matches!(chevron.side, ExecutionSide::Buy),
                 &rgba(&color),
+                outline_color,
             );
         }
         self.ctx.restore();
@@ -2012,51 +2002,71 @@ impl OverlayRenderer {
 
     /// Draw the primary execution marker near the candle.
     ///
-    /// This is intentionally a true vertical arrow instead of a chevron so
-    /// traders can distinguish the side/intent marker from the precise fill
-    /// locator drawn at the execution price itself.
-    fn draw_execution_arrow(&self, x: f64, center_y: f64, size: f64, points_up: bool, color: &str) {
+    /// Keep this as a light stroked arrow instead of a filled glyph. At candle
+    /// scale a filled polygon reads heavy; the reference-style mark is closer
+    /// to a small direction annotation with a thin stem and open head.
+    fn draw_execution_arrow(
+        &self,
+        x: f64,
+        center_y: f64,
+        size: f64,
+        points_up: bool,
+        color: &str,
+        _outline_color: &str,
+    ) {
         self.ctx.save();
-        self.ctx.set_line_join("miter");
+        self.ctx.set_line_cap("round");
+        self.ctx.set_line_join("round");
 
         let x = x.round();
         let center_y = center_y.round();
-        let scale = size / 8.0;
-        let outline_width = (0.24 * self.dpr).clamp(0.22, 0.4);
-        let outline_color = "rgba(9, 12, 18, 0.42)";
+        let scale = size / 7.0;
+        let stroke_width = 1.5 * scale;
+        let map_x = |vx: f64| x + (vx - 7.0) * scale;
+        let map_y = |vy: f64| center_y + (vy - 7.0) * scale;
 
-        let trace_arrow = || {
-            self.ctx.begin_path();
-            if points_up {
-                self.ctx.move_to(x, center_y);
-                self.ctx.line_to(x + 6.0 * scale, center_y + 8.0 * scale);
-                self.ctx.line_to(x + 2.0 * scale, center_y + 8.0 * scale);
-                self.ctx.line_to(x + 2.0 * scale, center_y + 18.0 * scale);
-                self.ctx.line_to(x - 2.0 * scale, center_y + 18.0 * scale);
-                self.ctx.line_to(x - 2.0 * scale, center_y + 8.0 * scale);
-                self.ctx.line_to(x - 6.0 * scale, center_y + 8.0 * scale);
-            } else {
-                self.ctx.move_to(x - 2.0 * scale, center_y - 18.0 * scale);
-                self.ctx.line_to(x + 2.0 * scale, center_y - 18.0 * scale);
-                self.ctx.line_to(x + 2.0 * scale, center_y - 8.0 * scale);
-                self.ctx.line_to(x + 6.0 * scale, center_y - 8.0 * scale);
-                self.ctx.line_to(x, center_y);
-                self.ctx.line_to(x - 6.0 * scale, center_y - 8.0 * scale);
-                self.ctx.line_to(x - 2.0 * scale, center_y - 8.0 * scale);
-            }
-            self.ctx.close_path();
-        };
-
-        trace_arrow();
-        self.ctx.set_fill_style_str(color);
-        self.ctx.fill();
-
-        trace_arrow();
-        self.ctx.set_line_width(outline_width);
-        self.ctx.set_stroke_style_str(outline_color);
+        self.ctx.begin_path();
+        if points_up {
+            // SVG path: M7 11.5V2.5M7 2.5L3.5 6M7 2.5L10.5 6
+            self.ctx.move_to(map_x(7.0), map_y(11.5));
+            self.ctx.line_to(map_x(7.0), map_y(2.5));
+            self.ctx.move_to(map_x(7.0), map_y(2.5));
+            self.ctx.line_to(map_x(3.5), map_y(6.0));
+            self.ctx.move_to(map_x(7.0), map_y(2.5));
+            self.ctx.line_to(map_x(10.5), map_y(6.0));
+        } else {
+            // SVG path: M7 2.5V11.5M7 11.5L10.5 8M7 11.5L3.5 8
+            self.ctx.move_to(map_x(7.0), map_y(2.5));
+            self.ctx.line_to(map_x(7.0), map_y(11.5));
+            self.ctx.move_to(map_x(7.0), map_y(11.5));
+            self.ctx.line_to(map_x(10.5), map_y(8.0));
+            self.ctx.move_to(map_x(7.0), map_y(11.5));
+            self.ctx.line_to(map_x(3.5), map_y(8.0));
+        }
+        self.ctx.set_line_width(stroke_width);
+        self.ctx.set_stroke_style_str(color);
         self.ctx.stroke();
 
         self.ctx.restore();
+    }
+
+    fn execution_price_chevron_x(&self, bar_center_x_css: f64, side: ExecutionSide) -> f64 {
+        let offset_css = 2.0;
+        match side {
+            ExecutionSide::Buy => bar_center_x_css - offset_css,
+            ExecutionSide::Sell => bar_center_x_css + offset_css,
+        }
+    }
+
+    fn execution_contrast_outline_color(style: &ChartStyle) -> &'static str {
+        let background_luminance = 0.2126 * style.bg_color[0] as f64
+            + 0.7152 * style.bg_color[1] as f64
+            + 0.0722 * style.bg_color[2] as f64;
+        if background_luminance < 0.48 {
+            "rgba(19, 19, 21, 0.88)"
+        } else {
+            "rgba(255, 255, 255, 0.9)"
+        }
     }
 
     /// Draw the exact execution-price locator.
@@ -2070,42 +2080,42 @@ impl OverlayRenderer {
         size: f64,
         points_right: bool,
         color: &str,
+        outline_color: &str,
     ) {
         self.ctx.save();
+        self.ctx.set_line_cap("square");
         self.ctx.set_line_join("miter");
 
         let tip_x = tip_x.round();
         let y = y.round();
         let scale = size / 14.0;
-        let outline_width = (0.22 * self.dpr).clamp(0.2, 0.38);
-        let outline_color = "rgba(9, 12, 18, 0.42)";
+        let map_y = |vy: f64| y + (vy - 7.0) * scale;
+
         let trace_chevron = || {
             self.ctx.begin_path();
             if points_right {
-                self.ctx.move_to(tip_x - 8.0 * scale, y - 8.0 * scale);
+                // SVG path: M4 2L9 7L4 12
+                let map_x = |vx: f64| tip_x + (vx - 9.0) * scale;
+                self.ctx.move_to(map_x(4.0), map_y(2.0));
                 self.ctx.line_to(tip_x, y);
-                self.ctx.line_to(tip_x - 8.0 * scale, y + 8.0 * scale);
-                self.ctx.line_to(tip_x - 10.0 * scale, y + 6.0 * scale);
-                self.ctx.line_to(tip_x - 4.0 * scale, y);
-                self.ctx.line_to(tip_x - 10.0 * scale, y - 6.0 * scale);
+                self.ctx.line_to(map_x(4.0), map_y(12.0));
             } else {
-                self.ctx.move_to(tip_x + 8.0 * scale, y - 8.0 * scale);
-                self.ctx.line_to(tip_x + 10.0 * scale, y - 6.0 * scale);
-                self.ctx.line_to(tip_x + 4.0 * scale, y);
-                self.ctx.line_to(tip_x + 10.0 * scale, y + 6.0 * scale);
-                self.ctx.line_to(tip_x + 8.0 * scale, y + 8.0 * scale);
+                // SVG path: M10 12L5 7L10 2
+                let map_x = |vx: f64| tip_x + (vx - 5.0) * scale;
+                self.ctx.move_to(map_x(10.0), map_y(12.0));
                 self.ctx.line_to(tip_x, y);
+                self.ctx.line_to(map_x(10.0), map_y(2.0));
             }
-            self.ctx.close_path();
         };
-
+        let color_width = 2.5 * scale;
         trace_chevron();
-        self.ctx.set_fill_style_str(color);
-        self.ctx.fill();
-
-        trace_chevron();
-        self.ctx.set_line_width(outline_width);
+        self.ctx.set_line_width(color_width + 1.0);
         self.ctx.set_stroke_style_str(outline_color);
+        self.ctx.stroke();
+
+        trace_chevron();
+        self.ctx.set_line_width(color_width);
+        self.ctx.set_stroke_style_str(color);
         self.ctx.stroke();
 
         self.ctx.restore();
@@ -2177,27 +2187,6 @@ impl OverlayRenderer {
         self.ctx.line_to(x, y + radius);
         self.ctx.quadratic_curve_to(x, y, x + radius, y);
         self.ctx.close_path();
-    }
-
-    fn execution_pnl_text_color(
-        &self,
-        mark: &crate::core::execution_marks::ExecutionMark,
-        style: &ChartStyle,
-    ) -> String {
-        match mark.realized_pnl.unwrap_or(0.0).partial_cmp(&0.0) {
-            Some(std::cmp::Ordering::Greater) => "#26A69A".to_string(),
-            Some(std::cmp::Ordering::Less) => "#EF5350".to_string(),
-            _ => {
-                let background_luminance = 0.2126 * style.bg_color[0] as f64
-                    + 0.7152 * style.bg_color[1] as f64
-                    + 0.0722 * style.bg_color[2] as f64;
-                if background_luminance < 0.5 {
-                    "#E7E7E7".to_string()
-                } else {
-                    "#202020".to_string()
-                }
-            }
-        }
     }
 
     /// Render persistent indicator labels emitted as `DrawInstruction::DrawLabel`.
