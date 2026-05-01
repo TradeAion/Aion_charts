@@ -1561,7 +1561,8 @@ impl ChartEngine {
             merge_bounds(&mut bounds, contribution_lo, contribution_hi);
         }
         if let Some(current_bounds) = bounds {
-            if let Some((marker_lo, marker_hi)) = self.visible_marker_internal_bounds(current_bounds)
+            if let Some((marker_lo, marker_hi)) =
+                self.visible_marker_internal_bounds(current_bounds)
             {
                 merge_bounds(&mut bounds, marker_lo, marker_hi);
             }

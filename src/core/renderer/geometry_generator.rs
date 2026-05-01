@@ -25,7 +25,10 @@ use crate::core::viewport::Viewport;
 /// candle geometry is rendered as filled rects by every backend.
 #[inline]
 fn effective_wick_width(sizing: &CandleSizing) -> f64 {
-    sizing.wick_width.round().clamp(1.0, sizing.bar_width.max(1.0))
+    sizing
+        .wick_width
+        .round()
+        .clamp(1.0, sizing.bar_width.max(1.0))
 }
 
 #[inline]

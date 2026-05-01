@@ -157,6 +157,7 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
             &engine.footprint_data,
             &engine.main_chart_options.footprint,
             &engine.price_lines,
+            &engine.order_lines,
             &engine.viewport,
             pane_ph,
             engine.v_pixel_ratio,
@@ -210,8 +211,10 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
 
     // 5. Generate drawing geometry. Drawings now stay on the overlay bucket by
     // default; the base bucket remains for compatibility with the engine render path.
-    let (mut base_drawings, mut top_drawings) =
-        s.engine.drawings.generate_all_geometry_with_text_font_family(
+    let (mut base_drawings, mut top_drawings) = s
+        .engine
+        .drawings
+        .generate_all_geometry_with_text_font_family(
             &s.engine.viewport,
             pane_css_w,
             pane_css_h,

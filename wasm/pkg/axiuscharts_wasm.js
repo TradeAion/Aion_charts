@@ -2565,6 +2565,21 @@ export class AxiusCharts {
         return ret !== 0;
     }
     /**
+     * Update the non-accent text color for an existing order line.
+     * @param {string} id
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     * @param {number} a
+     * @returns {boolean}
+     */
+    set_order_line_label_text_color(id, r, g, b, a) {
+        const ptr0 = passStringToWasm0(id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.axiuscharts_set_order_line_label_text_color(this.__wbg_ptr, ptr0, len0, r, g, b, a);
+        return ret !== 0;
+    }
+    /**
      * Update the live PNL displayed on an existing order line.
      * @param {string} id
      * @param {number} pnl
@@ -4565,7 +4580,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_2657(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_2670(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -5280,8 +5295,8 @@ function __wasm_bindgen_func_elem_462(arg0, arg1, arg2) {
     wasm.__wasm_bindgen_func_elem_462(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_2657(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_2657(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_2670(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_2670(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 function __wasm_bindgen_func_elem_469(arg0, arg1, arg2) {

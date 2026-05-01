@@ -23,7 +23,7 @@ use crate::core::indicators::render::types::DrawInstruction;
 use crate::core::markers::{
     MarkerHitArea, MarkerManager, MarkerPosition, MarkerShape, MarkerZOrder,
 };
-use crate::core::order_line::OrderLineManager;
+use crate::core::order_line::{OrderLineManager, OrderType};
 use crate::core::price_line::PriceLineManager;
 use crate::core::renderer::axis_label_geometry::{
     compute_right_axis_label_geometry_with_vertical_mode, right_axis_label_height_bmp,
@@ -973,11 +973,24 @@ impl OverlayRenderer {
             .set_font(&format!("{}px {}", font_size, style.font_family));
         self.ctx.set_text_baseline("middle");
 
-        for line in order_lines.iter() {
-            if !line.is_visible() {
-                continue;
+        let mut render_lines: Vec<_> = order_lines
+            .iter()
+            .filter(|line| line.is_visible())
+            .collect();
+        render_lines.sort_by_key(|line| {
+            if line.dragging
+                || line.hovered
+                || line.cancel_hovered
+                || line.tp_hovered
+                || line.sl_hovered
+            {
+                1
+            } else {
+                0
             }
+        });
 
+        for line in render_lines {
             let opts = &line.options;
             let show_tp = order_lines.line_shows_tp_button(line) && opts.status.is_active();
             let show_sl = order_lines.line_shows_sl_button(line) && opts.status.is_active();
@@ -1002,6 +1015,422 @@ impl OverlayRenderer {
             } else {
                 base_color
             };
+
+            let line_w = (opts.line_width * dpr).round().max(1.0);
+            let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
+            let line_y = y_phys.round() + correction;
+            let bg_luma = 0.2126 * style.bg_color[0] as f64
+                + 0.7152 * style.bg_color[1] as f64
+                + 0.0722 * style.bg_color[2] as f64;
+            let is_light_theme = bg_luma > 0.62;
+            let panel_fill = if is_light_theme {
+                [1.0, 1.0, 1.0, 0.90]
+            } else {
+                [0.04, 0.08, 0.12, 0.86]
+            };
+            let panel_fill_hover = if is_light_theme {
+                [1.0, 1.0, 1.0, 0.96]
+            } else {
+                [0.04, 0.08, 0.13, 0.88]
+            };
+            let order_divider_color = [
+                line_color[0],
+                line_color[1],
+                line_color[2],
+                line_color[3].max(1.0),
+            ];
+            let grip_color = if is_light_theme {
+                [0.35, 0.40, 0.50, 0.72]
+            } else {
+                [0.72, 0.78, 0.86, 0.78]
+            };
+            let close_icon_color = if is_light_theme {
+                [0.36, 0.42, 0.54, 1.0]
+            } else {
+                [0.74, 0.80, 0.90, 1.0]
+            };
+            let draw_level_line_with_gaps = |gaps: &[(f64, f64)]| {
+                self.ctx.set_stroke_style_str(&rgba(&line_color));
+                self.ctx.set_line_width(line_w);
+                self.ctx.set_line_cap("butt");
+                set_canvas_line_dash(&self.ctx, opts.line_style, line_w);
+                self.ctx.begin_path();
+                let mut cursor_x = 0.0;
+                for (gap_start, gap_end) in gaps {
+                    let start = gap_start.clamp(0.0, pane_pw);
+                    let end = gap_end.clamp(0.0, pane_pw);
+                    if start > cursor_x {
+                        self.ctx.move_to(cursor_x, line_y);
+                        self.ctx.line_to(start, line_y);
+                    }
+                    cursor_x = cursor_x.max(end);
+                }
+                if cursor_x < pane_pw {
+                    self.ctx.move_to(cursor_x, line_y);
+                    self.ctx.line_to(pane_pw, line_y);
+                }
+                self.ctx.stroke();
+                clear_canvas_line_dash(&self.ctx);
+            };
+
+            if matches!(opts.order_type, OrderType::TakeProfit | OrderType::StopLoss) {
+                let label = if let Some(custom) = &opts.custom_label {
+                    custom.as_str()
+                } else {
+                    opts.order_type.short_label()
+                };
+                let grip_w = 12.0 * dpr;
+                let label_w = self
+                    .ctx
+                    .measure_text(label)
+                    .map(|m| m.width())
+                    .unwrap_or(18.0 * dpr);
+                let badge_w = (px + label_w + 8.0 * dpr + grip_w).max(44.0 * dpr);
+                let badge_x = 36.0 * dpr;
+                let badge_y = y_phys - pill_h / 2.0;
+                draw_level_line_with_gaps(&[(0.0, badge_x + badge_w)]);
+
+                self.ctx.set_fill_style_str(&rgba(&panel_fill));
+                self.ctx.set_stroke_style_str(&rgba(&line_color));
+                self.ctx.set_line_width(1.0 * dpr);
+                self.ctx.begin_path();
+                self.ctx.move_to(badge_x + radius, badge_y);
+                self.ctx.line_to(badge_x + badge_w - radius, badge_y);
+                let _ = self.ctx.arc_to(
+                    badge_x + badge_w,
+                    badge_y,
+                    badge_x + badge_w,
+                    badge_y + radius,
+                    radius,
+                );
+                self.ctx
+                    .line_to(badge_x + badge_w, badge_y + pill_h - radius);
+                let _ = self.ctx.arc_to(
+                    badge_x + badge_w,
+                    badge_y + pill_h,
+                    badge_x + badge_w - radius,
+                    badge_y + pill_h,
+                    radius,
+                );
+                self.ctx.line_to(badge_x + radius, badge_y + pill_h);
+                let _ = self.ctx.arc_to(
+                    badge_x,
+                    badge_y + pill_h,
+                    badge_x,
+                    badge_y + pill_h - radius,
+                    radius,
+                );
+                self.ctx.line_to(badge_x, badge_y + radius);
+                let _ = self
+                    .ctx
+                    .arc_to(badge_x, badge_y, badge_x + radius, badge_y, radius);
+                self.ctx.close_path();
+                self.ctx.fill();
+                self.ctx.stroke();
+
+                self.ctx.set_text_align("left");
+                self.ctx.set_fill_style_str(&rgba(&line_color));
+                let _ = self.ctx.fill_text(label, badge_x + px, y_phys);
+
+                self.ctx.set_fill_style_str(&rgba(&grip_color));
+                let dot_r = 1.15 * dpr;
+                let dot_x0 = badge_x + badge_w - px - 5.0 * dpr;
+                for col in 0..2 {
+                    for row in 0..3 {
+                        self.ctx.begin_path();
+                        let _ = self.ctx.arc(
+                            dot_x0 + col as f64 * 4.0 * dpr,
+                            y_phys - 4.0 * dpr + row as f64 * 4.0 * dpr,
+                            dot_r,
+                            0.0,
+                            std::f64::consts::TAU,
+                        );
+                        self.ctx.fill();
+                    }
+                }
+                continue;
+            }
+
+            if is_position {
+                let qty_text = if opts.quantity > 0.0 {
+                    format!("{:.2}", opts.quantity)
+                } else {
+                    String::new()
+                };
+                let pnl_value = opts.pnl.unwrap_or(0.0);
+                let pnl_text = if pnl_value >= 0.0 {
+                    format!("+{:.2} USD", pnl_value)
+                } else {
+                    format!("-{:.2} USD", pnl_value.abs())
+                };
+
+                let qty_w = self
+                    .ctx
+                    .measure_text(&qty_text)
+                    .map(|m| m.width())
+                    .unwrap_or(46.0 * dpr);
+                let pnl_w = self
+                    .ctx
+                    .measure_text(&pnl_text)
+                    .map(|m| m.width())
+                    .unwrap_or(72.0 * dpr);
+                let qty_block_w = (qty_w + 10.0 * dpr).max(38.0 * dpr);
+                let pnl_pad_x = 10.0 * dpr;
+                let div_w = 1.0 * dpr;
+                let main_pill_w = qty_block_w + div_w + pnl_pad_x + pnl_w + pnl_pad_x;
+                let control_gap = 8.0 * dpr;
+                let control_inner_gap = 4.0 * dpr;
+                let sec_btn_w = 32.0 * dpr;
+                let close_w = pill_h;
+                let controls_w = (if show_tp {
+                    sec_btn_w + control_inner_gap
+                } else {
+                    0.0
+                }) + (if show_sl {
+                    sec_btn_w + control_inner_gap
+                } else {
+                    0.0
+                }) + if has_close { close_w } else { 0.0 };
+                let total_w = main_pill_w + control_gap + controls_w;
+                let min_x = 16.0 * dpr;
+                let right_anchor_gap = 92.0 * dpr;
+                let max_x = (pane_pw - total_w - right_anchor_gap).max(min_x);
+                let main_pill_x = max_x;
+                let main_pill_y = y_phys - pill_h / 2.0;
+                let controls_x = main_pill_x + main_pill_w + control_gap;
+                let mut line_gaps = vec![(main_pill_x, main_pill_x + main_pill_w)];
+                let mut gap_x = controls_x;
+                if show_tp {
+                    line_gaps.push((gap_x, gap_x + sec_btn_w));
+                    gap_x += sec_btn_w + control_inner_gap;
+                }
+                if show_sl {
+                    line_gaps.push((gap_x, gap_x + sec_btn_w));
+                    gap_x += sec_btn_w + control_inner_gap;
+                }
+                if has_close {
+                    line_gaps.push((gap_x, gap_x + close_w));
+                }
+                draw_level_line_with_gaps(&line_gaps);
+
+                self.ctx.set_fill_style_str(&rgba(&panel_fill_hover));
+                self.ctx.set_stroke_style_str(&rgba(&line_color));
+                self.ctx.set_line_width(1.0 * dpr);
+                self.ctx.begin_path();
+                self.ctx.move_to(main_pill_x + radius, main_pill_y);
+                self.ctx
+                    .line_to(main_pill_x + main_pill_w - radius, main_pill_y);
+                let _ = self.ctx.arc_to(
+                    main_pill_x + main_pill_w,
+                    main_pill_y,
+                    main_pill_x + main_pill_w,
+                    main_pill_y + radius,
+                    radius,
+                );
+                self.ctx
+                    .line_to(main_pill_x + main_pill_w, main_pill_y + pill_h - radius);
+                let _ = self.ctx.arc_to(
+                    main_pill_x + main_pill_w,
+                    main_pill_y + pill_h,
+                    main_pill_x + main_pill_w - radius,
+                    main_pill_y + pill_h,
+                    radius,
+                );
+                self.ctx.line_to(main_pill_x + radius, main_pill_y + pill_h);
+                let _ = self.ctx.arc_to(
+                    main_pill_x,
+                    main_pill_y + pill_h,
+                    main_pill_x,
+                    main_pill_y + pill_h - radius,
+                    radius,
+                );
+                self.ctx.line_to(main_pill_x, main_pill_y + radius);
+                let _ = self.ctx.arc_to(
+                    main_pill_x,
+                    main_pill_y,
+                    main_pill_x + radius,
+                    main_pill_y,
+                    radius,
+                );
+                self.ctx.close_path();
+                self.ctx.fill();
+                self.ctx.stroke();
+
+                // Solid side-color quantity segment with rounded left corners.
+                self.ctx.set_fill_style_str(&rgba(&line_color));
+                self.ctx.begin_path();
+                self.ctx.move_to(main_pill_x + radius, main_pill_y);
+                self.ctx.line_to(main_pill_x + qty_block_w, main_pill_y);
+                self.ctx
+                    .line_to(main_pill_x + qty_block_w, main_pill_y + pill_h);
+                self.ctx.line_to(main_pill_x + radius, main_pill_y + pill_h);
+                let _ = self.ctx.arc_to(
+                    main_pill_x,
+                    main_pill_y + pill_h,
+                    main_pill_x,
+                    main_pill_y + pill_h - radius,
+                    radius,
+                );
+                self.ctx.line_to(main_pill_x, main_pill_y + radius);
+                let _ = self.ctx.arc_to(
+                    main_pill_x,
+                    main_pill_y,
+                    main_pill_x + radius,
+                    main_pill_y,
+                    radius,
+                );
+                self.ctx.close_path();
+                self.ctx.fill();
+
+                self.ctx.set_stroke_style_str(&rgba(&order_divider_color));
+                self.ctx.set_line_width(div_w);
+                self.ctx.begin_path();
+                let divider_x = main_pill_x + qty_block_w;
+                self.ctx.move_to(divider_x, main_pill_y);
+                self.ctx.line_to(divider_x, main_pill_y + pill_h);
+                self.ctx.stroke();
+
+                self.ctx.set_text_align("center");
+                self.ctx
+                    .set_fill_style_str(&rgba(&contrast_text_color(line_color)));
+                let _ = self
+                    .ctx
+                    .fill_text(&qty_text, main_pill_x + qty_block_w / 2.0, y_phys);
+
+                let pnl_color = if pnl_value >= 0.0 {
+                    [0.12, 0.85, 0.55, 1.0]
+                } else {
+                    [0.98, 0.21, 0.28, 1.0]
+                };
+                self.ctx.set_text_align("left");
+                self.ctx.set_fill_style_str(&rgba(&pnl_color));
+                let _ = self.ctx.fill_text(&pnl_text, divider_x + pnl_pad_x, y_phys);
+
+                let mut ctl_x = main_pill_x + main_pill_w + control_gap;
+                let draw_control = |x: f64,
+                                    text: &str,
+                                    color: [f32; 4],
+                                    hovered: bool,
+                                    w: f64,
+                                    dotted_border: bool| {
+                    let fill = if hovered {
+                        [color[0], color[1], color[2], 1.0]
+                    } else {
+                        panel_fill_hover
+                    };
+                    self.ctx.set_fill_style_str(&rgba(&fill));
+                    self.ctx.set_stroke_style_str(&rgba(&color));
+                    self.ctx.set_line_width(1.0 * dpr);
+                    self.ctx.set_line_cap("butt");
+                    clear_canvas_line_dash(&self.ctx);
+                    self.ctx.begin_path();
+                    self.ctx.move_to(x + radius, main_pill_y);
+                    self.ctx.line_to(x + w - radius, main_pill_y);
+                    let _ =
+                        self.ctx
+                            .arc_to(x + w, main_pill_y, x + w, main_pill_y + radius, radius);
+                    self.ctx.line_to(x + w, main_pill_y + pill_h - radius);
+                    let _ = self.ctx.arc_to(
+                        x + w,
+                        main_pill_y + pill_h,
+                        x + w - radius,
+                        main_pill_y + pill_h,
+                        radius,
+                    );
+                    self.ctx.line_to(x + radius, main_pill_y + pill_h);
+                    let _ = self.ctx.arc_to(
+                        x,
+                        main_pill_y + pill_h,
+                        x,
+                        main_pill_y + pill_h - radius,
+                        radius,
+                    );
+                    self.ctx.line_to(x, main_pill_y + radius);
+                    let _ = self
+                        .ctx
+                        .arc_to(x, main_pill_y, x + radius, main_pill_y, radius);
+                    self.ctx.close_path();
+                    self.ctx.fill();
+                    if dotted_border {
+                        let border_w = 1.0 * dpr;
+                        let bx = x + border_w / 2.0;
+                        let by = main_pill_y + border_w / 2.0;
+                        let bw = (w - border_w).max(1.0);
+                        let bh = (pill_h - border_w).max(1.0);
+                        let br = (radius - border_w / 2.0).max(0.0);
+                        let _ = self.ctx.set_line_dash(&js_sys::Array::of2(
+                            &JsValue::from(0.65 * dpr),
+                            &JsValue::from(1.45 * dpr),
+                        ));
+                        self.ctx
+                            .set_stroke_style_str(&rgba(&[color[0], color[1], color[2], 1.0]));
+                        self.ctx.set_line_width(border_w);
+                        self.ctx.set_line_cap("round");
+                        self.ctx.set_line_join("round");
+                        self.ctx.begin_path();
+                        self.ctx.move_to(bx + br, by);
+                        self.ctx.line_to(bx + bw - br, by);
+                        let _ = self.ctx.arc_to(bx + bw, by, bx + bw, by + br, br);
+                        self.ctx.line_to(bx + bw, by + bh - br);
+                        let _ = self.ctx.arc_to(bx + bw, by + bh, bx + bw - br, by + bh, br);
+                        self.ctx.line_to(bx + br, by + bh);
+                        let _ = self.ctx.arc_to(bx, by + bh, bx, by + bh - br, br);
+                        self.ctx.line_to(bx, by + br);
+                        let _ = self.ctx.arc_to(bx, by, bx + br, by, br);
+                        self.ctx.close_path();
+                        self.ctx.stroke();
+                        clear_canvas_line_dash(&self.ctx);
+                    } else {
+                        self.ctx.stroke();
+                    }
+                    self.ctx.set_line_cap("butt");
+                    self.ctx.set_text_align("center");
+                    let control_text = if hovered {
+                        contrast_text_color([color[0], color[1], color[2], 1.0])
+                    } else {
+                        color
+                    };
+                    self.ctx.set_fill_style_str(&rgba(&control_text));
+                    let _ = self.ctx.fill_text(text, x + w / 2.0, y_phys);
+                };
+
+                if show_tp {
+                    draw_control(ctl_x, "TP", line_color, line.tp_hovered, sec_btn_w, true);
+                    ctl_x += sec_btn_w + control_inner_gap;
+                }
+                if show_sl {
+                    draw_control(
+                        ctl_x,
+                        "SL",
+                        [0.98, 0.21, 0.28, 1.0],
+                        line.sl_hovered,
+                        sec_btn_w,
+                        true,
+                    );
+                    ctl_x += sec_btn_w + control_inner_gap;
+                }
+                if has_close {
+                    draw_control(ctl_x, "", line_color, line.cancel_hovered, close_w, false);
+                    let cx = ctl_x + close_w / 2.0;
+                    let hs = 4.0 * dpr;
+                    let close_icon = if line.cancel_hovered {
+                        contrast_text_color([line_color[0], line_color[1], line_color[2], 1.0])
+                    } else {
+                        close_icon_color
+                    };
+                    self.ctx.set_stroke_style_str(&rgba(&close_icon));
+                    self.ctx.set_line_width(1.35 * dpr);
+                    self.ctx.set_line_cap("round");
+                    self.ctx.begin_path();
+                    self.ctx.move_to(cx - hs, y_phys - hs);
+                    self.ctx.line_to(cx + hs, y_phys + hs);
+                    self.ctx.move_to(cx + hs, y_phys - hs);
+                    self.ctx.line_to(cx - hs, y_phys + hs);
+                    self.ctx.stroke();
+                    self.ctx.set_line_cap("butt");
+                }
+                continue;
+            }
 
             // 1. Build Main Pill Text metrics
             let mut qty_text = String::new();

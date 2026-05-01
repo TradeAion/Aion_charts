@@ -935,6 +935,10 @@ export class AxiusCharts {
      */
     set_order_line_filled_quantity(id: string, filled: number): boolean;
     /**
+     * Update the non-accent text color for an existing order line.
+     */
+    set_order_line_label_text_color(id: string, r: number, g: number, b: number, a: number): boolean;
+    /**
      * Update the live PNL displayed on an existing order line.
      */
     set_order_line_pnl(id: string, pnl: number): boolean;
@@ -1458,6 +1462,7 @@ export interface InitOutput {
     readonly axiuscharts_set_max_bars_per_load: (a: number, b: number) => void;
     readonly axiuscharts_set_max_indicator_panes: (a: number, b: number) => void;
     readonly axiuscharts_set_order_line_filled_quantity: (a: number, b: number, c: number, d: number) => number;
+    readonly axiuscharts_set_order_line_label_text_color: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
     readonly axiuscharts_set_order_line_pnl: (a: number, b: number, c: number, d: number) => number;
     readonly axiuscharts_set_order_line_price: (a: number, b: number, c: number, d: number) => number;
     readonly axiuscharts_set_order_line_price_precision: (a: number, b: number) => void;
@@ -1562,7 +1567,7 @@ export interface InitOutput {
     readonly chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
     readonly __wasm_bindgen_func_elem_458: (a: number, b: number) => void;
     readonly __wasm_bindgen_func_elem_469: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_2657: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_2670: (a: number, b: number, c: number, d: number) => void;
     readonly __wasm_bindgen_func_elem_459: (a: number, b: number, c: number) => void;
     readonly __wasm_bindgen_func_elem_462: (a: number, b: number, c: number) => void;
     readonly __wasm_bindgen_func_elem_467: (a: number, b: number) => void;

@@ -1687,9 +1687,9 @@ impl ChartInner {
             .handle_scale_axis_double_click_reset;
         let allow_touch_kinetic_scroll = self.interaction_options.kinetic_scroll_touch;
         let allow_mouse_kinetic_scroll = self.interaction_options.kinetic_scroll_mouse;
-        let exit_tracking_on_touch_end =
-            self.interaction_options.tracking_mode_exit_mode == TrackingModeExitMode::OnTouchEnd
-                && self.interaction.is_touch;
+        let exit_tracking_on_touch_end = self.interaction_options.tracking_mode_exit_mode
+            == TrackingModeExitMode::OnTouchEnd
+            && self.interaction.is_touch;
 
         let Self {
             interaction,

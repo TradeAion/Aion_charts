@@ -155,14 +155,14 @@ pub mod colors {
     /// Sell order color (red) [R, G, B, A] in 0.0-1.0 range.
     pub const SELL_COLOR: [f32; 4] = [0.9843137, 0.21568628, 0.28235295, 1.0]; // #FB3748
 
-    /// Take profit color (blue-green) [R, G, B, A] in 0.0-1.0 range.
-    pub const TAKE_PROFIT_COLOR: [f32; 4] = BUY_COLOR;
+    /// Take profit color (green) [R, G, B, A] in 0.0-1.0 range.
+    pub const TAKE_PROFIT_COLOR: [f32; 4] = [0.12, 0.74, 0.43, 1.0]; // #1EBE6E
 
     /// Stop loss color (orange-red) [R, G, B, A] in 0.0-1.0 range.
     pub const STOP_LOSS_COLOR: [f32; 4] = SELL_COLOR;
 
     /// Label text color (white).
-    pub const LABEL_TEXT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.95];
+    pub const LABEL_TEXT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 
     /// Cancel button color (muted red).
     pub const CANCEL_BUTTON_COLOR: [f32; 4] = [0.6, 0.2, 0.2, 1.0];
@@ -625,26 +625,12 @@ impl OrderLineManager {
             .count()
     }
 
-    fn has_active_linked_order_of_type(
-        &self,
-        parent_id: &OrderLineId,
-        order_type: OrderType,
-    ) -> bool {
-        self.lines.iter().any(|line| {
-            line.options.status.is_active()
-                && line.options.order_type == order_type
-                && line.options.linked_position_id.as_deref() == Some(parent_id.0.as_str())
-        })
-    }
-
     pub fn line_shows_sl_button(&self, line: &OrderLine) -> bool {
         line.options.shows_sl_button()
-            && !self.has_active_linked_order_of_type(line.id(), OrderType::StopLoss)
     }
 
     pub fn line_shows_tp_button(&self, line: &OrderLine) -> bool {
         line.options.shows_tp_button()
-            && !self.has_active_linked_order_of_type(line.id(), OrderType::TakeProfit)
     }
 
     pub fn estimate_label_width_css(&self, line: &OrderLine) -> f64 {
@@ -687,11 +673,22 @@ impl OrderLineManager {
         // font size so button/body hitboxes stay aligned with rendered pills.
         let text_scale = (font_size_css / 11.0).max(0.5);
 
-        for line in &self.lines {
-            if !line.is_visible() {
-                continue;
+        let mut hit_lines: Vec<&OrderLine> =
+            self.lines.iter().filter(|line| line.is_visible()).collect();
+        hit_lines.sort_by_key(|line| {
+            if line.dragging
+                || line.hovered
+                || line.cancel_hovered
+                || line.tp_hovered
+                || line.sl_hovered
+            {
+                1
+            } else {
+                0
             }
+        });
 
+        for line in hit_lines.into_iter().rev() {
             let opts = &line.options;
             let y_phys = viewport.price_to_css_y(opts.price, pane_css_h);
             let dist = (y_css - y_phys).abs();
@@ -700,6 +697,66 @@ impl OrderLineManager {
                 let show_tp_button = self.line_shows_tp_button(line) && opts.status.is_active();
                 let show_sl_button = self.line_shows_sl_button(line) && opts.status.is_active();
                 let has_close = opts.cancellable && opts.status.is_active();
+
+                if opts.is_position_line() {
+                    let qty_len: f64 = if opts.quantity > 0.0 {
+                        opts.quantity_label().map(|s| s.len() as f64).unwrap_or(4.0)
+                    } else {
+                        0.0
+                    };
+                    let pnl_len = opts
+                        .pnl
+                        .map(|v| format!("{:+.2} USD", v).len() as f64)
+                        .unwrap_or(9.0);
+                    let qty_w = (qty_len * 6.5).max(24.0) * text_scale;
+                    let pnl_w = (pnl_len * 6.5).max(58.0) * text_scale;
+                    let qty_block_w = (qty_w + 10.0).max(38.0);
+                    let pnl_pad_x = 10.0;
+                    let div_w = 1.0;
+                    let main_pill_w = qty_block_w + div_w + pnl_pad_x + pnl_w + pnl_pad_x;
+                    let control_gap = 8.0;
+                    let btn_gap = 4.0;
+                    let sec_btn_w = 32.0;
+                    let close_w = pill_h;
+                    let controls_w = (if show_tp_button {
+                        sec_btn_w + btn_gap
+                    } else {
+                        0.0
+                    }) + (if show_sl_button {
+                        sec_btn_w + btn_gap
+                    } else {
+                        0.0
+                    }) + if has_close { close_w } else { 0.0 };
+                    let total_w = main_pill_w + control_gap + controls_w;
+                    let min_x = 16.0;
+                    let right_anchor_gap = 92.0;
+                    let main_x = (pane_css_w - total_w - right_anchor_gap).max(min_x);
+                    let controls_start = main_x + main_pill_w + control_gap;
+                    let hit_pad = 4.0;
+                    let mut ctl_x = controls_start;
+
+                    if show_tp_button {
+                        if x_css >= ctl_x - hit_pad && x_css <= ctl_x + sec_btn_w + hit_pad {
+                            return OrderLineHit::TpButton(line.id.clone());
+                        }
+                        ctl_x += sec_btn_w + btn_gap;
+                    }
+                    if show_sl_button {
+                        if x_css >= ctl_x - hit_pad && x_css <= ctl_x + sec_btn_w + hit_pad {
+                            return OrderLineHit::SlButton(line.id.clone());
+                        }
+                        ctl_x += sec_btn_w + btn_gap;
+                    }
+                    if has_close && x_css >= ctl_x - hit_pad && x_css <= ctl_x + close_w + hit_pad {
+                        return OrderLineHit::CancelButton(line.id.clone());
+                    }
+                    if x_css >= main_x - hit_pad && x_css <= main_x + main_pill_w + hit_pad {
+                        return OrderLineHit::Line(line.id.clone());
+                    }
+                    if x_css <= pane_css_w - right_margin {
+                        return OrderLineHit::Line(line.id.clone());
+                    }
+                }
 
                 let mut main_text = String::new();
                 if opts.is_position_line() {
@@ -912,6 +969,7 @@ impl OrderLineManager {
                     "visible": line.options.visible,
                     "cancellable": line.options.cancellable,
                     "modifiable": line.options.modifiable,
+                    "label_text_color": line.options.label_text_color,
                 });
 
                 if let Some(trigger) = line.options.trigger_price {
@@ -1007,6 +1065,18 @@ impl OrderLineManager {
                     c
                 })
             });
+            let label_text_color = order
+                .get("label_text_color")
+                .and_then(|v| {
+                    v.as_array().map(|arr| {
+                        let mut c = colors::LABEL_TEXT_COLOR;
+                        for (i, val) in arr.iter().enumerate().take(4) {
+                            c[i] = val.as_f64().unwrap_or(c[i] as f64) as f32;
+                        }
+                        c
+                    })
+                })
+                .unwrap_or(colors::LABEL_TEXT_COLOR);
 
             let custom_label = order
                 .get("custom_label")
@@ -1059,6 +1129,7 @@ impl OrderLineManager {
                 visible,
                 cancellable,
                 modifiable,
+                label_text_color,
                 custom_label,
                 tooltip,
                 linked_position_id,

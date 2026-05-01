@@ -713,8 +713,7 @@ impl InteractionHandler {
         } else {
             allow_mouse_kinetic_scroll
         };
-        if allow_kinetic_scroll && self.pressed && self.drag_active && zone == HitZone::Chart
-        {
+        if allow_kinetic_scroll && self.pressed && self.drag_active && zone == HitZone::Chart {
             let dt = now_ms - self.last_move_time;
             if dt < KINETIC_TRIGGER_WINDOW_MS && self.velocity_x.abs() > MIN_KINETIC_VELOCITY {
                 self.is_gliding = true;
@@ -1312,7 +1311,10 @@ mod tests {
         ih.last_move_time = 100.0;
 
         ih.pointer_up(&mut vp, &bars, bars.len(), 110.0, true, true, false);
-        assert!(!ih.is_gliding, "mouse kinetic should stay off when disabled");
+        assert!(
+            !ih.is_gliding,
+            "mouse kinetic should stay off when disabled"
+        );
 
         ih.pressed = true;
         ih.drag_active = true;

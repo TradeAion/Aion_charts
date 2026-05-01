@@ -60,11 +60,10 @@ use axiuscharts::{
     ChartGuardrails, ChartPaneId, ChartStyle, CrosshairMagnetMode, CrosshairSnapshot, DataRange,
     GpuContext, HistogramPoint, HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint,
     LineSeriesOptions, LineStyle, MainChartType, MainViewportPreset, MarkerPosition, MarkerShape,
-    MarkerZOrder,
-    MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint, OrderLineId, OrderLineOptions, OrderSide,
-    OrderStatus, OrderType, OverlayRenderer, PriceAxisRenderer, PriceLineOptions, RendererBackend,
-    ResourceLimits, RuntimeEvent, SeriesId, SeriesMarker, SnapshotMtfResolver, TimeAxisRenderer,
-    TimeRange, Viewport, WgpuRenderer,
+    MarkerZOrder, MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint, OrderLineId, OrderLineOptions,
+    OrderSide, OrderStatus, OrderType, OverlayRenderer, PriceAxisRenderer, PriceLineOptions,
+    RendererBackend, ResourceLimits, RuntimeEvent, SeriesId, SeriesMarker, SnapshotMtfResolver,
+    TimeAxisRenderer, TimeRange, Viewport, WgpuRenderer,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -610,16 +609,14 @@ fn parse_marker_index(value: f64, field: &str) -> Result<usize, JsValue> {
     if value.is_finite() && value >= 0.0 && value.fract() == 0.0 && value <= usize::MAX as f64 {
         Ok(value as usize)
     } else {
-        Err(js_err(format!("{field} must be a finite non-negative integer")))
+        Err(js_err(format!(
+            "{field} must be a finite non-negative integer"
+        )))
     }
 }
 
 fn parse_marker_enum(value: f64, field: &str, max_inclusive: u32) -> Result<u32, JsValue> {
-    if value.is_finite()
-        && value >= 0.0
-        && value.fract() == 0.0
-        && value <= max_inclusive as f64
-    {
+    if value.is_finite() && value >= 0.0 && value.fract() == 0.0 && value <= max_inclusive as f64 {
         Ok(value as u32)
     } else {
         Err(js_err(format!(
@@ -632,7 +629,9 @@ fn parse_marker_color_channel(value: f64, field: &str) -> Result<f32, JsValue> {
     if value.is_finite() && (0.0..=1.0).contains(&value) {
         Ok(value as f32)
     } else {
-        Err(js_err(format!("{field} must be finite and between 0 and 1")))
+        Err(js_err(format!(
+            "{field} must be finite and between 0 and 1"
+        )))
     }
 }
 
@@ -6684,11 +6683,16 @@ impl AxiusCharts {
     #[wasm_bindgen]
     pub fn set_order_line_price(&mut self, id: &str, price: f64) -> bool {
         let order_id = OrderLineId::new(id);
-        self.inner
+        let updated = self
+            .inner
             .borrow_mut()
             .engine
             .order_lines
-            .update_price(&order_id, price)
+            .update_price(&order_id, price);
+        if updated {
+            self.mark_dirty();
+        }
+        updated
     }
 
     /// Update the status of an order line.
@@ -6737,7 +6741,7 @@ impl AxiusCharts {
     #[wasm_bindgen]
     pub fn set_order_line_pnl(&mut self, id: &str, pnl: f64) -> bool {
         let order_id = OrderLineId::new(id);
-        if let Some(line) = self
+        let updated = if let Some(line) = self
             .inner
             .borrow_mut()
             .engine
@@ -6748,20 +6752,58 @@ impl AxiusCharts {
             true
         } else {
             false
+        };
+        if updated {
+            self.mark_dirty();
         }
+        updated
+    }
+
+    /// Update the non-accent text color for an existing order line.
+    #[wasm_bindgen]
+    pub fn set_order_line_label_text_color(
+        &mut self,
+        id: &str,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+    ) -> bool {
+        let order_id = OrderLineId::new(id);
+        let updated = if let Some(line) = self
+            .inner
+            .borrow_mut()
+            .engine
+            .order_lines
+            .get_mut(&order_id)
+        {
+            line.options.label_text_color = [r, g, b, a];
+            true
+        } else {
+            false
+        };
+        if updated {
+            self.mark_dirty();
+        }
+        updated
     }
 
     /// Remove an order line by ID.
     #[wasm_bindgen]
     pub fn remove_order_line(&mut self, id: &str) -> bool {
         let order_id = OrderLineId::new(id);
-        self.inner.borrow_mut().engine.order_lines.remove(&order_id)
+        let removed = self.inner.borrow_mut().engine.order_lines.remove(&order_id);
+        if removed {
+            self.mark_dirty();
+        }
+        removed
     }
 
     /// Remove all order lines.
     #[wasm_bindgen]
     pub fn clear_order_lines(&mut self) {
         self.inner.borrow_mut().engine.order_lines.clear();
+        self.mark_dirty();
     }
 
     /// Remove all order lines with a specific status.
@@ -6823,7 +6865,9 @@ impl AxiusCharts {
             .engine
             .order_lines
             .from_json(json)
-            .map_err(|e| JsValue::from_str(&e))
+            .map_err(|e| JsValue::from_str(&e))?;
+        self.mark_dirty();
+        Ok(())
     }
 
     /// Set the price precision (decimal places) for order line labels.
@@ -6834,6 +6878,7 @@ impl AxiusCharts {
             .engine
             .order_lines
             .set_price_precision(precision);
+        self.mark_dirty();
     }
 
     /// Set whether to show cancel buttons on order lines.
@@ -6844,6 +6889,7 @@ impl AxiusCharts {
             .engine
             .order_lines
             .set_show_cancel_buttons(show);
+        self.mark_dirty();
     }
 
     // ── Series Markers API ─────────────────────────────────────────────────────
@@ -7066,16 +7112,8 @@ impl AxiusCharts {
             .map(|ts| JsValue::from_f64(ts as f64))
             .unwrap_or(JsValue::NULL);
         let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("timestamp"), &timestamp);
-        let _ = js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("x"),
-            &JsValue::from_f64(hit.x_css),
-        );
-        let _ = js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("y"),
-            &JsValue::from_f64(hit.y_css),
-        );
+        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("x"), &JsValue::from_f64(hit.x_css));
+        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("y"), &JsValue::from_f64(hit.y_css));
         let _ = js_sys::Reflect::set(
             &obj,
             &JsValue::from_str("shape"),
@@ -7253,7 +7291,11 @@ impl AxiusCharts {
             s.engine.markers.for_series(series_id).set(markers);
             s.engine.viewport.price_invalidated = true;
         }
-        log::info!("set_time_markers: series={}, count={}", series_id, marker_count);
+        log::info!(
+            "set_time_markers: series={}, count={}",
+            series_id,
+            marker_count
+        );
         Ok(())
     }
 

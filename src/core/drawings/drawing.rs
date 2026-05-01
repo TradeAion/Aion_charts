@@ -410,22 +410,12 @@ fn browser_text_line_width(
         let font_family = TEXT_MEASURE_FONT_FAMILY
             .with(|cell| cell.borrow().clone())
             .unwrap_or_else(|| crate::core::renderer::theme::FONT_FAMILY.to_string());
-        format!(
-            "italic {} {}px {}",
-            font_weight,
-            font_size,
-            font_family
-        )
+        format!("italic {} {}px {}", font_weight, font_size, font_family)
     } else {
         let font_family = TEXT_MEASURE_FONT_FAMILY
             .with(|cell| cell.borrow().clone())
             .unwrap_or_else(|| crate::core::renderer::theme::FONT_FAMILY.to_string());
-        format!(
-            "{} {}px {}",
-            font_weight,
-            font_size,
-            font_family
-        )
+        format!("{} {}px {}", font_weight, font_size, font_family)
     };
     ctx.set_font(&font);
     ctx.measure_text(line)

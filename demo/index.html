@@ -98,8 +98,7 @@
     body.light .btn { background: #eee; color: #555; border-color: #ccc; }
     body.light .btn:hover { background: #ddd; color: #222; }
     body.light .btn.active { background: #dcfce7; color: #16a34a; border-color: #22C55E44; }
-    .demo-advanced,
-    #order-lines-toggle {
+    .demo-advanced {
       display: none !important;
     }
 
@@ -619,7 +618,7 @@
     <div class="toolbar-section demo-actions">
       <button class="btn" id="execution-marks-toggle" title="Toggle demo execution marks">Executions</button>
       <button class="btn active" id="execution-text-toggle" title="Toggle execution price labels">Price Label</button>
-      <button class="btn" id="order-lines-toggle" title="Toggle demo order lines">Orders</button>
+      <button class="btn" id="order-lines-toggle" title="Spawn TradingView-style TP, SL, and position lines">Spawn Lines</button>
       <button class="btn" id="stream-toggle">▶ Live</button>
       <button class="btn active" id="volume-toggle">Volume</button>
       <button class="btn active" id="autoscroll-toggle">Auto</button>
@@ -1847,35 +1846,55 @@
       const lastClose = Number(demoData.close[demoData.close.length - 1] || 0);
       const p = Number.isFinite(lastClose) && lastClose > 0 ? lastClose : 42000;
       if (!Number.isFinite(demoPositionEntryPrice)) {
-        demoPositionEntryPrice = p;
+        demoPositionEntryPrice = p - Math.max(p * 0.004, 1);
       }
-      const step = Math.max(p * 0.0025, 1);
+      const step = Math.max(p * 0.0075, 1);
+      const entryPrice = demoPositionEntryPrice;
+      const takeProfitPrice = entryPrice + step;
+      const stopLossPrice = Math.max(1, entryPrice - step);
       return [
         {
           id: 'live-position',
-          price: demoPositionEntryPrice,
-          order_type: 'Market', // Live position usually represented without a specific limit type or just "working" status
+          price: entryPrice,
+          order_type: 'Market',
           side: 'Buy',
           status: 'Working',
-          quantity: demoPositionQuantity,
+          quantity: 1.0,
           filled_quantity: demoPositionQuantity,
           visible: true,
-          cancellable: true, // Close position button
+          cancellable: true,
           modifiable: false,
           pnl: 0,
-          show_sl_button: true, // Show SL button
-          show_tp_button: true, // Show TP button
+          show_sl_button: true,
+          show_tp_button: true,
         },
         {
-          id: 'demo-sell-limit',
-          price: p + (step * 2),
-          order_type: 'Limit',
+          id: 'demo-take-profit',
+          price: takeProfitPrice,
+          order_type: 'TakeProfit',
           side: 'Sell',
           status: 'Pending',
           quantity: 1.0,
           visible: true,
           cancellable: true,
           modifiable: true,
+          custom_label: 'TP',
+          linked_position_id: 'live-position',
+          show_sl_button: false,
+          show_tp_button: false,
+        },
+        {
+          id: 'demo-stop-loss',
+          price: stopLossPrice,
+          order_type: 'StopLoss',
+          side: 'Sell',
+          status: 'Pending',
+          quantity: 1.0,
+          visible: true,
+          cancellable: true,
+          modifiable: true,
+          custom_label: 'SL',
+          linked_position_id: 'live-position',
           show_sl_button: false,
           show_tp_button: false,
         }
@@ -1886,7 +1905,7 @@
       const btn = $('order-lines-toggle');
       if (!btn) return;
       btn.classList.toggle('active', orderLinesVisible);
-      btn.textContent = orderLinesVisible ? 'Orders' : 'Orders Off';
+      btn.textContent = orderLinesVisible ? 'Lines On' : 'Spawn Lines';
     }
 
     function applyDemoOrderLines() {

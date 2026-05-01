@@ -136,6 +136,7 @@ impl PriceAxisRenderer {
     /// - Tick labels
     /// - Last-price labels (main + overlays)
     /// - Custom price-line labels
+    /// - Order-line labels
     /// - Top/bottom edge price labels (crosshair-width safety margin)
     pub fn measure_optimal_width(
         &mut self,
@@ -147,6 +148,7 @@ impl PriceAxisRenderer {
         footprint_data: &FootprintData,
         footprint_opts: &FootprintOptions,
         price_lines: &PriceLineManager,
+        order_lines: &OrderLineManager,
         vp: &Viewport,
         pane_ph: f64,
         v_pixel_ratio: f64,
@@ -202,6 +204,20 @@ impl PriceAxisRenderer {
             } else {
                 line.options.label_text.clone()
             };
+            let w = self.text_cache.measure(&self.base_ctx, &text, &font);
+            if w > max_w {
+                max_w = w;
+            }
+        }
+
+        // Order-line labels use the same full-width price-axis chip as the
+        // live price label, so they must participate in axis width reservation.
+        let order_price_precision = order_lines.price_precision() as usize;
+        for line in order_lines.iter() {
+            if !line.is_visible() {
+                continue;
+            }
+            let text = format_order_line_axis_label(line.options.price, order_price_precision);
             let w = self.text_cache.measure(&self.base_ctx, &text, &font);
             if w > max_w {
                 max_w = w;
@@ -877,27 +893,12 @@ impl PriceAxisRenderer {
         let w = self.pw as f64;
         let dpr = self.dpr;
 
-        // Keep order-label clamping in the same physical Y space as order-line
-        // rendering in overlay.rs (full pane height). Using candle-area-only
-        // bounds here causes the axis chip to clamp while the line continues,
-        // which visually disconnects the label from its line.
-        let label_h = pane_ph.min(self.ph as f64);
+        let axis_h = self.ph as f64;
 
         let font = style.axis_font(dpr);
         self.base_ctx.set_font(&font);
         let metrics = RightAxisLabelMetrics::from_style(style, dpr);
-        let price_precision = order_lines.price_precision() as usize;
-        // Keep axis-label visibility in sync with overlay order-line rendering.
-        // Use the same pill-height formula as overlay.rs so labels disappear at
-        // the same time as the corresponding order-line controls.
-        let font_size_phys = style.font_size as f64 * dpr;
-        let inset_tb_phys = style.price_axis_inset_tb() * dpr;
-        let tick_h_bmp = dpr.floor().max(1.0) as i32;
-        let mut order_pill_h_bmp = (font_size_phys + inset_tb_phys * 2.0).round() as i32;
-        if order_pill_h_bmp % 2 != tick_h_bmp % 2 {
-            order_pill_h_bmp += 1;
-        }
-        let edge_visibility_margin = order_pill_h_bmp.max(1) as f64;
+        let order_price_precision = order_lines.price_precision() as usize;
 
         struct OrderLineLabel {
             text: String,
@@ -914,19 +915,15 @@ impl PriceAxisRenderer {
             let opts = &line.options;
             let y_phys = price_to_pane_y_phys(opts.price, vp, pane_ph);
 
-            // Keep labels clamped at the edge while lines are near the pane,
-            // but stop rendering once the line is far outside the visible range.
             if !y_phys.is_finite() {
                 continue;
             }
-            if y_phys < -edge_visibility_margin || y_phys > pane_ph + edge_visibility_margin {
+            if y_phys < 0.0 || y_phys > axis_h {
                 continue;
             }
 
-            let text = format!("{:.prec$}", opts.price, prec = price_precision);
-
             entries.push(OrderLineLabel {
-                text,
+                text: format_order_line_axis_label(opts.price, order_price_precision),
                 y_phys,
                 bg_color: opts.effective_color(),
                 text_color: opts.label_text_color,
@@ -943,15 +940,16 @@ impl PriceAxisRenderer {
                 .text_cache
                 .measure(&self.base_ctx, &entry.text, &font)
                 .ceil();
-            let geom = match compute_right_axis_label_geometry(
+            let geom = match compute_right_axis_label_geometry_with_vertical_mode(
                 w,
-                label_h,
+                axis_h,
                 entry.y_phys,
                 text_w,
                 dpr,
                 &metrics,
                 0.0,
                 RightAxisLabelWidthMode::AxisFull,
+                RightAxisLabelVerticalMode::FollowValue,
             ) {
                 Some(v) => v,
                 None => continue,
@@ -996,6 +994,10 @@ pub(crate) fn append_countdown_to_labels(
     if let Some(countdown_str) = format_countdown(remaining_ms, Some(interval_ms)) {
         labels[0].countdown = Some(countdown_str);
     }
+}
+
+fn format_order_line_axis_label(price: f64, precision: usize) -> String {
+    format!("{:.precision$}", price, precision = precision)
 }
 
 fn draw_right_axis_label_background(

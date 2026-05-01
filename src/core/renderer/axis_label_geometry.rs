@@ -127,7 +127,8 @@ pub(crate) fn compute_right_axis_label_geometry_with_vertical_mode(
         0.0
     };
     let x_inside = (metrics.border_size + inside_gap).min(axis_w).max(0.0);
-    let available_w = (axis_w - x_inside).max(1.0);
+    let x_axis_right = (axis_w - metrics.inset_outer).max(x_inside + 1.0);
+    let available_w = (x_axis_right - x_inside).max(1.0);
     let total_w_bmp = match width_mode {
         RightAxisLabelWidthMode::AxisFull => available_w.round().max(1.0),
         RightAxisLabelWidthMode::TextFit => total_w_raw.min(available_w).round().max(1.0),
@@ -153,14 +154,14 @@ pub(crate) fn compute_right_axis_label_geometry_with_vertical_mode(
     let y_bottom = y_top + total_h_bmp;
 
     let x_outside = match width_mode {
-        RightAxisLabelWidthMode::AxisFull => axis_w,
-        RightAxisLabelWidthMode::TextFit => (x_inside + total_w_bmp).min(axis_w),
+        RightAxisLabelWidthMode::AxisFull => x_axis_right,
+        RightAxisLabelWidthMode::TextFit => (x_inside + total_w_bmp).min(x_axis_right),
     };
     let (text_x_css, text_align_right) = match width_mode {
         RightAxisLabelWidthMode::AxisFull => {
-            let center_x_phys = (x_inside + axis_w) / 2.0;
+            let center_x_phys = (x_inside + x_outside) / 2.0;
             let min_left = x_inside + metrics.tick_size + metrics.inset_inner;
-            let max_left = (axis_w - metrics.inset_outer - text_w_phys).max(min_left);
+            let max_left = (x_outside - metrics.inset_inner - text_w_phys).max(min_left);
             let text_left_phys = (center_x_phys - text_w_phys / 2.0).clamp(min_left, max_left);
             (text_left_phys / dpr, false)
         }
@@ -194,7 +195,7 @@ pub(crate) fn centered_full_width_label_text_x_css(
 ) -> f64 {
     let center_x_phys = (geom.x_inside + geom.x_outside) / 2.0;
     let min_left = geom.x_inside + geom.tick_size + metrics.inset_inner;
-    let max_left = (geom.x_outside - metrics.inset_outer - text_w_phys).max(min_left);
+    let max_left = (geom.x_outside - metrics.inset_inner - text_w_phys).max(min_left);
     let text_left_phys = (center_x_phys - text_w_phys / 2.0).clamp(min_left, max_left);
     text_left_phys / dpr
 }
@@ -256,5 +257,27 @@ mod tests {
         assert!(clamped.y_mid < 100.0);
         assert_eq!(following.y_mid, 130.0);
         assert!(following.y_top > clamped.y_top);
+    }
+
+    #[test]
+    fn full_width_labels_leave_outer_axis_gap() {
+        let style = default_style();
+        let dpr = 1.0;
+        let metrics = RightAxisLabelMetrics::from_style(&style, dpr);
+        let axis_w = 80.0;
+        let geom = compute_right_axis_label_geometry(
+            axis_w,
+            120.0,
+            60.0,
+            32.0,
+            dpr,
+            &metrics,
+            0.0,
+            RightAxisLabelWidthMode::AxisFull,
+        )
+        .expect("geometry");
+
+        assert!(geom.x_outside < axis_w);
+        assert_eq!(axis_w - geom.x_outside, metrics.inset_outer);
     }
 }
