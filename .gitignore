@@ -16,8 +16,10 @@ debug.log
 /.playwright-cli/
 /playwright-report/
 /test-results/
+/.playwright-mcp/
 /output/
 chrome_*.png
+execution-lines-wide.png
 
 # IDE
 .idea/
