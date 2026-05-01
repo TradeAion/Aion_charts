@@ -142,7 +142,7 @@ export class AxiusCharts {
      */
     can_set_interval(interval: string): boolean;
     /**
-     * Cancel the drawing currently being created (e.g. on Escape key).
+     * Cancel the drawing currently being created.
      */
     cancel_drawing(): void;
     /**
@@ -185,6 +185,11 @@ export class AxiusCharts {
      * Clear the selected execution mark.
      */
     clear_selected_execution_mark(): void;
+    /**
+     * Complete the drawing currently being created, when the active tool uses
+     * explicit completion.
+     */
+    complete_drawing(): boolean;
     /**
      * Create a new AxiusCharts instance with a full options object.
      *
@@ -263,6 +268,10 @@ export class AxiusCharts {
      * switches the chart type to `footprint`.
      */
     demo_mode_footprint(): void;
+    /**
+     * Deselect all drawings.
+     */
+    deselect_drawings(): void;
     /**
      * Dispose: remove all event listeners, disconnect resize observer, and clean up resources.
      *
@@ -490,21 +499,6 @@ export class AxiusCharts {
      */
     on(event: string, callback: Function): void;
     /**
-     * Handle keyboard events. Returns true if the key was handled.
-     *
-     * Supported shortcuts:
-     * - Delete / Backspace: Remove selected drawing
-     * - Escape: Cancel drawing creation, deselect all
-     * - Arrow Left/Right: Scroll chart by one bar
-     * - Arrow Up/Down: Zoom price axis in/out
-     * - Home: Scroll to first bar
-     * - End: Scroll to last bar
-     * - +/=: Zoom in (time axis)
-     * - -: Zoom out (time axis)
-     * - 0: Reset zoom to fit all data
-     */
-    on_key_down(key: string, ctrl: boolean, shift: boolean, _alt: boolean): boolean;
-    /**
      * Register a one-shot event callback (auto-removes after first call).
      */
     once(event: string, callback: Function): void;
@@ -555,7 +549,7 @@ export class AxiusCharts {
      */
     remove_price_line(id: number): boolean;
     /**
-     * Remove the currently selected drawing (e.g. on Delete key).
+     * Remove the currently selected drawing.
      */
     remove_selected_drawing(): void;
     /**
@@ -1320,6 +1314,7 @@ export interface InitOutput {
     readonly axiuscharts_clear_markers: (a: number, b: number) => void;
     readonly axiuscharts_clear_order_lines: (a: number) => void;
     readonly axiuscharts_clear_selected_execution_mark: (a: number) => void;
+    readonly axiuscharts_complete_drawing: (a: number) => number;
     readonly axiuscharts_create_chart: (a: number, b: number) => number;
     readonly axiuscharts_create_order_line: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
     readonly axiuscharts_create_order_line_full: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number) => void;
@@ -1331,6 +1326,7 @@ export interface InitOutput {
     readonly axiuscharts_data_range: (a: number, b: number) => void;
     readonly axiuscharts_demo_mode: (a: number) => void;
     readonly axiuscharts_demo_mode_footprint: (a: number) => void;
+    readonly axiuscharts_deselect_drawings: (a: number) => void;
     readonly axiuscharts_dispose: (a: number) => void;
     readonly axiuscharts_drag_pane_separator: (a: number, b: number, c: number) => void;
     readonly axiuscharts_drawing_count: (a: number) => number;
@@ -1381,7 +1377,6 @@ export interface InitOutput {
     readonly axiuscharts_max_indicator_panes: (a: number) => number;
     readonly axiuscharts_off: (a: number, b: number, c: number, d: number) => void;
     readonly axiuscharts_on: (a: number, b: number, c: number, d: number) => void;
-    readonly axiuscharts_on_key_down: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly axiuscharts_once: (a: number, b: number, c: number, d: number) => void;
     readonly axiuscharts_order_line_count: (a: number) => number;
     readonly axiuscharts_price_line_count: (a: number) => number;
@@ -1567,7 +1562,7 @@ export interface InitOutput {
     readonly chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
     readonly __wasm_bindgen_func_elem_458: (a: number, b: number) => void;
     readonly __wasm_bindgen_func_elem_469: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_2666: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_2657: (a: number, b: number, c: number, d: number) => void;
     readonly __wasm_bindgen_func_elem_459: (a: number, b: number, c: number) => void;
     readonly __wasm_bindgen_func_elem_462: (a: number, b: number, c: number) => void;
     readonly __wasm_bindgen_func_elem_467: (a: number, b: number) => void;

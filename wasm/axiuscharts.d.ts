@@ -1772,6 +1772,12 @@ export declare class AxiusCharts {
   /** Cancel an in-progress drawing creation. */
   cancel_drawing(): void;
 
+  /** Complete an in-progress drawing creation for tools that require explicit completion. */
+  complete_drawing(): boolean;
+
+  /** Deselect all drawings. */
+  deselect_drawings(): void;
+
   /** Delete the currently selected drawing. */
   remove_selected_drawing(): void;
 
@@ -1820,25 +1826,6 @@ export declare class AxiusCharts {
 
   /** Set the axis label font size (CSS px). */
   set_font_size(size: number): void;
-
-  // ── Keyboard shortcuts ─────────────────────────────────────────────────────
-
-  /**
-   * Forward a keyboard event to the chart.
-   *
-   * Supported:
-   * - `Delete` / `Backspace` — remove selected drawing
-   * - `Escape` — cancel drawing, deselect all
-   * - `←` / `→` — scroll one bar
-   * - `↑` / `↓` — zoom price axis
-   * - `Home` / `End` — scroll to first / last bar
-   * - `+` / `=` — zoom in (time)
-   * - `-` — zoom out
-   * - `0` — reset zoom to fit all data
-   *
-   * @returns `true` if the key was handled (caller should `preventDefault()`).
-   */
-  on_key_down(key: string, ctrl: boolean, shift: boolean, alt: boolean): boolean;
 
   // ── Misc ───────────────────────────────────────────────────────────────────
 

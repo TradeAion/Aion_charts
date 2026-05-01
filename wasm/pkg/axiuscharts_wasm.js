@@ -477,7 +477,7 @@ export class AxiusCharts {
         return ret !== 0;
     }
     /**
-     * Cancel the drawing currently being created (e.g. on Escape key).
+     * Cancel the drawing currently being created.
      */
     cancel_drawing() {
         wasm.axiuscharts_cancel_drawing(this.__wbg_ptr);
@@ -542,6 +542,15 @@ export class AxiusCharts {
      */
     clear_selected_execution_mark() {
         wasm.axiuscharts_clear_selected_execution_mark(this.__wbg_ptr);
+    }
+    /**
+     * Complete the drawing currently being created, when the active tool uses
+     * explicit completion.
+     * @returns {boolean}
+     */
+    complete_drawing() {
+        const ret = wasm.axiuscharts_complete_drawing(this.__wbg_ptr);
+        return ret !== 0;
     }
     /**
      * Create a new AxiusCharts instance with a full options object.
@@ -777,6 +786,12 @@ export class AxiusCharts {
      */
     demo_mode_footprint() {
         wasm.axiuscharts_demo_mode_footprint(this.__wbg_ptr);
+    }
+    /**
+     * Deselect all drawings.
+     */
+    deselect_drawings() {
+        wasm.axiuscharts_deselect_drawings(this.__wbg_ptr);
     }
     /**
      * Dispose: remove all event listeners, disconnect resize observer, and clean up resources.
@@ -1429,31 +1444,6 @@ export class AxiusCharts {
         wasm.axiuscharts_on(this.__wbg_ptr, ptr0, len0, addHeapObject(callback));
     }
     /**
-     * Handle keyboard events. Returns true if the key was handled.
-     *
-     * Supported shortcuts:
-     * - Delete / Backspace: Remove selected drawing
-     * - Escape: Cancel drawing creation, deselect all
-     * - Arrow Left/Right: Scroll chart by one bar
-     * - Arrow Up/Down: Zoom price axis in/out
-     * - Home: Scroll to first bar
-     * - End: Scroll to last bar
-     * - +/=: Zoom in (time axis)
-     * - -: Zoom out (time axis)
-     * - 0: Reset zoom to fit all data
-     * @param {string} key
-     * @param {boolean} ctrl
-     * @param {boolean} shift
-     * @param {boolean} _alt
-     * @returns {boolean}
-     */
-    on_key_down(key, ctrl, shift, _alt) {
-        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_on_key_down(this.__wbg_ptr, ptr0, len0, ctrl, shift, _alt);
-        return ret !== 0;
-    }
-    /**
      * Register a one-shot event callback (auto-removes after first call).
      * @param {string} event
      * @param {Function} callback
@@ -1566,7 +1556,7 @@ export class AxiusCharts {
         return ret !== 0;
     }
     /**
-     * Remove the currently selected drawing (e.g. on Delete key).
+     * Remove the currently selected drawing.
      */
     remove_selected_drawing() {
         wasm.axiuscharts_remove_selected_drawing(this.__wbg_ptr);
@@ -4575,7 +4565,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_2666(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_2657(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -5290,8 +5280,8 @@ function __wasm_bindgen_func_elem_462(arg0, arg1, arg2) {
     wasm.__wasm_bindgen_func_elem_462(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_2666(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_2666(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_2657(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_2657(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 function __wasm_bindgen_func_elem_469(arg0, arg1, arg2) {

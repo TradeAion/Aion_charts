@@ -218,6 +218,8 @@ pub struct ChartInner {
     pub price_line_drag_id: Option<u32>,
     /// Active order-line drag ID, if the user is dragging a modifiable order line.
     pub order_line_drag_id: Option<String>,
+    /// True when Shift temporarily activated the scale tool for one pointer gesture.
+    pub temporary_scale_tool_active: bool,
     /// Order line being cancelled (for cancel button click handling).
     pub cancelling_order_id: Option<String>,
 }
@@ -1264,7 +1266,7 @@ impl ChartInner {
         x: f64,
         y: f64,
         zone: HitZone,
-        _shift_pressed: bool,
+        shift_pressed: bool,
         ctrl_pressed: bool,
     ) {
         let (pw, ph) = self.layout.pane_css_size();
@@ -1301,6 +1303,20 @@ impl ChartInner {
             {
                 bar = snap.bar;
                 price = snap.price;
+            }
+
+            let shift_measure_requested = shift_pressed
+                && !self.interaction.is_touch
+                && !self.engine.drawings.is_tool_active()
+                && !self.engine.drawings.is_creating()
+                && !self.interaction.drawing_drag_active
+                && self.price_line_drag_id.is_none()
+                && self.order_line_drag_id.is_none();
+            if shift_measure_requested {
+                self.engine.drawings.active_tool = axiuscharts::DrawingTool::Scale;
+                self.temporary_scale_tool_active = true;
+            } else if !self.engine.drawings.is_creating() {
+                self.temporary_scale_tool_active = false;
             }
 
             if !self.interaction.is_touch
@@ -1614,6 +1630,10 @@ impl ChartInner {
         }
         if finalized_creation {
             self.engine.stamp_drawing_timestamps();
+            if self.temporary_scale_tool_active {
+                self.engine.drawings.active_tool = axiuscharts::DrawingTool::None;
+                self.temporary_scale_tool_active = false;
+            }
             self.interaction.cancel_pointer_gesture();
             self.interaction.drawing_drag_active = false;
             self.interaction.set_drawing_cursor(None);
@@ -1782,6 +1802,10 @@ impl ChartInner {
 
         if self.engine.drawings.is_creating() {
             self.engine.drawings.cancel_creation();
+            if self.temporary_scale_tool_active {
+                self.engine.drawings.active_tool = axiuscharts::DrawingTool::None;
+                self.temporary_scale_tool_active = false;
+            }
             self.engine.stamp_drawing_timestamps();
             self.interaction.cancel_pointer_gesture();
             self.interaction.drawing_drag_active = false;

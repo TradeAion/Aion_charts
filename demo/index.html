@@ -562,6 +562,7 @@
       <button class="btn" id="draw-rectangle">Rect</button>
       <button class="btn" id="draw-text">Text</button>
       <button class="btn" id="draw-fibonacci">Fib</button>
+      <button class="btn" id="draw-scale" title="Measure price/time range">Measure</button>
       <button class="btn" id="draw-brush">Brush</button>
       <button class="btn" id="draw-clear">Clear</button>
     </div>
@@ -637,14 +638,14 @@
       <div id="hud-status"></div>
       <div id="hud-execution"></div>
       <div id="hud-shortcuts" style="display:none">
-        <b>Shortcuts:</b><br>
+        <b>Demo shortcuts:</b><br>
+        <span class="shortcut-key">T</span> Trend line · <span class="shortcut-key">R</span> Rectangle<br>
+        <span class="shortcut-key">F</span> Fibonacci · <span class="shortcut-key">M</span> Measure<br>
         <span class="shortcut-key">Shift</span> Angle snap (45°)<br>
         <span class="shortcut-key">Ctrl</span> OHLC snap<br>
         <span class="shortcut-key">Enter</span> Finish Path<br>
-        <span class="shortcut-key">Type</span> Add text to selected drawing<br>
         <span class="shortcut-key">Esc</span> Cancel / Deselect<br>
-        <span class="shortcut-key">Del</span> Delete selected<br>
-        <span class="shortcut-key">←→</span> Scroll · <span class="shortcut-key">+−</span> Zoom · <span class="shortcut-key">0</span> Fit All
+        <span class="shortcut-key">Del</span> Delete selected
       </div>
     </div>
     <div id="drawing-placeholder" role="button" tabindex="0">+ Add text</div>
@@ -2366,14 +2367,17 @@
     const drawTools = {
       'draw-trendline': 'trend_line', 'draw-hline': 'horizontal_line', 'draw-vline': 'vertical_line',
       'draw-ray': 'ray', 'draw-path': 'path', 'draw-rectangle': 'rectangle', 'draw-text': 'text',
-      'draw-fibonacci': 'fibonacci', 'draw-brush': 'brush',
+      'draw-fibonacci': 'fibonacci', 'draw-scale': 'scale', 'draw-brush': 'brush',
     };
+    function activateDrawingTool(tool) {
+      activeDrawTool = tool;
+      Object.keys(drawTools).forEach(k => $(k).classList.toggle('active', drawTools[k] === tool));
+      if (core) core.set_drawing_tool(tool);
+    }
     Object.entries(drawTools).forEach(([id, tool]) => {
       $(id).onclick = () => {
         const newTool = activeDrawTool === tool ? 'none' : tool;
-        activeDrawTool = newTool;
-        Object.keys(drawTools).forEach(k => $(k).classList.toggle('active', drawTools[k] === newTool));
-        if (core) core.set_drawing_tool(newTool);
+        activateDrawingTool(newTool);
       };
     });
     $('draw-clear').onclick = () => { if (core) core.clear_drawings(); };
@@ -2387,13 +2391,30 @@
       }
 
       if (!core) return;
-      const handled = core.on_key_down(e.key, e.ctrlKey || e.metaKey, e.shiftKey, e.altKey);
-      if (e.key === 'Escape') {
+      let handled = false;
+      const isModified = e.ctrlKey || e.metaKey || e.altKey;
+      const platformToolShortcuts = {
+        t: 'trend_line',
+        r: 'rectangle',
+        f: 'fibonacci',
+        m: 'scale',
+      };
+
+      if (!isModified && platformToolShortcuts[e.key.toLowerCase()]) {
+        activateDrawingTool(platformToolShortcuts[e.key.toLowerCase()]);
+        handled = true;
+      } else if (e.key === 'Enter') {
+        handled = core.complete_drawing();
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        core.remove_selected_drawing();
+        handled = true;
+      } else if (e.key === 'Escape') {
         closeDrawingEditor(false);
-        core.set_drawing_tool('none');
-        activeDrawTool = 'none';
-        Object.keys(drawTools).forEach(k => $(k).classList.remove('active'));
+        core.cancel_drawing();
+        core.deselect_drawings();
+        activateDrawingTool('none');
         settingsPanel.classList.remove('open');
+        handled = true;
       }
       if (handled) e.preventDefault();
     });

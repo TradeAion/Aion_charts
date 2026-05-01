@@ -13,7 +13,7 @@ test.beforeEach(async ({ page }) => {
   await installHarness(page);
 });
 
-test('text drawing edits through the native canvas key path and commits with Enter', async ({ page }) => {
+test('platform keyboard mapping edits canvas text drawing and commits with Enter', async ({ page }) => {
   await importTextDrawing(page);
   await startTextEdit(page);
 

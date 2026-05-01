@@ -20,15 +20,53 @@ AxiusCharts includes interactive drawing tools for chart annotation and measurem
 1. Call `set_drawing_tool(toolName)`
 2. Place the required anchors
 3. Drag existing drawings or anchors to edit them
-4. Use `cancel_drawing()`, `remove_selected_drawing()`, or `clear_drawings()` as needed
+4. Use `complete_drawing()`, `cancel_drawing()`, `deselect_drawings()`, `remove_selected_drawing()`, or `clear_drawings()` as needed
 
-## Keyboard Forwarding
+## Shortcut Ownership
+
+AxiusCharts does not own keyboard shortcuts. The engine exposes chart and drawing
+commands; the platform embedding the engine decides whether shortcuts exist and
+which keys invoke those commands.
+
+Do not add tool shortcut mapping to the engine. Add shortcut mapping in the
+application, shell, or platform layer that hosts the chart. This keeps shortcuts
+configurable for product needs, user preferences, operating systems, locales,
+permissions, and focused UI state.
+
+Example platform mapping:
 
 ```ts
 document.addEventListener('keydown', (e) => {
-  chart.on_key_down(e.key, e.ctrlKey, e.shiftKey, e.altKey);
+  if (isEditingFormControl(e.target)) return;
+
+  const toolShortcuts = {
+    t: 'trend_line',
+    r: 'rectangle',
+    f: 'fibonacci',
+    m: 'scale',
+  };
+
+  const tool = toolShortcuts[e.key.toLowerCase()];
+  if (tool && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    chart.set_drawing_tool(tool);
+    e.preventDefault();
+    return;
+  }
+
+  if (e.key === 'Enter') {
+    if (chart.complete_drawing()) e.preventDefault();
+  } else if (e.key === 'Escape') {
+    chart.cancel_drawing();
+    chart.deselect_drawings();
+    e.preventDefault();
+  } else if (e.key === 'Delete' || e.key === 'Backspace') {
+    chart.remove_selected_drawing();
+    e.preventDefault();
+  }
 });
 ```
+
+This example is optional platform code, not required engine integration.
 
 ## Persistence
 

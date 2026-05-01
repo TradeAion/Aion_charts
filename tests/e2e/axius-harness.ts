@@ -69,8 +69,35 @@ export async function installHarness(page: Page) {
     chart.render();
 
     document.addEventListener('keydown', event => {
-      const handled = chart.on_key_down(event.key, event.ctrlKey || event.metaKey, event.shiftKey, event.altKey);
-      if (handled) event.preventDefault();
+      const selectedRaw = chart.get_selected_drawing_info_json();
+      const selected = selectedRaw && selectedRaw !== 'null' ? JSON.parse(selectedRaw) : null;
+      let handled = false;
+
+      if (selected?.text_editing) {
+        if (event.key === 'Enter') {
+          handled = chart.end_selected_drawing_text_edit(false);
+        } else if (event.key === 'Escape') {
+          handled = chart.end_selected_drawing_text_edit(true);
+        } else if (event.key === 'Backspace') {
+          handled = chart.set_selected_drawing_text((selected.text || '').slice(0, -1));
+        } else if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.length === 1) {
+          handled = chart.set_selected_drawing_text(`${selected.text || ''}${event.key}`);
+        }
+      } else if (event.key === 'Enter') {
+        handled = chart.complete_drawing();
+      } else if (event.key === 'Delete' || event.key === 'Backspace') {
+        chart.remove_selected_drawing();
+        handled = true;
+      } else if (event.key === 'Escape') {
+        chart.cancel_drawing();
+        chart.deselect_drawings();
+        handled = true;
+      }
+
+      if (handled) {
+        chart.render();
+        event.preventDefault();
+      }
     });
 
     (window as any).__axiusHarness = { chart, host, bars: { open, high, low, close, volume, timestamps } };

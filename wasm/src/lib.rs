@@ -2118,6 +2118,7 @@ impl AxiusCharts {
             selected_execution_mark_id: None,
             price_line_drag_id: None,
             order_line_drag_id: None,
+            temporary_scale_tool_active: false,
             cancelling_order_id: None,
         }));
 
@@ -5187,202 +5188,51 @@ impl AxiusCharts {
         let mut s = self.inner.borrow_mut();
         s.engine.drawings.active_tool =
             axiuscharts::DrawingTool::from_api_key(tool).unwrap_or(axiuscharts::DrawingTool::None);
+        drop(s);
+        self.mark_dirty();
     }
 
-    /// Remove the currently selected drawing (e.g. on Delete key).
-    pub fn remove_selected_drawing(&mut self) {
-        self.inner.borrow_mut().engine.drawings.remove_selected();
-    }
-
-    /// Cancel the drawing currently being created (e.g. on Escape key).
-    pub fn cancel_drawing(&mut self) {
-        self.inner.borrow_mut().engine.drawings.cancel_creation();
-    }
-
-    // ── Keyboard Events ────────────────────────────────────────────────────────
-
-    /// Handle keyboard events. Returns true if the key was handled.
-    ///
-    /// Supported shortcuts:
-    /// - Delete / Backspace: Remove selected drawing
-    /// - Escape: Cancel drawing creation, deselect all
-    /// - Arrow Left/Right: Scroll chart by one bar
-    /// - Arrow Up/Down: Zoom price axis in/out
-    /// - Home: Scroll to first bar
-    /// - End: Scroll to last bar
-    /// - +/=: Zoom in (time axis)
-    /// - -: Zoom out (time axis)
-    /// - 0: Reset zoom to fit all data
-    pub fn on_key_down(&mut self, key: &str, ctrl: bool, shift: bool, _alt: bool) -> bool {
+    /// Complete the drawing currently being created, when the active tool uses
+    /// explicit completion.
+    pub fn complete_drawing(&mut self) -> bool {
         let mut s = self.inner.borrow_mut();
-        let bar_count = s.engine.bars.len() as f64;
-        let mut visible_range_changed = false;
-
-        if s.engine.drawings.handle_text_key(key, ctrl, _alt, shift) {
+        if s.engine.drawings.is_creating() && !s.engine.drawings.creation_completes_on_pointer_up()
+        {
+            let completed = s.engine.drawings.complete_creation();
+            s.engine.stamp_drawing_timestamps();
             drop(s);
             self.mark_dirty();
-            return true;
+            return completed;
         }
 
-        if key == "Enter" {
-            if s.engine.drawings.is_creating()
-                && !s.engine.drawings.creation_completes_on_pointer_up()
-            {
-                let completed = s.engine.drawings.complete_creation();
-                s.engine.stamp_drawing_timestamps();
-                if completed {
-                    drop(s);
-                    self.mark_dirty();
-                    return true;
-                }
+        for sp in s.subpanes.iter_mut() {
+            if sp.drawings.is_creating() && !sp.drawings.creation_completes_on_pointer_up() {
+                let completed = sp.drawings.complete_creation();
                 drop(s);
                 self.mark_dirty();
-                return true;
-            }
-
-            for sp in s.subpanes.iter_mut() {
-                if sp.drawings.is_creating() && !sp.drawings.creation_completes_on_pointer_up() {
-                    let _ = sp.drawings.complete_creation();
-                    drop(s);
-                    self.mark_dirty();
-                    return true;
-                }
+                return completed;
             }
         }
 
-        let handled = match key {
-            // Delete selected drawing
-            "Delete" | "Backspace" => {
-                s.engine.drawings.remove_selected();
-                true
-            }
+        false
+    }
 
-            // Cancel/deselect
-            "Escape" => {
-                s.engine.drawings.cancel_creation();
-                s.engine.drawings.deselect_all();
-                true
-            }
+    /// Remove the currently selected drawing.
+    pub fn remove_selected_drawing(&mut self) {
+        self.inner.borrow_mut().engine.drawings.remove_selected();
+        self.mark_dirty();
+    }
 
-            // Scroll by bars
-            "ArrowLeft" => {
-                let amount = if ctrl {
-                    10.0
-                } else if shift {
-                    5.0
-                } else {
-                    1.0
-                };
-                if ctrl {
-                    let (pane_css_w, _) = s.layout.pane_css_size();
-                    let visible_bar_span = s.engine.viewport.end_bar - s.engine.viewport.start_bar;
-                    s.interaction.start_horizontal_glide_by_bars(
-                        -amount,
-                        pane_css_w,
-                        visible_bar_span,
-                    );
-                } else {
-                    let time_scale_len = s.engine.time_scale.len();
-                    s.engine.viewport.pan_clamped(-amount, time_scale_len);
-                    visible_range_changed = true;
-                }
-                true
-            }
-            "ArrowRight" => {
-                let amount = if ctrl {
-                    10.0
-                } else if shift {
-                    5.0
-                } else {
-                    1.0
-                };
-                if ctrl {
-                    let (pane_css_w, _) = s.layout.pane_css_size();
-                    let visible_bar_span = s.engine.viewport.end_bar - s.engine.viewport.start_bar;
-                    s.interaction.start_horizontal_glide_by_bars(
-                        amount,
-                        pane_css_w,
-                        visible_bar_span,
-                    );
-                } else {
-                    let time_scale_len = s.engine.time_scale.len();
-                    s.engine.viewport.pan_clamped(amount, time_scale_len);
-                    visible_range_changed = true;
-                }
-                true
-            }
+    /// Cancel the drawing currently being created.
+    pub fn cancel_drawing(&mut self) {
+        self.inner.borrow_mut().engine.drawings.cancel_creation();
+        self.mark_dirty();
+    }
 
-            // Zoom price axis
-            "ArrowUp" => {
-                let factor = if ctrl { 1.2 } else { 1.05 };
-                let mid = (s.engine.viewport.price_max + s.engine.viewport.price_min) / 2.0;
-                let half_range =
-                    (s.engine.viewport.price_max - s.engine.viewport.price_min) / 2.0 / factor;
-                s.engine.viewport.price_min = mid - half_range;
-                s.engine.viewport.price_max = mid + half_range;
-                s.engine.viewport.price_invalidated = true;
-                true
-            }
-            "ArrowDown" => {
-                let factor = if ctrl { 1.2 } else { 1.05 };
-                let mid = (s.engine.viewport.price_max + s.engine.viewport.price_min) / 2.0;
-                let half_range =
-                    (s.engine.viewport.price_max - s.engine.viewport.price_min) / 2.0 * factor;
-                s.engine.viewport.price_min = mid - half_range;
-                s.engine.viewport.price_max = mid + half_range;
-                s.engine.viewport.price_invalidated = true;
-                true
-            }
-
-            // Jump to start/end
-            "Home" => {
-                let visible_bars = s.engine.viewport.end_bar - s.engine.viewport.start_bar;
-                s.engine.viewport.start_bar = 0.0;
-                s.engine.viewport.end_bar = visible_bars;
-                visible_range_changed = true;
-                true
-            }
-            "End" => {
-                let visible_bars = s.engine.viewport.end_bar - s.engine.viewport.start_bar;
-                s.engine.viewport.end_bar = bar_count - 1.0 + visible_bars * 0.1; // Small right margin
-                s.engine.viewport.start_bar = s.engine.viewport.end_bar - visible_bars;
-                visible_range_changed = true;
-                true
-            }
-
-            // Zoom time axis (only without Ctrl — let browser handle Ctrl+/- for page zoom)
-            "+" | "=" if !ctrl => {
-                let mid = (s.engine.viewport.start_bar + s.engine.viewport.end_bar) / 2.0;
-                s.engine.viewport.zoom(mid, 1.0 / 1.2);
-                visible_range_changed = true;
-                true
-            }
-            "-" | "_" if !ctrl => {
-                let mid = (s.engine.viewport.start_bar + s.engine.viewport.end_bar) / 2.0;
-                s.engine.viewport.zoom(mid, 1.2);
-                visible_range_changed = true;
-                true
-            }
-
-            // Reset zoom to fit all data
-            "0" => {
-                reset_main_viewport_and_emit(&mut s.engine, Some("fit_all"));
-                s.engine.viewport.price_invalidated = true;
-                true
-            }
-
-            _ => false, // Key not handled
-        };
-
-        if handled && visible_range_changed {
-            emit_visible_range_change(&mut s.engine);
-        }
-        drop(s);
-
-        if handled {
-            self.mark_dirty();
-        }
-        handled
+    /// Deselect all drawings.
+    pub fn deselect_drawings(&mut self) {
+        self.inner.borrow_mut().engine.drawings.deselect_all();
+        self.mark_dirty();
     }
 
     /// Remove all drawings.
@@ -5391,6 +5241,8 @@ impl AxiusCharts {
         let active_tool = s.engine.drawings.active_tool;
         s.engine.drawings.clear();
         s.engine.drawings.active_tool = active_tool;
+        drop(s);
+        self.mark_dirty();
     }
 
     /// Get the currently selected drawing's text/alignment inspector payload as JSON.
