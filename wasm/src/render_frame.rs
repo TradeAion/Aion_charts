@@ -263,6 +263,7 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
             ref engine,
             ref active_subpane_id,
             ref mut execution_mark_hit_areas,
+            ref mut marker_hit_areas,
             ref hovered_execution_mark_id,
             ref symbol,
             ref selected_execution_mark_id,
@@ -282,12 +283,24 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
             .unwrap_or(&engine.style);
 
         // Drawings render on the overlay; any base-bucket drawings remain on the pane canvas.
-        overlay.render_with_drawings(
+        overlay.render_overlay_base(
             &main_crosshair,
             crosshair_style,
             &top_drawings,
             Some((&engine.bars, &engine.viewport, &time_scale)),
         );
+        marker_hit_areas.clear();
+        marker_hit_areas.extend(overlay.render_markers(
+            &engine.markers,
+            axiuscharts::MarkerZOrder::Normal,
+            &engine.series,
+            &engine.bars,
+            &time_scale,
+            &engine.viewport,
+            &engine.style,
+            pane_css_w,
+            pane_css_h,
+        ));
         // Footprint text labels — rendered on overlay for both WebGPU and Canvas2D
         // so text always appears on top of the chart data.
         overlay.render_footprint_texts(&engine.footprint_texts, &engine.style);
@@ -342,15 +355,17 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
             pane_css_h,
             engine.v_pixel_ratio,
         );
-        overlay.render_markers(
+        marker_hit_areas.extend(overlay.render_markers(
             &engine.markers,
+            axiuscharts::MarkerZOrder::AboveSeries,
+            &engine.series,
             &engine.bars,
             &time_scale,
             &engine.viewport,
             &engine.style,
             pane_css_w,
             pane_css_h,
-        );
+        ));
         overlay.render_indicator_labels(
             &indicator_draw_instructions,
             &time_scale,
@@ -359,6 +374,7 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
             pane_css_w,
             pane_css_h,
         );
+        overlay.render_crosshair(&main_crosshair, crosshair_style);
         overlay.render_crosshair_markers(
             &main_crosshair,
             &engine.series,
@@ -397,6 +413,17 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
                 pane_css_h,
             );
         }
+        marker_hit_areas.extend(overlay.render_markers(
+            &engine.markers,
+            axiuscharts::MarkerZOrder::Top,
+            &engine.series,
+            &engine.bars,
+            &time_scale,
+            &engine.viewport,
+            &engine.style,
+            pane_css_w,
+            pane_css_h,
+        ));
     }
 
     // 7. Price axis — base (ticks + labels) + last price labels + price line labels + top (crosshair label)

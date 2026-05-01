@@ -1,9 +1,9 @@
 //! Kinetic (momentum) scrolling animation.
 //!
-//! Based on LWC's `kinetic-animation.ts` - provides smooth deceleration
+//! Based on the reference implementation's `kinetic-animation.ts` - provides smooth deceleration
 //! after touch/mouse release.
 
-/// Constants for kinetic scrolling behavior (matching LWC).
+/// Constants for kinetic scrolling behavior (matching reference implementation).
 pub mod constants {
     /// Minimum speed before animation stops.
     pub const MIN_SCROLL_SPEED: f64 = 0.2;

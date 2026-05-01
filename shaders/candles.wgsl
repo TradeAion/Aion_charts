@@ -21,7 +21,7 @@
 // This guarantees the rect is exactly `w` pixels wide regardless of
 // odd/even width or fractional center position. `floor(w/2)` for
 // even widths splits perfectly; for odd widths (e.g. wick_width=1),
-// the extra pixel goes to the right, matching LWC's convention.
+// the extra pixel goes to the right, matching the reference implementation's convention.
 
 struct CandleUniforms {
     // Viewport dimensions (physical pixels) — for pixel→NDC conversion.
@@ -132,7 +132,7 @@ fn vs_main(
     } else if (quad_idx == 2u) {
         // Border / outer body rect.
         px = quad_corner(vi, bar_edges.x, bar_edges.y, body_top, body_bottom);
-        color = wick_color; // border uses wick color (LWC convention)
+        color = wick_color; // border uses wick color (reference convention)
     } else {
         // Body fill — inset by border_width.
         let bw = u.border_width;

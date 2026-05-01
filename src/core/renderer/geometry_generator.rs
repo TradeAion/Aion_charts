@@ -10,7 +10,7 @@
 //! - `generate_volume_rects` — volume bars
 //! - `generate`              — legacy all-in-one (background + grid + volume + candles)
 //!
-//! All candle sizing uses LWC-matching algorithms from series.rs.
+//! All candle sizing uses reference-matching algorithms from series.rs.
 //! Tick computation is in tick_marks.rs (shared with axis renderers).
 
 use crate::core::renderer::draw_list::{ColoredRect, DrawList};
@@ -205,7 +205,7 @@ pub fn generate_volume_rects(
 // ── Coordinate helpers imported from transforms.rs ───────────────────────────
 // bar_to_x, price_to_y, and color4 are now in crate::core::renderer::transforms
 
-// ── Inner-border fill (matches LWC fillRectInnerBorder) ──────────────────────
+// ── Inner-border fill (matches reference implementation fillRectInnerBorder) ──────────────────────
 
 fn push_inner_border(
     rects: &mut Vec<ColoredRect>,
@@ -265,10 +265,10 @@ fn push_inner_border(
     });
 }
 
-// ── Candle generation (3-pass LWC order: wicks → borders → body fill) ────────
+// ── Candle generation (3-pass reference implementation order: wicks → borders → body fill) ────────
 
 /// Project one visible candle to discrete physical-pixel geometry.
-/// Values are in physical pixels, using LWC-style inclusive body/wick ends.
+/// Values are in physical pixels, using compatibility-style inclusive body/wick ends.
 #[derive(Debug, Clone, Copy)]
 pub struct ProjectedCandle {
     pub body_left: f64,
@@ -406,7 +406,7 @@ fn generate_candles_into(
                 a: wa,
             });
         }
-        // LWC parity: draw 1px lower wick when low == body_bottom + 1.
+        // reference parity: draw 1px lower wick when low == body_bottom + 1.
         if c.low_y > c.body_bottom {
             rects.push(ColoredRect {
                 x: c.wick_left as f32,

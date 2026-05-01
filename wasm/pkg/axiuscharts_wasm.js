@@ -52,12 +52,33 @@ export class AxiusCharts {
         return ret >>> 0;
     }
     /**
+     * Add an external price range that participates in automatic price scaling.
+     * @param {number} min_price
+     * @param {number} max_price
+     * @returns {number}
+     */
+    add_autoscale_contribution(min_price, max_price) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.axiuscharts_add_autoscale_contribution(retptr, this.__wbg_ptr, min_price, max_price);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return r0 >>> 0;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
      * Add a new bar (OHLC) series overlay. Returns the series ID.
      *
      * `up_color_*`: RGBA for bullish bars (close >= open).
      * `down_color_*`: RGBA for bearish bars (close < open).
      * `open_visible`: whether to show the open tick.
-     * `thin_bars`: use 1px stems (like LWC thinBars option).
+     * `thin_bars`: use 1px stems (like reference implementation thinBars option).
      * @param {number} up_color_r
      * @param {number} up_color_g
      * @param {number} up_color_b
@@ -209,7 +230,7 @@ export class AxiusCharts {
     /**
      * Add a new line series overlay. Returns the series ID.
      *
-     * Default color is TradingView blue (#2962FF). Use RGBA [0.0–1.0].
+     * Default color is default blue (#2962FF). Use RGBA [0.0–1.0].
      * `line_style`: "solid", "dotted", "dashed", "large_dashed", "sparse_dotted".
      * @param {number} color_r
      * @param {number} color_g
@@ -247,14 +268,64 @@ export class AxiusCharts {
      * @returns {number}
      */
     add_marker(series_id, bar_index, shape, position, price, color_r, color_g, color_b, color_a, size, text) {
-        const ptr0 = passStringToWasm0(shape, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(position, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(text, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_add_marker(this.__wbg_ptr, series_id, bar_index, ptr0, len0, ptr1, len1, price, color_r, color_g, color_b, color_a, size, ptr2, len2);
-        return ret >>> 0;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(shape, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(position, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(text, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len2 = WASM_VECTOR_LEN;
+            wasm.axiuscharts_add_marker(retptr, this.__wbg_ptr, series_id, bar_index, ptr0, len0, ptr1, len1, price, color_r, color_g, color_b, color_a, size, ptr2, len2);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return r0 >>> 0;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * Add a marker anchored by timestamp instead of mutable bar index.
+     *
+     * The timestamp is kept as the canonical render anchor. The resolved bar
+     * index is only used as a fallback and for above/below bar price placement.
+     * @param {number} series_id
+     * @param {bigint} timestamp
+     * @param {string} shape
+     * @param {string} position
+     * @param {number} price
+     * @param {number} color_r
+     * @param {number} color_g
+     * @param {number} color_b
+     * @param {number} color_a
+     * @param {number} size
+     * @param {string} text
+     * @returns {number}
+     */
+    add_marker_at_time(series_id, timestamp, shape, position, price, color_r, color_g, color_b, color_a, size, text) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(shape, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(position, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(text, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len2 = WASM_VECTOR_LEN;
+            wasm.axiuscharts_add_marker_at_time(retptr, this.__wbg_ptr, series_id, timestamp, ptr0, len0, ptr1, len1, price, color_r, color_g, color_b, color_a, size, ptr2, len2);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return r0 >>> 0;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
     }
     /**
      * Get the allowed interval list. Returns an empty array when all intervals are allowed.
@@ -424,6 +495,12 @@ export class AxiusCharts {
         wasm.axiuscharts_clear_allowed_intervals(this.__wbg_ptr);
     }
     /**
+     * Remove all external autoscale contributions.
+     */
+    clear_autoscale_contributions() {
+        wasm.axiuscharts_clear_autoscale_contributions(this.__wbg_ptr);
+    }
+    /**
      * Hide crosshair immediately.
      */
     clear_crosshair() {
@@ -493,7 +570,7 @@ export class AxiusCharts {
     /**
      * Create a new order line at the specified price level.
      *
-     * This creates a TradingView-style order management line with:
+     * This creates a platform-style order management line with:
      * - Order type label (Limit, Stop, TP, SL)
      * - Side indication (Buy/Sell) with appropriate colors
      * - Quantity display
@@ -1041,6 +1118,18 @@ export class AxiusCharts {
         return ret !== 0;
     }
     /**
+     * Hit-test rendered series markers at pane CSS coordinates.
+     *
+     * Returns `null` when no rendered marker contains the point.
+     * @param {number} x_css
+     * @param {number} y_css
+     * @returns {any}
+     */
+    hit_test_marker(x_css, y_css) {
+        const ret = wasm.axiuscharts_hit_test_marker(this.__wbg_ptr, x_css, y_css);
+        return takeObject(ret);
+    }
+    /**
      * Restore all drawings (main pane + indicator subpanes) from JSON.
      *
      * Existing drawings are replaced atomically. Unknown subpane IDs in the payload are ignored.
@@ -1266,6 +1355,34 @@ export class AxiusCharts {
         return ret !== 0;
     }
     /**
+     * Whether marker visual size participates in automatic price scaling.
+     * @returns {boolean}
+     */
+    marker_auto_scale() {
+        const ret = wasm.axiuscharts_marker_auto_scale(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Get the current global marker z-order.
+     * @returns {string}
+     */
+    marker_z_order() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.axiuscharts_marker_z_order(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export4(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * Get the maximum historical bar count allowed in a single load. Returns 0 when uncapped.
      * @returns {number}
      */
@@ -1377,6 +1494,15 @@ export class AxiusCharts {
      */
     remove_all_scale_drawings() {
         wasm.axiuscharts_remove_all_scale_drawings(this.__wbg_ptr);
+    }
+    /**
+     * Remove a previously registered autoscale contribution.
+     * @param {number} id
+     * @returns {boolean}
+     */
+    remove_autoscale_contribution(id) {
+        const ret = wasm.axiuscharts_remove_autoscale_contribution(this.__wbg_ptr, id);
+        return ret !== 0;
     }
     /**
      * Remove an execution mark by ID.
@@ -1606,7 +1732,7 @@ export class AxiusCharts {
      *
      * When `true` (default) the viewport advances by 1 bar each time a new bar
      * is appended and the chart is already showing the latest data — identical
-     * to LWC's `shiftVisibleRangeOnNewBar` behaviour.
+     * to the reference implementation's `shiftVisibleRangeOnNewBar` behaviour.
      *
      * When `false` the viewport never moves during live streaming regardless of
      * the current scroll position, giving the user a fully static view even
@@ -2374,6 +2500,32 @@ export class AxiusCharts {
         wasm.axiuscharts_set_last_price_line_width(this.__wbg_ptr, width);
     }
     /**
+     * Include marker visual size in automatic price scaling.
+     * @param {boolean} auto_scale
+     */
+    set_marker_auto_scale(auto_scale) {
+        wasm.axiuscharts_set_marker_auto_scale(this.__wbg_ptr, auto_scale);
+    }
+    /**
+     * Set the global marker z-order: "normal", "aboveSeries", or "top".
+     * @param {string} z_order
+     */
+    set_marker_z_order(z_order) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(z_order, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.axiuscharts_set_marker_z_order(retptr, this.__wbg_ptr, ptr0, len0);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            if (r1) {
+                throw takeObject(r0);
+            }
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
      * Set multiple markers for a series at once (replaces existing).
      * `marker_data` is a flat array: [bar_index, shape_idx, position_idx, price, r, g, b, a, size, ...]
      * where shape_idx: 0=arrowUp, 1=arrowDown, 2=circle, 3=square
@@ -2382,9 +2534,19 @@ export class AxiusCharts {
      * @param {Float64Array} marker_data
      */
     set_markers(series_id, marker_data) {
-        const ptr0 = passArrayF64ToWasm0(marker_data, wasm.__wbindgen_export);
-        const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_markers(this.__wbg_ptr, series_id, ptr0, len0);
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passArrayF64ToWasm0(marker_data, wasm.__wbindgen_export);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.axiuscharts_set_markers(retptr, this.__wbg_ptr, series_id, ptr0, len0);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            if (r1) {
+                throw takeObject(r0);
+            }
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
     }
     /**
      * Set the maximum historical bar count allowed in a single load. Pass 0 to disable the cap.
@@ -2714,7 +2876,7 @@ export class AxiusCharts {
     }
     /**
      * Toggle / configure the optional horizontal middle line on the currently
-     * selected Rectangle drawing (TradingView-style midline).
+     * selected Rectangle drawing (platform-style midline).
      *
      * `dash_on`/`dash_off` ≤ 0 means a solid line. Returns `false` when the
      * current selection is not a Rectangle, or when nothing is selected.
@@ -2852,6 +3014,32 @@ export class AxiusCharts {
         const ptr0 = passStringToWasm0(symbol, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
         wasm.axiuscharts_set_symbol(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * Set multiple timestamp-anchored markers for a series at once.
+     *
+     * `timestamps` contains one timestamp per marker. `marker_data` is a flat
+     * array with stride 8: [shape_idx, position_idx, price, r, g, b, a, size, ...].
+     * @param {number} series_id
+     * @param {BigUint64Array} timestamps
+     * @param {Float64Array} marker_data
+     */
+    set_time_markers(series_id, timestamps, marker_data) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passArray64ToWasm0(timestamps, wasm.__wbindgen_export);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passArrayF64ToWasm0(marker_data, wasm.__wbindgen_export);
+            const len1 = WASM_VECTOR_LEN;
+            wasm.axiuscharts_set_time_markers(retptr, this.__wbg_ptr, series_id, ptr0, len0, ptr1, len1);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            if (r1) {
+                throw takeObject(r0);
+            }
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
     }
     /**
      * Set visible bar range using fractional bar indices.
@@ -3059,7 +3247,7 @@ export class AxiusCharts {
         }
     }
     /**
-     * LWC-style main series update semantics:
+     * compatibility-style main series update semantics:
      * update last bar if timestamp matches, append if timestamp is newer.
      * @param {bigint} timestamp
      * @param {number} open
@@ -3082,7 +3270,7 @@ export class AxiusCharts {
         }
     }
     /**
-     * LWC-style update semantics for OHLC bar overlays:
+     * compatibility-style update semantics for OHLC bar overlays:
      * update last point if timestamp matches, append if timestamp is newer.
      * @param {number} id
      * @param {bigint} timestamp
@@ -3139,7 +3327,7 @@ export class AxiusCharts {
         }
     }
     /**
-     * LWC-style update semantics for histogram overlays:
+     * compatibility-style update semantics for histogram overlays:
      * update last point if timestamp matches, append if timestamp is newer.
      * @param {number} id
      * @param {bigint} timestamp
@@ -3163,7 +3351,7 @@ export class AxiusCharts {
         }
     }
     /**
-     * LWC-style update semantics for line/area/baseline overlays:
+     * compatibility-style update semantics for line/area/baseline overlays:
      * update last point if timestamp matches, append if timestamp is newer.
      * @param {number} id
      * @param {bigint} timestamp
@@ -4387,7 +4575,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_2641(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_2669(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -5102,8 +5290,8 @@ function __wasm_bindgen_func_elem_462(arg0, arg1, arg2) {
     wasm.__wasm_bindgen_func_elem_462(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_2641(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_2641(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_2669(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_2669(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 function __wasm_bindgen_func_elem_469(arg0, arg1, arg2) {

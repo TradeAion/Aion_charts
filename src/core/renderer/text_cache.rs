@@ -1,6 +1,6 @@
 //! TextWidthCache — bounded FIFO cache for Canvas2D text measurements.
 //!
-//! Mirrors LWC's TextWidthCache: digit normalization + bounded eviction.
+//! Mirrors the reference implementation's TextWidthCache: digit normalization + bounded eviction.
 //!
 //! Key insight: in typical chart fonts, all digits 0-9 have equal width (tabular
 //! figures). So "42,512.50" and "31,245.67" share the same pixel width. By
@@ -12,7 +12,7 @@
 //!
 //! Also caches `yMidCorrection` — the precise vertical centering offset computed
 //! from `actualBoundingBoxAscent` / `actualBoundingBoxDescent`.
-//! Matches LWC behavior by measuring with `textBaseline = "middle"`.
+//! Matches reference behavior by measuring with `textBaseline = "middle"`.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -81,7 +81,7 @@ impl TextWidthCache {
             }
         }
 
-        // Cache miss -- measure via browser (LWC-compatible baseline handling)
+        // Cache miss -- measure via browser (compatibility-focused baseline handling)
         let measurement = {
             ctx.save();
             ctx.set_text_baseline("middle");

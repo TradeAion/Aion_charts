@@ -28,11 +28,17 @@
       "types": "./wasm/pkg/axiuscharts_wasm.d.ts",
       "import": "./wasm/pkg/axiuscharts_wasm.js"
     },
+    "./compat": {
+      "types": "./wasm/axiuscharts-compat.d.ts",
+      "import": "./wasm/axiuscharts-compat.js"
+    },
     "./axiuscharts_wasm_bg.wasm": "./wasm/pkg/axiuscharts_wasm_bg.wasm"
   },
   "files": [
     "LICENSE",
     "README.md",
+    "wasm/axiuscharts-compat.js",
+    "wasm/axiuscharts-compat.d.ts",
     "wasm/pkg/axiuscharts_wasm_bg.wasm",
     "wasm/pkg/axiuscharts_wasm_bg.wasm.d.ts",
     "wasm/pkg/axiuscharts_wasm.js",

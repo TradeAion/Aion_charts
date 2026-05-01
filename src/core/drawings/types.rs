@@ -374,7 +374,7 @@ impl FibonacciLevel {
     }
 }
 
-/// Optional horizontal middle line for a Rectangle drawing (TradingView-style).
+/// Optional horizontal middle line for a Rectangle drawing (platform-style).
 ///
 /// When `Some`, the rectangle renders an extra horizontal line through its
 /// vertical midpoint, spanning the rectangle's full width. The line uses its
@@ -391,7 +391,7 @@ pub struct MiddleLineStyle {
 
 impl Default for MiddleLineStyle {
     fn default() -> Self {
-        // Default to a neutral mid-gray, 1px solid line — matches TradingView's
+        // Default to a neutral mid-gray, 1px solid line — matches the reference platform
         // default middle-line appearance once enabled.
         Self {
             color: [0.55, 0.55, 0.55, 1.0],
@@ -579,7 +579,7 @@ impl DrawingTool {
 // ── Z-order ─────────────────────────────────────────────────────────────────
 
 /// Where in the visual stack a drawing renders.
-/// Matches LWC's PrimitivePaneViewZOrder.
+/// Matches the reference implementation's PrimitivePaneViewZOrder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZOrder {
     /// Below series (behind candles).

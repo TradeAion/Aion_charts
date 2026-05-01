@@ -364,7 +364,7 @@ pub fn generate_line_rects(
 
         // Draw the line as a series of axis-aligned rects
         // Strategy: horizontal segment at y0, then vertical connector to y1
-        // This matches the LWC walk-line approach
+        // This matches the reference implementation walk-line approach
 
         // Horizontal segment: from x0 to x1 at y0
         let h_left = x0.min(x1);
@@ -636,7 +636,7 @@ pub fn generate_area_line_rects(
 ///
 /// Each data point produces a vertical bar from the base value to the data value.
 /// Bars are centered on the bar position and sized to fill the bar width with
-/// a small gap (like LWC histogram). Per-bar color overrides are supported.
+/// a small gap (like reference implementation histogram). Per-bar color overrides are supported.
 pub fn generate_histogram_rects(
     series: &Series,
     viewport: &Viewport,
@@ -668,7 +668,7 @@ pub fn generate_histogram_rects(
     // Bar width: fill most of the bar slot with a small gap
     let visible_bars = (viewport.end_bar - viewport.start_bar).max(1.0);
     let bar_slot_w = pane_w / visible_bars;
-    // LWC uses ~80% of bar width for histogram bars
+    // reference implementation uses ~80% of bar width for histogram bars
     let bar_w = (bar_slot_w * 0.8).max(1.0);
 
     let mut rects = Vec::with_capacity(data.len());

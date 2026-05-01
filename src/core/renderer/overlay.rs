@@ -20,7 +20,9 @@ use crate::core::execution_marks::{
 use crate::core::footprint::{FootprintData, FootprintOptions};
 use crate::core::formatters::{format_price, format_volume};
 use crate::core::indicators::render::types::DrawInstruction;
-use crate::core::markers::{MarkerManager, MarkerPosition, MarkerShape};
+use crate::core::markers::{
+    MarkerHitArea, MarkerManager, MarkerPosition, MarkerShape, MarkerZOrder,
+};
 use crate::core::order_line::OrderLineManager;
 use crate::core::price_line::PriceLineManager;
 use crate::core::renderer::axis_label_geometry::{
@@ -39,7 +41,7 @@ use crate::core::renderer::transforms::bar_to_x;
 use crate::core::renderer::value_projection::{
     price_to_pane_y_phys, project_main_last_value, TimeScaleIndex,
 };
-use crate::core::series::{LineStyle, SeriesCollection, SeriesType};
+use crate::core::series::{LineStyle, SeriesCollection, SeriesId, SeriesType};
 use crate::core::viewport::Viewport;
 use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
@@ -60,7 +62,7 @@ pub struct OverlayRenderer {
 }
 
 impl OverlayRenderer {
-    /// Convert a CSS-space X coordinate that uses the LWC `-1px` bias
+    /// Convert a CSS-space X coordinate that uses the reference implementation `-1px` bias
     /// (`x_css = frac * pane_css_w - 1`) into physical pixels.
     ///
     /// Plain `x_css * ratio` is only exact at ratio=1; on fractional DPR it
@@ -167,6 +169,32 @@ impl OverlayRenderer {
         self.draw_crosshair(crosshair, style, pw, ph);
     }
 
+    /// Clear the overlay canvas and render non-crosshair overlay content.
+    pub fn render_overlay_base(
+        &mut self,
+        crosshair: &CrosshairState,
+        style: &ChartStyle,
+        top_drawings: &[DrawingGeometry],
+        legend_context: Option<(&BarArray, &Viewport, &TimeScaleIndex)>,
+    ) {
+        let pw = self.pw as f64;
+        let ph = self.ph as f64;
+        self.ctx.clear_rect(0.0, 0.0, pw, ph);
+
+        if let Some((bars, viewport, time_scale)) = legend_context {
+            self.render_legend(crosshair, style, bars, viewport, time_scale);
+        }
+
+        for geom in top_drawings {
+            self.draw_geometry(geom, style.font_family.as_str());
+        }
+    }
+
+    /// Render crosshair lines on top of the current overlay canvas contents.
+    pub fn render_crosshair(&self, crosshair: &CrosshairState, style: &ChartStyle) {
+        self.draw_crosshair(crosshair, style, self.pw as f64, self.ph as f64);
+    }
+
     /// Draw a DrawingGeometry on the overlay canvas.
     fn draw_geometry(&self, geom: &DrawingGeometry, font_family: &str) {
         Self::draw_geometry_on(&self.ctx, geom, font_family);
@@ -200,7 +228,7 @@ impl OverlayRenderer {
                 let _ = ctx.set_line_dash(&js_sys::Array::new());
             }
 
-            // LWC strokeInPixel: add 0.5px offset for odd-width lines
+            // reference implementation strokeInPixel: add 0.5px offset for odd-width lines
             // to snap to pixel center and prevent blurry sub-pixel rendering
             let correction = if l.dash < 0.0 {
                 0.0
@@ -428,7 +456,7 @@ impl OverlayRenderer {
     ///
     /// Draws on the base chart canvas (same z-level as solid lines).
     ///
-    /// Uses `setLineDash()` with the LWC dash table, then `beginPath/moveTo/lineTo/stroke`.
+    /// Uses `setLineDash()` with the reference implementation dash table, then `beginPath/moveTo/lineTo/stroke`.
     pub fn render_dashed_series(
         &self,
         series: &SeriesCollection,
@@ -502,7 +530,7 @@ impl OverlayRenderer {
         ctx.set_line_join("round");
         ctx.set_line_cap("butt");
 
-        // LWC strokeInPixel: 0.5px offset for odd-width lines
+        // reference implementation strokeInPixel: 0.5px offset for odd-width lines
         let correction = if (line_w as i32) % 2 == 1 { 0.5 } else { 0.0 };
 
         // Build a single connected path through all points
@@ -524,9 +552,9 @@ impl OverlayRenderer {
     ///
     /// Each line starts at the currently printing point and extends to the
     /// price axis edge, so it stays visually connected to the live print.
-    /// Style is controlled by `style.last_price_line` (LWC-like options).
+    /// Style is controlled by `style.last_price_line` (reference-like options).
     ///
-    /// LWC behaviour: the price line is clipped against the FULL pane height,
+    /// reference behaviour: the price line is clipped against the FULL pane height,
     /// not just the candle area.  This allows the line to remain visible even
     /// when the price is near the bottom of the candle area (approaching the
     /// volume region).
@@ -572,7 +600,7 @@ impl OverlayRenderer {
         set_canvas_line_dash(&self.ctx, style.last_price_line.style, line_w);
 
         // Main series (candles / line / area / bars / footprint)
-        // LWC clips against pane bounds, not candle area — the line stays
+        // reference implementation clips against pane bounds, not candle area — the line stays
         // visible as long as it's within the pane, even if the price scale
         // has scrolled the last value near or into the volume region.
         //
@@ -682,7 +710,7 @@ impl OverlayRenderer {
             };
             let x_anchor = bar_to_x(bar_idx + 0.5, viewport, pane_pw);
             let y_phys = price_to_pane_y_phys(last_price, viewport, pane_ph);
-            // Clip to full pane height (LWC behaviour)
+            // Clip to full pane height (reference behaviour)
             if y_phys < 0.0 || y_phys > pane_ph {
                 continue;
             }
@@ -709,7 +737,7 @@ impl OverlayRenderer {
     /// Render the asset-name chip (e.g. "BTCUSD") on the pane overlay, anchored
     /// to the right edge at the last price Y.
     ///
-    /// TradingView-style: the chip sits to the LEFT of the price-axis label,
+    /// platform-style: the chip sits to the LEFT of the price-axis label,
     /// with rounded corners on the left and a flat right edge that visually
     /// connects to the price chip in the axis.
     pub fn render_asset_name_chip(
@@ -1317,7 +1345,7 @@ impl OverlayRenderer {
 
     /// Render crosshair marker circles at the intersection with line/area/baseline series.
     ///
-    /// LWC pattern: two-pass rendering — border ring first, then fill dot.
+    /// reference pattern: two-pass rendering — border ring first, then fill dot.
     /// The marker appears at the crosshair X position, Y determined by interpolating
     /// the series data at that bar index.
     pub fn render_crosshair_markers(
@@ -1351,7 +1379,7 @@ impl OverlayRenderer {
             None => return,
         };
 
-        // Marker styling (LWC defaults)
+        // Marker styling (reference defaults)
         let radius = 4.0 * dpr;
         let border_width = 1.0 * dpr;
 
@@ -1420,31 +1448,37 @@ impl OverlayRenderer {
 
     /// Render series markers (arrows, circles, squares) positioned at bar indices.
     ///
-    /// LWC's setMarkers() API:
+    /// the reference implementation's setMarkers() API:
     /// - Shapes: arrowUp, arrowDown, circle, square
     /// - Position: aboveBar, belowBar, atPrice
     /// - Two-pass rendering for circles (border ring then fill)
     pub fn render_markers(
         &self,
         markers: &MarkerManager,
+        z_order: MarkerZOrder,
+        series: &SeriesCollection,
         bars: &BarArray,
         time_scale: &TimeScaleIndex,
         viewport: &Viewport,
         style: &ChartStyle,
         pane_css_w: f64,
         pane_css_h: f64,
-    ) {
+    ) -> Vec<MarkerHitArea> {
+        if markers.z_order() != z_order {
+            return Vec::new();
+        }
+
         let dpr = self.dpr;
         let pane_ph = pane_css_h * dpr;
 
         if bars.len() == 0 || time_scale.is_empty() {
-            return;
+            return Vec::new();
         }
 
         let Some((start_idx, end_exclusive)) =
             time_scale.visible_main_bar_range(viewport.start_bar, viewport.end_bar)
         else {
-            return;
+            return Vec::new();
         };
         let end_idx = end_exclusive.saturating_sub(1);
 
@@ -1457,18 +1491,43 @@ impl OverlayRenderer {
             size: f64,
             text: String,
             text_color: [f32; 4],
+            series_id: u32,
+            marker_id: u32,
+            bar_index: usize,
+            timestamp: Option<u64>,
+            position: MarkerPosition,
         }
 
         let mut to_draw: Vec<MarkerDraw> = Vec::new();
+        let mut hit_areas = Vec::new();
 
-        for (_series_id, series_markers) in markers.iter() {
-            let visible = series_markers.in_range(start_idx, end_idx);
+        for (series_id, series_markers) in markers.iter() {
+            if *series_id != 0 {
+                let Some(owner) = series.get(SeriesId(*series_id)) else {
+                    continue;
+                };
+                if !owner.is_visible() {
+                    continue;
+                }
+            }
 
-            for marker in visible {
-                let Some(logical_slot) = time_scale.logical_index_for_main_bar(marker.bar_index)
+            for marker in series_markers.iter() {
+                let Some(logical_slot) = marker
+                    .timestamp
+                    .and_then(|ts| time_scale.logical_index_for_timestamp(ts))
+                    .or_else(|| time_scale.logical_index_for_main_bar(marker.bar_index))
                 else {
                     continue;
                 };
+                if logical_slot < start_idx as f64 || logical_slot > end_idx as f64 {
+                    continue;
+                }
+                let main_bar_index = time_scale
+                    .main_bar_index_for_logical(logical_slot)
+                    .unwrap_or(marker.bar_index);
+                if main_bar_index >= bars.len() {
+                    continue;
+                }
                 // Calculate X directly in physical space for exact alignment
                 // with candle centers at fractional DPR/zoom levels.
                 let x_phys = bar_to_x(logical_slot + 0.5, viewport, pane_css_w * dpr);
@@ -1481,11 +1540,11 @@ impl OverlayRenderer {
                 let y_price: f64 = match marker.position {
                     MarkerPosition::AboveBar => {
                         // Above the bar's high
-                        bars.high(marker.bar_index) as f64
+                        bars.high(main_bar_index) as f64
                     }
                     MarkerPosition::BelowBar => {
                         // Below the bar's low
-                        bars.low(marker.bar_index) as f64
+                        bars.low(main_bar_index) as f64
                     }
                     MarkerPosition::AtPrice => marker.price,
                 };
@@ -1513,6 +1572,11 @@ impl OverlayRenderer {
                     size: marker.size * dpr,
                     text: marker.text.clone(),
                     text_color: marker.text_color,
+                    series_id: *series_id,
+                    marker_id: marker.id,
+                    bar_index: main_bar_index,
+                    timestamp: marker.timestamp,
+                    position: marker.position,
                 });
             }
         }
@@ -1599,7 +1663,29 @@ impl OverlayRenderer {
 
                 let _ = self.ctx.fill_text(&m.text, m.x_phys, text_y);
             }
+
+            let radius_css = match m.shape {
+                MarkerShape::ArrowUp | MarkerShape::ArrowDown => (m.size / dpr) * 1.7,
+                MarkerShape::Circle => (m.size / dpr) + 5.0,
+                MarkerShape::Square => (m.size / dpr) * 1.5,
+            }
+            .max(8.0);
+            hit_areas.push(MarkerHitArea {
+                series_id: m.series_id,
+                marker_id: m.marker_id,
+                bar_index: m.bar_index,
+                timestamp: m.timestamp,
+                x_css: m.x_phys / dpr,
+                y_css: m.y_phys / dpr,
+                radius_css,
+                shape: m.shape,
+                position: m.position,
+                z_order,
+                text: m.text.clone(),
+            });
         }
+
+        hit_areas
     }
 
     /// Render execution marks (trade executions) on the price chart.

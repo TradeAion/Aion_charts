@@ -1,4 +1,4 @@
-//! Multi-click Path drawing — TradingView-style arrowed path finished explicitly.
+//! Multi-click Path drawing — platform-style arrowed path finished explicitly.
 
 use super::drawing::{
     generate_anchor_circles, next_drawing_id, point_to_bitmap, point_to_css, Drawing,

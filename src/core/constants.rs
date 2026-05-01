@@ -10,7 +10,7 @@
 /// Default number of visible bars when chart is first loaded or reset.
 pub const DEFAULT_INITIAL_VISIBLE_BARS: f64 = 200.0;
 
-/// LWC default time-scale bar spacing (CSS pixels).
+/// reference default time-scale bar spacing (CSS pixels).
 pub const DEFAULT_BAR_SPACING_CSS: f64 = 6.0;
 
 /// Minimum number of bars that can be visible (maximum zoom in).
@@ -119,7 +119,7 @@ pub const MAX_PRICE_SCALE_COEFF: f64 = 10.0;
 
 /// Exponential sensitivity for price-axis drag scaling.
 /// Controls how many pane-heights of drag correspond to one e-fold zoom change.
-/// Lower = more responsive. 0.6 calibrated to match TradingView feel.
+/// Lower = more responsive. 0.6 calibrated to match reference platform feel.
 pub const PRICE_SCALE_DRAG_SENSITIVITY: f64 = 0.6;
 
 /// Divisor for price step calculation.
@@ -161,7 +161,7 @@ pub const LAST_PRICE_DOT_BASE_RADIUS_CSS: f64 = 4.0;
 // Tick Mark Density & Spacing
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// LWC default price-scale tick mark density.
+/// reference default price-scale tick mark density.
 /// Effective Y-tick row height is `ceil(fontSize * tickMarkDensity)`.
 pub const DEFAULT_PRICE_SCALE_TICK_MARK_DENSITY: f64 = 2.5;
 
@@ -175,13 +175,13 @@ pub const X_TICK_MIN_COUNT: f64 = 2.0;
 pub const X_TICK_MAX_COUNT: f64 = 12.0;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Axis Dimensions (LWC Constants)
+// Axis Dimensions (reference constants)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// LWC DefaultOptimalWidth — minimum price axis width when no labels present.
+/// reference defaultOptimalWidth — minimum price axis width when no labels present.
 pub const DEFAULT_PRICE_AXIS_OPTIMAL_WIDTH: f64 = 34.0;
 
-/// LWC LabelOffset — spacing between tick and label text.
+/// reference implementation LabelOffset — spacing between tick and label text.
 pub const PRICE_AXIS_LABEL_OFFSET: f64 = 5.0;
 
 // ═══════════════════════════════════════════════════════════════════════════════

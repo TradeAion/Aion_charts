@@ -1263,7 +1263,7 @@ impl SubPane {
                 let _ = ctx.set_line_dash(&js_sys::Array::new());
             }
 
-            // LWC strokeInPixel: add 0.5px offset for odd-width lines
+            // reference implementation strokeInPixel: add 0.5px offset for odd-width lines
             let correction = if l.dash < 0.0 {
                 0.0
             } else if (l.width as i32) % 2 == 1 {

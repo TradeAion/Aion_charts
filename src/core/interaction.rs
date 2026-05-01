@@ -1,15 +1,15 @@
-//! InteractionHandler — LWC-style pointer/wheel state machine with full touch support.
+//! InteractionHandler — compatibility-style pointer/wheel state machine with full touch support.
 //!
 //! Pure Rust, no DOM dependencies. The WASM layer forwards raw pointer events
 //! WITH the zone already determined (since each widget is a separate DOM element).
 //!
-//! Architecture matches LWC:
+//! Architecture matches reference implementation:
 //! - PaneWidget events → zone=Chart
 //! - PriceAxisWidget events → zone=PriceAxis
 //! - TimeAxisWidget events → zone=TimeAxis
 //! - Each widget fires its own mouseEnter/Leave naturally
 //!
-//! Interaction model (matching LWC):
+//! Interaction model (matching reference implementation):
 //! ── Pane ──
 //!   wheel deltaY  → zoom time (proportional, focal-point aware)
 //!   wheel deltaX  → scroll time
@@ -18,11 +18,11 @@
 //!   long press    → activate crosshair tracking mode
 //!   double tap    → zoom in / reset
 //! ── Time Axis ──
-//!   drag          → scale time (ratio from right edge, like LWC)
+//!   drag          → scale time (ratio from right edge, like reference implementation)
 //!   wheel deltaY  → zoom time
 //!   dbl-click     → reset time
 //! ── Price Axis ──
-//!   drag          → scale price (LWC inverted-Y formula)
+//!   drag          → scale price (reference implementation inverted-Y formula)
 //!   wheel deltaY  → zoom price
 //!   dbl-click     → reset price
 
@@ -55,7 +55,7 @@ fn now_ms() -> f64 {
         .unwrap_or(0.0)
 }
 
-/// Manhattan distance threshold before drag starts (LWC: CancelClickManhattanDistance = 5).
+/// Manhattan distance threshold before drag starts (reference implementation: CancelClickManhattanDistance = 5).
 const CANCEL_CLICK_DISTANCE: f64 = 5.0;
 /// Manhattan distance threshold for mouse double-click detection.
 const DOUBLE_CLICK_DISTANCE: f64 = 5.0;
@@ -91,7 +91,7 @@ pub enum HitZone {
     None,
 }
 
-/// Touch tracking mode — LWC-style crosshair on touch.
+/// Touch tracking mode — compatibility-style crosshair on touch.
 /// On touch devices crosshair is hidden until user long-presses,
 /// then it tracks the finger. Double-tap hides it again.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -117,22 +117,22 @@ pub struct InteractionHandler {
     last_click_x: f64,
     last_click_y: f64,
 
-    // ── Time axis scale state (LWC: TimeScale.startScale / scaleTo / endScale) ──
+    // ── Time axis scale state (reference implementation: TimeScale.startScale / scaleTo / endScale) ──
     time_scale_start_x: f64,
     time_scale_start_visible_bars: f64,
 
-    // ── Price axis scale state (LWC: PriceScale.startScale / scaleTo) ──
-    // LWC inverts Y: _scaleStartPoint = height - localY
+    // ── Price axis scale state (reference implementation: PriceScale.startScale / scaleTo) ──
+    // reference implementation inverts Y: _scaleStartPoint = height - localY
     price_scale_start_y_inv: f64,
     price_scale_start_range: f64,
     price_scale_start_mid: f64,
     price_scale_height: f64,
 
-    // ── Chart pan state (LWC: startScrollTime / scrollTimeTo) ──
+    // ── Chart pan state (reference implementation: startScrollTime / scrollTimeTo) ──
     scroll_start_x: f64,
     scroll_start_bar: f64,
 
-    // ── Chart pan price state (LWC: PriceScale.startScroll / scrollTo) ──
+    // ── Chart pan price state (reference implementation: PriceScale.startScroll / scrollTo) ──
     scroll_price_start_y: f64,
     scroll_price_start_min: f64,
     scroll_price_start_max: f64,
@@ -177,7 +177,7 @@ pub struct InteractionHandler {
     /// Set to true by WASM layer when long-press timer fires.
     pub long_press_fired: bool,
 
-    // ── Touch tracking mode (LWC _startTrackPoint) ──
+    // ── Touch tracking mode (reference implementation _startTrackPoint) ──
     /// When in tracking mode, crosshair follows finger relative to initial position.
     track_start_x: f64,
     track_start_y: f64,
@@ -296,6 +296,14 @@ impl InteractionHandler {
         }
     }
 
+    pub fn is_pressed_in_zone(&self, zone: HitZone) -> bool {
+        self.pressed && self.press_zone == zone
+    }
+
+    pub fn press_position(&self) -> (f64, f64) {
+        (self.press_x, self.press_y)
+    }
+
     // ── Pinch zoom (two-finger) ──
 
     /// Start a pinch gesture. Called from WASM when 2 touches detected.
@@ -351,7 +359,7 @@ impl InteractionHandler {
             return;
         }
 
-        // LWC: zoomScale = (scale - prevScale) * 5
+        // reference implementation: zoomScale = (scale - prevScale) * 5
         let zoom_scale = (scale - self.pinch_prev_scale) * PINCH_SCALE_MULTIPLIER;
         self.pinch_prev_scale = scale;
 
@@ -359,7 +367,7 @@ impl InteractionHandler {
             return;
         }
 
-        // Time zoom — same as LWC zoomTime
+        // Time zoom — same as reference implementation zoomTime
         let factor = 1.0 / (1.0 + zoom_scale / ZOOM_FACTOR_DIVISOR);
         viewport.zoom(self.pinch_start_center_bar, factor);
         viewport.clamp_to_data(data_len);
@@ -390,7 +398,7 @@ impl InteractionHandler {
 
     // ── Long-press → tracking mode ──
 
-    /// Called by WASM when the long-press timer fires (240ms like LWC).
+    /// Called by WASM when the long-press timer fires (240ms like reference implementation).
     /// Activates crosshair tracking mode.
     pub fn long_press(&mut self, x: f64, y: f64, crosshair: &mut CrosshairState) {
         self.long_press_fired = true;
@@ -426,6 +434,13 @@ impl InteractionHandler {
             viewport.price_locked = false;
             reset_time_range(viewport, data_len);
             viewport.auto_fit_price(bars);
+        }
+    }
+
+    pub fn exit_touch_tracking(&mut self, crosshair: &mut CrosshairState) {
+        if self.touch_crosshair_mode == TouchCrosshairMode::Tracking {
+            self.touch_crosshair_mode = TouchCrosshairMode::Hidden;
+            crosshair.active = false;
         }
     }
 
@@ -534,14 +549,12 @@ impl InteractionHandler {
                 }
             }
             if self.drag_active && pane_css_w > 0.0 {
-                // Track velocity (touch-only, used for inertia)
-                if self.is_touch {
-                    let dt = now - self.last_move_time;
-                    if dt > 0.0 && dt < VELOCITY_SAMPLE_WINDOW_MS {
-                        let vx = (x - self.last_move_x) / dt;
-                        self.velocity_x = self.velocity_x * VELOCITY_SMOOTHING_FACTOR
-                            + vx * (1.0 - VELOCITY_SMOOTHING_FACTOR);
-                    }
+                // Track velocity for optional kinetic scrolling.
+                let dt = now - self.last_move_time;
+                if dt > 0.0 && dt < VELOCITY_SAMPLE_WINDOW_MS {
+                    let vx = (x - self.last_move_x) / dt;
+                    self.velocity_x = self.velocity_x * VELOCITY_SMOOTHING_FACTOR
+                        + vx * (1.0 - VELOCITY_SMOOTHING_FACTOR);
                 }
                 self.last_move_time = now;
                 self.last_move_x = x;
@@ -573,7 +586,7 @@ impl InteractionHandler {
     }
 
     /// Pointer move on the TIME AXIS.
-    /// LWC: scaleTo — ratio of distances from right edge.
+    /// reference implementation: scaleTo — ratio of distances from right edge.
     pub fn time_axis_pointer_move(
         &mut self,
         x: f64,
@@ -685,14 +698,23 @@ impl InteractionHandler {
         bars: &BarArray,
         data_len: usize,
         now_ms: f64,
+        allow_double_click_reset: bool,
+        allow_touch_kinetic_scroll: bool,
+        allow_mouse_kinetic_scroll: bool,
     ) {
         let was_click = self.pressed && !self.drag_active;
         let zone = self.press_zone;
         let click_x = self.press_x;
         let click_y = self.press_y;
 
-        // Kinetic scrolling: TOUCH ONLY, horizontal only
-        if self.is_touch && self.pressed && self.drag_active && zone == HitZone::Chart {
+        // Kinetic scrolling: optional per pointer type, horizontal only.
+        let allow_kinetic_scroll = if self.is_touch {
+            allow_touch_kinetic_scroll
+        } else {
+            allow_mouse_kinetic_scroll
+        };
+        if allow_kinetic_scroll && self.pressed && self.drag_active && zone == HitZone::Chart
+        {
             let dt = now_ms - self.last_move_time;
             if dt < KINETIC_TRIGGER_WINDOW_MS && self.velocity_x.abs() > MIN_KINETIC_VELOCITY {
                 self.is_gliding = true;
@@ -707,13 +729,14 @@ impl InteractionHandler {
         }
 
         // If touch tracking mode and user lifts finger — keep crosshair visible
-        // (LWC behavior: crosshair stays until next double-tap or touchStart+exit)
+        // (reference behavior: crosshair stays until next double-tap or touchStart+exit)
 
         self.pressed = false;
         self.drag_active = false;
 
         // Double-click / double-tap detection
-        if was_click && zone != HitZone::None && !self.long_press_fired {
+        if allow_double_click_reset && was_click && zone != HitZone::None && !self.long_press_fired
+        {
             let distance_threshold = if self.is_touch {
                 30.0
             } else {
@@ -755,7 +778,7 @@ impl InteractionHandler {
     }
 
     /// Wheel event on the chart pane.
-    /// LWC baseline: deltaY → time zoom, deltaX → time scroll.
+    /// reference baseline: deltaY → time zoom, deltaX → time scroll.
     /// Footprint mode can optionally apply cursor-anchored Y zoom as well.
     pub fn pane_wheel(
         &mut self,
@@ -992,7 +1015,7 @@ impl InteractionHandler {
     }
 
     /// Process kinetic scrolling deceleration on each frame.
-    /// Touch-only, horizontal-only (like LWC). Returns true if gliding is still active.
+    /// Touch-only, horizontal-only (like reference implementation). Returns true if gliding is still active.
     pub fn update_gliding(
         &mut self,
         pane_css_w: f64,
@@ -1041,7 +1064,7 @@ impl InteractionHandler {
 /// Compute the magnet-snap price for a given bar (MagnetOHLC mode).
 ///
 /// Snaps to the O/H/L/C value whose CSS Y is nearest to `cursor_css_y`
-/// (matching LWC's `magnet.ts` algorithm).
+/// (matching the reference implementation's `magnet.ts` algorithm).
 fn magnet_snap_ohlc_price(
     bars: &BarArray,
     idx: usize,
@@ -1071,7 +1094,7 @@ fn magnet_snap_ohlc_price(
 
 #[cfg(test)]
 mod tests {
-    use super::InteractionHandler;
+    use super::{HitZone, InteractionHandler, MIN_KINETIC_VELOCITY};
     use crate::core::constants::PHYSICS_FRAME_MS;
     use crate::core::data::{Bar, BarArray};
     use crate::core::viewport::Viewport;
@@ -1272,5 +1295,33 @@ mod tests {
         let still_gliding = ih.update_gliding(800.0, 600.0, &mut vp, &bars, bars.len());
         assert!(still_gliding);
         assert!(vp.start_bar > start);
+    }
+
+    #[test]
+    fn mouse_kinetic_option_controls_chart_drag_glide() {
+        let mut ih = InteractionHandler::new();
+        let bars = mk_bars(240);
+        let mut vp = Viewport::new(800, 600);
+        vp.set_range(20.0, 120.0);
+
+        ih.pressed = true;
+        ih.drag_active = true;
+        ih.press_zone = HitZone::Chart;
+        ih.is_touch = false;
+        ih.velocity_x = MIN_KINETIC_VELOCITY * 2.0;
+        ih.last_move_time = 100.0;
+
+        ih.pointer_up(&mut vp, &bars, bars.len(), 110.0, true, true, false);
+        assert!(!ih.is_gliding, "mouse kinetic should stay off when disabled");
+
+        ih.pressed = true;
+        ih.drag_active = true;
+        ih.press_zone = HitZone::Chart;
+        ih.is_touch = false;
+        ih.velocity_x = MIN_KINETIC_VELOCITY * 2.0;
+        ih.last_move_time = 100.0;
+
+        ih.pointer_up(&mut vp, &bars, bars.len(), 110.0, true, true, true);
+        assert!(ih.is_gliding, "mouse kinetic should start when enabled");
     }
 }

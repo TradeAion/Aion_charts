@@ -1,8 +1,8 @@
 //! Line series visual options — color, width, dash style, etc.
 
-/// Line dash style — matches LWC's LineStyle enum.
+/// Line dash style — matches the reference implementation's LineStyle enum.
 ///
-/// Dash patterns are width-relative per the LWC specification:
+/// Dash patterns are width-relative per the reference specification:
 /// - Solid = no dash
 /// - Dotted = [w, 2w]
 /// - Dashed = [2w, 2w]
@@ -29,7 +29,7 @@ impl LineStyle {
     /// Returns (dash_len, gap_len) in physical pixels, scaled by line width.
     /// (0, 0) = solid (no dash pattern).
     ///
-    /// LWC dash table (w = line_width in physical px):
+    /// reference implementation dash table (w = line_width in physical px):
     /// - Solid: (0, 0)
     /// - Dotted: (w, 2w)
     /// - Dashed: (2w, 2w)
@@ -39,7 +39,7 @@ impl LineStyle {
         let w = line_width.max(1.0);
         match self {
             Self::Solid => (0.0, 0.0),
-            // Keep dotted visible but less dense, closer to TradingView spacing.
+            // Keep dotted visible but less dense, closer to reference platform spacing.
             Self::Dotted => (w, 2.0 * w),
             Self::Dashed => (2.0 * w, 2.0 * w),
             Self::LargeDashed => (6.0 * w, 6.0 * w),
@@ -70,7 +70,7 @@ impl LineStyle {
 /// Visual options for a line series.
 #[derive(Debug, Clone)]
 pub struct LineSeriesOptions {
-    /// Line color [R, G, B, A] (0.0–1.0). Default: #2962FF (TradingView blue).
+    /// Line color [R, G, B, A] (0.0–1.0). Default: #2962FF (default blue).
     pub color: [f32; 4],
     /// Line width in CSS px.
     pub line_width: f64,

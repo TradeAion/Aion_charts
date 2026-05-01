@@ -1458,7 +1458,7 @@ impl DrawingManager {
             (false, Vec::new())
         };
 
-        // Rectangle midline state (TradingView-style horizontal middle line).
+        // Rectangle midline state (platform-style horizontal middle line).
         // Only Rectangle currently exposes this control. When the rectangle's
         // `middle_line()` is `None`, the midline is disabled but we still
         // surface sensible defaults so the UI checkbox + style inputs have
@@ -1714,7 +1714,7 @@ impl DrawingManager {
     }
 
     /// Toggle / configure the optional horizontal middle line on the currently
-    /// selected Rectangle drawing (TradingView-style midline).
+    /// selected Rectangle drawing (platform-style midline).
     ///
     /// When `enabled` is false, the midline is removed (`None`). When true,
     /// the midline is set to the provided color/width/dash. Returns `false`

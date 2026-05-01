@@ -1,6 +1,6 @@
 //! Global crosshair model with per-pane views.
 //!
-//! Based on LWC's `crosshair.ts` - tracks a single logical position
+//! Based on the reference implementation's `crosshair.ts` - tracks a single logical position
 //! (time index + price) that renders differently in each pane:
 //! - Vertical line: same time index → same X in all panes
 //! - Horizontal line: only in the active pane where cursor is
@@ -10,7 +10,7 @@ use crate::core::pane::PaneId;
 use crate::core::viewport::Viewport;
 
 /// Crosshair mode.
-/// X line always snaps to bar centers (LWC behavior).
+/// X line always snaps to bar centers (reference behavior).
 /// Y line behavior depends on mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CrosshairMode {
@@ -36,7 +36,7 @@ pub struct Crosshair {
     /// Currently active pane (where cursor is hovering).
     active_pane: Option<PaneId>,
     /// Bar/time index (shared across all panes).
-    /// This is the key insight from LWC - use time index not pixel X.
+    /// This is the key insight from reference implementation - use time index not pixel X.
     time_index: Option<usize>,
     /// Price in the active pane's coordinate system.
     price: f64,
@@ -151,7 +151,7 @@ impl Crosshair {
 
     /// Check if price axis label should be visible in given pane.
     ///
-    /// LWC shows the label on all panes' price axes, but we simplify
+    /// reference implementation shows the label on all panes' price axes, but we simplify
     /// to only show on the active pane for now.
     pub fn price_label_visible(&self, pane_id: PaneId) -> bool {
         self.visible() && self.active_pane == Some(pane_id)

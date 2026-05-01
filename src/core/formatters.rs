@@ -1,21 +1,21 @@
-//! LWC-matching formatters — price, time, volume.
+//! reference-matching formatters — price, time, volume.
 //!
-//! Architecture mirrors LWC's `src/formatters/`:
+//! Architecture mirrors the reference implementation's `src/formatters/`:
 //! - PriceFormatter: automatic decimal precision based on price scale
-//! - Time formatting: adaptive labels (year/month/day/time) matching LWC's defaultTickMarkFormatter
-//! - VolumeFormatter: K/M/B suffixes matching LWC's volume-formatter.ts
-//! - nice_step: LWC-like 1-2-2.5-5 series for clean tick values
+//! - Time formatting: adaptive labels (year/month/day/time) matching the reference implementation's defaultTickMarkFormatter
+//! - VolumeFormatter: K/M/B suffixes matching the reference implementation's volume-formatter.ts
+//! - nice_step: reference-like 1-2-2.5-5 series for clean tick values
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-// ── Price formatting (LWC PriceFormatter) ────────────────────────────────────
+// ── Price formatting (reference implementation PriceFormatter) ────────────────────────────────────
 
 /// Format a price value with dynamic decimal precision and grouped thousands.
 /// Precision follows the requested tick step instead of forcing 2 decimals.
 pub fn format_price(v: f64, step: f64) -> String {
     let d = decimal_precision(step);
-    // LWC uses Unicode minus \u{2212} for negative (same width as +)
+    // reference implementation uses Unicode minus \u{2212} for negative (same width as +)
     if v < 0.0 {
         format!("\u{2212}{}", format_decimal_grouped(v.abs(), d))
     } else {
@@ -47,7 +47,7 @@ pub fn format_indexed(v: f64, step: f64) -> String {
     }
 }
 
-/// Compute decimal precision from step size (matches LWC _calculateDecimal).
+/// Compute decimal precision from step size (matches reference implementation _calculateDecimal).
 fn decimal_precision(step: f64) -> usize {
     if step <= 0.0 {
         return 2;
@@ -90,10 +90,10 @@ fn add_thousands_separators(int_part: &str) -> String {
     out
 }
 
-// ── Volume formatting (LWC VolumeFormatter) ──────────────────────────────────
+// ── Volume formatting (reference implementation VolumeFormatter) ──────────────────────────────────
 
 /// Format a volume value with K/M/B suffixes.
-/// Matches LWC's VolumeFormatter.format() exactly.
+/// Matches the reference implementation's VolumeFormatter.format() exactly.
 pub fn format_volume(vol: f64) -> String {
     let (sign, v) = if vol < 0.0 { ("-", -vol) } else { ("", vol) };
 
@@ -161,7 +161,7 @@ pub fn format_qty(qty: f64) -> String {
     }
 }
 
-// ── Time formatting (LWC defaultTickMarkFormatter) ───────────────────────────
+// ── Time formatting (reference defaultTickMarkFormatter) ───────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimeAxisLabel {
@@ -170,7 +170,7 @@ pub struct TimeAxisLabel {
 }
 
 /// Format a Unix epoch millisecond timestamp into an axis-appropriate label.
-/// Adapts format based on context, matching LWC's defaultTickMarkFormatter.
+/// Adapts format based on context, matching the reference implementation's defaultTickMarkFormatter.
 #[cfg(target_arch = "wasm32")]
 pub fn format_time_axis_label(ms: u64) -> TimeAxisLabel {
     let date = js_sys::Date::new(&JsValue::from_f64(ms as f64));
@@ -181,7 +181,7 @@ pub fn format_time_axis_label(ms: u64) -> TimeAxisLabel {
     let month = date.get_utc_month() + 1; // 0-based in JS
     let year = date.get_utc_full_year();
 
-    // Determine tick mark type based on time components (LWC logic)
+    // Determine tick mark type based on time components (reference logic)
     if h == 0 && m == 0 && s == 0 {
         if day == 1 {
             if month == 1 {
@@ -317,10 +317,10 @@ pub fn format_countdown(remaining_ms: f64, interval_ms: Option<f64>) -> Option<S
     }
 }
 
-// ── Tick step computation (LWC-like 1-2-2.5-5 series) ───────────────────────
+// ── Tick step computation (reference-like 1-2-2.5-5 series) ───────────────────────
 
 /// Compute a "nice" step value for axis ticks.
-/// Uses LWC-like ladder: 1, 2, 2.5, 5, 10.
+/// Uses reference-like ladder: 1, 2, 2.5, 5, 10.
 pub fn nice_step(raw: f64) -> f64 {
     if raw <= 0.0 {
         return 1.0;

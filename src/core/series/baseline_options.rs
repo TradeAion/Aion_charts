@@ -1,6 +1,6 @@
 //! Baseline series visual options — two-tone area fill above/below a base value.
 //!
-//! LWC's BaselineSeries renders:
+//! the reference implementation's BaselineSeries renders:
 //!   - A line connecting data points
 //!   - Fill above the baseline in `topFillColor1` → `topFillColor2` gradient
 //!   - Fill below the baseline in `bottomFillColor1` → `bottomFillColor2` gradient
@@ -14,27 +14,27 @@ pub struct BaselineSeriesOptions {
     pub base_value: f64,
 
     /// Line color above the baseline [R, G, B, A].
-    /// LWC default: rgba(38, 166, 154, 1) — teal/green.
+    /// reference default: rgba(38, 166, 154, 1) — teal/green.
     pub top_line_color: [f32; 4],
 
     /// Line color below the baseline [R, G, B, A].
-    /// LWC default: rgba(239, 83, 80, 1) — red.
+    /// reference default: rgba(239, 83, 80, 1) — red.
     pub bottom_line_color: [f32; 4],
 
     /// Fill color at the line (above baseline) — top of above-gradient.
-    /// LWC default: rgba(38, 166, 154, 0.28).
+    /// reference default: rgba(38, 166, 154, 0.28).
     pub top_fill_color1: [f32; 4],
 
     /// Fill color at the baseline (above region) — bottom of above-gradient.
-    /// LWC default: rgba(38, 166, 154, 0.05).
+    /// reference default: rgba(38, 166, 154, 0.05).
     pub top_fill_color2: [f32; 4],
 
     /// Fill color at the baseline (below region) — top of below-gradient.
-    /// LWC default: rgba(239, 83, 80, 0.05).
+    /// reference default: rgba(239, 83, 80, 0.05).
     pub bottom_fill_color1: [f32; 4],
 
     /// Fill color at the line (below baseline) — bottom of below-gradient.
-    /// LWC default: rgba(239, 83, 80, 0.28).
+    /// reference default: rgba(239, 83, 80, 0.28).
     pub bottom_fill_color2: [f32; 4],
 
     /// Line width in CSS pixels.

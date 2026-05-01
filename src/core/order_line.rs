@@ -1,4 +1,4 @@
-//! OrderLine — TradingView-style order management lines.
+//! OrderLine — platform-style order management lines.
 //!
 //! Order lines display pending orders on the chart with:
 //! - Order type labels (Limit, Stop, Take Profit, Stop Loss)

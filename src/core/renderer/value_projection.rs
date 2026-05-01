@@ -29,7 +29,7 @@ pub struct ProjectedLastValue {
     /// Formatted label text for the current price-scale mode.
     pub label: String,
     /// Optional countdown string (e.g. "00:39") — rendered on a second line
-    /// below the price label, TradingView-style.
+    /// below the price label, platform-style.
     pub countdown: Option<String>,
 }
 
@@ -272,12 +272,12 @@ pub fn price_to_pane_y_phys(price: f64, vp: &Viewport, pane_ph: f64) -> f64 {
 
 /// Shared Y tick-step in internal price-scale space.
 ///
-/// Ported from LWC's `PriceTickMarkBuilder.tickSpan()` which runs three
+/// Ported from the reference implementation's `PriceTickMarkBuilder.tickSpan()` which runs three
 /// `PriceTickSpanCalculator` instances with divider sequences
 /// `[2, 2.5, 2]`, `[2, 2, 2.5]`, `[2.5, 2, 2]` and takes the minimum.
 ///
 /// `axis_ph` must be the CANDLE AREA height in physical pixels — the same
-/// coordinate space where tick positions are mapped. LWC uses a single
+/// coordinate space where tick positions are mapped. reference implementation uses a single
 /// `priceScale.height()` for both step and coordinate mapping; we must do
 /// the same to avoid step transitions at wrong zoom levels.
 pub fn y_tick_step_internal(vp: &Viewport, axis_ph: f64, dpr: f64, style: &ChartStyle) -> f64 {
@@ -290,9 +290,9 @@ pub fn y_tick_step_internal(vp: &Viewport, axis_ph: f64, dpr: f64, style: &Chart
     let max_tick_span = range * mark_height / scale_height;
     let min_movement = inferred_min_movement(range);
 
-    let s1 = lwc_tick_span(range, max_tick_span, min_movement, &[2.0, 2.5, 2.0]);
-    let s2 = lwc_tick_span(range, max_tick_span, min_movement, &[2.0, 2.0, 2.5]);
-    let s3 = lwc_tick_span(range, max_tick_span, min_movement, &[2.5, 2.0, 2.0]);
+    let s1 = reference_tick_span(range, max_tick_span, min_movement, &[2.0, 2.5, 2.0]);
+    let s2 = reference_tick_span(range, max_tick_span, min_movement, &[2.0, 2.0, 2.5]);
+    let s3 = reference_tick_span(range, max_tick_span, min_movement, &[2.5, 2.0, 2.0]);
 
     s1.min(s2).min(s3).max(0.0001)
 }
@@ -300,9 +300,9 @@ pub fn y_tick_step_internal(vp: &Viewport, axis_ph: f64, dpr: f64, style: &Chart
 const TICK_SPAN_EPS: f64 = 1e-14;
 const FRACTIONAL_DIVIDERS: [f64; 3] = [2.0, 2.5, 2.0];
 
-/// Port of LWC's `PriceTickSpanCalculator.tickSpan()` for base-decimal prices
+/// Port of the reference implementation's `PriceTickSpanCalculator.tickSpan()` for base-decimal prices
 /// with an adaptive minimum movement derived from the current range.
-fn lwc_tick_span(
+fn reference_tick_span(
     range: f64,
     max_tick_span: f64,
     min_movement: f64,
@@ -315,7 +315,7 @@ fn lwc_tick_span(
     let mut idx = 0usize;
     let mut c = integral_dividers[0];
 
-    // LWC integral loop — three conditions must ALL be true to continue:
+    // reference implementation integral loop — three conditions must ALL be true to continue:
     // 1. span >= minMovement  (and span > minMovement + eps)
     // 2. span >= maxTickSpan * c
     // 3. span >= 1
@@ -403,7 +403,7 @@ pub fn collect_last_values(
 
     // Main candlestick last value (pending-aware read via BarArray::get).
     //
-    // LWC behaviour: the last-price label is ALWAYS included regardless of
+    // reference behaviour: the last-price label is ALWAYS included regardless of
     // whether the price is currently inside the visible candle area.  The
     // rendering side clamps the label to the top/bottom edge of the axis
     // (via `compute_right_axis_label_geometry`), keeping it visible even

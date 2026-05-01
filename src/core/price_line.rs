@@ -1,6 +1,6 @@
 //! PriceLine — horizontal price level lines with labels.
 //!
-//! Matches LWC's createPriceLine() API:
+//! Matches the reference implementation's createPriceLine() API:
 //! - Horizontal line at a specified price, spanning the full pane width
 //! - Optional label on the price axis
 //! - Hit-testable (7px threshold) and optionally draggable

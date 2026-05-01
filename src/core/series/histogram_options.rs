@@ -2,7 +2,7 @@
 //!
 //! A histogram series renders vertical bars from a base value (default 0)
 //! to the data value. Used for MACD histogram, volume profile overlays, etc.
-//! LWC supports per-bar color overrides via the data array.
+//! reference implementation supports per-bar color overrides via the data array.
 
 /// Visual options for a histogram series.
 #[derive(Debug, Clone)]

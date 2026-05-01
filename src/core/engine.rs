@@ -21,7 +21,7 @@ use crate::core::events::{ChartEvent, EventBus};
 use crate::core::execution_marks::{ExecutionLabelMode, ExecutionMarkManager};
 use crate::core::footprint::{FootprintBar, FootprintData, FootprintDisplayMode, FootprintOptions};
 use crate::core::indicators::IndicatorManager;
-use crate::core::markers::MarkerManager;
+use crate::core::markers::{MarkerManager, MarkerPosition};
 use crate::core::order_line::OrderLineManager;
 use crate::core::price_line::PriceLineManager;
 use crate::core::renderer::draw_list::DrawText;
@@ -178,6 +178,13 @@ enum FootprintTimeRangeAnchor {
     CenterPreserving,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct AutoScaleContribution {
+    pub id: u32,
+    pub min_price: f64,
+    pub max_price: f64,
+}
+
 /// The main chart engine. Owns everything needed to render the pane.
 pub struct ChartEngine {
     pub renderer: RendererBackend,
@@ -192,6 +199,8 @@ pub struct ChartEngine {
     pub price_lines: PriceLineManager,
     pub order_lines: OrderLineManager,
     pub markers: MarkerManager,
+    pub autoscale_contributions: Vec<AutoScaleContribution>,
+    next_autoscale_contribution_id: u32,
     pub execution_marks: ExecutionMarkManager,
     pub indicators: IndicatorManager,
     pub dpr: f64,
@@ -380,6 +389,8 @@ impl ChartEngine {
             price_lines,
             order_lines,
             markers,
+            autoscale_contributions: Vec::new(),
+            next_autoscale_contribution_id: 1,
             execution_marks,
             indicators,
             dpr,
@@ -511,6 +522,43 @@ impl ChartEngine {
         self.refresh_price_scale_margin_mode();
         self.sync_hidden_volume_default_margins();
         self.viewport.price_invalidated = true;
+    }
+
+    pub fn add_autoscale_contribution(
+        &mut self,
+        min_price: f64,
+        max_price: f64,
+    ) -> Result<u32, String> {
+        if !min_price.is_finite() || !max_price.is_finite() {
+            return Err("autoscale contribution bounds must be finite".into());
+        }
+        let id = self.next_autoscale_contribution_id.max(1);
+        self.next_autoscale_contribution_id = id.saturating_add(1).max(1);
+        self.autoscale_contributions.push(AutoScaleContribution {
+            id,
+            min_price,
+            max_price,
+        });
+        self.viewport.price_invalidated = true;
+        Ok(id)
+    }
+
+    pub fn remove_autoscale_contribution(&mut self, id: u32) -> bool {
+        let before = self.autoscale_contributions.len();
+        self.autoscale_contributions
+            .retain(|contribution| contribution.id != id);
+        let removed = self.autoscale_contributions.len() != before;
+        if removed {
+            self.viewport.price_invalidated = true;
+        }
+        removed
+    }
+
+    pub fn clear_autoscale_contributions(&mut self) {
+        if !self.autoscale_contributions.is_empty() {
+            self.autoscale_contributions.clear();
+            self.viewport.price_invalidated = true;
+        }
     }
 
     /// Get the current main chart type.
@@ -1030,7 +1078,7 @@ impl ChartEngine {
         Ok(())
     }
 
-    /// LWC-style update semantics for a line/area/baseline series:
+    /// compatibility-style update semantics for a line/area/baseline series:
     /// update last when timestamp matches, append when newer.
     pub fn upsert_series_point(&mut self, id: SeriesId, point: LinePoint) -> Result<(), String> {
         let last_ts = self
@@ -1091,7 +1139,7 @@ impl ChartEngine {
         Ok(())
     }
 
-    /// LWC-style update semantics for a histogram series:
+    /// compatibility-style update semantics for a histogram series:
     /// update last when timestamp matches, append when newer.
     pub fn upsert_histogram_point(
         &mut self,
@@ -1149,7 +1197,7 @@ impl ChartEngine {
         Ok(())
     }
 
-    /// LWC-style update semantics for an OHLC bar overlay series:
+    /// compatibility-style update semantics for an OHLC bar overlay series:
     /// update last when timestamp matches, append when newer.
     pub fn upsert_bar_series_point(
         &mut self,
@@ -1170,6 +1218,7 @@ impl ChartEngine {
     pub fn remove_series(&mut self, id: SeriesId) -> bool {
         let removed = self.series.remove(id);
         if removed {
+            self.markers.remove_series(id.0);
             self.on_overlay_series_changed();
         }
         removed
@@ -1411,6 +1460,86 @@ impl ChartEngine {
         bounds
     }
 
+    fn visible_marker_internal_bounds(
+        &self,
+        current_internal_bounds: (f64, f64),
+    ) -> Option<(f64, f64)> {
+        if !self.markers.auto_scale() || self.time_scale.is_empty() || self.bars.is_empty() {
+            return None;
+        }
+
+        let visible_start = self.viewport.start_bar - 1.0;
+        let visible_end = self.viewport.end_bar + 1.0;
+        let pane_css_h = (self.viewport.height as f64 / self.dpr.max(1e-9)).max(1.0);
+        let candle_css_h = (pane_css_h * self.viewport.candle_height_frac()).max(1.0);
+        let internal_span = (current_internal_bounds.1 - current_internal_bounds.0)
+            .abs()
+            .max(1e-9);
+        let internal_per_css_px = internal_span / candle_css_h;
+        let mut bounds = None;
+
+        for (series_id, series_markers) in self.markers.iter() {
+            if *series_id != 0 {
+                let Some(owner) = self.series.get(SeriesId(*series_id)) else {
+                    continue;
+                };
+                if !owner.is_visible() {
+                    continue;
+                }
+            }
+
+            for marker in series_markers.iter() {
+                let Some(logical_slot) = marker
+                    .timestamp
+                    .and_then(|ts| self.time_scale.logical_index_for_timestamp(ts))
+                    .or_else(|| self.time_scale.logical_index_for_main_bar(marker.bar_index))
+                else {
+                    continue;
+                };
+                if logical_slot < visible_start || logical_slot > visible_end {
+                    continue;
+                }
+
+                let main_bar_index = self
+                    .time_scale
+                    .main_bar_index_for_logical(logical_slot)
+                    .unwrap_or(marker.bar_index);
+                if main_bar_index >= self.bars.len() {
+                    continue;
+                }
+
+                let visual_padding_css = (marker.size * 1.25 + 8.0).max(0.0);
+                let visual_padding_internal = visual_padding_css * internal_per_css_px;
+                let internal = match marker.position {
+                    MarkerPosition::AboveBar => {
+                        self.viewport
+                            .price_to_internal(self.bars.high(main_bar_index) as f64)
+                            + visual_padding_internal
+                    }
+                    MarkerPosition::BelowBar => {
+                        self.viewport
+                            .price_to_internal(self.bars.low(main_bar_index) as f64)
+                            - visual_padding_internal
+                    }
+                    MarkerPosition::AtPrice => self.viewport.price_to_internal(marker.price),
+                };
+                merge_bounds(&mut bounds, internal, internal);
+            }
+        }
+
+        bounds
+    }
+
+    fn autoscale_contribution_internal_bounds(&self) -> Option<(f64, f64)> {
+        let mut bounds = None;
+        for contribution in &self.autoscale_contributions {
+            let min_internal = self.viewport.price_to_internal(contribution.min_price);
+            let max_internal = self.viewport.price_to_internal(contribution.max_price);
+            merge_bounds(&mut bounds, min_internal, max_internal);
+        }
+        bounds
+    }
+
     fn fit_price_to_visible_main_and_overlay_bounds(&mut self) -> bool {
         let Some((start, main_lo, main_hi)) = self.visible_main_raw_bounds() else {
             return false;
@@ -1425,6 +1554,17 @@ impl ChartEngine {
         ));
         if let Some((overlay_lo, overlay_hi)) = self.visible_overlay_internal_bounds() {
             merge_bounds(&mut bounds, overlay_lo, overlay_hi);
+        }
+        if let Some((contribution_lo, contribution_hi)) =
+            self.autoscale_contribution_internal_bounds()
+        {
+            merge_bounds(&mut bounds, contribution_lo, contribution_hi);
+        }
+        if let Some(current_bounds) = bounds {
+            if let Some((marker_lo, marker_hi)) = self.visible_marker_internal_bounds(current_bounds)
+            {
+                merge_bounds(&mut bounds, marker_lo, marker_hi);
+            }
         }
         let Some((internal_lo, internal_hi)) = bounds else {
             return false;
@@ -1557,6 +1697,12 @@ impl ChartEngine {
         if let Some((overlay_min, overlay_max)) = self.visible_overlay_internal_bounds() {
             data_min = data_min.min(overlay_min);
             data_max = data_max.max(overlay_max);
+        }
+        if let Some((contribution_min, contribution_max)) =
+            self.autoscale_contribution_internal_bounds()
+        {
+            data_min = data_min.min(contribution_min);
+            data_max = data_max.max(contribution_max);
         }
         let internal_frac =
             1.0 - self.viewport.scale_margin_top - self.viewport.scale_margin_bottom;
@@ -1796,7 +1942,7 @@ impl ChartEngine {
         self.studies.update_studies(&self.bars);
         self.indicators.on_incremental_update(&self.bars);
 
-        // LWC-style viewport advance: if auto_scroll is enabled AND the previous
+        // compatibility-style viewport advance: if auto_scroll is enabled AND the previous
         // last bar was inside the visible range, shift the viewport right by
         // exactly 1 bar so the new bar comes into view at the same position the
         // old last bar occupied.
@@ -1861,7 +2007,7 @@ impl ChartEngine {
         Ok(())
     }
 
-    /// LWC-style update semantics for the main bar series:
+    /// compatibility-style update semantics for the main bar series:
     /// update last when timestamp matches, append when newer.
     pub fn upsert_bar(&mut self, bar: Bar) -> Result<(), String> {
         match Self::resolve_upsert_action("upsert_bar", self.last_main_timestamp(), bar.timestamp)?
@@ -2332,6 +2478,36 @@ mod tests {
     }
 
     #[test]
+    fn autoscale_contributions_expand_and_release_price_fit() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        engine.viewport.auto_scroll = false;
+        engine
+            .set_data(vec![mk_bar(1_000), mk_bar(2_000), mk_bar(3_000)])
+            .unwrap();
+
+        let id = engine
+            .add_autoscale_contribution(-200.0, 500.0)
+            .expect("contribution id");
+        engine.auto_fit_price_if_unlocked();
+
+        assert!(
+            engine.viewport.price_to_frac(500.0) <= 1.0,
+            "autoscale contribution high should be included"
+        );
+        assert!(
+            engine.viewport.price_to_frac(-200.0) >= 0.0,
+            "autoscale contribution low should be included"
+        );
+
+        assert!(engine.remove_autoscale_contribution(id));
+        engine.auto_fit_price_if_unlocked();
+        assert!(
+            engine.viewport.price_to_frac(500.0) > 1.0,
+            "removed autoscale contribution should no longer expand the range"
+        );
+    }
+
+    #[test]
     fn overlay_visibility_changes_trigger_refit() {
         let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
         engine.viewport.auto_scroll = false;
@@ -2370,6 +2546,23 @@ mod tests {
             engine.viewport.price_to_frac(420.0) > 1.0,
             "hidden overlay should no longer expand the fitted range"
         );
+    }
+
+    #[test]
+    fn removing_overlay_series_removes_its_markers() {
+        let mut engine = ChartEngine::new(RendererBackend::Noop, 800, 400, 1.0);
+        let series_id = engine.add_line_series(LineSeriesOptions::default());
+        let marker_id = engine
+            .markers
+            .for_series(series_id.0)
+            .add(crate::core::markers::SeriesMarker::default());
+
+        assert_eq!(marker_id, 1);
+        assert_eq!(engine.markers.get(series_id.0).unwrap().len(), 1);
+
+        assert!(engine.remove_series(series_id));
+
+        assert!(engine.markers.get(series_id.0).is_none());
     }
 
     #[test]

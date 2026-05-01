@@ -175,6 +175,26 @@ pub enum ChartEvent {
         group_id: Option<String>,
     },
 
+    /// User hovered over a series marker.
+    MarkerHover {
+        /// Series ID for the marker, or None when leaving.
+        series_id: Option<u32>,
+        /// Marker ID within the series, or None when leaving.
+        marker_id: Option<u32>,
+        /// Main bar index for the marker, if hovering.
+        bar_index: Option<usize>,
+        /// Marker timestamp in milliseconds, if available.
+        timestamp: Option<u64>,
+        /// Marker shape, if hovering.
+        shape: Option<String>,
+        /// Marker position, if hovering.
+        position: Option<String>,
+        /// Marker z-order layer, if hovering.
+        z_order: Option<String>,
+        /// Marker text label, if hovering.
+        text: Option<String>,
+    },
+
     /// User dragged an order line to modify its price.
     OrderLineModified {
         /// Unique ID of the order line.
@@ -227,6 +247,7 @@ impl ChartEvent {
             Self::ExecutionMarkClick { .. } => "executionMarkClick",
             Self::ExecutionClusterClick { .. } => "executionClusterClick",
             Self::ExecutionMarkHover { .. } => "executionMarkHover",
+            Self::MarkerHover { .. } => "markerHover",
             Self::OrderLineModified { .. } => "orderLineModified",
             Self::OrderLineCancelled { .. } => "orderLineCancelled",
         }
@@ -249,6 +270,7 @@ impl ChartEvent {
         "executionMarkClick",
         "executionClusterClick",
         "executionMarkHover",
+        "markerHover",
         "orderLineModified",
         "orderLineCancelled",
     ];
@@ -439,13 +461,14 @@ mod tests {
 
     #[test]
     fn all_event_names_are_valid() {
-        assert_eq!(ChartEvent::ALL_EVENT_NAMES.len(), 17);
+        assert_eq!(ChartEvent::ALL_EVENT_NAMES.len(), 18);
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"crosshairMove"));
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"error"));
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"rendererFallback"));
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"executionMarkClick"));
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"executionClusterClick"));
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"executionMarkHover"));
+        assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"markerHover"));
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"orderLineModified"));
         assert!(ChartEvent::ALL_EVENT_NAMES.contains(&"orderLineCancelled"));
     }

@@ -21,13 +21,13 @@ pub struct VisibleTimePoint {
 
 /// Compute price (Y-axis) tick marks.
 ///
-/// Faithfully ports LWC's `PriceTickMarkBuilder._updateMarks()`:
+/// Faithfully ports the reference implementation's `PriceTickMarkBuilder._updateMarks()`:
 /// - Tick step is computed from the CANDLE AREA height (the same coordinate
-///   space where ticks are positioned). LWC uses a single `priceScale.height()`
+///   space where ticks are positioned). reference implementation uses a single `priceScale.height()`
 ///   for both step and coordinate mapping.
-/// - Iteration runs HIGH→LOW (top of chart to bottom), matching LWC exactly.
+/// - Iteration runs HIGH→LOW (top of chart to bottom), matching reference implementation exactly.
 ///   This gives priority to higher-value ticks when spacing is tight.
-/// - Tick alignment uses `high - (high % span)` (LWC's modulo alignment).
+/// - Tick alignment uses `high - (high % span)` (the reference implementation's modulo alignment).
 ///
 /// Supports all PriceScaleMode variants: Normal, Logarithmic, Percentage, IndexedTo100.
 pub fn compute_y_ticks(
@@ -42,29 +42,29 @@ pub fn compute_y_ticks(
         return vec![];
     }
 
-    // ── Step computation uses CANDLE AREA height (matches LWC) ──
-    // LWC: maxTickSpan = (high-low) * markHeight / priceScale.height()
+    // ── Step computation uses CANDLE AREA height (matches reference implementation) ──
+    // reference implementation: maxTickSpan = (high-low) * markHeight / priceScale.height()
     // We use candle_h so that step transitions match the coordinate space.
     let step = y_tick_step_internal(vp, candle_h, dpr, style).max(0.0001);
     let min_gap_px = (style.price_scale_tick_mark_spacing_css() * dpr).max(1.0);
 
     // ── Compute high/low: extend range to cover the full pane ──
-    // LWC: high = coordinateToLogical(0), low = coordinateToLogical(height-1)
+    // reference implementation: high = coordinateToLogical(0), low = coordinateToLogical(height-1)
     // This extends the price range into margin/volume areas so ticks can
     // appear outside the data region.
     let price_at_pane_bottom = vp.price_min - (range * (pane_h - candle_h) / candle_h);
     let high = vp.price_max + step; // slightly above top to catch edge ticks
     let low = price_at_pane_bottom;
 
-    // ── LWC modulo alignment: start at largest multiple of step ≤ high ──
-    // LWC: mod = high % span; mod += (mod < 0) ? span : 0; start = high - mod
+    // ── reference implementation modulo alignment: start at largest multiple of step ≤ high ──
+    // reference implementation: mod = high % span; mod += (mod < 0) ? span : 0; start = high - mod
     let mut modulo = high % step;
     if modulo < 0.0 {
         modulo += step;
     }
     let start = high - modulo;
 
-    // ── Iterate HIGH → LOW (LWC's _updateMarks direction) ──
+    // ── Iterate HIGH → LOW (the reference implementation's _updateMarks direction) ──
     let mut out: Vec<TickMark> = Vec::new();
     let mut prev_px: Option<f64> = None;
     let mut v = start;
@@ -80,7 +80,7 @@ pub fn compute_y_ticks(
             continue;
         }
 
-        // Skip ticks too close to previous (LWC: abs(coord - prevCoord) < tickMarkHeight)
+        // Skip ticks too close to previous (reference implementation: abs(coord - prevCoord) < tickMarkHeight)
         if let Some(prev) = prev_px {
             if (prev - px).abs() < min_gap_px {
                 v -= step;

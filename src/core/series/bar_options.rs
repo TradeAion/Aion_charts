@@ -4,7 +4,7 @@
 //! with horizontal ticks for open (left) and close (right). This is the
 //! traditional "bar chart" style used in technical analysis.
 //!
-//! LWC supports `upColor` and `downColor` for bullish/bearish bars.
+//! reference implementation supports `upColor` and `downColor` for bullish/bearish bars.
 
 /// Visual options for a Bar (OHLC) series.
 #[derive(Debug, Clone)]

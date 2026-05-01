@@ -13,7 +13,7 @@ use crate::core::renderer::value_projection::TimeScaleIndex;
 use crate::core::series::{LineStyle, SeriesCollection};
 use crate::core::viewport::Viewport;
 
-/// Crosshair line options (LWC-style) for vertical/horizontal lines.
+/// Crosshair line options (compatibility-style) for vertical/horizontal lines.
 #[derive(Debug, Clone, Copy)]
 pub struct CrosshairLineStyle {
     /// Line color [R, G, B, A].
@@ -30,7 +30,7 @@ pub struct CrosshairLineStyle {
     pub label_bg_color: [f32; 4],
 }
 
-/// Main-series live price line options (LWC-style series price line).
+/// Main-series live price line options (compatibility-style series price line).
 #[derive(Debug, Clone, Copy)]
 pub struct LastPriceLineStyle {
     /// Whether the live price line is rendered.
@@ -45,7 +45,7 @@ pub struct LastPriceLineStyle {
 
 /// Style configuration for the chart — colors, sizes, etc.
 /// Shared between all renderers so the chart looks identical regardless of backend.
-/// All dimension constants match LWC exactly.
+/// All dimension constants match reference implementation exactly.
 #[derive(Debug, Clone)]
 pub struct ChartStyle {
     pub bg_color: [f32; 4],
@@ -56,31 +56,31 @@ pub struct ChartStyle {
     pub wick_bullish_color: [f32; 4],
     pub wick_bearish_color: [f32; 4],
     pub grid_color: [f32; 4],
-    /// Axis border / tick color (LWC: timeScale.borderColor / priceScale.borderColor).
+    /// Axis border / tick color (reference implementation: timeScale.borderColor / priceScale.borderColor).
     pub axis_border_color: [f32; 4],
     pub axis_text_color: [f32; 4],
     pub axis_bg_color: [f32; 4],
-    /// Crosshair vertical line options (LWC `crosshair.vertLine`).
+    /// Crosshair vertical line options (reference implementation `crosshair.vertLine`).
     pub crosshair_vert_line: CrosshairLineStyle,
-    /// Crosshair horizontal line options (LWC `crosshair.horzLine`).
+    /// Crosshair horizontal line options (reference implementation `crosshair.horzLine`).
     pub crosshair_horz_line: CrosshairLineStyle,
     /// Shared crosshair label text color.
     pub crosshair_label_text: [f32; 4],
     /// Live price line options for main/overlay series.
     pub last_price_line: LastPriceLineStyle,
-    /// Font family — LWC default: `-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif`.
+    /// Font family — reference default: `-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif`.
     pub font_family: String,
-    /// Layout font size in CSS px (LWC default: 12).
+    /// Layout font size in CSS px (reference default: 12).
     pub font_size: f32,
     /// Bar width as fraction of bar slot (0.0-1.0). 0.8 = 80%.
     pub bar_width_ratio: f32,
 
-    // ── LWC price-axis renderer constants (in CSS px) ──
-    /// Border width at the axis edge (LWC: 1).
+    // ── reference implementation price-axis renderer constants (in CSS px) ──
+    /// Border width at the axis edge (reference implementation: 1).
     pub axis_border_size: f32,
-    /// Tick line length perpendicular to axis (LWC: 5).
+    /// Tick line length perpendicular to axis (reference implementation: 5).
     pub axis_tick_length: f32,
-    /// Price-scale tick mark density (LWC: `priceScale.tickMarkDensity`, default 2.5).
+    /// Price-scale tick mark density (reference implementation: `priceScale.tickMarkDensity`, default 2.5).
     pub price_scale_tick_mark_density: f32,
     /// Whether to draw axis tick marks (the small perpendicular lines).
     /// When false, layout stays the same but tick lines are not rendered.
@@ -91,10 +91,10 @@ pub struct ChartStyle {
 }
 
 impl ChartStyle {
-    // ── LWC-derived computed insets (all in CSS px) ──
+    // ── reference-derived computed insets (all in CSS px) ──
 
     /// Compact axis inset target in CSS px.
-    /// Kept as a utility for future use; current axis insets use LWC formulas.
+    /// Kept as a utility for future use; current axis insets use reference formulas.
     #[inline]
     #[allow(dead_code)]
     fn compact_axis_inset_css(&self) -> f64 {
@@ -102,13 +102,13 @@ impl ChartStyle {
     }
 
     /// Price axis left inset (inside edge to text).
-    /// LWC: `paddingInner = fontSize / 12 * tickLength` where tickLength = 5.
+    /// reference implementation: `paddingInner = fontSize / 12 * tickLength` where tickLength = 5.
     #[inline]
     pub fn price_axis_inset_inner(&self) -> f64 {
         self.font_size as f64 / 12.0 * self.axis_tick_length as f64
     }
     /// Price axis right inset (text to outer edge).
-    /// LWC: `paddingOuter = fontSize / 12 * tickLength`.
+    /// reference implementation: `paddingOuter = fontSize / 12 * tickLength`.
     #[inline]
     pub fn price_axis_inset_outer(&self) -> f64 {
         self.font_size as f64 / 12.0 * self.axis_tick_length as f64
@@ -119,7 +119,7 @@ impl ChartStyle {
         2.5 / 12.0 * self.font_size as f64
     }
     /// Price axis label offset.
-    /// LWC: `Constants.LabelOffset = 5` — extra spacing after text in optimal width.
+    /// reference implementation: `Constants.LabelOffset = 5` — extra spacing after text in optimal width.
     #[inline]
     pub fn price_axis_label_offset(&self) -> f64 {
         crate::core::constants::PRICE_AXIS_LABEL_OFFSET
@@ -138,7 +138,7 @@ impl ChartStyle {
     }
 
     /// Computed optimal price axis width (CSS px) for a given max text width.
-    /// LWC: `ceil(borderSize + tickLength + paddingInner + paddingOuter + LabelOffset + maxTextWidth)`,
+    /// reference implementation: `ceil(borderSize + tickLength + paddingInner + paddingOuter + LabelOffset + maxTextWidth)`,
     /// then rounded to the next even number.
     /// At default fontSize=12: `ceil(1 + 5 + 5 + 5 + 5 + textW)` = `ceil(21 + textW)`.
     #[inline]
@@ -156,7 +156,7 @@ impl ChartStyle {
     }
 
     /// Time axis optimal height (CSS px).
-    /// LWC: `ceil(borderSize + tickLength + fontSize + paddingTop + paddingBottom + labelBottomOffset)`.
+    /// reference implementation: `ceil(borderSize + tickLength + fontSize + paddingTop + paddingBottom + labelBottomOffset)`.
     /// At default fontSize=12: `ceil(1 + 5 + 12 + 3 + 3 + 4) = 28`.
     #[inline]
     pub fn time_axis_height(&self) -> f64 {
@@ -170,13 +170,13 @@ impl ChartStyle {
     }
 
     /// Time axis top inset.
-    /// LWC: `paddingTop = 3 * fontSize / 12`.
+    /// reference implementation: `paddingTop = 3 * fontSize / 12`.
     #[inline]
     pub fn time_axis_inset_top(&self) -> f64 {
         3.0 / 12.0 * self.font_size as f64
     }
     /// Time axis bottom inset.
-    /// LWC: `paddingBottom = 3 * fontSize / 12`.
+    /// reference implementation: `paddingBottom = 3 * fontSize / 12`.
     #[inline]
     pub fn time_axis_inset_bottom(&self) -> f64 {
         3.0 / 12.0 * self.font_size as f64
@@ -187,13 +187,13 @@ impl ChartStyle {
         9.0 * self.font_size as f64 / 12.0
     }
     /// Additional bottom offset under X-axis labels.
-    /// LWC: `labelBottomOffset = 4 * fontSize / 12`.
+    /// reference implementation: `labelBottomOffset = 4 * fontSize / 12`.
     #[inline]
     pub fn time_axis_label_bottom_offset(&self) -> f64 {
         4.0 / 12.0 * self.font_size as f64
     }
 
-    /// Crosshair label additional inset (LWC: `2/12 * fontSize`).
+    /// Crosshair label additional inset (reference implementation: `2/12 * fontSize`).
     #[inline]
     pub fn crosshair_label_extra_inset(&self) -> f64 {
         2.0 / 12.0 * self.font_size as f64
@@ -207,7 +207,7 @@ impl ChartStyle {
     }
 
     /// Effective Y-axis row spacing for price ticks (CSS px).
-    /// Matches LWC: `ceil(fontSize * tickMarkDensity)`.
+    /// Matches reference implementation: `ceil(fontSize * tickMarkDensity)`.
     #[inline]
     pub fn price_scale_tick_mark_spacing_css(&self) -> f64 {
         (self.font_size as f64 * self.price_scale_tick_mark_density as f64)
@@ -243,7 +243,7 @@ impl Default for ChartStyle {
 }
 
 /// Crosshair mode.
-/// X line always snaps to bar centers (LWC behavior).
+/// X line always snaps to bar centers (reference behavior).
 /// Y line behavior depends on mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CrosshairMode {

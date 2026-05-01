@@ -119,7 +119,7 @@ pub(crate) fn compute_right_axis_label_geometry_with_vertical_mode(
         + metrics.inset_outer
         + text_w_phys
         + metrics.tick_size;
-    // Right price scale in LWC uses align='left':
+    // Right price scale in reference implementation uses align='left':
     // separator/border is at x=0, label extends from inside edge to the right.
     let inside_gap = if matches!(width_mode, RightAxisLabelWidthMode::AxisFull) {
         metrics.full_label_inside_gap.max(0.0)

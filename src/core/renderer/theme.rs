@@ -103,9 +103,9 @@ pub const AXIS_BORDER_SIZE: f32 = 1.0;
 /// Axis tick length in CSS px.
 pub const AXIS_TICK_LENGTH: f32 = 5.0;
 
-/// Match lightweight-charts contrast selection for solid label backgrounds.
+/// Match the reference contrast selection for solid label backgrounds.
 ///
-/// LWC converts the background to grayscale and chooses black text for bright
+/// reference implementation converts the background to grayscale and chooses black text for bright
 /// labels, otherwise white text. AxiusCharts stores colors normalized to 0.0-1.0,
 /// so the grayscale threshold is normalized from 160/255.
 pub fn contrast_text_color(background: [f32; 4]) -> [f32; 4] {
@@ -180,7 +180,7 @@ pub fn default_style() -> ChartStyle {
 pub enum ThemePreset {
     /// Dark theme (default) — dark background, light text.
     Dark,
-    /// Light theme — white background, dark text. Based on TradingView Light.
+    /// Light theme — white background, dark text. Based on reference light palette.
     Light,
 }
 
@@ -397,7 +397,7 @@ pub struct ThemeConfig {
 impl ThemeConfig {
     // ── Presets ──────────────────────────────────────────────────────────
 
-    /// Dark theme preset — matches the existing AxiusCharts default (TradingView dark-inspired).
+    /// Dark theme preset — matches the existing AxiusCharts default.
     pub fn dark() -> Self {
         Self {
             colors: ThemeColors {
@@ -495,7 +495,7 @@ impl ThemeConfig {
         }
     }
 
-    /// Light theme preset — TradingView Light reference colors.
+    /// Light theme preset — reference light palette colors.
     /// White background, dark text, legacy bullish/bearish accent colors.
     pub fn light() -> Self {
         Self {

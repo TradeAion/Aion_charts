@@ -1,6 +1,6 @@
 //! Pane — independent chart pane with its own price scale.
 //!
-//! Multi-pane architecture matching LWC:
+//! Multi-pane architecture matching reference implementation:
 //! - Each pane has its own viewport (price range), series, and price axis
 //! - Panes share a common time axis (horizontal scroll is synchronized)
 //! - Stretch factors control proportional vertical sizing

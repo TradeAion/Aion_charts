@@ -1,6 +1,6 @@
 //! SeriesMarker — visual markers positioned at specific bar indices.
 //!
-//! Matches LWC's Series.setMarkers() API:
+//! Matches the reference implementation's Series.setMarkers() API:
 //! - Shapes: arrowUp, arrowDown, circle, square
 //! - Positioned at bar time + price level (above/below/inBar)
 //! - Optional text label below/above marker
@@ -32,6 +32,15 @@ impl MarkerShape {
             _ => MarkerShape::Circle, // default
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MarkerShape::ArrowUp => "arrowUp",
+            MarkerShape::ArrowDown => "arrowDown",
+            MarkerShape::Circle => "circle",
+            MarkerShape::Square => "square",
+        }
+    }
 }
 
 /// Vertical position of the marker relative to the bar.
@@ -54,13 +63,89 @@ impl MarkerPosition {
             _ => MarkerPosition::AboveBar,
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MarkerPosition::AboveBar => "aboveBar",
+            MarkerPosition::BelowBar => "belowBar",
+            MarkerPosition::AtPrice => "atPrice",
+        }
+    }
+}
+
+/// Visual stacking layer for series markers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkerZOrder {
+    /// Draw below top overlays such as crosshair and price-line overlays.
+    Normal,
+    /// Draw above series overlays but below topmost interaction overlays.
+    AboveSeries,
+    /// Draw at the end of the pane overlay pass.
+    Top,
+}
+
+impl MarkerZOrder {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "normal" => Some(Self::Normal),
+            "aboveseries" | "above_series" | "above-series" => Some(Self::AboveSeries),
+            "top" => Some(Self::Top),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MarkerZOrder::Normal => "normal",
+            MarkerZOrder::AboveSeries => "aboveSeries",
+            MarkerZOrder::Top => "top",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MarkerHitArea {
+    pub series_id: u32,
+    pub marker_id: u32,
+    pub bar_index: usize,
+    pub timestamp: Option<u64>,
+    pub x_css: f64,
+    pub y_css: f64,
+    pub radius_css: f64,
+    pub shape: MarkerShape,
+    pub position: MarkerPosition,
+    pub z_order: MarkerZOrder,
+    pub text: String,
+}
+
+impl MarkerHitArea {
+    pub fn contains(&self, x_css: f64, y_css: f64) -> bool {
+        let dx = x_css - self.x_css;
+        let dy = y_css - self.y_css;
+        (dx * dx + dy * dy) <= self.radius_css * self.radius_css
+    }
+}
+
+pub fn hit_test_marker_hit_areas(
+    hit_areas: &[MarkerHitArea],
+    x_css: f64,
+    y_css: f64,
+) -> Option<&MarkerHitArea> {
+    hit_areas
+        .iter()
+        .rev()
+        .find(|hit_area| hit_area.contains(x_css, y_css))
 }
 
 /// A single series marker instance.
 #[derive(Debug, Clone)]
 pub struct SeriesMarker {
     /// Bar index (0-based into bars array).
+    /// Kept for legacy callers and fallback when timestamp anchoring is absent.
     pub bar_index: usize,
+    /// Canonical time anchor. When present, renderers resolve the marker through
+    /// the current time scale so data reloads/prepends do not move it.
+    pub timestamp: Option<u64>,
     /// Marker shape.
     pub shape: MarkerShape,
     /// Vertical position.
@@ -84,6 +169,7 @@ impl Default for SeriesMarker {
         let theme = crate::core::renderer::theme::ThemeConfig::default();
         Self {
             bar_index: 0,
+            timestamp: None,
             shape: MarkerShape::Circle,
             position: MarkerPosition::AboveBar,
             price: 0.0,
@@ -178,6 +264,10 @@ impl SeriesMarkers {
 pub struct MarkerManager {
     /// Series ID -> markers for that series.
     series_markers: HashMap<u32, SeriesMarkers>,
+    /// Global marker stacking order.
+    z_order: MarkerZOrder,
+    /// Whether price auto-fit should include marker visual size.
+    auto_scale: bool,
 }
 
 impl Default for MarkerManager {
@@ -190,6 +280,8 @@ impl MarkerManager {
     pub fn new() -> Self {
         Self {
             series_markers: HashMap::new(),
+            z_order: MarkerZOrder::Normal,
+            auto_scale: true,
         }
     }
 
@@ -222,8 +314,57 @@ impl MarkerManager {
         self.series_markers.remove(&series_id);
     }
 
+    pub fn z_order(&self) -> MarkerZOrder {
+        self.z_order
+    }
+
+    pub fn set_z_order(&mut self, z_order: MarkerZOrder) {
+        self.z_order = z_order;
+    }
+
+    pub fn auto_scale(&self) -> bool {
+        self.auto_scale
+    }
+
+    pub fn set_auto_scale(&mut self, auto_scale: bool) {
+        self.auto_scale = auto_scale;
+    }
+
     /// Iterate over all series and their markers.
     pub fn iter(&self) -> impl Iterator<Item = (&u32, &SeriesMarkers)> {
         self.series_markers.iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MarkerManager, MarkerZOrder};
+
+    #[test]
+    fn marker_z_order_parses_reference_names() {
+        assert_eq!(MarkerZOrder::from_str("normal"), Some(MarkerZOrder::Normal));
+        assert_eq!(
+            MarkerZOrder::from_str("aboveSeries"),
+            Some(MarkerZOrder::AboveSeries)
+        );
+        assert_eq!(
+            MarkerZOrder::from_str("above_series"),
+            Some(MarkerZOrder::AboveSeries)
+        );
+        assert_eq!(MarkerZOrder::from_str("top"), Some(MarkerZOrder::Top));
+        assert_eq!(MarkerZOrder::from_str("front"), None);
+    }
+
+    #[test]
+    fn marker_manager_tracks_z_order() {
+        let mut markers = MarkerManager::new();
+        assert_eq!(markers.z_order(), MarkerZOrder::Normal);
+        assert!(markers.auto_scale());
+
+        markers.set_z_order(MarkerZOrder::Top);
+        assert_eq!(markers.z_order(), MarkerZOrder::Top);
+
+        markers.set_auto_scale(false);
+        assert!(!markers.auto_scale());
     }
 }

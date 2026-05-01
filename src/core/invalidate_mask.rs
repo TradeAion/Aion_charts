@@ -1,6 +1,6 @@
 //! Invalidation system for efficient partial repaints.
 //!
-//! Based on LWC's `invalidate-mask.ts` - granular per-pane invalidation
+//! Based on the reference implementation's `invalidate-mask.ts` - granular per-pane invalidation
 //! to minimize unnecessary redraws.
 
 use crate::core::pane::PaneId;

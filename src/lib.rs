@@ -6,8 +6,7 @@
 //!
 //! ## Architecture Overview
 //!
-//! AxiusCharts follows a widget-based architecture similar to TradingView's
-//! Lightweight Charts (LWC):
+//! AxiusCharts uses a widget-based chart architecture:
 //!
 //! - **Pane System**: Multiple panes with independent price scales
 //! - **Layered Rendering**: Separate base and overlay (Canvas2D) layers
@@ -227,7 +226,7 @@ pub use crate::core::price_line::{
     PriceLine, PriceLineHit, PriceLineId, PriceLineManager, PriceLineOptions,
 };
 
-/// Order management lines (TradingView-style).
+/// Order management lines (platform-style).
 pub use crate::core::order_line::{
     OrderLine, OrderLineHit, OrderLineId, OrderLineManager, OrderLineOptions, OrderSide,
     OrderStatus, OrderType,
@@ -235,7 +234,8 @@ pub use crate::core::order_line::{
 
 /// Series markers (annotations on bars).
 pub use crate::core::markers::{
-    MarkerManager, MarkerPosition, MarkerShape, SeriesMarker, SeriesMarkers,
+    hit_test_marker_hit_areas, MarkerHitArea, MarkerManager, MarkerPosition, MarkerShape,
+    MarkerZOrder, SeriesMarker, SeriesMarkers,
 };
 
 /// Execution marks (trade executions).

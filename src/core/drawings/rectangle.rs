@@ -22,7 +22,7 @@ pub struct RectangleDrawing {
     text: DrawingText,
     border_enabled: bool,
     /// Optional horizontal midline through the rectangle's vertical center
-    /// (TradingView-style). `None` means the midline is disabled.
+    /// (platform-style). `None` means the midline is disabled.
     middle_line: Option<MiddleLineStyle>,
 }
 
@@ -128,7 +128,7 @@ impl RectangleDrawing {
 
     /// Move a rectangle corner while keeping the opposite corner fixed.
     ///
-    /// This enables natural TradingView-like flipping when the dragged corner
+    /// This enables natural platform-like flipping when the dragged corner
     /// crosses over the opposite side.
     pub(crate) fn move_corner_with_fixed_opposite(
         &mut self,
@@ -397,7 +397,7 @@ impl Drawing for RectangleDrawing {
             });
         }
 
-        // Optional horizontal middle line (TradingView-style). Independent of
+        // Optional horizontal middle line (platform-style). Independent of
         // the rectangle's border style — uses its own color, width, and dash.
         // When the midline is enabled AND the text is set to Middle vertical
         // alignment, the text rides ALONG the midline (like horizontal-line

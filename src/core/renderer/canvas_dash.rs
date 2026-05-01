@@ -6,7 +6,7 @@ use crate::core::series::LineStyle;
 use wasm_bindgen::JsValue;
 use web_sys::CanvasRenderingContext2d;
 
-/// Apply the LWC-style dash pattern for a line style and physical line width.
+/// Apply the compatibility-style dash pattern for a line style and physical line width.
 #[inline]
 pub fn set_canvas_line_dash(ctx: &CanvasRenderingContext2d, style: LineStyle, line_width: f64) {
     let (dash, gap) = style.dash_pattern(line_width.max(1.0));

@@ -1,4 +1,4 @@
-//! Line series data — lightweight (timestamp, value) columnar storage.
+//! Line series data — reference (timestamp, value) columnar storage.
 //!
 //! Separate from the OHLCV `BarArray` — line series only need a single
 //! value per data point (e.g. SMA, EMA, or any indicator output).

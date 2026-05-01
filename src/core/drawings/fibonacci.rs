@@ -14,7 +14,7 @@ use crate::core::renderer::draw_list::{TextAlign, TextVerticalAlign};
 use crate::core::viewport::Viewport;
 use crate::impl_drawing_accessors;
 
-/// Standard Fibonacci retracement levels (matches TradingView defaults).
+/// Standard Fibonacci retracement levels (matches reference platform defaults).
 fn default_fibonacci_levels() -> Vec<FibonacciLevel> {
     vec![
         FibonacciLevel::new(0.0, "0"),

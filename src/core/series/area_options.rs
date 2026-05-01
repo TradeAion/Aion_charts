@@ -1,13 +1,13 @@
 //! Area series visual options — line color, fill gradient, etc.
 //!
 //! An area series is a line series with a filled region between the line
-//! and the bottom of the chart (or a custom base value). LWC supports
+//! and the bottom of the chart (or a custom base value). reference implementation supports
 //! gradient fills with separate top/bottom colors.
 
 /// Visual options for an area series.
 #[derive(Debug, Clone)]
 pub struct AreaSeriesOptions {
-    /// Line color [R, G, B, A] (0.0–1.0). Default: #2962FF (TradingView blue).
+    /// Line color [R, G, B, A] (0.0–1.0). Default: #2962FF (default blue).
     pub line_color: [f32; 4],
     /// Line width in CSS px.
     pub line_width: f64,
@@ -26,7 +26,7 @@ pub struct AreaSeriesOptions {
     /// Display label / title for the series.
     pub title: String,
     /// Base value for the fill area. If None, fills to the bottom of the pane.
-    /// LWC calls this `baseValue` with type `BaseValuePrice`.
+    /// reference implementation calls this `baseValue` with type `BaseValuePrice`.
     pub base_value: Option<f64>,
 }
 

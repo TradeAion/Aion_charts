@@ -414,6 +414,81 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
                 },
             );
         }
+        axiuscharts::ChartEvent::MarkerHover {
+            series_id,
+            marker_id,
+            bar_index,
+            timestamp,
+            shape,
+            position,
+            z_order,
+            text,
+        } => {
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("seriesId"),
+                &match series_id {
+                    Some(id) => JsValue::from_f64(*id as f64),
+                    None => JsValue::NULL,
+                },
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("markerId"),
+                &match marker_id {
+                    Some(id) => JsValue::from_f64(*id as f64),
+                    None => JsValue::NULL,
+                },
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("barIndex"),
+                &match bar_index {
+                    Some(idx) => JsValue::from_f64(*idx as f64),
+                    None => JsValue::NULL,
+                },
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("timestamp"),
+                &match timestamp {
+                    Some(ts) => JsValue::from_f64(*ts as f64),
+                    None => JsValue::NULL,
+                },
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("shape"),
+                &match shape {
+                    Some(shape) => JsValue::from_str(shape),
+                    None => JsValue::NULL,
+                },
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("position"),
+                &match position {
+                    Some(position) => JsValue::from_str(position),
+                    None => JsValue::NULL,
+                },
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("zOrder"),
+                &match z_order {
+                    Some(z_order) => JsValue::from_str(z_order),
+                    None => JsValue::NULL,
+                },
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("text"),
+                &match text {
+                    Some(text) => JsValue::from_str(text),
+                    None => JsValue::NULL,
+                },
+            );
+        }
         axiuscharts::ChartEvent::OrderLineModified {
             id,
             old_price,

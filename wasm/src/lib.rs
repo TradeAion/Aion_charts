@@ -1,6 +1,6 @@
-//! AxiusCharts WASM bindings — LWC-style widget-based chart library.
+//! AxiusCharts WASM bindings — widget-based chart library.
 //!
-//! Architecture (matches LWC):
+//! Architecture:
 //!   - WidgetLayout creates CSS-grid DOM: [pane|price_axis] / [time_axis]
 //!   - Each widget has its own DOM container + canvases + event handlers
 //!   - InteractionHandler processes per-widget events (zone from DOM, not pixel math)
@@ -60,6 +60,7 @@ use axiuscharts::{
     ChartGuardrails, ChartPaneId, ChartStyle, CrosshairMagnetMode, CrosshairSnapshot, DataRange,
     GpuContext, HistogramPoint, HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint,
     LineSeriesOptions, LineStyle, MainChartType, MainViewportPreset, MarkerPosition, MarkerShape,
+    MarkerZOrder,
     MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint, OrderLineId, OrderLineOptions, OrderSide,
     OrderStatus, OrderType, OverlayRenderer, PriceAxisRenderer, PriceLineOptions, RendererBackend,
     ResourceLimits, RuntimeEvent, SeriesId, SeriesMarker, SnapshotMtfResolver, TimeAxisRenderer,
@@ -86,7 +87,7 @@ mod workspace;
 use canvas_manager::WidgetLayout;
 use chart_inner::{
     event_css_pos, wheel_css_pos, ChartInner, EventListenerRegistry, ExactPixelSizes,
-    ReplayEdgeBehavior, SharedInner,
+    InteractionOptions, ReplayEdgeBehavior, SharedInner, TrackingModeExitMode,
 };
 use event_emitter::EventEmitter;
 use subpane::{IndicatorConfig, PaneHeightCoordinator, SubPane, SubPaneSeparatorStyle};
@@ -576,6 +577,106 @@ async fn resolve_renderer_backend(
 
 fn js_err(message: impl Into<String>) -> JsValue {
     JsValue::from_str(&message.into())
+}
+
+fn validate_marker_series(engine: &ChartEngine, series_id: u32) -> Result<(), JsValue> {
+    if series_id == 0 || engine.series.get(SeriesId(series_id)).is_some() {
+        Ok(())
+    } else {
+        Err(js_err(format!("marker series id {series_id} not found")))
+    }
+}
+
+fn validate_marker_bar_index(engine: &ChartEngine, bar_index: usize) -> Result<(), JsValue> {
+    if bar_index < engine.bars.len() {
+        Ok(())
+    } else {
+        Err(js_err(format!(
+            "marker bar_index {bar_index} is outside loaded bars length {}",
+            engine.bars.len()
+        )))
+    }
+}
+
+fn validate_marker_timestamp(engine: &ChartEngine, timestamp: u64) -> Result<usize, JsValue> {
+    axiuscharts::timestamp_to_bar_index(timestamp, &engine.bars).ok_or_else(|| {
+        js_err(format!(
+            "marker timestamp {timestamp} is before loaded data or no bars are loaded"
+        ))
+    })
+}
+
+fn parse_marker_index(value: f64, field: &str) -> Result<usize, JsValue> {
+    if value.is_finite() && value >= 0.0 && value.fract() == 0.0 && value <= usize::MAX as f64 {
+        Ok(value as usize)
+    } else {
+        Err(js_err(format!("{field} must be a finite non-negative integer")))
+    }
+}
+
+fn parse_marker_enum(value: f64, field: &str, max_inclusive: u32) -> Result<u32, JsValue> {
+    if value.is_finite()
+        && value >= 0.0
+        && value.fract() == 0.0
+        && value <= max_inclusive as f64
+    {
+        Ok(value as u32)
+    } else {
+        Err(js_err(format!(
+            "{field} must be an integer between 0 and {max_inclusive}"
+        )))
+    }
+}
+
+fn parse_marker_color_channel(value: f64, field: &str) -> Result<f32, JsValue> {
+    if value.is_finite() && (0.0..=1.0).contains(&value) {
+        Ok(value as f32)
+    } else {
+        Err(js_err(format!("{field} must be finite and between 0 and 1")))
+    }
+}
+
+fn validate_marker_size(size: f64) -> Result<f64, JsValue> {
+    if size.is_finite() && size >= 0.0 {
+        Ok(size)
+    } else {
+        Err(js_err("marker size must be finite and non-negative"))
+    }
+}
+
+fn validate_marker_price(position: MarkerPosition, price: f64) -> Result<f64, JsValue> {
+    if position == MarkerPosition::AtPrice && !price.is_finite() {
+        Err(js_err("marker price must be finite for at_price markers"))
+    } else {
+        Ok(price)
+    }
+}
+
+fn parse_marker_shape_str(value: &str) -> Result<MarkerShape, JsValue> {
+    match value.to_ascii_lowercase().as_str() {
+        "arrowup" | "arrow_up" => Ok(MarkerShape::ArrowUp),
+        "arrowdown" | "arrow_down" => Ok(MarkerShape::ArrowDown),
+        "circle" => Ok(MarkerShape::Circle),
+        "square" => Ok(MarkerShape::Square),
+        _ => Err(js_err(format!("invalid marker shape: {value}"))),
+    }
+}
+
+fn parse_marker_position_str(value: &str) -> Result<MarkerPosition, JsValue> {
+    match value.to_ascii_lowercase().as_str() {
+        "abovebar" | "above_bar" | "above" => Ok(MarkerPosition::AboveBar),
+        "belowbar" | "below_bar" | "below" => Ok(MarkerPosition::BelowBar),
+        "atprice" | "at_price" | "inbar" | "in_bar" => Ok(MarkerPosition::AtPrice),
+        _ => Err(js_err(format!("invalid marker position: {value}"))),
+    }
+}
+
+fn parse_marker_z_order(value: &str) -> Result<MarkerZOrder, JsValue> {
+    MarkerZOrder::from_str(value).ok_or_else(|| {
+        js_err(format!(
+            "invalid marker z_order: {value}; expected normal, aboveSeries, or top"
+        ))
+    })
 }
 
 const MAX_BULK_JSON_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
@@ -1197,6 +1298,45 @@ fn price_scale_mode_key(mode: axiuscharts::PriceScaleMode) -> &'static str {
         axiuscharts::PriceScaleMode::Percentage => "percentage",
         axiuscharts::PriceScaleMode::IndexedTo100 => "indexed_to_100",
     }
+}
+
+fn option_bool(parent: Option<&JsValue>, path: &[&str], fallback: bool) -> bool {
+    parent
+        .and_then(|value| js_get_path(value, path))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(fallback)
+}
+
+fn touch_action_for_interactions(options: InteractionOptions) -> &'static str {
+    if options.handle_scale_pinch {
+        return "none";
+    }
+    match (
+        options.handle_scroll_horz_touch_drag,
+        options.handle_scroll_vert_touch_drag,
+    ) {
+        (true, true) => "none",
+        (true, false) => "pan-y",
+        (false, true) => "pan-x",
+        (false, false) => "auto",
+    }
+}
+
+fn parse_tracking_mode_exit_mode_js(value: &JsValue) -> Option<TrackingModeExitMode> {
+    if let Some(mode) = value.as_string() {
+        return match mode.trim() {
+            "onTouchEnd" | "touchEnd" | "OnTouchEnd" => Some(TrackingModeExitMode::OnTouchEnd),
+            "onNextTap" | "nextTap" | "OnNextTap" => Some(TrackingModeExitMode::OnNextTap),
+            _ => None,
+        };
+    }
+    value.as_f64().map(|mode| {
+        if mode as i32 == 0 {
+            TrackingModeExitMode::OnTouchEnd
+        } else {
+            TrackingModeExitMode::OnNextTap
+        }
+    })
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1954,6 +2094,7 @@ impl AxiusCharts {
             time_axis_renderer,
             layout,
             interaction,
+            interaction_options: InteractionOptions::default(),
             exact_sizes: ExactPixelSizes::default(),
             subpanes: Vec::new(),
             next_subpane_id: 1,
@@ -1971,7 +2112,9 @@ impl AxiusCharts {
             replay_tick_accum_bars: 0.0,
             symbol: "DEMO".to_string(),
             execution_mark_hit_areas: Vec::new(),
+            marker_hit_areas: Vec::new(),
             hovered_execution_mark_id: None,
+            hovered_marker_key: None,
             selected_execution_mark_id: None,
             price_line_drag_id: None,
             order_line_drag_id: None,
@@ -2182,7 +2325,7 @@ impl AxiusCharts {
                         }
                         *last_tap.borrow_mut() = now;
 
-                        // Start long-press timer (240ms like LWC)
+                        // Start long-press timer (240ms like reference implementation)
                         let inner_lp = Rc::clone(&inner);
                         let lp_timer_inner = Rc::clone(&lp_timer);
                         let dirty_lp = Rc::clone(&dirty);
@@ -2264,13 +2407,27 @@ impl AxiusCharts {
             let dirty = Rc::clone(&dirty);
             let cb = Closure::<dyn FnMut(web_sys::WheelEvent)>::wrap(Box::new(
                 move |e: web_sys::WheelEvent| {
-                    e.prevent_default();
                     let (x, y) = wheel_css_pos(&e, &pane_c);
                     let Ok(mut s) = inner.try_borrow_mut() else {
                         return;
                     };
+                    let opts = s.interaction_options;
+                    let delta_x = if opts.handle_scroll_mouse_wheel {
+                        e.delta_x()
+                    } else {
+                        0.0
+                    };
+                    let delta_y = if opts.handle_scale_mouse_wheel {
+                        e.delta_y()
+                    } else {
+                        0.0
+                    };
+                    if delta_x.abs() <= 0.001 && delta_y.abs() <= 0.001 {
+                        return;
+                    }
+                    e.prevent_default();
                     s.on_pointer_enter(HitZone::Chart);
-                    s.on_pane_wheel(x, y, e.delta_x(), e.delta_y(), e.delta_mode());
+                    s.on_pane_wheel(x, y, delta_x, delta_y, e.delta_mode());
                     dirty.set(true);
                 },
             ));
@@ -2352,8 +2509,14 @@ impl AxiusCharts {
             let dirty = Rc::clone(&dirty);
             let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::wrap(Box::new(
                 move |e: web_sys::TouchEvent| {
-                    e.prevent_default();
                     let touches = e.touches();
+                    let Ok(mut s) = inner.try_borrow_mut() else {
+                        return;
+                    };
+                    if !s.interaction_options.handle_scale_pinch {
+                        return;
+                    }
+                    e.prevent_default();
                     if touches.length() >= 2 {
                         // Cancel long-press timer on multi-touch
                         if let Some(tid) = lp_timer.borrow_mut().take() {
@@ -2373,9 +2536,6 @@ impl AxiusCharts {
                         let dx = x1 - x0;
                         let dy = y1 - y0;
                         let distance = (dx * dx + dy * dy).sqrt();
-                        let Ok(mut s) = inner.try_borrow_mut() else {
-                            return;
-                        };
                         s.on_pinch_start(cx, cy, distance);
                         dirty.set(true);
                     }
@@ -2396,12 +2556,15 @@ impl AxiusCharts {
             let dirty = Rc::clone(&dirty);
             let cb = Closure::<dyn FnMut(web_sys::TouchEvent)>::wrap(Box::new(
                 move |e: web_sys::TouchEvent| {
-                    e.prevent_default();
                     let touches = e.touches();
                     let s_ref = inner.borrow();
+                    if !s_ref.interaction_options.handle_scale_pinch {
+                        return;
+                    }
                     let pinch_active = s_ref.interaction.pinch_active;
                     let pinch_start_dist = s_ref.interaction.pinch_start_distance;
                     drop(s_ref);
+                    e.prevent_default();
 
                     if touches.length() >= 2 && pinch_active {
                         let t0 = touches.get(0).unwrap();
@@ -2568,6 +2731,9 @@ impl AxiusCharts {
                     };
                     s.interaction.is_touch = pe.pointer_type() == "touch";
                     s.on_pointer_enter(HitZone::PriceAxis);
+                    if !s.interaction_options.handle_scale_axis_pressed_mouse_move {
+                        return;
+                    }
                     s.on_pointer_down(0.0, y, HitZone::PriceAxis, false, false);
                     let html_el: &web_sys::HtmlElement = price_c.unchecked_ref();
                     let _ = html_el.set_pointer_capture(pe.pointer_id());
@@ -2609,10 +2775,13 @@ impl AxiusCharts {
             let dirty = Rc::clone(&dirty);
             let cb = Closure::<dyn FnMut(web_sys::WheelEvent)>::wrap(Box::new(
                 move |e: web_sys::WheelEvent| {
-                    e.prevent_default();
                     let Ok(mut s) = inner.try_borrow_mut() else {
                         return;
                     };
+                    if !s.interaction_options.handle_scale_mouse_wheel {
+                        return;
+                    }
+                    e.prevent_default();
                     s.on_pointer_enter(HitZone::PriceAxis);
                     s.on_price_axis_wheel(e.delta_y(), e.delta_mode());
                     dirty.set(true);
@@ -2755,6 +2924,9 @@ impl AxiusCharts {
                     };
                     s.interaction.is_touch = pe.pointer_type() == "touch";
                     s.on_pointer_enter(HitZone::TimeAxis);
+                    if !s.interaction_options.handle_scale_axis_pressed_mouse_move {
+                        return;
+                    }
                     s.on_pointer_down(x, 0.0, HitZone::TimeAxis, false, false);
                     let html_el: &web_sys::HtmlElement = time_c.unchecked_ref();
                     let _ = html_el.set_pointer_capture(pe.pointer_id());
@@ -2796,11 +2968,14 @@ impl AxiusCharts {
             let dirty = Rc::clone(&dirty);
             let cb = Closure::<dyn FnMut(web_sys::WheelEvent)>::wrap(Box::new(
                 move |e: web_sys::WheelEvent| {
-                    e.prevent_default();
                     let (x, _y) = wheel_css_pos(&e, &time_c);
                     let Ok(mut s) = inner.try_borrow_mut() else {
                         return;
                     };
+                    if !s.interaction_options.handle_scale_mouse_wheel {
+                        return;
+                    }
+                    e.prevent_default();
                     s.on_pointer_enter(HitZone::TimeAxis);
                     s.on_time_axis_wheel(x, e.delta_y(), e.delta_mode());
                     dirty.set(true);
@@ -2852,7 +3027,7 @@ impl AxiusCharts {
 
         // ── ResizeObserver on widget containers (device-pixel-content-box) ──
         //
-        // LWC (fancy-canvas) uses ResizeObserver with `device-pixel-content-box`
+        // reference implementation (fancy-canvas) uses ResizeObserver with `device-pixel-content-box`
         // to get the exact integer device-pixel size of each canvas element.
         // This eliminates the ±1px rounding error from `round(css * dpr)`
         // that causes blur at non-integer zoom levels.
@@ -3139,7 +3314,8 @@ impl AxiusCharts {
             chart.interval = interval;
         }
 
-        chart.apply_lwc_compat_options(&options);
+        chart.apply_compat_options(&options);
+        chart.apply_interaction_options(&options);
 
         // Apply CSS variables from theme
         chart.apply_css_variables();
@@ -3262,7 +3438,8 @@ impl AxiusCharts {
                 .emit(axiuscharts::ChartEvent::IntervalChange { interval });
         }
 
-        css_changed = self.apply_lwc_compat_options(&options) || css_changed;
+        css_changed = self.apply_compat_options(&options) || css_changed;
+        self.apply_interaction_options(&options);
 
         // Auto render
         if let Some(auto) = js_get_bool(&options, "autoRender") {
@@ -3283,10 +3460,116 @@ impl AxiusCharts {
         self.mark_dirty();
     }
 
-    /// Apply Lightweight Charts style-compatible nested options directly to
+    fn apply_interaction_options(&mut self, options: &JsValue) {
+        if options.is_undefined() || options.is_null() {
+            return;
+        }
+
+        let mut inner = self.inner.borrow_mut();
+        let current = inner.interaction_options;
+        let scroll_bool = js_get(options, "handleScroll").and_then(|v| v.as_bool());
+        let scale_bool = js_get(options, "handleScale").and_then(|v| v.as_bool());
+        let kinetic_bool = js_get(options, "kineticScroll").and_then(|v| v.as_bool());
+        let scroll_obj = js_get(options, "handleScroll");
+        let scale_obj = js_get(options, "handleScale");
+        let kinetic_obj = js_get(options, "kineticScroll");
+        let tracking_obj = js_get(options, "trackingMode");
+
+        let mut next = current;
+        if let Some(enabled) = scroll_bool {
+            next.handle_scroll_mouse_wheel = enabled;
+            next.handle_scroll_pressed_mouse_move = enabled;
+            next.handle_scroll_horz_touch_drag = enabled;
+            next.handle_scroll_vert_touch_drag = enabled;
+        }
+        if let Some(enabled) = scale_bool {
+            next.handle_scale_axis_pressed_mouse_move = enabled;
+            next.handle_scale_axis_double_click_reset = enabled;
+            next.handle_scale_mouse_wheel = enabled;
+            next.handle_scale_pinch = enabled;
+        }
+        if let Some(enabled) = kinetic_bool {
+            next.kinetic_scroll_touch = enabled;
+            next.kinetic_scroll_mouse = enabled;
+        }
+
+        next.handle_scroll_mouse_wheel = option_bool(
+            scroll_obj.as_ref(),
+            &["mouseWheel"],
+            next.handle_scroll_mouse_wheel,
+        );
+        next.handle_scroll_pressed_mouse_move = option_bool(
+            scroll_obj.as_ref(),
+            &["pressedMouseMove"],
+            next.handle_scroll_pressed_mouse_move,
+        );
+        next.handle_scroll_horz_touch_drag = option_bool(
+            scroll_obj.as_ref(),
+            &["horzTouchDrag"],
+            next.handle_scroll_horz_touch_drag,
+        );
+        next.handle_scroll_vert_touch_drag = option_bool(
+            scroll_obj.as_ref(),
+            &["vertTouchDrag"],
+            next.handle_scroll_vert_touch_drag,
+        );
+        next.handle_scale_axis_pressed_mouse_move = option_bool(
+            scale_obj.as_ref(),
+            &["axisPressedMouseMove"],
+            next.handle_scale_axis_pressed_mouse_move,
+        );
+        next.handle_scale_axis_double_click_reset = option_bool(
+            scale_obj.as_ref(),
+            &["axisDoubleClickReset"],
+            next.handle_scale_axis_double_click_reset,
+        );
+        next.handle_scale_mouse_wheel = option_bool(
+            scale_obj.as_ref(),
+            &["mouseWheel"],
+            next.handle_scale_mouse_wheel,
+        );
+        next.handle_scale_pinch =
+            option_bool(scale_obj.as_ref(), &["pinch"], next.handle_scale_pinch);
+        next.kinetic_scroll_touch =
+            option_bool(kinetic_obj.as_ref(), &["touch"], next.kinetic_scroll_touch);
+        next.kinetic_scroll_mouse =
+            option_bool(kinetic_obj.as_ref(), &["mouse"], next.kinetic_scroll_mouse);
+        if let Some(exit_mode) = tracking_obj
+            .as_ref()
+            .and_then(|value| js_get_path(value, &["exitMode"]))
+            .and_then(|value| parse_tracking_mode_exit_mode_js(&value))
+        {
+            next.tracking_mode_exit_mode = exit_mode;
+        }
+
+        inner.interaction_options = next;
+        let touch_action = touch_action_for_interactions(next);
+        let _ = inner
+            .layout
+            .grid_wrapper
+            .style()
+            .set_property("touch-action", touch_action);
+        let _ = inner
+            .layout
+            .pane_container
+            .style()
+            .set_property("touch-action", touch_action);
+        let _ = inner
+            .layout
+            .time_axis_container
+            .style()
+            .set_property("touch-action", touch_action);
+        let _ = inner
+            .layout
+            .price_axis_container
+            .style()
+            .set_property("touch-action", touch_action);
+    }
+
+    /// Apply compatibility-style nested options directly to
     /// AxiusCharts style/runtime state. Returns true when theme CSS variables
     /// should be refreshed.
-    fn apply_lwc_compat_options(&mut self, options: &JsValue) -> bool {
+    fn apply_compat_options(&mut self, options: &JsValue) -> bool {
         if options.is_undefined() || options.is_null() {
             return false;
         }
@@ -5291,7 +5574,7 @@ impl AxiusCharts {
     }
 
     /// Toggle / configure the optional horizontal middle line on the currently
-    /// selected Rectangle drawing (TradingView-style midline).
+    /// selected Rectangle drawing (platform-style midline).
     ///
     /// `dash_on`/`dash_off` ≤ 0 means a solid line. Returns `false` when the
     /// current selection is not a Rectangle, or when nothing is selected.
@@ -5476,6 +5759,7 @@ impl AxiusCharts {
         )
         .max(0.1);
         let volume_visible = s.engine.user_volume_visible();
+        let interaction_options = s.interaction_options;
 
         let options = serde_json::json!({
             "symbol": self.symbol,
@@ -5551,6 +5835,25 @@ impl AxiusCharts {
                 "upColor": style.bullish_volume_color,
                 "downColor": style.bearish_volume_color,
                 "visible": volume_visible,
+            },
+            "handleScroll": {
+                "mouseWheel": interaction_options.handle_scroll_mouse_wheel,
+                "pressedMouseMove": interaction_options.handle_scroll_pressed_mouse_move,
+                "horzTouchDrag": interaction_options.handle_scroll_horz_touch_drag,
+                "vertTouchDrag": interaction_options.handle_scroll_vert_touch_drag,
+            },
+            "handleScale": {
+                "axisPressedMouseMove": interaction_options.handle_scale_axis_pressed_mouse_move,
+                "axisDoubleClickReset": interaction_options.handle_scale_axis_double_click_reset,
+                "mouseWheel": interaction_options.handle_scale_mouse_wheel,
+                "pinch": interaction_options.handle_scale_pinch,
+            },
+            "kineticScroll": {
+                "touch": interaction_options.kinetic_scroll_touch,
+                "mouse": interaction_options.kinetic_scroll_mouse,
+            },
+            "trackingMode": {
+                "exitMode": interaction_options.tracking_mode_exit_mode.as_key(),
             },
             "lastPriceLine": {
                 "visible": style.last_price_line.visible,
@@ -6224,11 +6527,40 @@ impl AxiusCharts {
             .set_price_scale_margins(top, bottom);
     }
 
+    /// Add an external price range that participates in automatic price scaling.
+    pub fn add_autoscale_contribution(
+        &mut self,
+        min_price: f64,
+        max_price: f64,
+    ) -> Result<u32, JsValue> {
+        self.inner
+            .borrow_mut()
+            .engine
+            .add_autoscale_contribution(min_price, max_price)
+            .map_err(JsValue::from)
+    }
+
+    /// Remove a previously registered autoscale contribution.
+    pub fn remove_autoscale_contribution(&mut self, id: u32) -> bool {
+        self.inner
+            .borrow_mut()
+            .engine
+            .remove_autoscale_contribution(id)
+    }
+
+    /// Remove all external autoscale contributions.
+    pub fn clear_autoscale_contributions(&mut self) {
+        self.inner
+            .borrow_mut()
+            .engine
+            .clear_autoscale_contributions();
+    }
+
     /// Enable or disable auto-scroll on new bars.
     ///
     /// When `true` (default) the viewport advances by 1 bar each time a new bar
     /// is appended and the chart is already showing the latest data — identical
-    /// to LWC's `shiftVisibleRangeOnNewBar` behaviour.
+    /// to the reference implementation's `shiftVisibleRangeOnNewBar` behaviour.
     ///
     /// When `false` the viewport never moves during live streaming regardless of
     /// the current scroll position, giving the user a fully static view even
@@ -6386,11 +6718,11 @@ impl AxiusCharts {
         self.inner.borrow().engine.price_lines.len()
     }
 
-    // ── Order Lines API (TradingView-style) ─────────────────────────────────────
+    // ── Order Lines API (platform-style) ─────────────────────────────────────
 
     /// Create a new order line at the specified price level.
     ///
-    /// This creates a TradingView-style order management line with:
+    /// This creates a platform-style order management line with:
     /// - Order type label (Limit, Stop, TP, SL)
     /// - Side indication (Buy/Sell) with appropriate colors
     /// - Quantity display
@@ -6684,93 +7016,288 @@ impl AxiusCharts {
         color_a: f32,
         size: f32,
         text: &str,
-    ) -> u32 {
+    ) -> Result<u32, JsValue> {
+        {
+            let s = self.inner.borrow();
+            validate_marker_series(&s.engine, series_id)?;
+            validate_marker_bar_index(&s.engine, bar_index as usize)?;
+        }
+        let shape = parse_marker_shape_str(shape)?;
+        let position = parse_marker_position_str(position)?;
+        let price = validate_marker_price(position, price)?;
+        let size = validate_marker_size(size as f64)?;
+        let color = [
+            parse_marker_color_channel(color_r as f64, "color_r")?,
+            parse_marker_color_channel(color_g as f64, "color_g")?,
+            parse_marker_color_channel(color_b as f64, "color_b")?,
+            parse_marker_color_channel(color_a as f64, "color_a")?,
+        ];
         let marker = SeriesMarker {
             bar_index: bar_index as usize,
-            shape: MarkerShape::from_str(shape),
-            position: MarkerPosition::from_str(position),
+            timestamp: self
+                .inner
+                .borrow()
+                .engine
+                .bars
+                .get(bar_index as usize)
+                .map(|bar| bar.timestamp),
+            shape,
+            position,
             price,
-            color: [color_r, color_g, color_b, color_a],
-            size: size as f64,
+            color,
+            size,
             text: text.to_string(),
             text_color: axiuscharts::ThemeConfig::default()
                 .series_defaults
                 .marker_text_color,
             id: 0, // will be assigned
         };
-        let id = self
-            .inner
-            .borrow_mut()
-            .engine
-            .markers
-            .for_series(series_id)
-            .add(marker);
+        let id = {
+            let mut s = self.inner.borrow_mut();
+            let id = s.engine.markers.for_series(series_id).add(marker);
+            s.engine.viewport.price_invalidated = true;
+            id
+        };
         log::info!(
-            "add_marker: series={}, bar={}, shape={}, id={}",
+            "add_marker: series={}, bar={}, shape={:?}, id={}",
             series_id,
             bar_index,
             shape,
             id
         );
-        id
+        Ok(id)
+    }
+
+    /// Add a marker anchored by timestamp instead of mutable bar index.
+    ///
+    /// The timestamp is kept as the canonical render anchor. The resolved bar
+    /// index is only used as a fallback and for above/below bar price placement.
+    pub fn add_marker_at_time(
+        &mut self,
+        series_id: u32,
+        timestamp: u64,
+        shape: &str,
+        position: &str,
+        price: f64,
+        color_r: f32,
+        color_g: f32,
+        color_b: f32,
+        color_a: f32,
+        size: f32,
+        text: &str,
+    ) -> Result<u32, JsValue> {
+        let bar_index = {
+            let s = self.inner.borrow();
+            validate_marker_series(&s.engine, series_id)?;
+            validate_marker_timestamp(&s.engine, timestamp)?
+        };
+        let shape = parse_marker_shape_str(shape)?;
+        let position = parse_marker_position_str(position)?;
+        let price = validate_marker_price(position, price)?;
+        let size = validate_marker_size(size as f64)?;
+        let color = [
+            parse_marker_color_channel(color_r as f64, "color_r")?,
+            parse_marker_color_channel(color_g as f64, "color_g")?,
+            parse_marker_color_channel(color_b as f64, "color_b")?,
+            parse_marker_color_channel(color_a as f64, "color_a")?,
+        ];
+        let marker = SeriesMarker {
+            bar_index,
+            timestamp: Some(timestamp),
+            shape,
+            position,
+            price,
+            color,
+            size,
+            text: text.to_string(),
+            text_color: axiuscharts::ThemeConfig::default()
+                .series_defaults
+                .marker_text_color,
+            id: 0,
+        };
+        let id = {
+            let mut s = self.inner.borrow_mut();
+            let id = s.engine.markers.for_series(series_id).add(marker);
+            s.engine.viewport.price_invalidated = true;
+            id
+        };
+        log::info!(
+            "add_marker_at_time: series={}, timestamp={}, shape={:?}, id={}",
+            series_id,
+            timestamp,
+            shape,
+            id
+        );
+        Ok(id)
     }
 
     /// Remove a specific marker from a series.
     pub fn remove_marker(&mut self, series_id: u32, marker_id: u32) -> bool {
-        self.inner
-            .borrow_mut()
-            .engine
-            .markers
-            .for_series(series_id)
-            .remove(marker_id)
+        let mut s = self.inner.borrow_mut();
+        let removed = s.engine.markers.for_series(series_id).remove(marker_id);
+        if removed {
+            s.engine.viewport.price_invalidated = true;
+        }
+        removed
     }
 
     /// Clear all markers for a series.
     pub fn clear_markers(&mut self, series_id: u32) {
-        self.inner
-            .borrow_mut()
-            .engine
-            .markers
-            .clear_series(series_id);
+        let mut s = self.inner.borrow_mut();
+        s.engine.markers.clear_series(series_id);
+        s.engine.viewport.price_invalidated = true;
     }
 
     /// Clear all markers for all series.
     pub fn clear_all_markers(&mut self) {
-        self.inner.borrow_mut().engine.markers.clear_all();
+        let mut s = self.inner.borrow_mut();
+        s.engine.markers.clear_all();
+        s.engine.viewport.price_invalidated = true;
+    }
+
+    /// Set the global marker z-order: "normal", "aboveSeries", or "top".
+    pub fn set_marker_z_order(&mut self, z_order: &str) -> Result<(), JsValue> {
+        let z_order = parse_marker_z_order(z_order)?;
+        self.inner.borrow_mut().engine.markers.set_z_order(z_order);
+        Ok(())
+    }
+
+    /// Get the current global marker z-order.
+    pub fn marker_z_order(&self) -> String {
+        match self.inner.borrow().engine.markers.z_order() {
+            MarkerZOrder::Normal => "normal",
+            MarkerZOrder::AboveSeries => "aboveSeries",
+            MarkerZOrder::Top => "top",
+        }
+        .to_string()
+    }
+
+    /// Include marker visual size in automatic price scaling.
+    pub fn set_marker_auto_scale(&mut self, auto_scale: bool) {
+        let mut s = self.inner.borrow_mut();
+        s.engine.markers.set_auto_scale(auto_scale);
+        s.engine.viewport.price_invalidated = true;
+    }
+
+    /// Whether marker visual size participates in automatic price scaling.
+    pub fn marker_auto_scale(&self) -> bool {
+        self.inner.borrow().engine.markers.auto_scale()
+    }
+
+    /// Hit-test rendered series markers at pane CSS coordinates.
+    ///
+    /// Returns `null` when no rendered marker contains the point.
+    pub fn hit_test_marker(&self, x_css: f64, y_css: f64) -> JsValue {
+        let s = self.inner.borrow();
+        let Some(hit) = s.marker_hit_area_at(x_css, y_css) else {
+            return JsValue::NULL;
+        };
+
+        let obj = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("seriesId"),
+            &JsValue::from_f64(hit.series_id as f64),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("markerId"),
+            &JsValue::from_f64(hit.marker_id as f64),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("barIndex"),
+            &JsValue::from_f64(hit.bar_index as f64),
+        );
+        let timestamp = hit
+            .timestamp
+            .map(|ts| JsValue::from_f64(ts as f64))
+            .unwrap_or(JsValue::NULL);
+        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("timestamp"), &timestamp);
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("x"),
+            &JsValue::from_f64(hit.x_css),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("y"),
+            &JsValue::from_f64(hit.y_css),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("shape"),
+            &JsValue::from_str(hit.shape.as_str()),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("position"),
+            &JsValue::from_str(hit.position.as_str()),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("zOrder"),
+            &JsValue::from_str(hit.z_order.as_str()),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("text"),
+            &JsValue::from_str(&hit.text),
+        );
+        obj.into()
     }
 
     /// Set multiple markers for a series at once (replaces existing).
     /// `marker_data` is a flat array: [bar_index, shape_idx, position_idx, price, r, g, b, a, size, ...]
     /// where shape_idx: 0=arrowUp, 1=arrowDown, 2=circle, 3=square
     /// and position_idx: 0=aboveBar, 1=belowBar, 2=atPrice
-    pub fn set_markers(&mut self, series_id: u32, marker_data: &[f64]) {
+    pub fn set_markers(&mut self, series_id: u32, marker_data: &[f64]) -> Result<(), JsValue> {
         const STRIDE: usize = 9; // bar_index, shape, position, price, r, g, b, a, size
         let mut markers = Vec::new();
 
+        if marker_data.len() % STRIDE != 0 {
+            return Err(js_err(format!(
+                "marker_data length must be a multiple of {STRIDE}"
+            )));
+        }
+
+        {
+            let s = self.inner.borrow();
+            validate_marker_series(&s.engine, series_id)?;
+        }
+
         for chunk in marker_data.chunks_exact(STRIDE) {
-            let bar_index = chunk[0] as usize;
-            let shape = match chunk[1] as u32 {
+            let bar_index = parse_marker_index(chunk[0], "bar_index")?;
+            {
+                let s = self.inner.borrow();
+                validate_marker_bar_index(&s.engine, bar_index)?;
+            }
+            let shape = match parse_marker_enum(chunk[1], "shape_idx", 3)? {
                 0 => MarkerShape::ArrowUp,
                 1 => MarkerShape::ArrowDown,
                 2 => MarkerShape::Circle,
                 _ => MarkerShape::Square,
             };
-            let position = match chunk[2] as u32 {
+            let position = match parse_marker_enum(chunk[2], "position_idx", 2)? {
                 0 => MarkerPosition::AboveBar,
                 1 => MarkerPosition::BelowBar,
                 _ => MarkerPosition::AtPrice,
             };
-            let price = chunk[3];
+            let price = validate_marker_price(position, chunk[3])?;
             let color = [
-                chunk[4] as f32,
-                chunk[5] as f32,
-                chunk[6] as f32,
-                chunk[7] as f32,
+                parse_marker_color_channel(chunk[4], "color_r")?,
+                parse_marker_color_channel(chunk[5], "color_g")?,
+                parse_marker_color_channel(chunk[6], "color_b")?,
+                parse_marker_color_channel(chunk[7], "color_a")?,
             ];
-            let size = chunk[8];
+            let size = validate_marker_size(chunk[8])?;
 
             markers.push(SeriesMarker {
                 bar_index,
+                timestamp: {
+                    let s = self.inner.borrow();
+                    s.engine.bars.get(bar_index).map(|bar| bar.timestamp)
+                },
                 shape,
                 position,
                 price,
@@ -6784,17 +7311,98 @@ impl AxiusCharts {
             });
         }
 
-        self.inner
-            .borrow_mut()
-            .engine
-            .markers
-            .for_series(series_id)
-            .set(markers);
+        {
+            let mut s = self.inner.borrow_mut();
+            s.engine.markers.for_series(series_id).set(markers);
+            s.engine.viewport.price_invalidated = true;
+        }
         log::info!(
             "set_markers: series={}, count={}",
             series_id,
             marker_data.len() / STRIDE
         );
+        Ok(())
+    }
+
+    /// Set multiple timestamp-anchored markers for a series at once.
+    ///
+    /// `timestamps` contains one timestamp per marker. `marker_data` is a flat
+    /// array with stride 8: [shape_idx, position_idx, price, r, g, b, a, size, ...].
+    pub fn set_time_markers(
+        &mut self,
+        series_id: u32,
+        timestamps: &[u64],
+        marker_data: &[f64],
+    ) -> Result<(), JsValue> {
+        const STRIDE: usize = 8; // shape, position, price, r, g, b, a, size
+        if marker_data.len() % STRIDE != 0 {
+            return Err(js_err(format!(
+                "marker_data length must be a multiple of {STRIDE}"
+            )));
+        }
+        let marker_count = marker_data.len() / STRIDE;
+        if timestamps.len() != marker_count {
+            return Err(js_err(format!(
+                "timestamps length {} must match marker count {marker_count}",
+                timestamps.len()
+            )));
+        }
+
+        {
+            let s = self.inner.borrow();
+            validate_marker_series(&s.engine, series_id)?;
+        }
+
+        let mut markers = Vec::with_capacity(marker_count);
+        for (i, chunk) in marker_data.chunks_exact(STRIDE).enumerate() {
+            let timestamp = timestamps[i];
+            let bar_index = {
+                let s = self.inner.borrow();
+                validate_marker_timestamp(&s.engine, timestamp)?
+            };
+            let shape = match parse_marker_enum(chunk[0], "shape_idx", 3)? {
+                0 => MarkerShape::ArrowUp,
+                1 => MarkerShape::ArrowDown,
+                2 => MarkerShape::Circle,
+                _ => MarkerShape::Square,
+            };
+            let position = match parse_marker_enum(chunk[1], "position_idx", 2)? {
+                0 => MarkerPosition::AboveBar,
+                1 => MarkerPosition::BelowBar,
+                _ => MarkerPosition::AtPrice,
+            };
+            let price = validate_marker_price(position, chunk[2])?;
+            let color = [
+                parse_marker_color_channel(chunk[3], "color_r")?,
+                parse_marker_color_channel(chunk[4], "color_g")?,
+                parse_marker_color_channel(chunk[5], "color_b")?,
+                parse_marker_color_channel(chunk[6], "color_a")?,
+            ];
+            let size = validate_marker_size(chunk[7])?;
+
+            markers.push(SeriesMarker {
+                bar_index,
+                timestamp: Some(timestamp),
+                shape,
+                position,
+                price,
+                color,
+                size,
+                text: String::new(),
+                text_color: axiuscharts::ThemeConfig::default()
+                    .series_defaults
+                    .marker_text_color,
+                id: 0,
+            });
+        }
+
+        {
+            let mut s = self.inner.borrow_mut();
+            s.engine.markers.for_series(series_id).set(markers);
+            s.engine.viewport.price_invalidated = true;
+        }
+        log::info!("set_time_markers: series={}, count={}", series_id, marker_count);
+        Ok(())
     }
 
     // ── Execution Marks API ────────────────────────────────────────────────────
@@ -7211,7 +7819,7 @@ impl AxiusCharts {
 
     /// Add a new line series overlay. Returns the series ID.
     ///
-    /// Default color is TradingView blue (#2962FF). Use RGBA [0.0–1.0].
+    /// Default color is default blue (#2962FF). Use RGBA [0.0–1.0].
     /// `line_style`: "solid", "dotted", "dashed", "large_dashed", "sparse_dotted".
     pub fn add_line_series(
         &mut self,
@@ -7352,7 +7960,7 @@ impl AxiusCharts {
     /// `up_color_*`: RGBA for bullish bars (close >= open).
     /// `down_color_*`: RGBA for bearish bars (close < open).
     /// `open_visible`: whether to show the open tick.
-    /// `thin_bars`: use 1px stems (like LWC thinBars option).
+    /// `thin_bars`: use 1px stems (like reference implementation thinBars option).
     pub fn add_bar_series(
         &mut self,
         up_color_r: f32,
@@ -8474,7 +9082,7 @@ impl AxiusCharts {
                     s.engine.crosshair.bar_index =
                         grid_idx.and_then(|idx| s.engine.time_scale.main_bar_index_at_slot(idx));
 
-                    // X snaps to bar grid (like LWC) - even in empty space
+                    // X snaps to bar grid (like reference implementation) - even in empty space
                     if let Some(idx) = grid_idx {
                         s.engine.crosshair.x = s.engine.viewport.bar_center_css(idx, pw);
                     } else {
@@ -9604,7 +10212,7 @@ impl AxiusCharts {
         }
     }
 
-    /// LWC-style main series update semantics:
+    /// compatibility-style main series update semantics:
     /// update last bar if timestamp matches, append if timestamp is newer.
     pub fn upsert_bar(
         &self,
@@ -9724,7 +10332,7 @@ impl AxiusCharts {
             .map_err(js_err)
     }
 
-    /// LWC-style update semantics for line/area/baseline overlays:
+    /// compatibility-style update semantics for line/area/baseline overlays:
     /// update last point if timestamp matches, append if timestamp is newer.
     pub fn upsert_series_point(&self, id: u32, timestamp: u64, value: f64) -> Result<(), JsValue> {
         if !value.is_finite() {
@@ -9806,7 +10414,7 @@ impl AxiusCharts {
             .map_err(js_err)
     }
 
-    /// LWC-style update semantics for histogram overlays:
+    /// compatibility-style update semantics for histogram overlays:
     /// update last point if timestamp matches, append if timestamp is newer.
     pub fn upsert_histogram_point(
         &self,
@@ -9916,7 +10524,7 @@ impl AxiusCharts {
             .map_err(js_err)
     }
 
-    /// LWC-style update semantics for OHLC bar overlays:
+    /// compatibility-style update semantics for OHLC bar overlays:
     /// update last point if timestamp matches, append if timestamp is newer.
     pub fn upsert_bar_series_point(
         &self,

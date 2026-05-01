@@ -272,7 +272,7 @@ pub fn point_to_css(
 /// Convert a logical DrawingPoint to bitmap (physical pixel) coordinates.
 ///
 /// Uses separate horizontal/vertical pixel ratios (from device-pixel-content-box)
-/// and rounds to nearest pixel for crisp rendering, matching LWC's approach.
+/// and rounds to nearest pixel for crisp rendering, matching the reference implementation's approach.
 pub fn point_to_bitmap(
     pt: &DrawingPoint,
     vp: &Viewport,
@@ -283,7 +283,7 @@ pub fn point_to_bitmap(
     snap_to_pixel: bool,
 ) -> (f64, f64) {
     let (cx, cy) = point_to_css(pt, vp, pane_css_w, pane_css_h);
-    // Match the renderer's LWC-style `-1px` X bias in physical space too.
+    // Match the renderer's compatibility-style `-1px` X bias in physical space too.
     // Plain `cx * ratio` drifts on fractional DPR / exact bitmap sizing.
     let bx = (cx + 1.0) * h_pixel_ratio - 1.0;
     let by = cy * v_pixel_ratio;

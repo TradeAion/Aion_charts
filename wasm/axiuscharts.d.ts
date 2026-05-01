@@ -326,6 +326,22 @@ export interface ExecutionMarkHoverEvent extends BaseChartEvent {
   groupId: string | null;
 }
 
+export interface MarkerHoverEvent extends BaseChartEvent {
+  type: 'markerHover';
+  /** Series ID for the marker, or null when leaving. */
+  seriesId: number | null;
+  /** Marker ID within the series, or null when leaving. */
+  markerId: number | null;
+  /** Main bar index for the marker, or null when leaving. */
+  barIndex: number | null;
+  /** Marker timestamp in milliseconds, or null when unavailable/leaving. */
+  timestamp: number | null;
+  shape: 'arrowUp' | 'arrowDown' | 'circle' | 'square' | string | null;
+  position: 'aboveBar' | 'belowBar' | 'atPrice' | string | null;
+  zOrder: 'normal' | 'aboveSeries' | 'top' | string | null;
+  text: string | null;
+}
+
 /** Map of event name → typed payload, used to type `on<K>()` overloads */
 export interface ChartEventMap {
   crosshairMove:        CrosshairMoveEvent;
@@ -343,6 +359,7 @@ export interface ChartEventMap {
   executionClusterClick: ExecutionClusterClickEvent;
   executionMarkClick:   ExecutionMarkClickEvent;
   executionMarkHover:   ExecutionMarkHoverEvent;
+  markerHover:          MarkerHoverEvent;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -874,7 +891,7 @@ export declare class AxiusCharts {
   clear_footprint_data(): void;
 
   /**
-   * LWC-style upsert: appends a new bar if the timestamp is newer than the last,
+   * compatibility-style upsert: appends a new bar if the timestamp is newer than the last,
    * or updates the last bar in-place if timestamps match.
    * Ideal for live-tick streaming.
    */
@@ -1011,15 +1028,30 @@ export declare class AxiusCharts {
   /**
    * Set price-scale top and bottom margins (fractions 0.0–1.0).
    * Default: top=0.2, bottom=0.1.
-   */
+  */
   set_price_scale_margins(top: number, bottom: number): void;
+
+  /**
+   * Add an external price range that participates in automatic price scaling.
+   */
+  add_autoscale_contribution(min_price: number, max_price: number): number;
+
+  /**
+   * Remove a previously registered autoscale contribution.
+   */
+  remove_autoscale_contribution(id: number): boolean;
+
+  /**
+   * Remove all external autoscale contributions.
+   */
+  clear_autoscale_contributions(): void;
 
   /**
    * Enable or disable auto-scroll when new bars arrive during live streaming.
    *
    * When `true` (default) the viewport advances by 1 bar each time a new bar
    * is appended and the chart is already showing the latest data — identical
-   * to LWC's `shiftVisibleRangeOnNewBar` behaviour.
+   * to the reference implementation's `shiftVisibleRangeOnNewBar` behaviour.
    *
    * When `false` the viewport is never moved by incoming data regardless of
    * scroll position, giving the user a fully static view during live updates.
@@ -1267,7 +1299,7 @@ export declare class AxiusCharts {
   /** Append a single point to a line/area/baseline series. */
   append_series_point(id: number, timestamp: bigint, value: number): void;
 
-  /** LWC-style upsert for a line/area/baseline series. */
+  /** compatibility-style upsert for a line/area/baseline series. */
   upsert_series_point(id: number, timestamp: bigint, value: number): void;
 
   /** Update the last point in a line/area/baseline series. */
@@ -1279,7 +1311,7 @@ export declare class AxiusCharts {
     open: number, high: number, low: number, close: number,
   ): void;
 
-  /** LWC-style upsert for an OHLC bar series. */
+  /** compatibility-style upsert for an OHLC bar series. */
   upsert_bar_series_point(
     id: number, timestamp: bigint,
     open: number, high: number, low: number, close: number,
@@ -1297,7 +1329,7 @@ export declare class AxiusCharts {
     color_r: number, color_g: number, color_b: number, color_a: number,
   ): void;
 
-  /** LWC-style upsert for a histogram series. */
+  /** compatibility-style upsert for a histogram series. */
   upsert_histogram_point(
     id: number, timestamp: bigint, value: number,
     color_r: number, color_g: number, color_b: number, color_a: number,
@@ -1364,6 +1396,21 @@ export declare class AxiusCharts {
     text:       string,
   ): number;
 
+  /**
+   * Add a marker anchored by timestamp instead of mutable bar index.
+   * The timestamp is retained as the canonical render anchor across data reloads.
+   */
+  add_marker_at_time(
+    series_id:  number,
+    timestamp: bigint | number,
+    shape:      string,
+    position:   string,
+    price:      number,
+    color_r:    number, color_g: number, color_b: number, color_a: number,
+    size:       number,
+    text:       string,
+  ): number;
+
   /** Remove a specific marker from a series. */
   remove_marker(series_id: number, marker_id: number): boolean;
 
@@ -1372,6 +1419,55 @@ export declare class AxiusCharts {
 
   /** Clear all markers for all series. */
   clear_all_markers(): void;
+
+  /** Set global marker stacking order: `"normal"`, `"aboveSeries"`, or `"top"`. */
+  set_marker_z_order(z_order: 'normal' | 'aboveSeries' | 'top' | string): void;
+
+  /** Get the current global marker stacking order. */
+  marker_z_order(): 'normal' | 'aboveSeries' | 'top' | string;
+
+  /** Include marker visual size in automatic price scaling. Defaults to `true`. */
+  set_marker_auto_scale(auto_scale: boolean): void;
+
+  /** Whether marker visual size participates in automatic price scaling. */
+  marker_auto_scale(): boolean;
+
+  /**
+   * Hit-test rendered series markers at pane CSS coordinates.
+   * Returns `null` when no marker contains the point.
+   */
+  hit_test_marker(x_css: number, y_css: number): null | {
+    seriesId: number;
+    markerId: number;
+    barIndex: number;
+    timestamp: number | null;
+    x: number;
+    y: number;
+    shape: 'arrowUp' | 'arrowDown' | 'circle' | 'square' | string;
+    position: 'aboveBar' | 'belowBar' | 'atPrice' | string;
+    zOrder: 'normal' | 'aboveSeries' | 'top' | string;
+    text: string;
+  };
+
+  /**
+   * Set multiple markers for a series at once.
+   * The flat array stride is 9:
+   * `[bar_index, shape_idx, position_idx, price, r, g, b, a, size, ...]`.
+   * Throws if the series ID, bar index, stride, enum IDs, colours, price, or size are invalid.
+   */
+  set_markers(series_id: number, marker_data: Float64Array | number[]): void;
+
+  /**
+   * Set multiple timestamp-anchored markers for a series at once.
+   * `timestamps` contains one timestamp per marker.
+   * The flat marker-data stride is 8:
+   * `[shape_idx, position_idx, price, r, g, b, a, size, ...]`.
+   */
+  set_time_markers(
+    series_id: number,
+    timestamps: BigUint64Array,
+    marker_data: Float64Array | number[],
+  ): void;
 
   // ── Execution Marks ──────────────────────────────────────────────────────
   //

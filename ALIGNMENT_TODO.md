@@ -10,7 +10,7 @@
 - [x] Use distance thresholds for double-click/double-tap reset detection instead of time-only matching.
 - [x] Stop right-gap crosshair labels from falling back to `"0"` when no timestamp is available.
 - [x] Draw axis tick marks consistently and use major/minor time-axis label styling based on actual label granularity.
-- [x] Align percentage/indexed/log price-scale math more closely with Lightweight Charts, including negative-base handling.
+- [x] Align percentage/indexed/log price-scale math more closely with reference chart library, including negative-base handling.
 - [x] Improve price precision inference so overlays are not locked to a `0.01` assumption.
 - [x] Align public docs and TypeScript declarations with runtime behavior and event payload shapes.
 - [x] Wire draggable price-line hit testing and drag updates into pointer handling.

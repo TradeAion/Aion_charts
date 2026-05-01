@@ -1,6 +1,6 @@
 //! TimeAxisRenderer — dedicated renderer for the time (X) axis widget.
 //!
-//! Mirrors LWC's TimeAxisWidget:
+//! Mirrors the reference implementation's TimeAxisWidget:
 //! - Base canvas: background, border, tick marks, tick labels (normal + bold)
 //! - Top canvas: crosshair time label (rounded rect + text)
 //!
@@ -112,7 +112,7 @@ impl TimeAxisRenderer {
         self.base_ctx.set_fill_style_str(&rgba(&style.bg_color));
         self.base_ctx.fill_rect(0.0, 0.0, w, h);
 
-        // Border line at top edge (LWC: time axis border is at its top)
+        // Border line at top edge (reference implementation: time axis border is at its top)
         let border_size = (style.axis_border_size as f64 * v_ratio).max(1.0).floor();
         if style.axis_border_visible {
             self.base_ctx
@@ -151,7 +151,7 @@ impl TimeAxisRenderer {
         let inset_top_css = style.time_axis_inset_top();
         let tick_length_css = style.axis_tick_length as f64;
         let fs_css = style.font_size as f64;
-        // LWC: yText = borderSize + tickLength + paddingTop + fontSize/2
+        // reference implementation: yText = borderSize + tickLength + paddingTop + fontSize/2
         let text_y_css = border_size / v_ratio + tick_length_css + inset_top_css + fs_css / 2.0;
         let pane_css_w_axis = pane_w / h_ratio;
 
@@ -382,7 +382,7 @@ impl TimeAxisRenderer {
             None => return,
         };
 
-        // LWC parity: compute label geometry in media/CSS coordinates, then convert to bitmap.
+        // reference parity: compute label geometry in media/CSS coordinates, then convert to bitmap.
         let css_font = format!("{}px {}", style.font_size, style.font_family);
         self.top_ctx.set_font(&css_font);
 
@@ -394,7 +394,7 @@ impl TimeAxisRenderer {
         let label_w = text_w + 2.0 * h_margin;
         let label_half = label_w / 2.0;
 
-        // Center on crosshair X, clamp to bounds (LWC uses +0.5 half-pixel offset).
+        // Center on crosshair X, clamp to bounds (reference implementation uses +0.5 half-pixel offset).
         let mut coord = mx_css;
         let mut lx1 = (coord - label_half).floor() + 0.5;
         if lx1 < 0.0 {
@@ -406,15 +406,15 @@ impl TimeAxisRenderer {
         }
         let lx2 = lx1 + label_w;
 
-        // Label height excludes labelBottomOffset (LWC y2 calculation in time-axis-view-renderer.ts).
-        // LWC: y2 = ceil(y1 + borderSize + tickLength + paddingTop + fontSize + paddingBottom)
+        // Label height excludes labelBottomOffset (reference implementation y2 calculation in time-axis-view-renderer.ts).
+        // reference implementation: y2 = ceil(y1 + borderSize + tickLength + paddingTop + fontSize + paddingBottom)
         let border_size = style.axis_border_size as f64;
         let tick_length = style.axis_tick_length as f64;
         let inset_top = style.time_axis_inset_top();
         let inset_bottom = style.time_axis_inset_bottom();
         let fs = style.font_size as f64;
 
-        // LWC: label starts at y=0 (covers border + tick area with its background).
+        // reference implementation: label starts at y=0 (covers border + tick area with its background).
         let by1_css = style.time_axis_crosshair_label_top_inset();
         let by2_css = (by1_css + border_size + tick_length + inset_top + fs + inset_bottom)
             .ceil()
@@ -454,7 +454,7 @@ impl TimeAxisRenderer {
         self.top_ctx.set_text_align("left");
         self.top_ctx.set_text_baseline("middle");
         let text_x_css = lx1 + h_margin;
-        // LWC: yText = y1 + borderSize + tickLength + paddingTop + fontSize/2
+        // reference implementation: yText = y1 + borderSize + tickLength + paddingTop + fontSize/2
         let text_y_css = by1_css + border_size + tick_length + inset_top + fs / 2.0;
         let m = self
             .text_cache

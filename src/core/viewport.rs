@@ -42,7 +42,7 @@ impl PriceScaleMode {
     }
 }
 
-/// Adaptive log formula parameters (LWC pattern).
+/// Adaptive log formula parameters (reference pattern).
 /// Used to handle negative values and values near zero gracefully.
 #[derive(Debug, Clone, Copy)]
 struct LogFormula {
@@ -129,15 +129,15 @@ pub struct Viewport {
     /// True if price axis is locked by user.
     pub price_locked: bool,
     /// When true (default) the viewport advances by 1 bar whenever a new bar
-    /// is appended and the previous last bar was visible — identical to LWC's
+    /// is appended and the previous last bar was visible — identical to the reference implementation's
     /// `shiftVisibleRangeOnNewBar` option.  Set to false to keep the viewport
     /// completely stationary during live streaming regardless of position.
     pub auto_scroll: bool,
-    /// LWC scaleMargins.top — fraction of chart height reserved above data (default 0.2).
+    /// reference implementation scaleMargins.top — fraction of chart height reserved above data (default 0.2).
     pub scale_margin_top: f64,
-    /// LWC scaleMargins.bottom — fraction of chart height reserved below data (default 0.1).
+    /// reference implementation scaleMargins.bottom — fraction of chart height reserved below data (default 0.1).
     pub scale_margin_bottom: f64,
-    /// True when price range needs recalculation (LWC _invalidatedForRange pattern).
+    /// True when price range needs recalculation (reference implementation _invalidatedForRange pattern).
     pub price_invalidated: bool,
     /// Price scale mode (Normal, Logarithmic, Percentage, IndexedTo100).
     pub price_scale_mode: PriceScaleMode,
@@ -262,9 +262,9 @@ impl Viewport {
         self.price_invalidated = true;
     }
 
-    /// Auto-fit price range to visible bars with LWC scaleMargins.
+    /// Auto-fit price range to visible bars with reference implementation scaleMargins.
     ///
-    /// LWC PriceScale uses scaleMargins { top: 0.2, bottom: 0.1 } by default,
+    /// reference implementation PriceScale uses scaleMargins { top: 0.2, bottom: 0.1 } by default,
     /// meaning the data occupies the inner 70% of the chart height, with 20%
     /// padding above and 10% below.
     pub fn auto_fit_price(&mut self, bars: &crate::core::data::BarArray) {
@@ -383,7 +383,7 @@ impl Viewport {
     ///
     /// Bar `i` occupies index range `[i, i+1)` — its center is at `i + 0.5`.
     /// `pixel_to_bar` returns a float in that range; `.floor()` gives the
-    /// correct integer index.  This matches LWC's `coordinateToIndex` which
+    /// correct integer index.  This matches the reference implementation's `coordinateToIndex` which
     /// uses `Math.ceil(floatIndex)` with a −0.5 offset (equivalent result).
     ///
     /// Returns `None` when the pixel maps outside `0..data_len`.
@@ -405,7 +405,7 @@ impl Viewport {
 
     /// Convert a pixel X coordinate to a bar index for crosshair snapping.
     ///
-    /// Like LWC: the crosshair can go into empty space (beyond data), but still
+    /// Like reference implementation: the crosshair can go into empty space (beyond data), but still
     /// snaps to the bar grid. Returns the grid-snapped index which may be >= data_len.
     /// Returns `None` only if the index would be negative.
     #[inline]
@@ -638,7 +638,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bar_center_css_matches_lwc_coordinate_bias() {
+    fn test_bar_center_css_matches_reference_coordinate_bias() {
         let mut vp = Viewport::new(1000, 600);
         vp.set_range(10.0, 110.0);
 

@@ -54,7 +54,7 @@ pub struct SerializedDrawing {
     /// Custom Fibonacci levels. Omitted for non-fibonacci drawings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fibonacci_levels: Vec<SerializedFibonacciLevel>,
-    /// Optional rectangle middle-line style (TradingView-style horizontal
+    /// Optional rectangle middle-line style (platform-style horizontal
     /// midline). `None` means the midline is disabled. Omitted for
     /// non-rectangle drawings, or rectangles without a midline.
     #[serde(default, skip_serializing_if = "Option::is_none")]

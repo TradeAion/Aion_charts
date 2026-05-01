@@ -1,6 +1,6 @@
 //! Histogram data storage — columnar arrays for timestamp, value, and optional per-bar color.
 //!
-//! Like LWC, each histogram bar can have an individual color override.
+//! Like reference implementation, each histogram bar can have an individual color override.
 //! If no per-bar color is set, the series default color is used.
 
 use crate::core::series::validation::{

@@ -1,6 +1,6 @@
 //! PriceAxisRenderer — dedicated renderer for the price (Y) axis widget.
 //!
-//! Mirrors LWC's PriceAxisWidget:
+//! Mirrors the reference implementation's PriceAxisWidget:
 //! - Base canvas: background, border, tick marks, tick labels
 //! - Top canvas: crosshair price label (rounded rect + text)
 //!
@@ -228,7 +228,7 @@ impl PriceAxisRenderer {
 
     /// Render the base layer: background, border, tick marks, tick labels.
     ///
-    /// LWC behaviour: tick marks are recomputed and redrawn instantly every
+    /// reference behaviour: tick marks are recomputed and redrawn instantly every
     /// frame with no fade animation.  Labels are placed at exact multiples of
     /// the tick span so they slide smoothly with the viewport during drag.
     pub fn render_base(&mut self, style: &ChartStyle, ticks: &[TickMark]) {
@@ -241,7 +241,7 @@ impl PriceAxisRenderer {
         self.base_ctx.set_fill_style_str(&rgba(&style.bg_color));
         self.base_ctx.fill_rect(0.0, 0.0, w, h);
 
-        // Border line at left edge (LWC: right price scale border is at its left)
+        // Border line at left edge (reference implementation: right price scale border is at its left)
         let border_size = (style.axis_border_size as f64 * dpr).max(1.0).floor();
         if style.axis_border_visible {
             self.base_ctx
@@ -269,7 +269,7 @@ impl PriceAxisRenderer {
         }
 
         // Tick labels — draw in media (CSS) coordinate space for sharp text.
-        // LWC pattern: save → scale(dpr,dpr) → draw text with CSS-px font → restore.
+        // reference pattern: save → scale(dpr,dpr) → draw text with CSS-px font → restore.
         self.base_ctx.save();
         let _ = self.base_ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
 
@@ -280,7 +280,7 @@ impl PriceAxisRenderer {
 
         let inner_inset_css = style.price_axis_inset_inner();
         let tick_length_css = style.axis_tick_length as f64;
-        // LWC: textLeftX = tickMarkLeftX + tickLength + paddingInner
+        // reference implementation: textLeftX = tickMarkLeftX + tickLength + paddingInner
         // tickMarkLeftX = 0 (at border), so text_x = border + tickLength + paddingInner.
         let text_x_css = border_size / dpr + tick_length_css + inner_inset_css;
 
@@ -306,7 +306,7 @@ impl PriceAxisRenderer {
     }
 
     /// Render the top layer: crosshair price label.
-    /// Matches LWC's PriceAxisViewRenderer._calculateGeometry for alignRight=true.
+    /// Matches the reference implementation's PriceAxisViewRenderer._calculateGeometry for alignRight=true.
     ///
     /// `pane_ph` is the pane height in physical pixels.
     pub fn render_top(
@@ -501,7 +501,7 @@ impl PriceAxisRenderer {
             geom.text_y_css = (y_top + y_top + single_h_bmp) / 2.0 / dpr;
             geom.text_x_css =
                 centered_full_width_label_text_x_css(&geom, price_text_w, dpr, &metrics);
-            // LWC: corner radius = 2 * horizontalPixelRatio. Rounded on the outside edge.
+            // reference implementation: corner radius = 2 * horizontalPixelRatio. Rounded on the outside edge.
 
             draw_right_axis_label_background(&self.base_ctx, &geom, &item.color);
             draw_right_axis_label_tick(&self.base_ctx, &geom, &text_color, dpr);

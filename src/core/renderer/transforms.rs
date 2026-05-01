@@ -91,7 +91,7 @@ mod tests {
     use crate::core::viewport::Viewport;
 
     #[test]
-    fn bar_projection_matches_lwc_index_to_coordinate_formula() {
+    fn bar_projection_matches_reference_index_to_coordinate_formula() {
         let mut vp = Viewport::new(1000, 600);
         vp.set_range(10.0, 110.0);
 
@@ -109,7 +109,7 @@ mod tests {
     }
 
     #[test]
-    fn x_to_bar_is_inverse_of_lwc_shifted_projection() {
+    fn x_to_bar_is_inverse_of_reference_shifted_projection() {
         let mut vp = Viewport::new(1000, 600);
         vp.set_range(10.0, 110.0);
 

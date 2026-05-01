@@ -12,9 +12,9 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use axiuscharts::{
-    hit_test_execution_mark_hit_areas, Bar, ChartEngine, ExecutionMarkHitArea, HitZone,
-    InteractionHandler, MainChartType, OrderLineHit, OrderLineId, OverlayRenderer,
-    PriceAxisRenderer, PriceLineHit, PriceLineId, TimeAxisRenderer,
+    hit_test_execution_mark_hit_areas, hit_test_marker_hit_areas, Bar, ChartEngine,
+    ExecutionMarkHitArea, HitZone, InteractionHandler, MainChartType, MarkerHitArea, OrderLineHit,
+    OrderLineId, OverlayRenderer, PriceAxisRenderer, PriceLineHit, PriceLineId, TimeAxisRenderer,
 };
 
 use crate::canvas_manager::WidgetLayout;
@@ -169,6 +169,8 @@ pub struct ChartInner {
     pub time_axis_renderer: TimeAxisRenderer,
     pub layout: WidgetLayout,
     pub interaction: InteractionHandler,
+    /// Compatibility-focused interaction option switches.
+    pub interaction_options: InteractionOptions,
     /// Exact pixel sizes from device-pixel-content-box ResizeObserver.
     pub exact_sizes: ExactPixelSizes,
     /// Sub-panes for indicators (RSI, ATR, etc.)
@@ -204,8 +206,12 @@ pub struct ChartInner {
     pub symbol: String,
     /// Screen-space hit areas for the most recently rendered execution marks.
     pub execution_mark_hit_areas: Vec<ExecutionMarkHitArea>,
+    /// Screen-space hit areas for the most recently rendered series markers.
+    pub marker_hit_areas: Vec<MarkerHitArea>,
     /// Last hovered execution mark ID so hover enter/leave only emits on change.
     pub hovered_execution_mark_id: Option<String>,
+    /// Last hovered series marker key (`series_id:marker_id`) for enter/leave suppression.
+    pub hovered_marker_key: Option<String>,
     /// Currently selected/clicked execution mark ID (for showing selected locators).
     pub selected_execution_mark_id: Option<String>,
     /// Active price-line drag ID, if the user is dragging a draggable price line.
@@ -214,6 +220,54 @@ pub struct ChartInner {
     pub order_line_drag_id: Option<String>,
     /// Order line being cancelled (for cancel button click handling).
     pub cancelling_order_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct InteractionOptions {
+    pub handle_scroll_mouse_wheel: bool,
+    pub handle_scroll_pressed_mouse_move: bool,
+    pub handle_scroll_horz_touch_drag: bool,
+    pub handle_scroll_vert_touch_drag: bool,
+    pub handle_scale_axis_pressed_mouse_move: bool,
+    pub handle_scale_axis_double_click_reset: bool,
+    pub handle_scale_mouse_wheel: bool,
+    pub handle_scale_pinch: bool,
+    pub kinetic_scroll_touch: bool,
+    pub kinetic_scroll_mouse: bool,
+    pub tracking_mode_exit_mode: TrackingModeExitMode,
+}
+
+impl Default for InteractionOptions {
+    fn default() -> Self {
+        Self {
+            handle_scroll_mouse_wheel: true,
+            handle_scroll_pressed_mouse_move: true,
+            handle_scroll_horz_touch_drag: true,
+            handle_scroll_vert_touch_drag: true,
+            handle_scale_axis_pressed_mouse_move: true,
+            handle_scale_axis_double_click_reset: true,
+            handle_scale_mouse_wheel: true,
+            handle_scale_pinch: true,
+            kinetic_scroll_touch: true,
+            kinetic_scroll_mouse: false,
+            tracking_mode_exit_mode: TrackingModeExitMode::OnNextTap,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrackingModeExitMode {
+    OnTouchEnd,
+    OnNextTap,
+}
+
+impl TrackingModeExitMode {
+    pub fn as_key(self) -> &'static str {
+        match self {
+            Self::OnTouchEnd => "onTouchEnd",
+            Self::OnNextTap => "onNextTap",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,6 +307,14 @@ impl ReplayEdgeBehavior {
 impl ChartInner {
     fn execution_mark_hit_area_at(&self, x_css: f64, y_css: f64) -> Option<ExecutionMarkHitArea> {
         hit_test_execution_mark_hit_areas(&self.execution_mark_hit_areas, x_css, y_css).cloned()
+    }
+
+    pub fn marker_hit_area_at(&self, x_css: f64, y_css: f64) -> Option<MarkerHitArea> {
+        hit_test_marker_hit_areas(&self.marker_hit_areas, x_css, y_css).cloned()
+    }
+
+    fn marker_hover_key(hit_area: &MarkerHitArea) -> String {
+        format!("{}:{}", hit_area.series_id, hit_area.marker_id)
     }
 
     fn hovered_execution_mark_id_at(&self, x_css: f64, y_css: f64) -> Option<String> {
@@ -298,6 +360,41 @@ impl ChartInner {
                 role: None,
                 quantity: None,
                 group_id: None,
+            }
+        };
+
+        self.engine.event_bus.emit(event);
+    }
+
+    fn emit_marker_hover_event(&mut self, hit_area: Option<&MarkerHitArea>) {
+        let next_key = hit_area.map(Self::marker_hover_key);
+        if self.hovered_marker_key == next_key {
+            return;
+        }
+
+        self.hovered_marker_key = next_key;
+
+        let event = if let Some(hit_area) = hit_area {
+            axiuscharts::ChartEvent::MarkerHover {
+                series_id: Some(hit_area.series_id),
+                marker_id: Some(hit_area.marker_id),
+                bar_index: Some(hit_area.bar_index),
+                timestamp: hit_area.timestamp,
+                shape: Some(hit_area.shape.as_str().to_string()),
+                position: Some(hit_area.position.as_str().to_string()),
+                z_order: Some(hit_area.z_order.as_str().to_string()),
+                text: Some(hit_area.text.clone()),
+            }
+        } else {
+            axiuscharts::ChartEvent::MarkerHover {
+                series_id: None,
+                marker_id: None,
+                bar_index: None,
+                timestamp: None,
+                shape: None,
+                position: None,
+                z_order: None,
+                text: None,
             }
         };
 
@@ -783,6 +880,7 @@ impl ChartInner {
             .pointer_leave(zone, &mut self.engine.crosshair);
         if zone == HitZone::Chart {
             self.emit_execution_mark_hover_event(None);
+            self.emit_marker_hover_event(None);
             self.engine.drawings.clear_hovered();
             self.interaction.set_drawing_cursor(None);
         }
@@ -964,6 +1062,20 @@ impl ChartInner {
             hover_cursor = Some("pointer");
         }
 
+        let can_hover_markers = !is_drawing_drag
+            && !self.engine.drawings.is_creating()
+            && self.engine.drawings.active_tool == axiuscharts::DrawingTool::None
+            && !(self.replay_active && self.replay_trim_edit_mode);
+        let hovered_marker = if can_hover_markers {
+            self.marker_hit_area_at(x, y)
+        } else {
+            None
+        };
+        self.emit_marker_hover_event(hovered_marker.as_ref());
+        if hover_cursor.is_none() && hovered_marker.is_some() {
+            hover_cursor = Some("pointer");
+        }
+
         // Check for order line hover and update cursor
         let can_hover_order_lines = !is_drawing_drag
             && !self.engine.drawings.is_creating()
@@ -1058,6 +1170,10 @@ impl ChartInner {
             return; // don't move chart while dragging drawing
         }
 
+        let handle_scroll_pressed_mouse_move =
+            self.interaction_options.handle_scroll_pressed_mouse_move;
+        let handle_scroll_horz_touch_drag = self.interaction_options.handle_scroll_horz_touch_drag;
+        let handle_scroll_vert_touch_drag = self.interaction_options.handle_scroll_vert_touch_drag;
         let Self {
             interaction,
             engine,
@@ -1067,9 +1183,27 @@ impl ChartInner {
         let before_end = engine.viewport.end_bar;
         let before_price_min = engine.viewport.price_min;
         let before_price_max = engine.viewport.price_max;
+        let suppress_chart_drag =
+            interaction.is_pressed_in_zone(HitZone::Chart) && !handle_scroll_pressed_mouse_move;
+        let restore_pressed = interaction.pressed;
+        if suppress_chart_drag {
+            interaction.pressed = false;
+            interaction.drag_active = false;
+        }
+        let mut move_x = x;
+        let mut move_y = y;
+        if interaction.is_touch && interaction.is_pressed_in_zone(HitZone::Chart) {
+            let (press_x, press_y) = interaction.press_position();
+            if !handle_scroll_horz_touch_drag {
+                move_x = press_x;
+            }
+            if !handle_scroll_vert_touch_drag {
+                move_y = press_y;
+            }
+        }
         interaction.pane_pointer_move(
-            x,
-            y,
+            move_x,
+            move_y,
             pw,
             ph,
             &mut engine.viewport,
@@ -1078,6 +1212,10 @@ impl ChartInner {
             &engine.time_scale,
             dpr,
         );
+        if suppress_chart_drag {
+            interaction.pressed = restore_pressed;
+            interaction.drag_active = false;
+        }
 
         if (before_start - engine.viewport.start_bar).abs() > 1e-9
             || (before_end - engine.viewport.end_bar).abs() > 1e-9
@@ -1138,6 +1276,14 @@ impl ChartInner {
                 ..
             } = self;
             interaction.pointer_down(x, y, zone, &engine.viewport, ph);
+        }
+
+        if zone == HitZone::Chart
+            && self.interaction.is_touch
+            && self.interaction_options.tracking_mode_exit_mode == TrackingModeExitMode::OnNextTap
+        {
+            self.interaction
+                .exit_touch_tracking(&mut self.engine.crosshair);
         }
 
         if zone == HitZone::Chart {
@@ -1516,6 +1662,14 @@ impl ChartInner {
         let before_end = self.engine.viewport.end_bar;
         let before_price_min = self.engine.viewport.price_min;
         let before_price_max = self.engine.viewport.price_max;
+        let allow_double_click_reset = self
+            .interaction_options
+            .handle_scale_axis_double_click_reset;
+        let allow_touch_kinetic_scroll = self.interaction_options.kinetic_scroll_touch;
+        let allow_mouse_kinetic_scroll = self.interaction_options.kinetic_scroll_mouse;
+        let exit_tracking_on_touch_end =
+            self.interaction_options.tracking_mode_exit_mode == TrackingModeExitMode::OnTouchEnd
+                && self.interaction.is_touch;
 
         let Self {
             interaction,
@@ -1527,7 +1681,13 @@ impl ChartInner {
             &engine.bars,
             engine.time_scale.len(),
             now_ms,
+            allow_double_click_reset,
+            allow_touch_kinetic_scroll,
+            allow_mouse_kinetic_scroll,
         );
+        if exit_tracking_on_touch_end {
+            interaction.exit_touch_tracking(&mut engine.crosshair);
+        }
         if (before_start - engine.viewport.start_bar).abs() > 1e-9
             || (before_end - engine.viewport.end_bar).abs() > 1e-9
             || (before_price_min - engine.viewport.price_min).abs() > 1e-9

@@ -18,12 +18,16 @@ export class AxiusCharts {
      */
     add_area_series(line_color_r: number, line_color_g: number, line_color_b: number, line_color_a: number, top_color_r: number, top_color_g: number, top_color_b: number, top_color_a: number, bottom_color_r: number, bottom_color_g: number, bottom_color_b: number, bottom_color_a: number, line_width: number): number;
     /**
+     * Add an external price range that participates in automatic price scaling.
+     */
+    add_autoscale_contribution(min_price: number, max_price: number): number;
+    /**
      * Add a new bar (OHLC) series overlay. Returns the series ID.
      *
      * `up_color_*`: RGBA for bullish bars (close >= open).
      * `down_color_*`: RGBA for bearish bars (close < open).
      * `open_visible`: whether to show the open tick.
-     * `thin_bars`: use 1px stems (like LWC thinBars option).
+     * `thin_bars`: use 1px stems (like reference implementation thinBars option).
      */
     add_bar_series(up_color_r: number, up_color_g: number, up_color_b: number, up_color_a: number, down_color_r: number, down_color_g: number, down_color_b: number, down_color_a: number, open_visible: boolean, thin_bars: boolean): number;
     /**
@@ -71,7 +75,7 @@ export class AxiusCharts {
     /**
      * Add a new line series overlay. Returns the series ID.
      *
-     * Default color is TradingView blue (#2962FF). Use RGBA [0.0–1.0].
+     * Default color is default blue (#2962FF). Use RGBA [0.0–1.0].
      * `line_style`: "solid", "dotted", "dashed", "large_dashed", "sparse_dotted".
      */
     add_line_series(color_r: number, color_g: number, color_b: number, color_a: number, line_width: number, line_style: string): number;
@@ -85,6 +89,13 @@ export class AxiusCharts {
      * Returns the marker ID.
      */
     add_marker(series_id: number, bar_index: number, shape: string, position: string, price: number, color_r: number, color_g: number, color_b: number, color_a: number, size: number, text: string): number;
+    /**
+     * Add a marker anchored by timestamp instead of mutable bar index.
+     *
+     * The timestamp is kept as the canonical render anchor. The resolved bar
+     * index is only used as a fallback and for above/below bar price placement.
+     */
+    add_marker_at_time(series_id: number, timestamp: bigint, shape: string, position: string, price: number, color_r: number, color_g: number, color_b: number, color_a: number, size: number, text: string): number;
     /**
      * Get the allowed interval list. Returns an empty array when all intervals are allowed.
      */
@@ -143,6 +154,10 @@ export class AxiusCharts {
      */
     clear_allowed_intervals(): void;
     /**
+     * Remove all external autoscale contributions.
+     */
+    clear_autoscale_contributions(): void;
+    /**
      * Hide crosshair immediately.
      */
     clear_crosshair(): void;
@@ -191,7 +206,7 @@ export class AxiusCharts {
     /**
      * Create a new order line at the specified price level.
      *
-     * This creates a TradingView-style order management line with:
+     * This creates a platform-style order management line with:
      * - Order type label (Limit, Stop, TP, SL)
      * - Side indication (Buy/Sell) with appropriate colors
      * - Quantity display
@@ -352,6 +367,12 @@ export class AxiusCharts {
      */
     get_volume_visible(): boolean;
     /**
+     * Hit-test rendered series markers at pane CSS coordinates.
+     *
+     * Returns `null` when no rendered marker contains the point.
+     */
+    hit_test_marker(x_css: number, y_css: number): any;
+    /**
      * Restore all drawings (main pane + indicator subpanes) from JSON.
      *
      * Existing drawings are replaced atomically. Unknown subpane IDs in the payload are ignored.
@@ -435,6 +456,14 @@ export class AxiusCharts {
      */
     is_interval_allowed(interval: string): boolean;
     /**
+     * Whether marker visual size participates in automatic price scaling.
+     */
+    marker_auto_scale(): boolean;
+    /**
+     * Get the current global marker z-order.
+     */
+    marker_z_order(): string;
+    /**
      * Get the maximum historical bar count allowed in a single load. Returns 0 when uncapped.
      */
     max_bars_per_load(): number;
@@ -495,6 +524,10 @@ export class AxiusCharts {
      * Remove all scale (measurement) drawings.
      */
     remove_all_scale_drawings(): void;
+    /**
+     * Remove a previously registered autoscale contribution.
+     */
+    remove_autoscale_contribution(id: number): boolean;
     /**
      * Remove an execution mark by ID.
      */
@@ -589,7 +622,7 @@ export class AxiusCharts {
      *
      * When `true` (default) the viewport advances by 1 bar each time a new bar
      * is appended and the chart is already showing the latest data — identical
-     * to LWC's `shiftVisibleRangeOnNewBar` behaviour.
+     * to the reference implementation's `shiftVisibleRangeOnNewBar` behaviour.
      *
      * When `false` the viewport never moves during live streaming regardless of
      * the current scroll position, giving the user a fully static view even
@@ -881,6 +914,14 @@ export class AxiusCharts {
      */
     set_last_price_line_width(width: number): void;
     /**
+     * Include marker visual size in automatic price scaling.
+     */
+    set_marker_auto_scale(auto_scale: boolean): void;
+    /**
+     * Set the global marker z-order: "normal", "aboveSeries", or "top".
+     */
+    set_marker_z_order(z_order: string): void;
+    /**
      * Set multiple markers for a series at once (replaces existing).
      * `marker_data` is a flat array: [bar_index, shape_idx, position_idx, price, r, g, b, a, size, ...]
      * where shape_idx: 0=arrowUp, 1=arrowDown, 2=circle, 3=square
@@ -1022,7 +1063,7 @@ export class AxiusCharts {
     set_selected_fibonacci_levels_json(json: string): boolean;
     /**
      * Toggle / configure the optional horizontal middle line on the currently
-     * selected Rectangle drawing (TradingView-style midline).
+     * selected Rectangle drawing (platform-style midline).
      *
      * `dash_on`/`dash_off` ≤ 0 means a solid line. Returns `false` when the
      * current selection is not a Rectangle, or when nothing is selected.
@@ -1073,6 +1114,13 @@ export class AxiusCharts {
      */
     set_subpane_separator_thickness(thickness_css: number): void;
     set_symbol(symbol: string): void;
+    /**
+     * Set multiple timestamp-anchored markers for a series at once.
+     *
+     * `timestamps` contains one timestamp per marker. `marker_data` is a flat
+     * array with stride 8: [shape_idx, position_idx, price, r, g, b, a, size, ...].
+     */
+    set_time_markers(series_id: number, timestamps: BigUint64Array, marker_data: Float64Array): void;
     /**
      * Set visible bar range using fractional bar indices.
      */
@@ -1136,12 +1184,12 @@ export class AxiusCharts {
      */
     update_last_series_point(id: number, timestamp: bigint, value: number): void;
     /**
-     * LWC-style main series update semantics:
+     * compatibility-style main series update semantics:
      * update last bar if timestamp matches, append if timestamp is newer.
      */
     upsert_bar(timestamp: bigint, open: number, high: number, low: number, close: number, volume: number): void;
     /**
-     * LWC-style update semantics for OHLC bar overlays:
+     * compatibility-style update semantics for OHLC bar overlays:
      * update last point if timestamp matches, append if timestamp is newer.
      */
     upsert_bar_series_point(id: number, timestamp: bigint, open: number, high: number, low: number, close: number): void;
@@ -1153,12 +1201,12 @@ export class AxiusCharts {
      */
     upsert_bar_with_footprint(timestamp: bigint, open: number, high: number, low: number, close: number, volume: number, prices: Float64Array, bid_volumes: Float64Array, ask_volumes: Float64Array): void;
     /**
-     * LWC-style update semantics for histogram overlays:
+     * compatibility-style update semantics for histogram overlays:
      * update last point if timestamp matches, append if timestamp is newer.
      */
     upsert_histogram_point(id: number, timestamp: bigint, value: number, color_r: number, color_g: number, color_b: number, color_a: number): void;
     /**
-     * LWC-style update semantics for line/area/baseline overlays:
+     * compatibility-style update semantics for line/area/baseline overlays:
      * update last point if timestamp matches, append if timestamp is newer.
      */
     upsert_series_point(id: number, timestamp: bigint, value: number): void;
@@ -1240,6 +1288,7 @@ export interface InitOutput {
     readonly __wbg_chartworkspace_free: (a: number, b: number) => void;
     readonly axiuscharts_active_order_line_count: (a: number) => number;
     readonly axiuscharts_add_area_series: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => number;
+    readonly axiuscharts_add_autoscale_contribution: (a: number, b: number, c: number, d: number) => void;
     readonly axiuscharts_add_bar_series: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
     readonly axiuscharts_add_baseline_series: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number, a1: number) => number;
     readonly axiuscharts_add_execution_mark: (a: number, b: number, c: number, d: bigint, e: number, f: number, g: number, h: number, i: number, j: number) => void;
@@ -1247,7 +1296,8 @@ export interface InitOutput {
     readonly axiuscharts_add_histogram_series: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly axiuscharts_add_indicator_pane: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly axiuscharts_add_line_series: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-    readonly axiuscharts_add_marker: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => number;
+    readonly axiuscharts_add_marker: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number) => void;
+    readonly axiuscharts_add_marker_at_time: (a: number, b: number, c: number, d: bigint, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number) => void;
     readonly axiuscharts_allowed_intervals: (a: number) => number;
     readonly axiuscharts_append_bar: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number) => void;
     readonly axiuscharts_append_bar_series_point: (a: number, b: number, c: number, d: bigint, e: number, f: number, g: number, h: number) => void;
@@ -1262,6 +1312,7 @@ export interface InitOutput {
     readonly axiuscharts_cancel_drawing: (a: number) => void;
     readonly axiuscharts_clear_all_markers: (a: number) => void;
     readonly axiuscharts_clear_allowed_intervals: (a: number) => void;
+    readonly axiuscharts_clear_autoscale_contributions: (a: number) => void;
     readonly axiuscharts_clear_crosshair: (a: number) => void;
     readonly axiuscharts_clear_drawings: (a: number) => void;
     readonly axiuscharts_clear_execution_marks: (a: number) => void;
@@ -1304,6 +1355,7 @@ export interface InitOutput {
     readonly axiuscharts_get_study_output: (a: number, b: number, c: number) => number;
     readonly axiuscharts_get_supported_renderers: () => number;
     readonly axiuscharts_get_volume_visible: (a: number) => number;
+    readonly axiuscharts_hit_test_marker: (a: number, b: number, c: number) => number;
     readonly axiuscharts_import_drawings: (a: number, b: number, c: number, d: number) => void;
     readonly axiuscharts_import_persistence_state: (a: number, b: number, c: number, d: number) => void;
     readonly axiuscharts_indicator_attach: (a: number, b: number, c: number, d: number) => number;
@@ -1323,6 +1375,8 @@ export interface InitOutput {
     readonly axiuscharts_interval_change_locked: (a: number) => number;
     readonly axiuscharts_is_auto_render: (a: number) => number;
     readonly axiuscharts_is_interval_allowed: (a: number, b: number, c: number) => number;
+    readonly axiuscharts_marker_auto_scale: (a: number) => number;
+    readonly axiuscharts_marker_z_order: (a: number, b: number) => void;
     readonly axiuscharts_max_bars_per_load: (a: number) => number;
     readonly axiuscharts_max_indicator_panes: (a: number) => number;
     readonly axiuscharts_off: (a: number, b: number, c: number, d: number) => void;
@@ -1333,6 +1387,7 @@ export interface InitOutput {
     readonly axiuscharts_price_line_count: (a: number) => number;
     readonly axiuscharts_project_point: (a: number, b: bigint, c: number) => number;
     readonly axiuscharts_remove_all_scale_drawings: (a: number) => void;
+    readonly axiuscharts_remove_autoscale_contribution: (a: number, b: number) => number;
     readonly axiuscharts_remove_execution_mark: (a: number, b: number, c: number) => number;
     readonly axiuscharts_remove_indicator_pane: (a: number, b: number) => number;
     readonly axiuscharts_remove_marker: (a: number, b: number, c: number) => number;
@@ -1402,7 +1457,9 @@ export interface InitOutput {
     readonly axiuscharts_set_last_price_line_style: (a: number, b: number, c: number) => void;
     readonly axiuscharts_set_last_price_line_visible: (a: number, b: number) => void;
     readonly axiuscharts_set_last_price_line_width: (a: number, b: number) => void;
-    readonly axiuscharts_set_markers: (a: number, b: number, c: number, d: number) => void;
+    readonly axiuscharts_set_marker_auto_scale: (a: number, b: number) => void;
+    readonly axiuscharts_set_marker_z_order: (a: number, b: number, c: number, d: number) => void;
+    readonly axiuscharts_set_markers: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly axiuscharts_set_max_bars_per_load: (a: number, b: number) => void;
     readonly axiuscharts_set_max_indicator_panes: (a: number, b: number) => void;
     readonly axiuscharts_set_order_line_filled_quantity: (a: number, b: number, c: number, d: number) => number;
@@ -1440,6 +1497,7 @@ export interface InitOutput {
     readonly axiuscharts_set_subpane_separator_hover_color: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly axiuscharts_set_subpane_separator_thickness: (a: number, b: number) => void;
     readonly axiuscharts_set_symbol: (a: number, b: number, c: number) => void;
+    readonly axiuscharts_set_time_markers: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly axiuscharts_set_visible_range: (a: number, b: number, c: number) => void;
     readonly axiuscharts_set_volume_colors: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly axiuscharts_set_volume_visible: (a: number, b: number) => void;
@@ -1509,7 +1567,7 @@ export interface InitOutput {
     readonly chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
     readonly __wasm_bindgen_func_elem_458: (a: number, b: number) => void;
     readonly __wasm_bindgen_func_elem_469: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_2641: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_2669: (a: number, b: number, c: number, d: number) => void;
     readonly __wasm_bindgen_func_elem_459: (a: number, b: number, c: number) => void;
     readonly __wasm_bindgen_func_elem_462: (a: number, b: number, c: number) => void;
     readonly __wasm_bindgen_func_elem_467: (a: number, b: number) => void;

@@ -1,6 +1,6 @@
-//! WidgetLayout — LWC-style DOM layout with separate widget containers.
+//! WidgetLayout — compatibility-style DOM layout with separate widget containers.
 //!
-//! Creates a CSS-grid layout matching LWC's table structure:
+//! Creates a CSS-grid layout matching the reference implementation's table structure:
 //!
 //!   ┌─────────────────────┬──────────────┐
 //!   │   Pane (chart area) │  Price Axis  │
@@ -24,7 +24,7 @@ use web_sys::{CssStyleDeclaration, Document, HtmlCanvasElement, HtmlDivElement, 
 use crate::utils;
 
 /// A pair of canvases: base (static content) + top (dynamic/crosshair content).
-/// Matches LWC's canvasBinding + topCanvasBinding pattern.
+/// Matches the reference implementation's canvasBinding + topCanvasBinding pattern.
 pub struct CanvasPair {
     pub base: HtmlCanvasElement,
     pub top: HtmlCanvasElement,
@@ -88,7 +88,7 @@ pub struct WidgetLayout {
 
 impl WidgetLayout {
     /// Create the full widget layout inside the given container div.
-    /// Mirrors LWC's ChartWidget._init() DOM creation.
+    /// Mirrors the reference implementation's ChartWidget._init() DOM creation.
     pub fn new(container_id: &str) -> Result<Self, JsValue> {
         let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
         let doc = window
@@ -113,7 +113,7 @@ impl WidgetLayout {
         container.set_inner_html("");
 
         // ── CSS-grid wrapper ──
-        // LWC uses an HTML table; we use CSS grid for the same layout:
+        // reference implementation uses an HTML table; we use CSS grid for the same layout:
         //   columns: [1fr] [price_axis_width]
         //   rows:    [1fr] [time_axis_height]
         let grid_wrapper = doc
@@ -222,7 +222,7 @@ impl WidgetLayout {
         set_style_property_if_needed(&time_axis_style, "grid-column", "1/3");
 
         // Price axis spans only row 1 (main pane) — matches the pane height,
-        // not extending into the time axis row. This matches LWC behaviour
+        // not extending into the time axis row. This matches reference behaviour
         // where the right price scale covers only the chart area.
         let price_axis_style = self.price_axis_container.style();
         set_style_property_if_needed(&price_axis_style, "grid-row", "1");
