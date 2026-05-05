@@ -5348,6 +5348,24 @@ impl AxiusCharts {
         changed
     }
 
+    /// Handle host keyboard input for native drawing text editing.
+    ///
+    /// Returns true when the key was consumed by the drawing manager. Hosts
+    /// should call this from focused chart keydown handlers and prevent their
+    /// own shortcuts when this returns true.
+    pub fn on_key_down(&mut self, key: &str, ctrl: bool, shift: bool, alt: bool) -> bool {
+        let handled = self
+            .inner
+            .borrow_mut()
+            .engine
+            .drawings
+            .handle_text_key(key, ctrl, alt, shift);
+        if handled {
+            self.mark_dirty();
+        }
+        handled
+    }
+
     /// Advance the text-edit caret blink phase. The host should call this on
     /// each animation frame (e.g. inside the rAF loop) passing `performance.now()`
     /// in milliseconds. Returns true when the caret visibility flipped, in which

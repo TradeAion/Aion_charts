@@ -499,6 +499,14 @@ export class AxiusCharts {
      */
     on(event: string, callback: Function): void;
     /**
+     * Handle host keyboard input for native drawing text editing.
+     *
+     * Returns true when the key was consumed by the drawing manager. Hosts
+     * should call this from focused chart keydown handlers and prevent their
+     * own shortcuts when this returns true.
+     */
+    on_key_down(key: string, ctrl: boolean, shift: boolean, alt: boolean): boolean;
+    /**
      * Register a one-shot event callback (auto-removes after first call).
      */
     once(event: string, callback: Function): void;
@@ -1381,6 +1389,7 @@ export interface InitOutput {
     readonly axiuscharts_max_indicator_panes: (a: number) => number;
     readonly axiuscharts_off: (a: number, b: number, c: number, d: number) => void;
     readonly axiuscharts_on: (a: number, b: number, c: number, d: number) => void;
+    readonly axiuscharts_on_key_down: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly axiuscharts_once: (a: number, b: number, c: number, d: number) => void;
     readonly axiuscharts_order_line_count: (a: number) => number;
     readonly axiuscharts_price_line_count: (a: number) => number;
@@ -1567,7 +1576,7 @@ export interface InitOutput {
     readonly chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
     readonly __wasm_bindgen_func_elem_458: (a: number, b: number) => void;
     readonly __wasm_bindgen_func_elem_469: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_2670: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_2678: (a: number, b: number, c: number, d: number) => void;
     readonly __wasm_bindgen_func_elem_459: (a: number, b: number, c: number) => void;
     readonly __wasm_bindgen_func_elem_462: (a: number, b: number, c: number) => void;
     readonly __wasm_bindgen_func_elem_467: (a: number, b: number) => void;

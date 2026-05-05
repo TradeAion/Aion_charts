@@ -1444,6 +1444,24 @@ export class AxiusCharts {
         wasm.axiuscharts_on(this.__wbg_ptr, ptr0, len0, addHeapObject(callback));
     }
     /**
+     * Handle host keyboard input for native drawing text editing.
+     *
+     * Returns true when the key was consumed by the drawing manager. Hosts
+     * should call this from focused chart keydown handlers and prevent their
+     * own shortcuts when this returns true.
+     * @param {string} key
+     * @param {boolean} ctrl
+     * @param {boolean} shift
+     * @param {boolean} alt
+     * @returns {boolean}
+     */
+    on_key_down(key, ctrl, shift, alt) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.axiuscharts_on_key_down(this.__wbg_ptr, ptr0, len0, ctrl, shift, alt);
+        return ret !== 0;
+    }
+    /**
      * Register a one-shot event callback (auto-removes after first call).
      * @param {string} event
      * @param {Function} callback
@@ -4580,7 +4598,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_2670(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_2678(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -5295,8 +5313,8 @@ function __wasm_bindgen_func_elem_462(arg0, arg1, arg2) {
     wasm.__wasm_bindgen_func_elem_462(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_2670(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_2670(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_2678(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_2678(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 function __wasm_bindgen_func_elem_469(arg0, arg1, arg2) {

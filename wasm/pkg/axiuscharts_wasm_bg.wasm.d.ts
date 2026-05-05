@@ -101,6 +101,7 @@ export const axiuscharts_max_bars_per_load: (a: number) => number;
 export const axiuscharts_max_indicator_panes: (a: number) => number;
 export const axiuscharts_off: (a: number, b: number, c: number, d: number) => void;
 export const axiuscharts_on: (a: number, b: number, c: number, d: number) => void;
+export const axiuscharts_on_key_down: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
 export const axiuscharts_once: (a: number, b: number, c: number, d: number) => void;
 export const axiuscharts_order_line_count: (a: number) => number;
 export const axiuscharts_price_line_count: (a: number) => number;
@@ -287,7 +288,7 @@ export const chartworkspace_split_pane: (a: number, b: number, c: number, d: num
 export const chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
 export const __wasm_bindgen_func_elem_458: (a: number, b: number) => void;
 export const __wasm_bindgen_func_elem_469: (a: number, b: number, c: number) => void;
-export const __wasm_bindgen_func_elem_2670: (a: number, b: number, c: number, d: number) => void;
+export const __wasm_bindgen_func_elem_2678: (a: number, b: number, c: number, d: number) => void;
 export const __wasm_bindgen_func_elem_459: (a: number, b: number, c: number) => void;
 export const __wasm_bindgen_func_elem_462: (a: number, b: number, c: number) => void;
 export const __wasm_bindgen_func_elem_467: (a: number, b: number) => void;
