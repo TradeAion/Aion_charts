@@ -6,8 +6,8 @@
 /node_modules
 
 # Stale root-level wasm-pack outputs (only wasm/pkg/ should have these)
-/axiuscharts_wasm*.js
-/axiuscharts_wasm*.d.ts
+/aion_charts_wasm*.js
+/aion_charts_wasm*.d.ts
 /nul
 
 # Debug/log files
@@ -32,5 +32,5 @@ execution-lines-wide.png
 Thumbs.db
 
 # Local paths
-axiuscharts/target/
+aion_charts/target/
 reference/

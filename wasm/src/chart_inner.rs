@@ -1,7 +1,7 @@
 //! Internal chart state and helper methods.
 //!
 //! This module contains `ChartInner`, the internal state shared between
-//! event closures and the public AxiusCharts API. Helper methods here handle
+//! event closures and the public Aion_charts API. Helper methods here handle
 //! the borrow checker dance of destructuring to access multiple fields.
 #![allow(dead_code)]
 
@@ -11,7 +11,7 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use axiuscharts::{
+use aion_charts::{
     hit_test_execution_mark_hit_areas, hit_test_marker_hit_areas, Bar, ChartEngine,
     ExecutionMarkHitArea, HitZone, InteractionHandler, MainChartType, MarkerHitArea, OrderLineHit,
     OrderLineId, OverlayRenderer, PriceAxisRenderer, PriceLineHit, PriceLineId, TimeAxisRenderer,
@@ -333,7 +333,7 @@ impl ChartInner {
 
         let event = if let Some(id) = mark_id {
             if let Some(mark) = self.engine.execution_marks.get(id) {
-                axiuscharts::ChartEvent::ExecutionMarkHover {
+                aion_charts::ChartEvent::ExecutionMarkHover {
                     id: Some(mark.id.clone()),
                     timestamp_ms: Some(mark.timestamp_ms),
                     price: Some(mark.price),
@@ -343,7 +343,7 @@ impl ChartInner {
                     group_id: mark.group_id.clone(),
                 }
             } else {
-                axiuscharts::ChartEvent::ExecutionMarkHover {
+                aion_charts::ChartEvent::ExecutionMarkHover {
                     id: None,
                     timestamp_ms: None,
                     price: None,
@@ -354,7 +354,7 @@ impl ChartInner {
                 }
             }
         } else {
-            axiuscharts::ChartEvent::ExecutionMarkHover {
+            aion_charts::ChartEvent::ExecutionMarkHover {
                 id: None,
                 timestamp_ms: None,
                 price: None,
@@ -377,7 +377,7 @@ impl ChartInner {
         self.hovered_marker_key = next_key;
 
         let event = if let Some(hit_area) = hit_area {
-            axiuscharts::ChartEvent::MarkerHover {
+            aion_charts::ChartEvent::MarkerHover {
                 series_id: Some(hit_area.series_id),
                 marker_id: Some(hit_area.marker_id),
                 bar_index: Some(hit_area.bar_index),
@@ -388,7 +388,7 @@ impl ChartInner {
                 text: Some(hit_area.text.clone()),
             }
         } else {
-            axiuscharts::ChartEvent::MarkerHover {
+            aion_charts::ChartEvent::MarkerHover {
                 series_id: None,
                 marker_id: None,
                 bar_index: None,
@@ -410,7 +410,7 @@ impl ChartInner {
 
         self.engine
             .event_bus
-            .emit(axiuscharts::ChartEvent::ExecutionMarkClick {
+            .emit(aion_charts::ChartEvent::ExecutionMarkClick {
                 id: mark.id.clone(),
                 timestamp_ms: mark.timestamp_ms,
                 price: mark.price,
@@ -424,7 +424,7 @@ impl ChartInner {
     fn emit_execution_cluster_click_event(&mut self, leader_id: &str, member_ids: &[String]) {
         self.engine
             .event_bus
-            .emit(axiuscharts::ChartEvent::ExecutionClusterClick {
+            .emit(aion_charts::ChartEvent::ExecutionClusterClick {
                 leader_id: leader_id.to_string(),
                 member_ids: member_ids.to_vec(),
             });
@@ -444,7 +444,7 @@ impl ChartInner {
         };
         self.engine
             .event_bus
-            .emit(axiuscharts::ChartEvent::DrawingCreated {
+            .emit(aion_charts::ChartEvent::DrawingCreated {
                 id,
                 tool: tool.as_api_key().to_string(),
             });
@@ -454,7 +454,7 @@ impl ChartInner {
         let selected_id_u32 = selected_id.and_then(|id| u32::try_from(id).ok());
         self.engine
             .event_bus
-            .emit(axiuscharts::ChartEvent::DrawingSelected {
+            .emit(aion_charts::ChartEvent::DrawingSelected {
                 id: selected_id_u32,
             });
     }
@@ -479,7 +479,7 @@ impl ChartInner {
         {
             self.engine
                 .event_bus
-                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
+                .emit(aion_charts::ChartEvent::VisibleRangeChange {
                     start_bar: after_start,
                     end_bar: after_end,
                 });
@@ -657,12 +657,12 @@ impl ChartInner {
         if let Some(id) = self.engine.drawings.selected_id {
             if matches!(
                 self.engine.drawings.get(id).map(|d| d.state()),
-                Some(axiuscharts::core::drawings::types::DrawingState::Dragging { .. })
+                Some(aion_charts::core::drawings::types::DrawingState::Dragging { .. })
             ) {
                 self.engine.drawings.end_drag(id);
             }
         }
-        self.engine.drawings.active_tool = axiuscharts::DrawingTool::None;
+        self.engine.drawings.active_tool = aion_charts::DrawingTool::None;
         Ok(())
     }
 
@@ -953,12 +953,12 @@ impl ChartInner {
                     let tool = drawings.creation_tool();
                     let should_snap = matches!(
                         tool,
-                        Some(axiuscharts::DrawingTool::TrendLine)
-                            | Some(axiuscharts::DrawingTool::Ray)
-                            | Some(axiuscharts::DrawingTool::Fibonacci)
-                            | Some(axiuscharts::DrawingTool::Scale)
-                            | Some(axiuscharts::DrawingTool::Rectangle)
-                            | Some(axiuscharts::DrawingTool::Path)
+                        Some(aion_charts::DrawingTool::TrendLine)
+                            | Some(aion_charts::DrawingTool::Ray)
+                            | Some(aion_charts::DrawingTool::Fibonacci)
+                            | Some(aion_charts::DrawingTool::Scale)
+                            | Some(aion_charts::DrawingTool::Rectangle)
+                            | Some(aion_charts::DrawingTool::Path)
                     );
                     if should_snap {
                         if let Some((anchor_bar, anchor_price)) = drawings.creation_first_anchor() {
@@ -985,7 +985,7 @@ impl ChartInner {
             } else if let Some(id) = drawings.selected_id {
                 if matches!(
                     drawings.get(id).map(|d| d.state()),
-                    Some(axiuscharts::core::drawings::types::DrawingState::Dragging { .. })
+                    Some(aion_charts::core::drawings::types::DrawingState::Dragging { .. })
                 ) {
                     // Apply angle snapping during anchor drag too.
                     // Ctrl+OHLC snap takes precedence over angle snap.
@@ -993,11 +993,11 @@ impl ChartInner {
                         let tool = drawings.tool_of(id);
                         let should_snap = matches!(
                             tool,
-                            Some(axiuscharts::DrawingTool::TrendLine)
-                                | Some(axiuscharts::DrawingTool::Ray)
-                                | Some(axiuscharts::DrawingTool::Fibonacci)
-                                | Some(axiuscharts::DrawingTool::Scale)
-                                | Some(axiuscharts::DrawingTool::Rectangle)
+                            Some(aion_charts::DrawingTool::TrendLine)
+                                | Some(aion_charts::DrawingTool::Ray)
+                                | Some(aion_charts::DrawingTool::Fibonacci)
+                                | Some(aion_charts::DrawingTool::Scale)
+                                | Some(aion_charts::DrawingTool::Rectangle)
                         );
                         if should_snap {
                             if let Some((anchor_bar, anchor_price)) =
@@ -1029,17 +1029,17 @@ impl ChartInner {
             // Hover hit-test for cursor feedback (not during drag/creation, no tool active)
             if !is_drawing_drag
                 && !drawings.is_creating()
-                && drawings.active_tool == axiuscharts::DrawingTool::None
+                && drawings.active_tool == aion_charts::DrawingTool::None
                 && !(self.replay_active && self.replay_trim_edit_mode)
             {
                 if let Some((hit_id, result)) =
                     drawings.hit_test(x, y, &self.engine.viewport, pw, ph)
                 {
-                    use axiuscharts::core::drawings::types::cursor_for_drawing_hit;
+                    use aion_charts::core::drawings::types::cursor_for_drawing_hit;
                     let (tool, locked) = drawings
                         .get(hit_id)
                         .map(|d| (d.tool(), d.locked()))
-                        .unwrap_or((axiuscharts::DrawingTool::None, false));
+                        .unwrap_or((aion_charts::DrawingTool::None, false));
                     hover_cursor = Some(cursor_for_drawing_hit(tool, result.part, None, locked));
                     drawings.set_hovered(Some(hit_id));
                 } else {
@@ -1052,7 +1052,7 @@ impl ChartInner {
 
         let can_hover_execution_marks = !is_drawing_drag
             && !self.engine.drawings.is_creating()
-            && self.engine.drawings.active_tool == axiuscharts::DrawingTool::None
+            && self.engine.drawings.active_tool == aion_charts::DrawingTool::None
             && !(self.replay_active && self.replay_trim_edit_mode);
         let hovered_execution_mark_id = if can_hover_execution_marks {
             self.hovered_execution_mark_id_at(x, y)
@@ -1066,7 +1066,7 @@ impl ChartInner {
 
         let can_hover_markers = !is_drawing_drag
             && !self.engine.drawings.is_creating()
-            && self.engine.drawings.active_tool == axiuscharts::DrawingTool::None
+            && self.engine.drawings.active_tool == aion_charts::DrawingTool::None
             && !(self.replay_active && self.replay_trim_edit_mode);
         let hovered_marker = if can_hover_markers {
             self.marker_hit_area_at(x, y)
@@ -1081,7 +1081,7 @@ impl ChartInner {
         // Check for order line hover and update cursor
         let can_hover_order_lines = !is_drawing_drag
             && !self.engine.drawings.is_creating()
-            && self.engine.drawings.active_tool == axiuscharts::DrawingTool::None
+            && self.engine.drawings.active_tool == aion_charts::DrawingTool::None
             && !(self.replay_active && self.replay_trim_edit_mode)
             && self.order_line_drag_id.is_none();
         if can_hover_order_lines && hover_cursor.is_none() {
@@ -1226,7 +1226,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
+                .emit(aion_charts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -1251,7 +1251,7 @@ impl ChartInner {
                 .or_else(|| bar_idx.and_then(|idx| engine.bars.get(idx).map(|b| b.timestamp)));
             engine
                 .event_bus
-                .emit(axiuscharts::ChartEvent::CrosshairMove {
+                .emit(aion_charts::ChartEvent::CrosshairMove {
                     x,
                     y,
                     bar_index: bar_idx,
@@ -1313,7 +1313,7 @@ impl ChartInner {
                 && self.price_line_drag_id.is_none()
                 && self.order_line_drag_id.is_none();
             if shift_measure_requested {
-                self.engine.drawings.active_tool = axiuscharts::DrawingTool::Scale;
+                self.engine.drawings.active_tool = aion_charts::DrawingTool::Scale;
                 self.temporary_scale_tool_active = true;
             } else if !self.engine.drawings.is_creating() {
                 self.temporary_scale_tool_active = false;
@@ -1364,7 +1364,7 @@ impl ChartInner {
                         // Emit cancel event via EventBus
                         if let Some((price, order_type, side, quantity)) = order_info {
                             self.engine.event_bus.emit(
-                                axiuscharts::ChartEvent::OrderLineCancelled {
+                                aion_charts::ChartEvent::OrderLineCancelled {
                                     id: id.0.clone(),
                                     price,
                                     order_type,
@@ -1388,9 +1388,9 @@ impl ChartInner {
                     OrderLineHit::SlButton(id) => {
                         if let Some(line) = self.engine.order_lines.get(&id) {
                             let new_id = format!("{}_sl_{}", id.0, js_sys::Date::now());
-                            let options = axiuscharts::core::order_line::OrderLineOptions {
+                            let options = aion_charts::core::order_line::OrderLineOptions {
                                 price: line.options.price,
-                                order_type: axiuscharts::core::order_line::OrderType::StopLoss,
+                                order_type: aion_charts::core::order_line::OrderType::StopLoss,
                                 side: line.options.side,
                                 quantity: line.options.quantity,
                                 show_sl_button: false,
@@ -1410,9 +1410,9 @@ impl ChartInner {
                     OrderLineHit::TpButton(id) => {
                         if let Some(line) = self.engine.order_lines.get(&id) {
                             let new_id = format!("{}_tp_{}", id.0, js_sys::Date::now());
-                            let options = axiuscharts::core::order_line::OrderLineOptions {
+                            let options = aion_charts::core::order_line::OrderLineOptions {
                                 price: line.options.price,
-                                order_type: axiuscharts::core::order_line::OrderType::TakeProfit,
+                                order_type: aion_charts::core::order_line::OrderType::TakeProfit,
                                 side: line.options.side,
                                 quantity: line.options.quantity,
                                 show_sl_button: false,
@@ -1461,11 +1461,11 @@ impl ChartInner {
                     // No tool active: check if user clicked on an existing drawing
                     let hit = drawings.hit_test(x, y, &self.engine.viewport, pw, ph);
                     if let Some((id, result)) = hit {
-                        use axiuscharts::core::drawings::types::{cursor_for_drawing_hit, HitPart};
+                        use aion_charts::core::drawings::types::{cursor_for_drawing_hit, HitPart};
                         let (tool, locked) = drawings
                             .get(id)
                             .map(|d| (d.tool(), d.locked()))
-                            .unwrap_or((axiuscharts::DrawingTool::None, false));
+                            .unwrap_or((aion_charts::DrawingTool::None, false));
                         let anchor_idx = match result.part {
                             HitPart::Anchor(i) => Some(i),
                             _ => None,
@@ -1565,7 +1565,7 @@ impl ChartInner {
                 if let Some((old_price, order_type, side, quantity)) = order_info {
                     self.engine
                         .event_bus
-                        .emit(axiuscharts::ChartEvent::OrderLineModified {
+                        .emit(aion_charts::ChartEvent::OrderLineModified {
                             id: id.clone(),
                             old_price,
                             new_price,
@@ -1606,7 +1606,7 @@ impl ChartInner {
                         .find(|d| {
                             matches!(
                                 d.state(),
-                                axiuscharts::core::drawings::types::DrawingState::Creating { .. }
+                                aion_charts::core::drawings::types::DrawingState::Creating { .. }
                             )
                         })
                         .and_then(|d| {
@@ -1631,7 +1631,7 @@ impl ChartInner {
         if finalized_creation {
             self.engine.stamp_drawing_timestamps();
             if self.temporary_scale_tool_active {
-                self.engine.drawings.active_tool = axiuscharts::DrawingTool::None;
+                self.engine.drawings.active_tool = aion_charts::DrawingTool::None;
                 self.temporary_scale_tool_active = false;
             }
             self.interaction.cancel_pointer_gesture();
@@ -1653,7 +1653,7 @@ impl ChartInner {
             if let Some(id) = drawings.selected_id {
                 if matches!(
                     drawings.get(id).map(|d| d.state()),
-                    Some(axiuscharts::core::drawings::types::DrawingState::Dragging { .. })
+                    Some(aion_charts::core::drawings::types::DrawingState::Dragging { .. })
                 ) {
                     drawings.end_drag(id);
                     ended_drag = true;
@@ -1715,7 +1715,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
+                .emit(aion_charts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -1729,7 +1729,7 @@ impl ChartInner {
                 .viewport
                 .bar_index_at_pixel(click_x, pw, engine.time_scale.len())
                 .and_then(|slot| engine.time_scale.main_bar_index_at_slot(slot));
-            engine.event_bus.emit(axiuscharts::ChartEvent::Click {
+            engine.event_bus.emit(aion_charts::ChartEvent::Click {
                 x: click_x,
                 y: click_y,
                 bar_index,
@@ -1803,7 +1803,7 @@ impl ChartInner {
         if self.engine.drawings.is_creating() {
             self.engine.drawings.cancel_creation();
             if self.temporary_scale_tool_active {
-                self.engine.drawings.active_tool = axiuscharts::DrawingTool::None;
+                self.engine.drawings.active_tool = aion_charts::DrawingTool::None;
                 self.temporary_scale_tool_active = false;
             }
             self.engine.stamp_drawing_timestamps();
@@ -1819,7 +1819,7 @@ impl ChartInner {
         if let Some(id) = self.engine.drawings.selected_id {
             if matches!(
                 self.engine.drawings.get(id).map(|d| d.state()),
-                Some(axiuscharts::core::drawings::types::DrawingState::Dragging { .. })
+                Some(aion_charts::core::drawings::types::DrawingState::Dragging { .. })
             ) {
                 self.engine.drawings.end_drag(id);
                 self.engine.stamp_drawing_timestamps();
@@ -1872,7 +1872,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
+                .emit(aion_charts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -1899,7 +1899,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
+                .emit(aion_charts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -1925,7 +1925,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
+                .emit(aion_charts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -1958,7 +1958,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
+                .emit(aion_charts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -1994,7 +1994,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
+                .emit(aion_charts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -2048,7 +2048,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
+                .emit(aion_charts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -2095,7 +2095,7 @@ impl ChartInner {
         {
             engine
                 .event_bus
-                .emit(axiuscharts::ChartEvent::VisibleRangeChange {
+                .emit(aion_charts::ChartEvent::VisibleRangeChange {
                     start_bar: engine.viewport.start_bar,
                     end_bar: engine.viewport.end_bar,
                 });
@@ -2154,7 +2154,7 @@ fn snap_to_angle_45(
     anchor_price: f64,
     target_bar: f64,
     target_price: f64,
-    viewport: &axiuscharts::Viewport,
+    viewport: &aion_charts::Viewport,
     pane_css_w: f64,
     candle_css_h: f64,
 ) -> (f64, f64) {
@@ -2197,7 +2197,7 @@ mod chart_inner_tests {
 
     #[test]
     fn angle_snap_uses_current_viewport_scale_for_horizontal_snap() {
-        let mut viewport = axiuscharts::Viewport::new(1000, 600);
+        let mut viewport = aion_charts::Viewport::new(1000, 600);
         viewport.start_bar = 100.0;
         viewport.end_bar = 120.0;
         viewport.price_min = 100.0;
@@ -2213,7 +2213,7 @@ mod chart_inner_tests {
 
     #[test]
     fn angle_snap_uses_current_viewport_scale_for_vertical_snap() {
-        let mut viewport = axiuscharts::Viewport::new(1000, 600);
+        let mut viewport = aion_charts::Viewport::new(1000, 600);
         viewport.start_bar = 100.0;
         viewport.end_bar = 120.0;
         viewport.price_min = 100.0;
@@ -2232,10 +2232,10 @@ mod chart_inner_tests {
 ///
 /// Finds the O/H/L/C value whose CSS Y is closest to the cursor Y position.
 fn snap_to_ohlc_price(
-    bars: &axiuscharts::BarArray,
+    bars: &aion_charts::BarArray,
     bar_idx: usize,
     cursor_css_y: f64,
-    viewport: &axiuscharts::Viewport,
+    viewport: &aion_charts::Viewport,
     pane_css_h: f64,
 ) -> f64 {
     let open = bars.open(bar_idx) as f64;

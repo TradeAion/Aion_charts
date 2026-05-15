@@ -1,4 +1,4 @@
-//! Core benchmarks for AxiusCharts performance-critical paths.
+//! Core benchmarks for Aion_charts performance-critical paths.
 //!
 //! Run with: `cargo bench`
 //!
@@ -7,9 +7,9 @@
 //! - Viewport coordinate transformations
 //! - Price auto-fit calculations
 
-use axiuscharts::core::data::{Bar, BarArray};
-use axiuscharts::core::viewport::Viewport;
-use axiuscharts::{
+use aion_charts::core::data::{Bar, BarArray};
+use aion_charts::core::viewport::Viewport;
+use aion_charts::{
     cluster_execution_mark_renderables, hit_test_execution_mark_hit_areas, ExecutionMarkHitArea,
     ExecutionRenderableMark, ExecutionRole, ExecutionSide,
 };

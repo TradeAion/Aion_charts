@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AxiusCharts dev server — watch + build + serve in one command.
+Aion_charts dev server — watch + build + serve in one command.
 
 Usage:
     python dev.py              # build once, then serve + watch

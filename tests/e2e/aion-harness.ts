@@ -19,13 +19,13 @@ export async function installHarness(page: Page) {
   await expect(page.locator('#error-banner')).toBeHidden();
 
   await page.evaluate(async () => {
-    if ((window as any).__axiusHarness) return;
+    if ((window as any).__aionHarness) return;
 
-    const module = await import('/wasm/pkg/axiuscharts_wasm.js');
-    await module.default({ module_or_path: '/wasm/pkg/axiuscharts_wasm_bg.wasm' });
+    const module = await import('/wasm/pkg/aion_charts_wasm.js');
+    await module.default({ module_or_path: '/wasm/pkg/aion_charts_wasm_bg.wasm' });
 
     const host = document.createElement('div');
-    host.id = 'axius-e2e-harness';
+    host.id = 'aion-e2e-harness';
     host.style.cssText = [
       'position:fixed',
       'left:0',
@@ -38,7 +38,7 @@ export async function installHarness(page: Page) {
     ].join(';');
     document.body.replaceChildren(host);
 
-    const chart = await module.AxiusCharts.create_chart(host, {
+    const chart = await module.Aion_charts.create_chart(host, {
       renderer: 'canvas2d',
       autoRender: false,
       theme: 'dark',
@@ -100,21 +100,21 @@ export async function installHarness(page: Page) {
       }
     });
 
-    (window as any).__axiusHarness = { chart, host, bars: { open, high, low, close, volume, timestamps } };
+    (window as any).__aionHarness = { chart, host, bars: { open, high, low, close, volume, timestamps } };
   });
 }
 
 export async function getHarness(page: Page): Promise<HarnessState> {
-  return page.evaluateHandle(() => (window as any).__axiusHarness) as Promise<any>;
+  return page.evaluateHandle(() => (window as any).__aionHarness) as Promise<any>;
 }
 
 export async function canvasLocator(page: Page) {
-  return page.locator('#axius-e2e-harness canvas').first();
+  return page.locator('#aion-e2e-harness canvas').first();
 }
 
 export async function commitCanvasFrame(page: Page) {
   await page.evaluate(() => {
-    const { chart } = (window as any).__axiusHarness;
+    const { chart } = (window as any).__aionHarness;
     chart.render();
   });
   await page.waitForTimeout(50);
@@ -122,7 +122,7 @@ export async function commitCanvasFrame(page: Page) {
 
 export async function importTextDrawing(page: Page, text = '') {
   await page.evaluate((value) => {
-    const { chart } = (window as any).__axiusHarness;
+    const { chart } = (window as any).__aionHarness;
     chart.import_drawings(JSON.stringify({
       version: 1,
       main: {
@@ -159,7 +159,7 @@ export async function importTextDrawing(page: Page, text = '') {
 
 export async function readSelectedDrawingInfo(page: Page) {
   return page.evaluate(() => {
-    const { chart } = (window as any).__axiusHarness;
+    const { chart } = (window as any).__aionHarness;
     const raw = chart.get_selected_drawing_info_json();
     return raw && raw !== 'null' ? JSON.parse(raw) : null;
   });
@@ -167,7 +167,7 @@ export async function readSelectedDrawingInfo(page: Page) {
 
 export async function clickTextDrawing(page: Page) {
   const point = await page.evaluate(() => {
-    const { chart, bars } = (window as any).__axiusHarness;
+    const { chart, bars } = (window as any).__aionHarness;
     return chart.project_point(bars.timestamps[32], 103);
   });
   const canvas = await (await canvasLocator(page)).boundingBox();
@@ -180,7 +180,7 @@ export async function clickTextDrawing(page: Page) {
 export async function startTextEdit(page: Page) {
   await clickTextDrawing(page);
   await page.evaluate(() => {
-    const { chart } = (window as any).__axiusHarness;
+    const { chart } = (window as any).__aionHarness;
     chart.begin_selected_drawing_text_edit();
     chart.render();
   });
@@ -188,7 +188,7 @@ export async function startTextEdit(page: Page) {
 
 export async function textPixelBounds(page: Page) {
   return page.evaluate(() => {
-    const canvases = Array.from(document.querySelectorAll<HTMLCanvasElement>('#axius-e2e-harness canvas'));
+    const canvases = Array.from(document.querySelectorAll<HTMLCanvasElement>('#aion-e2e-harness canvas'));
     let minX = Number.POSITIVE_INFINITY;
     let minY = Number.POSITIVE_INFINITY;
     let maxX = Number.NEGATIVE_INFINITY;

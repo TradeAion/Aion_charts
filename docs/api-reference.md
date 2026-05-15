@@ -1,10 +1,10 @@
 # API Reference
 
-This document summarizes the public WASM API. The hand-maintained TypeScript contract in [`../wasm/axiuscharts.d.ts`](../wasm/axiuscharts.d.ts) is the exact source of truth for signatures and payload types.
+This document summarizes the public WASM API. The hand-maintained TypeScript contract in [`../wasm/aion_charts.d.ts`](../wasm/aion_charts.d.ts) is the exact source of truth for signatures and payload types.
 
 ## Lifecycle
 
-### `AxiusCharts.create_chart(container, options)`
+### `Aion_charts.create_chart(container, options)`
 
 Creates a chart against an `HTMLElement` or a bare element ID string.
 

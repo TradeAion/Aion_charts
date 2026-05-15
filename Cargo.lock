@@ -26,6 +26,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "aion_charts"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "bytemuck",
+ "console_error_panic_hook",
+ "console_log",
+ "criterion",
+ "env_logger",
+ "js-sys",
+ "log",
+ "pollster",
+ "serde",
+ "serde_json",
+ "sha2",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu",
+]
+
+[[package]]
+name = "aion_charts-wasm"
+version = "0.1.0"
+dependencies = [
+ "aion_charts",
+ "bytemuck",
+ "console_error_panic_hook",
+ "console_log",
+ "js-sys",
+ "log",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu",
+]
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -332,46 +372,6 @@ name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
-
-[[package]]
-name = "axiuscharts"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "bytemuck",
- "console_error_panic_hook",
- "console_log",
- "criterion",
- "env_logger",
- "js-sys",
- "log",
- "pollster",
- "serde",
- "serde_json",
- "sha2",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "wgpu",
-]
-
-[[package]]
-name = "axiuscharts-wasm"
-version = "0.1.0"
-dependencies = [
- "axiuscharts",
- "bytemuck",
- "console_error_panic_hook",
- "console_log",
- "js-sys",
- "log",
- "serde",
- "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "wgpu",
-]
 
 [[package]]
 name = "base64"

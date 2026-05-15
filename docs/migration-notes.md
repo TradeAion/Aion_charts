@@ -9,7 +9,7 @@ Verified against code commit `97ae55b` on 2026-04-17.
 Commands completed successfully:
 
 - `cargo check`
-- `cargo check --target wasm32-unknown-unknown -p axiuscharts-wasm`
+- `cargo check --target wasm32-unknown-unknown -p aion_charts-wasm`
 - `cargo test`
 - `cargo test --features parity-tests`
 - `cargo clippy -- -D warnings`
@@ -103,7 +103,7 @@ Produced code commits:
   - `cargo bench --bench core_benchmarks`
   - `wasm-pack build wasm --target web --release`
 - Pre-migration WASM artifact:
-  - `wasm/pkg/axiuscharts_wasm_bg.wasm`: `2,110,177` bytes
+  - `wasm/pkg/aion_charts_wasm_bg.wasm`: `2,110,177` bytes
 
 ### Pre-migration benchmark medians
 
@@ -143,7 +143,7 @@ Produced code commits:
 
 ### WASM Artifact Size
 
-- Post-migration artifact: `wasm/pkg/axiuscharts_wasm_bg.wasm`
+- Post-migration artifact: `wasm/pkg/aion_charts_wasm_bg.wasm`
 - Size: `2,108,341` bytes
 - Delta vs baseline: `-1,836` bytes (`-0.087%`)
 

@@ -10,7 +10,7 @@
 //!
 //! ## Height Coordination
 //!
-//! Uses `PaneHeightCoordinator` to bridge with axiuscharts's `PaneManager` for:
+//! Uses `PaneHeightCoordinator` to bridge with aion_charts's `PaneManager` for:
 //!   - Stretch-factor based proportional height allocation
 //!   - Coordinated separator dragging (resizing one pane affects neighbors)
 //!   - Minimum height enforcement
@@ -22,15 +22,15 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, Document, HtmlCanvasElement, HtmlDivElement, MouseEvent};
 
-use axiuscharts::core::drawings::types::DrawingGeometry;
-use axiuscharts::core::renderer::canvas_dash::{clear_canvas_line_dash, set_canvas_line_dash};
-use axiuscharts::core::renderer::geometry_generator;
-use axiuscharts::core::renderer::tick_marks::compute_y_ticks;
-use axiuscharts::core::renderer::traits::{ChartStyle, CrosshairMode, CrosshairState, TickMark};
-use axiuscharts::core::renderer::value_projection::TimeScaleIndex;
-use axiuscharts::core::series::LineDataArray;
-use axiuscharts::core::viewport::Viewport;
-use axiuscharts::{
+use aion_charts::core::drawings::types::DrawingGeometry;
+use aion_charts::core::renderer::canvas_dash::{clear_canvas_line_dash, set_canvas_line_dash};
+use aion_charts::core::renderer::geometry_generator;
+use aion_charts::core::renderer::tick_marks::compute_y_ticks;
+use aion_charts::core::renderer::traits::{ChartStyle, CrosshairMode, CrosshairState, TickMark};
+use aion_charts::core::renderer::value_projection::TimeScaleIndex;
+use aion_charts::core::series::LineDataArray;
+use aion_charts::core::viewport::Viewport;
+use aion_charts::{
     DrawingManager, PaneId, PaneManager, PaneOptions, PriceAxisRenderer, ScrollState,
 };
 use std::cell::Cell;
@@ -75,7 +75,7 @@ impl SubPaneSeparatorStyle {
 
 // ── PaneHeightCoordinator ──────────────────────────────────────────────────
 //
-// Bridges axiuscharts's PaneManager with the SubPane DOM-based system.
+// Bridges aion_charts's PaneManager with the SubPane DOM-based system.
 // Coordinates heights across all panes using stretch factors.
 
 /// Maps a SubPane ID to its PaneManager PaneId.
@@ -85,7 +85,7 @@ pub struct PaneMapping {
     pub pane_id: PaneId,
 }
 
-/// Coordinates pane heights using axiuscharts's PaneManager.
+/// Coordinates pane heights using aion_charts's PaneManager.
 ///
 /// This wrapper:
 /// - Maintains a PaneManager instance for stretch-factor-based heights
@@ -241,7 +241,7 @@ impl IndicatorConfig {
     /// Falls back to sensible defaults for unknown types.
     /// Colors are drawn from the theme's indicator palette.
     pub fn for_type(indicator_type: &str) -> Self {
-        let theme = axiuscharts::ThemeConfig::default();
+        let theme = aion_charts::ThemeConfig::default();
         let p = &theme.indicator_palette;
         // Palette indices: 0=Blue, 1=Amber, 2=Purple, 3=Red, 4=Green, 5=Grey
         let blue = theme.indicator_color(0);
@@ -377,7 +377,7 @@ impl SubPane {
     ) -> Result<Self, JsValue> {
         let config = IndicatorConfig::for_type(indicator_type);
         let pane_row = grid_row + 1;
-        let id_str = format!("axiuscharts-subpane-{}", id);
+        let id_str = format!("aion_charts-subpane-{}", id);
 
         let mut separator_style = separator_style.clone();
         separator_style.normalize();
@@ -937,7 +937,7 @@ impl SubPane {
                     .find(|v| v.is_finite())
                     .copied()?;
                 let color = self.colors.get(i).copied().unwrap_or(
-                    axiuscharts::ThemeConfig::default()
+                    aion_charts::ThemeConfig::default()
                         .indicator_palette
                         .fallback,
                 );
@@ -1132,7 +1132,7 @@ impl SubPane {
         // Data lines
         for (i, line) in self.data.iter().enumerate() {
             let color = self.colors.get(i).copied().unwrap_or(
-                axiuscharts::ThemeConfig::default()
+                aion_charts::ThemeConfig::default()
                     .indicator_palette
                     .fallback,
             );

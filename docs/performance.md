@@ -1,6 +1,6 @@
 # Performance
 
-AxiusCharts performance comes from three main choices: columnar storage, invalidation-driven rendering, and backend-specific geometry emission that avoids rebuilding more state than necessary.
+Aion_charts performance comes from three main choices: columnar storage, invalidation-driven rendering, and backend-specific geometry emission that avoids rebuilding more state than necessary.
 
 ## Architectural Notes
 
@@ -34,7 +34,7 @@ Compared with the pre-migration baseline captured at the start of this branch:
 
 ## Render Scheduling Tradeoff
 
-Invalidation-driven rendering wins when the chart is idle or mostly static. A permanent RAF loop would simplify some animation code, but it would also waste frames when nothing changed. AxiusCharts keeps one-shot scheduling and explicitly re-queues during glide, replay, and pane animation instead.
+Invalidation-driven rendering wins when the chart is idle or mostly static. A permanent RAF loop would simplify some animation code, but it would also waste frames when nothing changed. Aion_charts keeps one-shot scheduling and explicitly re-queues during glide, replay, and pane animation instead.
 
 ## Storage And Streaming
 
@@ -58,7 +58,7 @@ Invalidation-driven rendering wins when the chart is idle or mostly static. A pe
 
 Release artifact size after the migration:
 
-- `wasm/pkg/axiuscharts_wasm_bg.wasm`: `2,108,341` bytes
+- `wasm/pkg/aion_charts_wasm_bg.wasm`: `2,108,341` bytes
 - Baseline: `2,110,177` bytes
 - Delta: `-1,836` bytes (`-0.087%`)
 

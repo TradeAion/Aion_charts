@@ -1,4 +1,4 @@
-//! AxiusCharts WASM bindings — widget-based chart library.
+//! Aion_charts WASM bindings — widget-based chart library.
 //!
 //! Architecture:
 //!   - WidgetLayout creates CSS-grid DOM: [pane|price_axis] / [time_axis]
@@ -7,7 +7,7 @@
 //!   - ChartEngine renders the pane only; axis renderers are separate
 //!
 //! Public WASM API:
-//!   AxiusCharts.create_chart(container, options)  → sets up everything, attaches all events
+//!   Aion_charts.create_chart(container, options)  → sets up everything, attaches all events
 //!   core.set_data_arrays(open, high, ...)     → load bar data
 //!   core.render()                             → draw one frame (call from RAF)
 //!   core.dispose()                            → detach events, cleanup
@@ -53,8 +53,8 @@
 )]
 #![cfg(target_arch = "wasm32")]
 
-use axiuscharts::core::guardrails::{DEFAULT_MAX_BARS_PER_LOAD, DEFAULT_MAX_INDICATOR_PANES};
-use axiuscharts::{
+use aion_charts::core::guardrails::{DEFAULT_MAX_BARS_PER_LOAD, DEFAULT_MAX_INDICATOR_PANES};
+use aion_charts::{
     generate_footprint_sample_data, generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions,
     BaselineSeriesOptions, Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup,
     ChartGuardrails, ChartPaneId, ChartStyle, CrosshairMagnetMode, CrosshairSnapshot, DataRange,
@@ -464,7 +464,7 @@ fn request_auto_render_frame_if_needed(dirty: &Rc<RenderInvalidation>) {
 
 fn with_crosshair_lines_mut<F>(style: &mut ChartStyle, target: &str, mut f: F)
 where
-    F: FnMut(&mut axiuscharts::core::renderer::traits::CrosshairLineStyle),
+    F: FnMut(&mut aion_charts::core::renderer::traits::CrosshairLineStyle),
 {
     match target {
         "vert" | "vertical" => f(&mut style.crosshair_vert_line),
@@ -476,20 +476,20 @@ where
     }
 }
 
-fn parse_crosshair_mode(mode: &str) -> axiuscharts::CrosshairMode {
+fn parse_crosshair_mode(mode: &str) -> aion_charts::CrosshairMode {
     match mode {
-        "normal" => axiuscharts::CrosshairMode::Normal,
-        "magnet_ohlc" | "ohlc" => axiuscharts::CrosshairMode::MagnetOHLC,
-        "magnet" => axiuscharts::CrosshairMode::Magnet,
-        _ => axiuscharts::CrosshairMode::Normal,
+        "normal" => aion_charts::CrosshairMode::Normal,
+        "magnet_ohlc" | "ohlc" => aion_charts::CrosshairMode::MagnetOHLC,
+        "magnet" => aion_charts::CrosshairMode::Magnet,
+        _ => aion_charts::CrosshairMode::Normal,
     }
 }
 
-fn crosshair_mode_key(mode: axiuscharts::CrosshairMode) -> &'static str {
+fn crosshair_mode_key(mode: aion_charts::CrosshairMode) -> &'static str {
     match mode {
-        axiuscharts::CrosshairMode::Normal => "normal",
-        axiuscharts::CrosshairMode::Magnet => "magnet",
-        axiuscharts::CrosshairMode::MagnetOHLC => "magnet_ohlc",
+        aion_charts::CrosshairMode::Normal => "normal",
+        aion_charts::CrosshairMode::Magnet => "magnet",
+        aion_charts::CrosshairMode::MagnetOHLC => "magnet_ohlc",
     }
 }
 
@@ -598,7 +598,7 @@ fn validate_marker_bar_index(engine: &ChartEngine, bar_index: usize) -> Result<(
 }
 
 fn validate_marker_timestamp(engine: &ChartEngine, timestamp: u64) -> Result<usize, JsValue> {
-    axiuscharts::timestamp_to_bar_index(timestamp, &engine.bars).ok_or_else(|| {
+    aion_charts::timestamp_to_bar_index(timestamp, &engine.bars).ok_or_else(|| {
         js_err(format!(
             "marker timestamp {timestamp} is before loaded data or no bars are loaded"
         ))
@@ -749,9 +749,9 @@ fn capped_usize_field(root: &JsonValue, field: &str, default: usize, hard_max: u
 }
 
 fn indicator_error_result(code: &str, message: &str, hint: &str) -> JsValue {
-    let diagnostics = vec![axiuscharts::CompileDiagnostic {
+    let diagnostics = vec![aion_charts::CompileDiagnostic {
         code: code.to_string(),
-        severity: axiuscharts::DiagnosticSeverity::Error,
+        severity: aion_charts::DiagnosticSeverity::Error,
         message: message.to_string(),
         hint: Some(hint.to_string()),
         span: None,
@@ -789,7 +789,7 @@ fn json_value_to_js(value: &JsonValue) -> JsValue {
     }
 }
 
-fn diagnostics_to_js(diagnostics: &[axiuscharts::CompileDiagnostic]) -> JsValue {
+fn diagnostics_to_js(diagnostics: &[aion_charts::CompileDiagnostic]) -> JsValue {
     let out = js_sys::Array::new();
     for d in diagnostics {
         let obj = js_sys::Object::new();
@@ -799,9 +799,9 @@ fn diagnostics_to_js(diagnostics: &[axiuscharts::CompileDiagnostic]) -> JsValue 
             &JsValue::from_str(&d.code),
         );
         let severity = match d.severity {
-            axiuscharts::DiagnosticSeverity::Error => "error",
-            axiuscharts::DiagnosticSeverity::Warning => "warning",
-            axiuscharts::DiagnosticSeverity::Info => "info",
+            aion_charts::DiagnosticSeverity::Error => "error",
+            aion_charts::DiagnosticSeverity::Warning => "warning",
+            aion_charts::DiagnosticSeverity::Info => "info",
         };
         let _ = js_sys::Reflect::set(
             &obj,
@@ -956,7 +956,7 @@ fn enforce_interval_guardrail(
 
 fn resolve_synced_crosshair_state(
     viewport: &Viewport,
-    time_scale: &axiuscharts::core::renderer::value_projection::TimeScaleIndex,
+    time_scale: &aion_charts::core::renderer::value_projection::TimeScaleIndex,
     pane_width: f64,
     pane_height: f64,
     fallback_x: f64,
@@ -1259,43 +1259,43 @@ fn line_style_key(style: LineStyle) -> &'static str {
     }
 }
 
-fn parse_crosshair_mode_js(value: &JsValue) -> Option<axiuscharts::CrosshairMode> {
+fn parse_crosshair_mode_js(value: &JsValue) -> Option<aion_charts::CrosshairMode> {
     if let Some(mode) = value.as_string() {
         return Some(parse_crosshair_mode(mode.trim()));
     }
     if let Some(raw) = value.as_f64() {
         let key = raw.round() as i32;
         return Some(match key {
-            1 => axiuscharts::CrosshairMode::Magnet,
-            2 => axiuscharts::CrosshairMode::MagnetOHLC,
-            _ => axiuscharts::CrosshairMode::Normal,
+            1 => aion_charts::CrosshairMode::Magnet,
+            2 => aion_charts::CrosshairMode::MagnetOHLC,
+            _ => aion_charts::CrosshairMode::Normal,
         });
     }
     None
 }
 
-fn parse_price_scale_mode_js(value: &JsValue) -> Option<axiuscharts::PriceScaleMode> {
+fn parse_price_scale_mode_js(value: &JsValue) -> Option<aion_charts::PriceScaleMode> {
     if let Some(mode) = value.as_string() {
-        return Some(axiuscharts::PriceScaleMode::from_str(mode.trim()));
+        return Some(aion_charts::PriceScaleMode::from_str(mode.trim()));
     }
     if let Some(raw) = value.as_f64() {
         let key = raw.round() as i32;
         return Some(match key {
-            1 => axiuscharts::PriceScaleMode::Logarithmic,
-            2 => axiuscharts::PriceScaleMode::Percentage,
-            3 => axiuscharts::PriceScaleMode::IndexedTo100,
-            _ => axiuscharts::PriceScaleMode::Normal,
+            1 => aion_charts::PriceScaleMode::Logarithmic,
+            2 => aion_charts::PriceScaleMode::Percentage,
+            3 => aion_charts::PriceScaleMode::IndexedTo100,
+            _ => aion_charts::PriceScaleMode::Normal,
         });
     }
     None
 }
 
-fn price_scale_mode_key(mode: axiuscharts::PriceScaleMode) -> &'static str {
+fn price_scale_mode_key(mode: aion_charts::PriceScaleMode) -> &'static str {
     match mode {
-        axiuscharts::PriceScaleMode::Normal => "normal",
-        axiuscharts::PriceScaleMode::Logarithmic => "logarithmic",
-        axiuscharts::PriceScaleMode::Percentage => "percentage",
-        axiuscharts::PriceScaleMode::IndexedTo100 => "indexed_to_100",
+        aion_charts::PriceScaleMode::Normal => "normal",
+        aion_charts::PriceScaleMode::Logarithmic => "logarithmic",
+        aion_charts::PriceScaleMode::Percentage => "percentage",
+        aion_charts::PriceScaleMode::IndexedTo100 => "indexed_to_100",
     }
 }
 
@@ -1481,7 +1481,7 @@ fn build_footprint_levels(
     prices: &[f64],
     bid_volumes: &[f64],
     ask_volumes: &[f64],
-) -> Result<Vec<axiuscharts::FootprintLevel>, JsValue> {
+) -> Result<Vec<aion_charts::FootprintLevel>, JsValue> {
     let len = prices.len();
     ensure_equal_len("prices", len, "bid_volumes", bid_volumes.len())?;
     ensure_equal_len("prices", len, "ask_volumes", ask_volumes.len())?;
@@ -1514,7 +1514,7 @@ fn build_footprint_levels(
     }
 
     Ok((0..len)
-        .map(|i| axiuscharts::FootprintLevel {
+        .map(|i| aion_charts::FootprintLevel {
             price: prices[i],
             bid_volume: bid_volumes[i],
             ask_volume: ask_volumes[i],
@@ -1526,13 +1526,13 @@ fn validate_footprint_bar_alignment(
     ctx: &str,
     bar_index: usize,
     bar: &Bar,
-    levels: &[axiuscharts::FootprintLevel],
+    levels: &[aion_charts::FootprintLevel],
 ) -> Result<(), JsValue> {
     if levels.is_empty() {
         return Ok(());
     }
     let tick = if levels.len() > 1 {
-        let bar = axiuscharts::FootprintBar {
+        let bar = aion_charts::FootprintBar {
             levels: levels.to_vec(),
         };
         bar.inferred_tick_size()
@@ -1565,7 +1565,7 @@ fn build_footprint_data_from_aligned_arrays(
     prices: &[f64],
     bid_volumes: &[f64],
     ask_volumes: &[f64],
-) -> Result<axiuscharts::FootprintData, JsValue> {
+) -> Result<aion_charts::FootprintData, JsValue> {
     ensure_equal_len("prices", prices.len(), "bid_volumes", bid_volumes.len())?;
     ensure_equal_len("prices", prices.len(), "ask_volumes", ask_volumes.len())?;
     ensure_finite_slice("prices", prices)?;
@@ -1603,7 +1603,7 @@ fn build_footprint_data_from_aligned_arrays(
         )));
     }
 
-    let mut footprint = axiuscharts::FootprintData::new();
+    let mut footprint = aion_charts::FootprintData::new();
     for i in 0..bars.len() {
         let start = level_offsets[i] as usize;
         let end = level_offsets[i + 1] as usize;
@@ -1618,7 +1618,7 @@ fn build_footprint_data_from_aligned_arrays(
             &ask_volumes[start..end],
         )?;
         validate_footprint_bar_alignment(ctx, i, &bars[i], &levels)?;
-        footprint.set_bar(i, axiuscharts::FootprintBar { levels });
+        footprint.set_bar(i, aion_charts::FootprintBar { levels });
     }
     Ok(footprint)
 }
@@ -1635,7 +1635,7 @@ fn build_historical_footprint_dataset_from_arrays(
     prices: &[f64],
     bid_volumes: &[f64],
     ask_volumes: &[f64],
-) -> Result<(Vec<Bar>, axiuscharts::FootprintData), JsValue> {
+) -> Result<(Vec<Bar>, aion_charts::FootprintData), JsValue> {
     let bars = build_main_bars_from_arrays(ctx, open, high, low, close, volume, timestamps)?;
     ensure_ohlcv_sanity_for_footprint(ctx, &bars)?;
     let footprint = build_footprint_data_from_aligned_arrays(
@@ -1672,7 +1672,7 @@ fn parse_color_json_value(value: &serde_json::Value) -> Option<[f32; 4]> {
 fn parse_historical_footprint_json_dataset(
     json: &str,
     guardrails: &ChartGuardrails,
-) -> Result<(Vec<Bar>, axiuscharts::FootprintData), JsValue> {
+) -> Result<(Vec<Bar>, aion_charts::FootprintData), JsValue> {
     enforce_json_payload_size(
         "set_data_with_footprint_json",
         json,
@@ -1699,7 +1699,7 @@ fn parse_historical_footprint_json_dataset(
     enforce_bar_load_guardrail("set_data_with_footprint_json", guardrails, items.len())?;
 
     let mut bars = Vec::with_capacity(items.len());
-    let mut footprint = axiuscharts::FootprintData::new();
+    let mut footprint = aion_charts::FootprintData::new();
     let mut total_level_count = 0usize;
 
     for (bar_index, item) in items.iter().enumerate() {
@@ -1824,7 +1824,7 @@ fn parse_historical_footprint_json_dataset(
             bars.last().expect("just pushed bar"),
             &levels,
         )?;
-        footprint.set_bar(bar_index, axiuscharts::FootprintBar { levels });
+        footprint.set_bar(bar_index, aion_charts::FootprintBar { levels });
     }
 
     let timestamps: Vec<u64> = bars.iter().map(|b| b.timestamp).collect();
@@ -1861,21 +1861,21 @@ fn normalize_price_range(min: f64, max: f64, fallback_min: f64, fallback_max: f6
         let center = finite_or(lo, finite_or(fallback_min, 0.0));
         let fallback_span =
             (finite_or(fallback_max, center + 1.0) - finite_or(fallback_min, center - 1.0)).abs();
-        let span = fallback_span.max(axiuscharts::core::constants::DEGENERATE_PRICE_RANGE_FALLBACK);
+        let span = fallback_span.max(aion_charts::core::constants::DEGENERATE_PRICE_RANGE_FALLBACK);
         lo = center - span * 0.5;
         hi = center + span * 0.5;
     }
     (lo, hi)
 }
 
-fn validate_drawing_snapshot(snapshot: &axiuscharts::DrawingSnapshot) -> Result<(), String> {
+fn validate_drawing_snapshot(snapshot: &aion_charts::DrawingSnapshot) -> Result<(), String> {
     enforce_count_limit_str(
         "drawing snapshot",
         "drawings",
         snapshot.drawings.len(),
         MAX_DRAWINGS_PER_PANE_IMPORT,
     )?;
-    let mut manager = axiuscharts::DrawingManager::new();
+    let mut manager = aion_charts::DrawingManager::new();
     manager.replace_from_snapshot(snapshot.clone())
 }
 
@@ -1886,13 +1886,13 @@ const CHART_PERSISTENCE_VERSION: u32 = 1;
 struct PaneDrawingStore {
     #[serde(rename = "paneId")]
     pane_id: u32,
-    drawings: axiuscharts::DrawingSnapshot,
+    drawings: aion_charts::DrawingSnapshot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DrawingStore {
     version: u32,
-    main: axiuscharts::DrawingSnapshot,
+    main: aion_charts::DrawingSnapshot,
     #[serde(default)]
     subpanes: Vec<PaneDrawingStore>,
 }
@@ -1949,7 +1949,7 @@ struct ChartPersistenceState {
 }
 
 #[wasm_bindgen]
-pub struct AxiusCharts {
+pub struct Aion_charts {
     inner: SharedInner,
     mtf_resolver: Arc<SnapshotMtfResolver>,
     guardrails: ChartGuardrails,
@@ -1974,7 +1974,7 @@ pub struct AxiusCharts {
     /// JS event emitter for on/off/once callbacks (Rc for RAF closure sharing).
     event_emitter: Rc<RefCell<EventEmitter>>,
     /// Active theme configuration.
-    theme_config: axiuscharts::ThemeConfig,
+    theme_config: aion_charts::ThemeConfig,
     /// Whether auto-render (internal RAF loop) is active.
     auto_render: Rc<Cell<bool>>,
     /// RAF closure slot for auto-render mode. One frame is queued at a time.
@@ -1988,9 +1988,9 @@ pub struct AxiusCharts {
 }
 
 #[wasm_bindgen]
-impl AxiusCharts {
+impl Aion_charts {
     /// Create with a specific renderer backend (`auto`, `webgpu`, `canvas2d`).
-    pub async fn create_with(container_id: &str, renderer: &str) -> Result<AxiusCharts, JsValue> {
+    pub async fn create_with(container_id: &str, renderer: &str) -> Result<Aion_charts, JsValue> {
         init_logging();
 
         let layout = WidgetLayout::new(container_id)?;
@@ -1999,7 +1999,7 @@ impl AxiusCharts {
         let requested_renderer_str = requested_renderer.as_str().to_string();
 
         // Set initial axis sizes so CSS grid can compute pane dimensions
-        let style = axiuscharts::ChartStyle::default();
+        let style = aion_charts::ChartStyle::default();
         let time_axis_h = style.time_axis_height();
         let initial_price_w = 50.0; // will be recalculated on first render
         layout.update_axis_sizes(initial_price_w, time_axis_h);
@@ -2015,7 +2015,7 @@ impl AxiusCharts {
         let pane_ph = (pane_css_h * dpr).round() as u32;
 
         log::info!(
-            "AxiusCharts: creating '{}' — pane CSS {}x{}, physical {}x{}, dpr={}",
+            "Aion_charts: creating '{}' — pane CSS {}x{}, physical {}x{}, dpr={}",
             requested_renderer.as_str(),
             pane_css_w,
             pane_css_h,
@@ -2036,7 +2036,7 @@ impl AxiusCharts {
         let active_renderer_name = resolution.active.to_string();
         if let Some(reason) = &resolution.fallback_reason {
             log::warn!(
-                "AxiusCharts: renderer '{}' fell back to '{}': {}",
+                "Aion_charts: renderer '{}' fell back to '{}': {}",
                 requested_renderer.as_str(),
                 active_renderer_name,
                 reason
@@ -2069,7 +2069,7 @@ impl AxiusCharts {
         if let Some(reason) = resolution.fallback_reason.clone() {
             engine
                 .event_bus
-                .emit(axiuscharts::ChartEvent::RendererFallback {
+                .emit(aion_charts::ChartEvent::RendererFallback {
                     requested: requested_renderer.as_str().to_string(),
                     active: active_renderer_name.clone(),
                     reason,
@@ -2079,7 +2079,7 @@ impl AxiusCharts {
         engine.indicators.set_mtf_resolver(mtf_resolver.clone());
         let interaction = InteractionHandler::new();
 
-        log::info!("AxiusCharts initialized: {}", engine.renderer_name());
+        log::info!("Aion_charts initialized: {}", engine.renderer_name());
 
         // Initialize pane height coordinator with main pane height
         let pane_coordinator = PaneHeightCoordinator::new(pane_css_h);
@@ -2452,9 +2452,9 @@ impl AxiusCharts {
                     };
                     s.engine.drawings.remove_all_scale();
                     // Also exit scale drawing mode if active
-                    if s.engine.drawings.active_tool == axiuscharts::DrawingTool::Scale {
+                    if s.engine.drawings.active_tool == aion_charts::DrawingTool::Scale {
                         s.engine.drawings.cancel_creation();
-                        s.engine.drawings.active_tool = axiuscharts::DrawingTool::None;
+                        s.engine.drawings.active_tool = aion_charts::DrawingTool::None;
                     }
                     dirty.set(true);
                 }));
@@ -3143,7 +3143,7 @@ impl AxiusCharts {
                             sync_widget_sizes(&mut *s, dpr, true);
 
                             let (cw, ch) = s.layout.container_css_size();
-                            s.engine.event_bus.emit(axiuscharts::ChartEvent::Resize {
+                            s.engine.event_bus.emit(aion_charts::ChartEvent::Resize {
                                 width: cw,
                                 height: ch,
                             });
@@ -3183,7 +3183,7 @@ impl AxiusCharts {
             (cb, observer)
         };
 
-        Ok(AxiusCharts {
+        Ok(Aion_charts {
             inner,
             mtf_resolver,
             guardrails: ChartGuardrails::default(),
@@ -3201,7 +3201,7 @@ impl AxiusCharts {
             _last_tap_time: last_tap_time,
             _event_registry: EventListenerRegistry::new(),
             event_emitter,
-            theme_config: axiuscharts::ThemeConfig::default(),
+            theme_config: aion_charts::ThemeConfig::default(),
             auto_render,
             _raf_closure: raf_closure,
             _raf_id: raf_id,
@@ -3227,7 +3227,7 @@ impl AxiusCharts {
 
     // ── Modern API ───────────────────────────────────────────────────────────
 
-    /// Create a new AxiusCharts instance with a full options object.
+    /// Create a new Aion_charts instance with a full options object.
     ///
     /// `container` can be an `HTMLElement` reference or a string container ID.
     /// `options` is an optional JS object:
@@ -3245,7 +3245,7 @@ impl AxiusCharts {
     pub async fn create_chart(
         container: JsValue,
         options: JsValue,
-    ) -> Result<AxiusCharts, JsValue> {
+    ) -> Result<Aion_charts, JsValue> {
         let options = normalize_options(options);
 
         // Resolve container: HTMLElement or string ID
@@ -3255,7 +3255,7 @@ impl AxiusCharts {
             // If element has an ID, use it. Otherwise assign a temporary one.
             let id = el.id();
             if id.is_empty() {
-                let generated = format!("axiuscharts-{}", js_sys::Date::now() as u64);
+                let generated = format!("aion_charts-{}", js_sys::Date::now() as u64);
                 el.set_id(&generated);
                 generated
             } else {
@@ -3287,7 +3287,7 @@ impl AxiusCharts {
             if let Some(theme_str) = theme_val.as_string() {
                 match theme_str.as_str() {
                     "light" => {
-                        chart.theme_config = axiuscharts::ThemeConfig::light();
+                        chart.theme_config = aion_charts::ThemeConfig::light();
                         let style = chart.theme_config.to_chart_style();
                         chart.inner.borrow_mut().engine.style = style;
                     }
@@ -3341,7 +3341,7 @@ impl AxiusCharts {
                     .borrow_mut()
                     .engine
                     .event_bus
-                    .emit(axiuscharts::ChartEvent::Error {
+                    .emit(aion_charts::ChartEvent::Error {
                         message: err
                             .as_string()
                             .unwrap_or_else(|| "invalid guardrails option".to_string()),
@@ -3375,7 +3375,7 @@ impl AxiusCharts {
                 .borrow_mut()
                 .engine
                 .event_bus
-                .emit(axiuscharts::ChartEvent::Error {
+                .emit(aion_charts::ChartEvent::Error {
                     message: err
                         .as_string()
                         .unwrap_or_else(|| "interval guardrail rejected apply_options".to_string()),
@@ -3392,7 +3392,7 @@ impl AxiusCharts {
                 .borrow_mut()
                 .engine
                 .event_bus
-                .emit(axiuscharts::ChartEvent::Error {
+                .emit(aion_charts::ChartEvent::Error {
                     message: "renderer is create-time only; apply_options({ renderer }) is ignored"
                         .to_string(),
                 });
@@ -3403,10 +3403,10 @@ impl AxiusCharts {
             if let Some(theme_str) = theme_val.as_string() {
                 match theme_str.as_str() {
                     "dark" => {
-                        self.theme_config = axiuscharts::ThemeConfig::dark();
+                        self.theme_config = aion_charts::ThemeConfig::dark();
                     }
                     "light" => {
-                        self.theme_config = axiuscharts::ThemeConfig::light();
+                        self.theme_config = aion_charts::ThemeConfig::light();
                     }
                     _ => {}
                 }
@@ -3424,7 +3424,7 @@ impl AxiusCharts {
                 s.symbol = symbol.clone();
                 s.engine
                     .event_bus
-                    .emit(axiuscharts::ChartEvent::SymbolChange { symbol });
+                    .emit(aion_charts::ChartEvent::SymbolChange { symbol });
             }
         }
 
@@ -3435,7 +3435,7 @@ impl AxiusCharts {
                 .borrow_mut()
                 .engine
                 .event_bus
-                .emit(axiuscharts::ChartEvent::IntervalChange { interval });
+                .emit(aion_charts::ChartEvent::IntervalChange { interval });
         }
 
         css_changed = self.apply_compat_options(&options) || css_changed;
@@ -3567,7 +3567,7 @@ impl AxiusCharts {
     }
 
     /// Apply compatibility-style nested options directly to
-    /// AxiusCharts style/runtime state. Returns true when theme CSS variables
+    /// Aion_charts style/runtime state. Returns true when theme CSS variables
     /// should be refreshed.
     fn apply_compat_options(&mut self, options: &JsValue) -> bool {
         if options.is_undefined() || options.is_null() {
@@ -3798,7 +3798,7 @@ impl AxiusCharts {
                     s.engine.set_main_chart_type(next_chart_type);
                     s.engine
                         .event_bus
-                        .emit(axiuscharts::ChartEvent::ChartTypeChange {
+                        .emit(aion_charts::ChartEvent::ChartTypeChange {
                             chart_type: next_chart_type.as_str().to_string(),
                         });
                 }
@@ -4312,13 +4312,13 @@ impl AxiusCharts {
     /// Get the current theme preset name ("dark", "light", or "custom").
     pub fn theme(&self) -> String {
         // Check if it matches a known preset
-        let dark = axiuscharts::ThemeConfig::dark();
+        let dark = aion_charts::ThemeConfig::dark();
         if self.theme_config.colors.background == dark.colors.background
             && self.theme_config.colors.bullish == dark.colors.bullish
         {
             "dark".to_string()
         } else {
-            let light = axiuscharts::ThemeConfig::light();
+            let light = aion_charts::ThemeConfig::light();
             if self.theme_config.colors.background == light.colors.background {
                 "light".to_string()
             } else {
@@ -4598,7 +4598,7 @@ impl AxiusCharts {
         }
         inner
             .engine
-            .set_footprint_bar(bar_index, axiuscharts::FootprintBar { levels });
+            .set_footprint_bar(bar_index, aion_charts::FootprintBar { levels });
         drop(inner);
         self.dirty.set(true);
         Ok(())
@@ -4696,7 +4696,7 @@ impl AxiusCharts {
                 &bid_volumes[start..end],
                 &ask_volumes[start..end],
             )?;
-            bars.push((bar_index, axiuscharts::FootprintBar { levels }));
+            bars.push((bar_index, aion_charts::FootprintBar { levels }));
         }
 
         inner.engine.set_footprint_bars(bars);
@@ -4789,7 +4789,7 @@ impl AxiusCharts {
             }
 
             let levels = build_footprint_levels("set_footprint_data_json", &prices, &bids, &asks)?;
-            bars.push((bar_index, axiuscharts::FootprintBar { levels }));
+            bars.push((bar_index, aion_charts::FootprintBar { levels }));
         }
         inner.engine.set_footprint_bars(bars);
         drop(inner);
@@ -4806,7 +4806,7 @@ impl AxiusCharts {
     /// Set footprint display mode.
     /// Accepted values: "bid_ask", "delta", "volume", "delta_profile", "volume_profile".
     pub fn set_footprint_display_mode(&mut self, mode: &str) {
-        let m = axiuscharts::FootprintDisplayMode::from_str(mode);
+        let m = aion_charts::FootprintDisplayMode::from_str(mode);
         self.inner.borrow_mut().engine.set_footprint_display_mode(m);
         self.dirty.set(true);
         log::info!("set_footprint_display_mode: {}", m.as_str());
@@ -4862,20 +4862,20 @@ impl AxiusCharts {
         let mut refresh_semantic_theme = false;
 
         if let Some(s) = v["display_mode"].as_str() {
-            opts.display_mode = axiuscharts::FootprintDisplayMode::from_str(s);
+            opts.display_mode = aion_charts::FootprintDisplayMode::from_str(s);
         }
         if let Some(n) = v["tick_size"].as_f64() {
             opts.tick_size = n;
         }
         if let Some(s) = v["palette"].as_str() {
-            opts.palette = axiuscharts::FootprintPalette::from_str(s);
+            opts.palette = aion_charts::FootprintPalette::from_str(s);
             refresh_semantic_theme = true;
         }
         if let Some(s) = v["gradient_style"]
             .as_str()
             .or_else(|| v["gradientStyle"].as_str())
         {
-            opts.gradient_style = axiuscharts::FootprintGradientStyle::from_str(s);
+            opts.gradient_style = aion_charts::FootprintGradientStyle::from_str(s);
             refresh_semantic_theme = true;
         }
         if let Some(value) = v.get("poc_color").or_else(|| v.get("pocColor")) {
@@ -5018,7 +5018,7 @@ impl AxiusCharts {
     pub fn set_crosshair_mode(&mut self, mode: &str) {
         let mut s = self.inner.borrow_mut();
         s.engine.crosshair.mode = match mode {
-            "magnet" => axiuscharts::CrosshairMode::MagnetOHLC,
+            "magnet" => aion_charts::CrosshairMode::MagnetOHLC,
             _ => parse_crosshair_mode(mode),
         };
     }
@@ -5139,7 +5139,7 @@ impl AxiusCharts {
             .borrow_mut()
             .engine
             .event_bus
-            .emit(axiuscharts::ChartEvent::SymbolChange {
+            .emit(aion_charts::ChartEvent::SymbolChange {
                 symbol: symbol.to_string(),
             });
         self.dirty.set(true);
@@ -5156,7 +5156,7 @@ impl AxiusCharts {
             .borrow_mut()
             .engine
             .event_bus
-            .emit(axiuscharts::ChartEvent::IntervalChange {
+            .emit(aion_charts::ChartEvent::IntervalChange {
                 interval: interval.to_string(),
             });
         self.dirty.set(true);
@@ -5186,7 +5186,7 @@ impl AxiusCharts {
     pub fn set_drawing_tool(&mut self, tool: &str) {
         let mut s = self.inner.borrow_mut();
         s.engine.drawings.active_tool =
-            axiuscharts::DrawingTool::from_api_key(tool).unwrap_or(axiuscharts::DrawingTool::None);
+            aion_charts::DrawingTool::from_api_key(tool).unwrap_or(aion_charts::DrawingTool::None);
         drop(s);
         self.mark_dirty();
     }
@@ -5284,7 +5284,7 @@ impl AxiusCharts {
             locked_count += subpane.drawings.locked_count();
         }
 
-        let summary = axiuscharts::core::drawings::types::DrawingsLockSummary {
+        let summary = aion_charts::core::drawings::types::DrawingsLockSummary {
             total,
             locked_count,
             all_locked: total > 0 && locked_count == total,
@@ -5420,12 +5420,12 @@ impl AxiusCharts {
         vertical: &str,
     ) -> bool {
         let Some(horizontal_align) =
-            axiuscharts::core::renderer::draw_list::TextAlign::from_key(horizontal)
+            aion_charts::core::renderer::draw_list::TextAlign::from_key(horizontal)
         else {
             return false;
         };
         let Some(vertical_align) =
-            axiuscharts::core::renderer::draw_list::TextVerticalAlign::from_key(vertical)
+            aion_charts::core::renderer::draw_list::TextVerticalAlign::from_key(vertical)
         else {
             return false;
         };
@@ -5569,7 +5569,7 @@ impl AxiusCharts {
                     }
                     raw
                 });
-                axiuscharts::core::drawings::types::FibonacciLevel::new(level.ratio, label)
+                aion_charts::core::drawings::types::FibonacciLevel::new(level.ratio, label)
             })
             .collect::<Vec<_>>();
 
@@ -5601,7 +5601,7 @@ impl AxiusCharts {
         let start_bar = finite_or(viewport.start_bar, 0.0).max(0.0);
         let mut end_bar = finite_or(
             viewport.end_bar,
-            start_bar + axiuscharts::core::constants::DEFAULT_INITIAL_VISIBLE_BARS,
+            start_bar + aion_charts::core::constants::DEFAULT_INITIAL_VISIBLE_BARS,
         );
         if end_bar < start_bar {
             end_bar = start_bar;
@@ -5610,21 +5610,21 @@ impl AxiusCharts {
             viewport.price_min,
             viewport.price_max,
             0.0,
-            axiuscharts::core::constants::DEFAULT_PRICE_MAX,
+            aion_charts::core::constants::DEFAULT_PRICE_MAX,
         );
         let scale_margin_top = finite_or(
             viewport.scale_margin_top,
-            axiuscharts::core::constants::DEFAULT_SCALE_MARGIN_TOP,
+            aion_charts::core::constants::DEFAULT_SCALE_MARGIN_TOP,
         )
         .clamp(0.0, 0.5);
         let scale_margin_bottom = finite_or(
             viewport.scale_margin_bottom,
-            axiuscharts::core::constants::DEFAULT_SCALE_MARGIN_BOTTOM,
+            aion_charts::core::constants::DEFAULT_SCALE_MARGIN_BOTTOM,
         )
         .clamp(0.0, 0.5);
         let price_scale_tick_density = finite_or_f32(
             style.price_scale_tick_mark_density,
-            axiuscharts::core::constants::DEFAULT_PRICE_SCALE_TICK_MARK_DENSITY as f32,
+            aion_charts::core::constants::DEFAULT_PRICE_SCALE_TICK_MARK_DENSITY as f32,
         )
         .max(0.1);
         let volume_visible = s.engine.user_volume_visible();
@@ -5746,7 +5746,7 @@ impl AxiusCharts {
                     sp.viewport.price_min,
                     sp.viewport.price_max,
                     0.0,
-                    axiuscharts::core::constants::DEFAULT_PRICE_MAX,
+                    aion_charts::core::constants::DEFAULT_PRICE_MAX,
                 );
                 PersistedSubPane {
                     id: sp.id,
@@ -5800,19 +5800,19 @@ impl AxiusCharts {
                 options: serde_json::json!({}),
                 viewport: PersistedViewport {
                     start_bar: 0.0,
-                    end_bar: axiuscharts::core::constants::DEFAULT_INITIAL_VISIBLE_BARS,
+                    end_bar: aion_charts::core::constants::DEFAULT_INITIAL_VISIBLE_BARS,
                     price_min: 0.0,
-                    price_max: axiuscharts::core::constants::DEFAULT_PRICE_MAX,
+                    price_max: aion_charts::core::constants::DEFAULT_PRICE_MAX,
                     price_locked: false,
                     price_scale_mode: "normal".to_string(),
-                    scale_margin_top: axiuscharts::core::constants::DEFAULT_SCALE_MARGIN_TOP,
-                    scale_margin_bottom: axiuscharts::core::constants::DEFAULT_SCALE_MARGIN_BOTTOM,
+                    scale_margin_top: aion_charts::core::constants::DEFAULT_SCALE_MARGIN_TOP,
+                    scale_margin_bottom: aion_charts::core::constants::DEFAULT_SCALE_MARGIN_BOTTOM,
                     auto_scroll: true,
                 },
                 panes: Vec::new(),
                 drawings: DrawingStore {
                     version: DRAWING_STORE_VERSION,
-                    main: axiuscharts::DrawingSnapshot::default(),
+                    main: aion_charts::DrawingSnapshot::default(),
                     subpanes: Vec::new(),
                 },
             };
@@ -5873,7 +5873,7 @@ impl AxiusCharts {
             let start_bar = finite_or(snapshot.viewport.start_bar, 0.0).max(0.0);
             let mut end_bar = finite_or(
                 snapshot.viewport.end_bar,
-                start_bar + axiuscharts::core::constants::DEFAULT_INITIAL_VISIBLE_BARS,
+                start_bar + aion_charts::core::constants::DEFAULT_INITIAL_VISIBLE_BARS,
             );
             if end_bar < start_bar {
                 end_bar = start_bar;
@@ -5882,11 +5882,11 @@ impl AxiusCharts {
                 snapshot.viewport.price_min,
                 snapshot.viewport.price_max,
                 0.0,
-                axiuscharts::core::constants::DEFAULT_PRICE_MAX,
+                aion_charts::core::constants::DEFAULT_PRICE_MAX,
             );
             {
                 let vp = &mut s.engine.viewport;
-                vp.set_price_scale_mode(axiuscharts::PriceScaleMode::from_str(
+                vp.set_price_scale_mode(aion_charts::PriceScaleMode::from_str(
                     snapshot.viewport.price_scale_mode.as_str(),
                 ));
                 vp.set_range(start_bar, end_bar);
@@ -5898,12 +5898,12 @@ impl AxiusCharts {
             emit_visible_range_change(&mut s.engine);
             let margin_top = finite_or(
                 snapshot.viewport.scale_margin_top,
-                axiuscharts::core::constants::DEFAULT_SCALE_MARGIN_TOP,
+                aion_charts::core::constants::DEFAULT_SCALE_MARGIN_TOP,
             )
             .clamp(0.0, 0.5);
             let margin_bottom = finite_or(
                 snapshot.viewport.scale_margin_bottom,
-                axiuscharts::core::constants::DEFAULT_SCALE_MARGIN_BOTTOM,
+                aion_charts::core::constants::DEFAULT_SCALE_MARGIN_BOTTOM,
             )
             .clamp(0.0, 0.5);
             s.engine.set_price_scale_margins(margin_top, margin_bottom);
@@ -5951,7 +5951,7 @@ impl AxiusCharts {
                 let s = self.inner.borrow();
                 s.engine
                     .studies
-                    .get_study(axiuscharts::StudyId(pane.study_id))
+                    .get_study(aion_charts::StudyId(pane.study_id))
                     .is_some()
             };
             if !study_exists {
@@ -5987,7 +5987,7 @@ impl AxiusCharts {
                         pane.price_min,
                         pane.price_max,
                         0.0,
-                        axiuscharts::core::constants::DEFAULT_PRICE_MAX,
+                        aion_charts::core::constants::DEFAULT_PRICE_MAX,
                     );
                     sp.set_height(height_css);
                     sp.auto_scale = pane.auto_scale;
@@ -6039,7 +6039,7 @@ impl AxiusCharts {
             log::error!("export_drawings: failed to serialize drawing snapshot: {err}");
             let fallback = DrawingStore {
                 version: DRAWING_STORE_VERSION,
-                main: axiuscharts::DrawingSnapshot::default(),
+                main: aion_charts::DrawingSnapshot::default(),
                 subpanes: Vec::new(),
             };
             serde_json::to_string(&fallback).unwrap_or_else(|_| "{}".to_string())
@@ -6448,13 +6448,13 @@ impl AxiusCharts {
     /// Accepted values: "normal", "logarithmic" (or "log"), "percentage" (or "percent"),
     /// "indexed_to_100" (or "indexedTo100", "indexed").
     pub fn set_price_scale_mode(&mut self, mode: &str) {
-        use axiuscharts::PriceScaleMode;
+        use aion_charts::PriceScaleMode;
         let parsed = PriceScaleMode::from_str(mode);
         let mut s = self.inner.borrow_mut();
         s.engine.viewport.set_price_scale_mode(parsed);
         s.engine
             .event_bus
-            .emit(axiuscharts::ChartEvent::PriceScaleChange {
+            .emit(aion_charts::ChartEvent::PriceScaleChange {
                 mode: mode.to_string(),
             });
     }
@@ -6466,13 +6466,13 @@ impl AxiusCharts {
     /// Accepted values: "candlestick", "candles", "ohlc", "bars", "line", "area",
     /// "heikin_ashi", "ha", "footprint", "fp", "order_flow".
     pub fn set_chart_type(&mut self, chart_type: &str) {
-        use axiuscharts::MainChartType;
+        use aion_charts::MainChartType;
         let ct = MainChartType::from_str(chart_type);
         let mut s = self.inner.borrow_mut();
         s.engine.set_main_chart_type(ct);
         s.engine
             .event_bus
-            .emit(axiuscharts::ChartEvent::ChartTypeChange {
+            .emit(aion_charts::ChartEvent::ChartTypeChange {
                 chart_type: ct.as_str().to_string(),
             });
         log::info!("set_chart_type: {}", ct.as_str());
@@ -6490,7 +6490,7 @@ impl AxiusCharts {
 
     /// Get all available chart types as a comma-separated string.
     pub fn get_available_chart_types() -> String {
-        use axiuscharts::MainChartType;
+        use aion_charts::MainChartType;
         MainChartType::all()
             .iter()
             .map(|ct| ct.as_str())
@@ -6532,7 +6532,7 @@ impl AxiusCharts {
 
     /// Update the price of an existing price line.
     pub fn set_price_line_price(&mut self, id: u32, price: f64) {
-        use axiuscharts::PriceLineId;
+        use aion_charts::PriceLineId;
         if let Some(line) = self
             .inner
             .borrow_mut()
@@ -6546,7 +6546,7 @@ impl AxiusCharts {
 
     /// Set whether a price line is visible.
     pub fn set_price_line_visible(&mut self, id: u32, visible: bool) {
-        use axiuscharts::PriceLineId;
+        use aion_charts::PriceLineId;
         if let Some(line) = self
             .inner
             .borrow_mut()
@@ -6560,7 +6560,7 @@ impl AxiusCharts {
 
     /// Set the label text of a price line. Empty string uses formatted price.
     pub fn set_price_line_label(&mut self, id: u32, label: &str) {
-        use axiuscharts::PriceLineId;
+        use aion_charts::PriceLineId;
         if let Some(line) = self
             .inner
             .borrow_mut()
@@ -6574,7 +6574,7 @@ impl AxiusCharts {
 
     /// Remove a price line by ID.
     pub fn remove_price_line(&mut self, id: u32) -> bool {
-        use axiuscharts::PriceLineId;
+        use aion_charts::PriceLineId;
         self.inner
             .borrow_mut()
             .engine
@@ -6963,7 +6963,7 @@ impl AxiusCharts {
             color,
             size,
             text: text.to_string(),
-            text_color: axiuscharts::ThemeConfig::default()
+            text_color: aion_charts::ThemeConfig::default()
                 .series_defaults
                 .marker_text_color,
             id: 0, // will be assigned
@@ -7026,7 +7026,7 @@ impl AxiusCharts {
             color,
             size,
             text: text.to_string(),
-            text_color: axiuscharts::ThemeConfig::default()
+            text_color: aion_charts::ThemeConfig::default()
                 .series_defaults
                 .marker_text_color,
             id: 0,
@@ -7212,7 +7212,7 @@ impl AxiusCharts {
                 color,
                 size,
                 text: String::new(),
-                text_color: axiuscharts::ThemeConfig::default()
+                text_color: aion_charts::ThemeConfig::default()
                     .series_defaults
                     .marker_text_color,
                 id: 0,
@@ -7297,7 +7297,7 @@ impl AxiusCharts {
                 color,
                 size,
                 text: String::new(),
-                text_color: axiuscharts::ThemeConfig::default()
+                text_color: aion_charts::ThemeConfig::default()
                     .series_defaults
                     .marker_text_color,
                 id: 0,
@@ -7338,7 +7338,7 @@ impl AxiusCharts {
         side: &str,
         role: &str,
     ) {
-        use axiuscharts::{ExecutionMark, ExecutionRole, ExecutionSide};
+        use aion_charts::{ExecutionMark, ExecutionRole, ExecutionSide};
 
         let mark = ExecutionMark::new(
             id,
@@ -7392,7 +7392,7 @@ impl AxiusCharts {
         color_a: f32,
         realized_pnl: f64,
     ) {
-        use axiuscharts::{ExecutionMark, ExecutionRole, ExecutionSide};
+        use aion_charts::{ExecutionMark, ExecutionRole, ExecutionSide};
 
         let mut mark = ExecutionMark::new(
             id,
@@ -7454,7 +7454,7 @@ impl AxiusCharts {
     ///
     /// Accepted values: `"side"`, `"role"`, `"side_and_role"` (case-insensitive).
     pub fn set_execution_label_mode(&mut self, mode: &str) -> Result<(), JsValue> {
-        let parsed = axiuscharts::ExecutionLabelMode::from_str(mode).ok_or_else(|| {
+        let parsed = aion_charts::ExecutionLabelMode::from_str(mode).ok_or_else(|| {
             js_err(format!(
                 "Invalid execution label mode '{}'; expected side, role, or side_and_role",
                 mode
@@ -7501,7 +7501,7 @@ impl AxiusCharts {
     /// Serialize all execution marks to JSON.
     pub fn get_execution_marks_json(&self) -> String {
         let s = self.inner.borrow();
-        serde_json::to_string(&axiuscharts::execution_marks_snapshot(
+        serde_json::to_string(&aion_charts::execution_marks_snapshot(
             &s.engine.execution_marks,
         ))
         .unwrap_or_else(|_| "{\"version\":1,\"marks\":[]}".to_string())
@@ -7516,7 +7516,7 @@ impl AxiusCharts {
     ///
     /// `ids` is an array of string IDs (must match mark_data length / 5).
     pub fn set_execution_marks(&mut self, ids: Vec<String>, mark_data: &[f64]) {
-        use axiuscharts::{ExecutionMark, ExecutionRole, ExecutionSide};
+        use aion_charts::{ExecutionMark, ExecutionRole, ExecutionSide};
 
         const STRIDE: usize = 5; // timestamp_ms, price, quantity, side_idx, role_idx
         let expected_count = mark_data.len() / STRIDE;
@@ -7598,7 +7598,7 @@ impl AxiusCharts {
         let payload: serde_json::Value = serde_json::from_str(json)
             .map_err(|e| js_err(format!("Invalid execution marks JSON: {}", e)))?;
         let snapshot =
-            axiuscharts::parse_execution_marks_snapshot_value(&payload).map_err(js_err)?;
+            aion_charts::parse_execution_marks_snapshot_value(&payload).map_err(js_err)?;
         enforce_count_limit(
             "set_execution_marks_json",
             "execution marks",
@@ -7608,7 +7608,7 @@ impl AxiusCharts {
         let marks: Vec<_> = snapshot
             .marks
             .into_iter()
-            .map(axiuscharts::SerializedExecutionMark::into_mark)
+            .map(aion_charts::SerializedExecutionMark::into_mark)
             .collect();
 
         let mut s = self.inner.borrow_mut();
@@ -7669,7 +7669,7 @@ impl AxiusCharts {
     /// Returns -1 if the timestamp is before all bars.
     pub fn timestamp_to_bar_index(&self, timestamp_ms: u64) -> i64 {
         let s = self.inner.borrow();
-        axiuscharts::timestamp_to_bar_index(timestamp_ms, &s.engine.bars)
+        aion_charts::timestamp_to_bar_index(timestamp_ms, &s.engine.bars)
             .map(|idx| idx as i64)
             .unwrap_or(-1)
     }
@@ -7678,7 +7678,7 @@ impl AxiusCharts {
     /// Returns 0 if the bar index is out of bounds.
     pub fn bar_index_to_timestamp(&self, bar_index: u32) -> u64 {
         let s = self.inner.borrow();
-        axiuscharts::bar_index_to_timestamp(bar_index as usize, &s.engine.bars).unwrap_or(0)
+        aion_charts::bar_index_to_timestamp(bar_index as usize, &s.engine.bars).unwrap_or(0)
     }
 
     /// Project a timestamp/price coordinate into current pane CSS coordinates.
@@ -7704,7 +7704,7 @@ impl AxiusCharts {
             return obj.into();
         };
 
-        let x = axiuscharts::core::renderer::transforms::bar_to_x(
+        let x = aion_charts::core::renderer::transforms::bar_to_x(
             logical_index + 0.5,
             &s.engine.viewport,
             pane_css_w,
@@ -8061,7 +8061,7 @@ impl AxiusCharts {
             .inner
             .borrow_mut()
             .engine
-            .remove_study(axiuscharts::StudyId(id));
+            .remove_study(aion_charts::StudyId(id));
         log::info!("remove_study: id={}, removed={}", id, removed);
         removed
     }
@@ -8071,7 +8071,7 @@ impl AxiusCharts {
     pub fn set_study_parameter(&mut self, id: u32, key: &str, value: f64) {
         let mut s = self.inner.borrow_mut();
         s.engine
-            .set_study_parameter(axiuscharts::StudyId(id), key, value);
+            .set_study_parameter(aion_charts::StudyId(id), key, value);
         // Recalculate immediately if we have data
         if s.engine.bars.len() > 0 {
             s.engine.recalculate_studies();
@@ -8083,7 +8083,7 @@ impl AxiusCharts {
     /// Returns null if the study or output index doesn't exist.
     pub fn get_study_output(&self, id: u32, output_index: u32) -> JsValue {
         let s = self.inner.borrow();
-        if let Some(study) = s.engine.studies.get_study(axiuscharts::StudyId(id)) {
+        if let Some(study) = s.engine.studies.get_study(aion_charts::StudyId(id)) {
             if let Some(output) = study.get_output(output_index as usize) {
                 let obj = js_sys::Object::new();
                 let ts_arr =
@@ -8171,9 +8171,9 @@ impl AxiusCharts {
             .unwrap_or_default();
 
         let Ok(mut s) = self.inner.try_borrow_mut() else {
-            let diagnostics = vec![axiuscharts::CompileDiagnostic {
+            let diagnostics = vec![aion_charts::CompileDiagnostic {
                 code: "INDL-3004".to_string(),
-                severity: axiuscharts::DiagnosticSeverity::Error,
+                severity: aion_charts::DiagnosticSeverity::Error,
                 message: "indicator runtime is busy; retry compile".to_string(),
                 hint: Some("wait a moment and compile again".to_string()),
                 span: None,
@@ -8716,7 +8716,7 @@ impl AxiusCharts {
                 .borrow_mut()
                 .engine
                 .event_bus
-                .emit(axiuscharts::ChartEvent::Error { message });
+                .emit(aion_charts::ChartEvent::Error { message });
             return 0;
         }
 
@@ -8814,7 +8814,7 @@ impl AxiusCharts {
             };
 
             // Populate with current study data using config colors
-            if let Some(study) = s.engine.studies.get_study(axiuscharts::StudyId(study_id)) {
+            if let Some(study) = s.engine.studies.get_study(aion_charts::StudyId(study_id)) {
                 let mut data = Vec::new();
                 let mut colors = Vec::new();
                 for i in 0..study.outputs.len() {
@@ -8822,7 +8822,7 @@ impl AxiusCharts {
                         data.push(output.data.clone());
                         colors.push(
                             config.colors.get(i).copied().unwrap_or(
-                                axiuscharts::ThemeConfig::default()
+                                aion_charts::ThemeConfig::default()
                                     .indicator_palette
                                     .fallback,
                             ),
@@ -8934,7 +8934,7 @@ impl AxiusCharts {
                                 .is_some_and(|state| {
                                     matches!(
                                         state,
-                                        axiuscharts::core::drawings::types::DrawingState::Dragging {
+                                        aion_charts::core::drawings::types::DrawingState::Dragging {
                                             ..
                                         }
                                     )
@@ -9025,7 +9025,7 @@ impl AxiusCharts {
                                 .map(|d| (d.tool(), d.state(), d.locked()));
                             if let Some((
                                 tool,
-                                axiuscharts::core::drawings::types::DrawingState::Dragging {
+                                aion_charts::core::drawings::types::DrawingState::Dragging {
                                     anchor_index,
                                     ..
                                 },
@@ -9036,12 +9036,12 @@ impl AxiusCharts {
                                 is_drawing_drag = true;
                                 let hit_part = match anchor_index {
                                     Some(i) => {
-                                        axiuscharts::core::drawings::types::HitPart::Anchor(i)
+                                        aion_charts::core::drawings::types::HitPart::Anchor(i)
                                     }
-                                    None => axiuscharts::core::drawings::types::HitPart::Body,
+                                    None => aion_charts::core::drawings::types::HitPart::Body,
                                 };
                                 let drag_cursor =
-                                    axiuscharts::core::drawings::types::cursor_for_drawing_hit(
+                                    aion_charts::core::drawings::types::cursor_for_drawing_hit(
                                         tool,
                                         hit_part,
                                         anchor_index,
@@ -9057,7 +9057,7 @@ impl AxiusCharts {
 
                         if !is_drawing_drag
                             && !sp.drawings.is_creating()
-                            && sp.drawings.active_tool == axiuscharts::DrawingTool::None
+                            && sp.drawings.active_tool == aion_charts::DrawingTool::None
                         {
                             // Build a hybrid viewport (shared time + subpane price) for hover hit-test.
                             let mut hybrid_vp = Viewport::new(pw as u32, ph as u32);
@@ -9072,7 +9072,7 @@ impl AxiusCharts {
                                     .hit_test(x, y, &hybrid_vp, pw, ph)
                                     .map(|(id, hit)| {
                                         let anchor_idx = match hit.part {
-                                            axiuscharts::core::drawings::types::HitPart::Anchor(i) => {
+                                            aion_charts::core::drawings::types::HitPart::Anchor(i) => {
                                                 Some(i)
                                             }
                                             _ => None,
@@ -9083,7 +9083,7 @@ impl AxiusCharts {
                                             .map(|d| (d.tool(), d.locked()))
                                         {
                                             drawing_cursor = Some(
-                                            axiuscharts::core::drawings::types::cursor_for_drawing_hit(
+                                            aion_charts::core::drawings::types::cursor_for_drawing_hit(
                                                 tool,
                                                 hit.part,
                                                 anchor_idx,
@@ -9206,7 +9206,7 @@ impl AxiusCharts {
 
                     // Check if drawing tool is active (shared from main chart)
                     let active_tool = s.engine.drawings.active_tool;
-                    if active_tool != axiuscharts::DrawingTool::None {
+                    if active_tool != aion_charts::DrawingTool::None {
                         if let Some(sp) = s.subpanes.iter_mut().find(|sp| sp.id == pid) {
                             let price = sp.viewport.pixel_to_price(y, ph);
 
@@ -9246,7 +9246,7 @@ impl AxiusCharts {
 
                         let hit = sp.drawings.hit_test(x, y, &hybrid_vp, pw, ph);
                         if let Some((id, result)) = hit {
-                            use axiuscharts::core::drawings::types::HitPart;
+                            use aion_charts::core::drawings::types::HitPart;
                             let anchor_idx = match result.part {
                                 HitPart::Anchor(i) => Some(i),
                                 _ => None,
@@ -9261,7 +9261,7 @@ impl AxiusCharts {
                                 .drawings
                                 .get(id)
                                 .map(|d| {
-                                    axiuscharts::core::drawings::types::cursor_for_drawing_hit(
+                                    aion_charts::core::drawings::types::cursor_for_drawing_hit(
                                         d.tool(),
                                         result.part,
                                         anchor_idx,
@@ -9404,7 +9404,7 @@ impl AxiusCharts {
                             if let Some((id, hit)) = sp.drawings.hit_test(x, y, &hybrid_vp, pw, ph)
                             {
                                 let anchor_idx = match hit.part {
-                                    axiuscharts::core::drawings::types::HitPart::Anchor(i) => {
+                                    aion_charts::core::drawings::types::HitPart::Anchor(i) => {
                                         Some(i)
                                     }
                                     _ => None,
@@ -9413,7 +9413,7 @@ impl AxiusCharts {
                                     sp.drawings.get(id).map(|d| (d.tool(), d.locked()))
                                 {
                                     hover_cursor =
-                                        axiuscharts::core::drawings::types::cursor_for_drawing_hit(
+                                        aion_charts::core::drawings::types::cursor_for_drawing_hit(
                                             tool, hit.part, anchor_idx, locked,
                                         );
                                 }
@@ -9491,7 +9491,7 @@ impl AxiusCharts {
                             if let Some((id, hit)) = sp.drawings.hit_test(x, y, &hybrid_vp, pw, ph)
                             {
                                 let anchor_idx = match hit.part {
-                                    axiuscharts::core::drawings::types::HitPart::Anchor(i) => {
+                                    aion_charts::core::drawings::types::HitPart::Anchor(i) => {
                                         Some(i)
                                     }
                                     _ => None,
@@ -9500,7 +9500,7 @@ impl AxiusCharts {
                                     sp.drawings.get(id).map(|d| (d.tool(), d.locked()))
                                 {
                                     hover_cursor =
-                                        axiuscharts::core::drawings::types::cursor_for_drawing_hit(
+                                        aion_charts::core::drawings::types::cursor_for_drawing_hit(
                                             tool, hit.part, anchor_idx, locked,
                                         );
                                 }
@@ -9996,8 +9996,8 @@ impl AxiusCharts {
     pub fn update_indicator_pane(&mut self, pane_id: u32, study_id: u32) {
         let mut s = self.inner.borrow_mut();
 
-        let study_data: Option<(Vec<axiuscharts::core::series::LineDataArray>, String)> = {
-            if let Some(study) = s.engine.studies.get_study(axiuscharts::StudyId(study_id)) {
+        let study_data: Option<(Vec<aion_charts::core::series::LineDataArray>, String)> = {
+            if let Some(study) = s.engine.studies.get_study(aion_charts::StudyId(study_id)) {
                 let mut data = Vec::new();
                 for i in 0..study.outputs.len() {
                     if let Some(output) = study.get_output(i) {
@@ -10019,7 +10019,7 @@ impl AxiusCharts {
                     .enumerate()
                     .map(|(i, _)| {
                         config.colors.get(i).copied().unwrap_or(
-                            axiuscharts::ThemeConfig::default()
+                            aion_charts::ThemeConfig::default()
                                 .indicator_palette
                                 .fallback,
                         )
@@ -10205,7 +10205,7 @@ impl AxiusCharts {
         let bar_index = inner.engine.bars.len().saturating_sub(1);
         inner
             .engine
-            .set_footprint_bar(bar_index, axiuscharts::FootprintBar { levels });
+            .set_footprint_bar(bar_index, aion_charts::FootprintBar { levels });
         Ok(())
     }
 
@@ -10561,7 +10561,7 @@ impl AxiusCharts {
     ///
     /// IMPORTANT: Call this when destroying the chart to prevent memory leaks.
     /// Event listeners attached to DOM elements will keep the closures alive
-    /// even after AxiusCharts is dropped, unless explicitly removed.
+    /// even after Aion_charts is dropped, unless explicitly removed.
     pub fn dispose(&mut self) {
         // 1. Disconnect resize observer
         if let Some(obs) = self._resize_observer.take() {
@@ -10610,7 +10610,7 @@ impl AxiusCharts {
             inner.subpanes.clear();
         }
 
-        log::info!("AxiusCharts disposed: all event listeners removed");
+        log::info!("Aion_charts disposed: all event listeners removed");
     }
 }
 
@@ -10819,9 +10819,9 @@ mod tests {
         build_historical_footprint_dataset_from_arrays, parse_historical_footprint_json_dataset,
         parse_main_viewport_preset, reset_main_viewport_and_emit, resolve_synced_crosshair_state,
     };
-    use axiuscharts::core::events::ChartEvent;
-    use axiuscharts::core::renderer::value_projection::TimeScaleIndex;
-    use axiuscharts::{
+    use aion_charts::core::events::ChartEvent;
+    use aion_charts::core::renderer::value_projection::TimeScaleIndex;
+    use aion_charts::{
         Bar, BarArray, ChartEngine, ChartGuardrails, MainViewportPreset, RendererBackend, Viewport,
     };
 

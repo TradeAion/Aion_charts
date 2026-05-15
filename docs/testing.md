@@ -1,6 +1,6 @@
 # Testing
 
-AxiusCharts uses three layers of verification: Rust unit tests, renderer parity scaffolding, and manual browser smoke checks.
+Aion_charts uses three layers of verification: Rust unit tests, renderer parity scaffolding, and manual browser smoke checks.
 
 ## Unit And Doc Tests
 

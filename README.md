@@ -1,24 +1,24 @@
-# AxiusCharts
+# Aion_charts
 
-AxiusCharts is a production charting engine built in Rust and shipped through WebAssembly. The core crate (`axiuscharts`) owns data storage, viewport math, geometry generation, render backends, drawings, indicators, and event delivery; the `axiuscharts-wasm` crate is the thin DOM and `wasm-bindgen` bridge.
+Aion_charts is a production charting engine built in Rust and shipped through WebAssembly. The core crate (`aion_charts`) owns data storage, viewport math, geometry generation, render backends, drawings, indicators, and event delivery; the `aion_charts-wasm` crate is the thin DOM and `wasm-bindgen` bridge.
 
 The logical price domain is now `f64` end-to-end. Prices remain double precision in storage, math, persistence, indicators, and the JS/WASM boundary, then get projected into single-precision render space only at the renderer seam.
 
 ## Quick Start
 
 ```bash
-npm install @axiusflow/axiuscharts-wasm
+npm install @aion_charts/aion_charts-wasm
 ```
 
 ```ts
-import init, { AxiusCharts } from '@axiusflow/axiuscharts-wasm';
+import init, { Aion_charts } from '@aion_charts/aion_charts-wasm';
 
 await init();
 
 const host = document.getElementById('chart');
 if (!host) throw new Error('Missing chart container');
 
-const chart = await AxiusCharts.create_chart(host, {
+const chart = await Aion_charts.create_chart(host, {
   renderer: 'auto',
   autoRender: true,
   theme: 'dark',
@@ -38,10 +38,10 @@ chart.set_data_arrays(
 
 ## Guardrails
 
-AxiusCharts can enforce engine-side commercial or operational caps without relying on UI-only checks.
+Aion_charts can enforce engine-side commercial or operational caps without relying on UI-only checks.
 
 ```ts
-const chart = await AxiusCharts.create_chart(host, {
+const chart = await Aion_charts.create_chart(host, {
   theme: 'dark',
   guardrails: {
     maxIndicatorPanes: 2,
@@ -90,7 +90,7 @@ Start at [docs/README.md](./docs/README.md). The most important documents for th
 
 ```bash
 cargo check
-cargo check --target wasm32-unknown-unknown -p axiuscharts-wasm
+cargo check --target wasm32-unknown-unknown -p aion_charts-wasm
 cargo test
 cargo clippy -- -D warnings
 wasm-pack build wasm --target web --release
@@ -98,7 +98,7 @@ wasm-pack build wasm --target web --release
 
 ## Package Releases
 
-This repository publishes the charting engine as the private GitHub Package `@axiusflow/axiuscharts-wasm`.
+This repository publishes the charting engine as the private GitHub Package `@aion_charts/aion_charts-wasm`.
 
 To release chart changes, bump `version` in `package.json` and push to `main`. The publish workflow builds the WASM package and publishes the new version to GitHub Packages. If the version already exists, the workflow skips publishing instead of overwriting it.
 

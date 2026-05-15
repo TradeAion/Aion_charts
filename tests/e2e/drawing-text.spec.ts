@@ -7,7 +7,7 @@ import {
   readSelectedDrawingInfo,
   startTextEdit,
   textPixelBounds,
-} from './axius-harness';
+} from './aion-harness';
 
 test.beforeEach(async ({ page }) => {
   await installHarness(page);
@@ -41,7 +41,7 @@ test('committed and active edit text use the same canvas text placement', async 
   await startTextEdit(page);
 
   await page.evaluate(() => {
-    const { chart } = (window as any).__axiusHarness;
+    const { chart } = (window as any).__aionHarness;
     chart.tick_drawing_caret_blink(0);
     chart.tick_drawing_caret_blink(600);
     chart.render();

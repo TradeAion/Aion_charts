@@ -1,6 +1,6 @@
 # Drawing Tools
 
-AxiusCharts includes interactive drawing tools for chart annotation and measurement.
+Aion_charts includes interactive drawing tools for chart annotation and measurement.
 
 ## Available Tools
 
@@ -24,7 +24,7 @@ AxiusCharts includes interactive drawing tools for chart annotation and measurem
 
 ## Shortcut Ownership
 
-AxiusCharts does not own keyboard shortcuts. The engine exposes chart and drawing
+Aion_charts does not own keyboard shortcuts. The engine exposes chart and drawing
 commands; the platform embedding the engine decides whether shortcuts exist and
 which keys invoke those commands.
 

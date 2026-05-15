@@ -1,6 +1,6 @@
 # Drawing Persistence
 
-AxiusCharts exposes both drawings-only and full-layout persistence. Drawings are versioned through `DRAWINGS_SNAPSHOT_VERSION`, and snapshot import now routes through a version-aware migration entry point.
+Aion_charts exposes both drawings-only and full-layout persistence. Drawings are versioned through `DRAWINGS_SNAPSHOT_VERSION`, and snapshot import now routes through a version-aware migration entry point.
 
 ## Wire Format
 

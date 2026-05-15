@@ -41,7 +41,7 @@ jobs:
         with:
           node-version: 24
           registry-url: https://npm.pkg.github.com
-          scope: '@axiusflow'
+          scope: '@aion_charts'
           cache: npm
 
       - name: Install wasm-pack
@@ -57,9 +57,9 @@ jobs:
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          if npm view "@axiusflow/axiuscharts-wasm@$version" version --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
+          if npm view "@aion_charts/aion_charts-wasm@$version" version --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "@axiusflow/axiuscharts-wasm@$version already exists; skipping publish."
+            echo "@aion_charts/aion_charts-wasm@$version already exists; skipping publish."
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi

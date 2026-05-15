@@ -189,12 +189,12 @@ export const HistogramSeries: 'Histogram';
 export const BaselineSeries: 'Baseline';
 export const CustomSeries: 'Custom';
 
-export function initAxiusCharts(initOptions?: unknown): Promise<unknown>;
+export function initAion_charts(initOptions?: unknown): Promise<unknown>;
 export function createChart(container: HTMLElement | string, options?: ChartOptions): Promise<IChartApi>;
 
 declare const _default: {
   createChart: typeof createChart;
-  initAxiusCharts: typeof initAxiusCharts;
+  initAion_charts: typeof initAion_charts;
   LineSeries: typeof LineSeries;
   AreaSeries: typeof AreaSeries;
   BarSeries: typeof BarSeries;

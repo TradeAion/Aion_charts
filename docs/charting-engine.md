@@ -1,6 +1,6 @@
 # Charting Engine
 
-AxiusCharts is the charting engine itself, not a wrapper around a third-party plotting library. The Rust core owns data structures, viewport math, geometry generation, render backend selection, drawings, studies, indicators, and event delivery.
+Aion_charts is the charting engine itself, not a wrapper around a third-party plotting library. The Rust core owns data structures, viewport math, geometry generation, render backend selection, drawings, studies, indicators, and event delivery.
 
 ## What The Engine Is
 
@@ -28,7 +28,7 @@ The stable public names include:
 - `get_css_variables`
 - `theme`
 
-See [api-reference.md](./api-reference.md) and [`../wasm/axiuscharts.d.ts`](../wasm/axiuscharts.d.ts) for the full surface.
+See [api-reference.md](./api-reference.md) and [`../wasm/aion_charts.d.ts`](../wasm/aion_charts.d.ts) for the full surface.
 
 ## Renderer Selection
 
@@ -48,4 +48,4 @@ WebGPU is the primary path because the engine is built around shared geometry ge
 
 ## Product Boundary
 
-There is no "vendor fallback library" behind AxiusCharts. The engine itself is the product boundary, which is why data precision, event semantics, persistence versioning, and backend parity are maintained in-repo instead of delegated elsewhere.
+There is no "vendor fallback library" behind Aion_charts. The engine itself is the product boundary, which is why data precision, event semantics, persistence versioning, and backend parity are maintained in-repo instead of delegated elsewhere.

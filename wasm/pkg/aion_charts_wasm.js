@@ -1,29 +1,29 @@
-/* @ts-self-types="./axiuscharts_wasm.d.ts" */
+/* @ts-self-types="./aion_charts_wasm.d.ts" */
 
-export class AxiusCharts {
+export class Aion_charts {
     static __wrap(ptr) {
         ptr = ptr >>> 0;
-        const obj = Object.create(AxiusCharts.prototype);
+        const obj = Object.create(Aion_charts.prototype);
         obj.__wbg_ptr = ptr;
-        AxiusChartsFinalization.register(obj, obj.__wbg_ptr, obj);
+        Aion_chartsFinalization.register(obj, obj.__wbg_ptr, obj);
         return obj;
     }
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
-        AxiusChartsFinalization.unregister(this);
+        Aion_chartsFinalization.unregister(this);
         return ptr;
     }
     free() {
         const ptr = this.__destroy_into_raw();
-        wasm.__wbg_axiuscharts_free(ptr, 0);
+        wasm.__wbg_aion_charts_free(ptr, 0);
     }
     /**
      * Get the number of active (pending/working) order lines.
      * @returns {number}
      */
     active_order_line_count() {
-        const ret = wasm.axiuscharts_active_order_line_count(this.__wbg_ptr);
+        const ret = wasm.aion_charts_active_order_line_count(this.__wbg_ptr);
         return ret >>> 0;
     }
     /**
@@ -48,7 +48,7 @@ export class AxiusCharts {
      * @returns {number}
      */
     add_area_series(line_color_r, line_color_g, line_color_b, line_color_a, top_color_r, top_color_g, top_color_b, top_color_a, bottom_color_r, bottom_color_g, bottom_color_b, bottom_color_a, line_width) {
-        const ret = wasm.axiuscharts_add_area_series(this.__wbg_ptr, line_color_r, line_color_g, line_color_b, line_color_a, top_color_r, top_color_g, top_color_b, top_color_a, bottom_color_r, bottom_color_g, bottom_color_b, bottom_color_a, line_width);
+        const ret = wasm.aion_charts_add_area_series(this.__wbg_ptr, line_color_r, line_color_g, line_color_b, line_color_a, top_color_r, top_color_g, top_color_b, top_color_a, bottom_color_r, bottom_color_g, bottom_color_b, bottom_color_a, line_width);
         return ret >>> 0;
     }
     /**
@@ -60,7 +60,7 @@ export class AxiusCharts {
     add_autoscale_contribution(min_price, max_price) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_add_autoscale_contribution(retptr, this.__wbg_ptr, min_price, max_price);
+            wasm.aion_charts_add_autoscale_contribution(retptr, this.__wbg_ptr, min_price, max_price);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -92,7 +92,7 @@ export class AxiusCharts {
      * @returns {number}
      */
     add_bar_series(up_color_r, up_color_g, up_color_b, up_color_a, down_color_r, down_color_g, down_color_b, down_color_a, open_visible, thin_bars) {
-        const ret = wasm.axiuscharts_add_bar_series(this.__wbg_ptr, up_color_r, up_color_g, up_color_b, up_color_a, down_color_r, down_color_g, down_color_b, down_color_a, open_visible, thin_bars);
+        const ret = wasm.aion_charts_add_bar_series(this.__wbg_ptr, up_color_r, up_color_g, up_color_b, up_color_a, down_color_r, down_color_g, down_color_b, down_color_a, open_visible, thin_bars);
         return ret >>> 0;
     }
     /**
@@ -130,7 +130,7 @@ export class AxiusCharts {
      * @returns {number}
      */
     add_baseline_series(base_value, top_line_r, top_line_g, top_line_b, top_line_a, bottom_line_r, bottom_line_g, bottom_line_b, bottom_line_a, top_fill1_r, top_fill1_g, top_fill1_b, top_fill1_a, top_fill2_r, top_fill2_g, top_fill2_b, top_fill2_a, bottom_fill1_r, bottom_fill1_g, bottom_fill1_b, bottom_fill1_a, bottom_fill2_r, bottom_fill2_g, bottom_fill2_b, bottom_fill2_a, line_width) {
-        const ret = wasm.axiuscharts_add_baseline_series(this.__wbg_ptr, base_value, top_line_r, top_line_g, top_line_b, top_line_a, bottom_line_r, bottom_line_g, bottom_line_b, bottom_line_a, top_fill1_r, top_fill1_g, top_fill1_b, top_fill1_a, top_fill2_r, top_fill2_g, top_fill2_b, top_fill2_a, bottom_fill1_r, bottom_fill1_g, bottom_fill1_b, bottom_fill1_a, bottom_fill2_r, bottom_fill2_g, bottom_fill2_b, bottom_fill2_a, line_width);
+        const ret = wasm.aion_charts_add_baseline_series(this.__wbg_ptr, base_value, top_line_r, top_line_g, top_line_b, top_line_a, bottom_line_r, bottom_line_g, bottom_line_b, bottom_line_a, top_fill1_r, top_fill1_g, top_fill1_b, top_fill1_a, top_fill2_r, top_fill2_g, top_fill2_b, top_fill2_a, bottom_fill1_r, bottom_fill1_g, bottom_fill1_b, bottom_fill1_a, bottom_fill2_r, bottom_fill2_g, bottom_fill2_b, bottom_fill2_a, line_width);
         return ret >>> 0;
     }
     /**
@@ -154,7 +154,7 @@ export class AxiusCharts {
         const len1 = WASM_VECTOR_LEN;
         const ptr2 = passStringToWasm0(role, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len2 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_add_execution_mark(this.__wbg_ptr, ptr0, len0, timestamp_ms, price, quantity, ptr1, len1, ptr2, len2);
+        wasm.aion_charts_add_execution_mark(this.__wbg_ptr, ptr0, len0, timestamp_ms, price, quantity, ptr1, len1, ptr2, len2);
     }
     /**
      * Add an execution mark with all optional fields.
@@ -194,7 +194,7 @@ export class AxiusCharts {
         const len4 = WASM_VECTOR_LEN;
         const ptr5 = passStringToWasm0(group_id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len5 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_add_execution_mark_full(this.__wbg_ptr, ptr0, len0, timestamp_ms, price, quantity, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, color_r, color_g, color_b, color_a, realized_pnl);
+        wasm.aion_charts_add_execution_mark_full(this.__wbg_ptr, ptr0, len0, timestamp_ms, price, quantity, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, color_r, color_g, color_b, color_a, realized_pnl);
     }
     /**
      * Add a new histogram series overlay. Returns the series ID.
@@ -209,7 +209,7 @@ export class AxiusCharts {
      * @returns {number}
      */
     add_histogram_series(color_r, color_g, color_b, color_a, base) {
-        const ret = wasm.axiuscharts_add_histogram_series(this.__wbg_ptr, color_r, color_g, color_b, color_a, base);
+        const ret = wasm.aion_charts_add_histogram_series(this.__wbg_ptr, color_r, color_g, color_b, color_a, base);
         return ret >>> 0;
     }
     /**
@@ -224,7 +224,7 @@ export class AxiusCharts {
     add_indicator_pane(study_id, indicator_type, height_css) {
         const ptr0 = passStringToWasm0(indicator_type, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_add_indicator_pane(this.__wbg_ptr, study_id, ptr0, len0, height_css);
+        const ret = wasm.aion_charts_add_indicator_pane(this.__wbg_ptr, study_id, ptr0, len0, height_css);
         return ret >>> 0;
     }
     /**
@@ -243,7 +243,7 @@ export class AxiusCharts {
     add_line_series(color_r, color_g, color_b, color_a, line_width, line_style) {
         const ptr0 = passStringToWasm0(line_style, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_add_line_series(this.__wbg_ptr, color_r, color_g, color_b, color_a, line_width, ptr0, len0);
+        const ret = wasm.aion_charts_add_line_series(this.__wbg_ptr, color_r, color_g, color_b, color_a, line_width, ptr0, len0);
         return ret >>> 0;
     }
     /**
@@ -276,7 +276,7 @@ export class AxiusCharts {
             const len1 = WASM_VECTOR_LEN;
             const ptr2 = passStringToWasm0(text, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len2 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_add_marker(retptr, this.__wbg_ptr, series_id, bar_index, ptr0, len0, ptr1, len1, price, color_r, color_g, color_b, color_a, size, ptr2, len2);
+            wasm.aion_charts_add_marker(retptr, this.__wbg_ptr, series_id, bar_index, ptr0, len0, ptr1, len1, price, color_r, color_g, color_b, color_a, size, ptr2, len2);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -315,7 +315,7 @@ export class AxiusCharts {
             const len1 = WASM_VECTOR_LEN;
             const ptr2 = passStringToWasm0(text, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len2 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_add_marker_at_time(retptr, this.__wbg_ptr, series_id, timestamp, ptr0, len0, ptr1, len1, price, color_r, color_g, color_b, color_a, size, ptr2, len2);
+            wasm.aion_charts_add_marker_at_time(retptr, this.__wbg_ptr, series_id, timestamp, ptr0, len0, ptr1, len1, price, color_r, color_g, color_b, color_a, size, ptr2, len2);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -332,7 +332,7 @@ export class AxiusCharts {
      * @returns {Array<any>}
      */
     allowed_intervals() {
-        const ret = wasm.axiuscharts_allowed_intervals(this.__wbg_ptr);
+        const ret = wasm.aion_charts_allowed_intervals(this.__wbg_ptr);
         return takeObject(ret);
     }
     /**
@@ -347,7 +347,7 @@ export class AxiusCharts {
     append_bar(timestamp, open, high, low, close, volume) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_append_bar(retptr, this.__wbg_ptr, timestamp, open, high, low, close, volume);
+            wasm.aion_charts_append_bar(retptr, this.__wbg_ptr, timestamp, open, high, low, close, volume);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -369,7 +369,7 @@ export class AxiusCharts {
     append_bar_series_point(id, timestamp, open, high, low, close) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_append_bar_series_point(retptr, this.__wbg_ptr, id, timestamp, open, high, low, close);
+            wasm.aion_charts_append_bar_series_point(retptr, this.__wbg_ptr, id, timestamp, open, high, low, close);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -392,7 +392,7 @@ export class AxiusCharts {
     append_histogram_point(id, timestamp, value, color_r, color_g, color_b, color_a) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_append_histogram_point(retptr, this.__wbg_ptr, id, timestamp, value, color_r, color_g, color_b, color_a);
+            wasm.aion_charts_append_histogram_point(retptr, this.__wbg_ptr, id, timestamp, value, color_r, color_g, color_b, color_a);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -411,7 +411,7 @@ export class AxiusCharts {
     append_series_point(id, timestamp, value) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_append_series_point(retptr, this.__wbg_ptr, id, timestamp, value);
+            wasm.aion_charts_append_series_point(retptr, this.__wbg_ptr, id, timestamp, value);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -429,7 +429,7 @@ export class AxiusCharts {
      * @param {any} options
      */
     apply_options(options) {
-        wasm.axiuscharts_apply_options(this.__wbg_ptr, addHeapObject(options));
+        wasm.aion_charts_apply_options(this.__wbg_ptr, addHeapObject(options));
     }
     /**
      * Convert a bar index to a timestamp (in milliseconds).
@@ -438,14 +438,14 @@ export class AxiusCharts {
      * @returns {bigint}
      */
     bar_index_to_timestamp(bar_index) {
-        const ret = wasm.axiuscharts_bar_index_to_timestamp(this.__wbg_ptr, bar_index);
+        const ret = wasm.aion_charts_bar_index_to_timestamp(this.__wbg_ptr, bar_index);
         return BigInt.asUintN(64, ret);
     }
     /**
      * @returns {boolean}
      */
     begin_selected_drawing_text_edit() {
-        const ret = wasm.axiuscharts_begin_selected_drawing_text_edit(this.__wbg_ptr);
+        const ret = wasm.aion_charts_begin_selected_drawing_text_edit(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -453,7 +453,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     can_add_indicator_pane() {
-        const ret = wasm.axiuscharts_can_add_indicator_pane(this.__wbg_ptr);
+        const ret = wasm.aion_charts_can_add_indicator_pane(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -462,7 +462,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     can_load_bar_count(bar_count) {
-        const ret = wasm.axiuscharts_can_load_bar_count(this.__wbg_ptr, bar_count);
+        const ret = wasm.aion_charts_can_load_bar_count(this.__wbg_ptr, bar_count);
         return ret !== 0;
     }
     /**
@@ -473,75 +473,75 @@ export class AxiusCharts {
     can_set_interval(interval) {
         const ptr0 = passStringToWasm0(interval, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_can_set_interval(this.__wbg_ptr, ptr0, len0);
+        const ret = wasm.aion_charts_can_set_interval(this.__wbg_ptr, ptr0, len0);
         return ret !== 0;
     }
     /**
      * Cancel the drawing currently being created.
      */
     cancel_drawing() {
-        wasm.axiuscharts_cancel_drawing(this.__wbg_ptr);
+        wasm.aion_charts_cancel_drawing(this.__wbg_ptr);
     }
     /**
      * Clear all markers for all series.
      */
     clear_all_markers() {
-        wasm.axiuscharts_clear_all_markers(this.__wbg_ptr);
+        wasm.aion_charts_clear_all_markers(this.__wbg_ptr);
     }
     /**
      * Clear the interval allowlist.
      */
     clear_allowed_intervals() {
-        wasm.axiuscharts_clear_allowed_intervals(this.__wbg_ptr);
+        wasm.aion_charts_clear_allowed_intervals(this.__wbg_ptr);
     }
     /**
      * Remove all external autoscale contributions.
      */
     clear_autoscale_contributions() {
-        wasm.axiuscharts_clear_autoscale_contributions(this.__wbg_ptr);
+        wasm.aion_charts_clear_autoscale_contributions(this.__wbg_ptr);
     }
     /**
      * Hide crosshair immediately.
      */
     clear_crosshair() {
-        wasm.axiuscharts_clear_crosshair(this.__wbg_ptr);
+        wasm.aion_charts_clear_crosshair(this.__wbg_ptr);
     }
     /**
      * Remove all drawings.
      */
     clear_drawings() {
-        wasm.axiuscharts_clear_drawings(this.__wbg_ptr);
+        wasm.aion_charts_clear_drawings(this.__wbg_ptr);
     }
     /**
      * Clear all execution marks.
      */
     clear_execution_marks() {
-        wasm.axiuscharts_clear_execution_marks(this.__wbg_ptr);
+        wasm.aion_charts_clear_execution_marks(this.__wbg_ptr);
     }
     /**
      * Clear all footprint data.
      */
     clear_footprint_data() {
-        wasm.axiuscharts_clear_footprint_data(this.__wbg_ptr);
+        wasm.aion_charts_clear_footprint_data(this.__wbg_ptr);
     }
     /**
      * Clear all markers for a series.
      * @param {number} series_id
      */
     clear_markers(series_id) {
-        wasm.axiuscharts_clear_markers(this.__wbg_ptr, series_id);
+        wasm.aion_charts_clear_markers(this.__wbg_ptr, series_id);
     }
     /**
      * Remove all order lines.
      */
     clear_order_lines() {
-        wasm.axiuscharts_clear_order_lines(this.__wbg_ptr);
+        wasm.aion_charts_clear_order_lines(this.__wbg_ptr);
     }
     /**
      * Clear the selected execution mark.
      */
     clear_selected_execution_mark() {
-        wasm.axiuscharts_clear_selected_execution_mark(this.__wbg_ptr);
+        wasm.aion_charts_clear_selected_execution_mark(this.__wbg_ptr);
     }
     /**
      * Complete the drawing currently being created, when the active tool uses
@@ -549,11 +549,11 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     complete_drawing() {
-        const ret = wasm.axiuscharts_complete_drawing(this.__wbg_ptr);
+        const ret = wasm.aion_charts_complete_drawing(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
-     * Create a new AxiusCharts instance with a full options object.
+     * Create a new Aion_charts instance with a full options object.
      *
      * `container` can be an `HTMLElement` reference or a string container ID.
      * `options` is an optional JS object:
@@ -570,10 +570,10 @@ export class AxiusCharts {
      * ```
      * @param {any} container
      * @param {any} options
-     * @returns {Promise<AxiusCharts>}
+     * @returns {Promise<Aion_charts>}
      */
     static create_chart(container, options) {
-        const ret = wasm.axiuscharts_create_chart(addHeapObject(container), addHeapObject(options));
+        const ret = wasm.aion_charts_create_chart(addHeapObject(container), addHeapObject(options));
         return takeObject(ret);
     }
     /**
@@ -611,7 +611,7 @@ export class AxiusCharts {
             const len1 = WASM_VECTOR_LEN;
             const ptr2 = passStringToWasm0(side, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len2 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_create_order_line(retptr, this.__wbg_ptr, ptr0, len0, price, ptr1, len1, ptr2, len2, quantity, modifiable, cancellable);
+            wasm.aion_charts_create_order_line(retptr, this.__wbg_ptr, ptr0, len0, price, ptr1, len1, ptr2, len2, quantity, modifiable, cancellable);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred4_0 = r0;
@@ -664,7 +664,7 @@ export class AxiusCharts {
             const len4 = WASM_VECTOR_LEN;
             const ptr5 = passStringToWasm0(linked_position_id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len5 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_create_order_line_full(retptr, this.__wbg_ptr, ptr0, len0, price, ptr1, len1, ptr2, len2, ptr3, len3, quantity, filled_quantity, modifiable, cancellable, color_r, color_g, color_b, color_a, ptr4, len4, ptr5, len5);
+            wasm.aion_charts_create_order_line_full(retptr, this.__wbg_ptr, ptr0, len0, price, ptr1, len1, ptr2, len2, ptr3, len3, quantity, filled_quantity, modifiable, cancellable, color_r, color_g, color_b, color_a, ptr4, len4, ptr5, len5);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred7_0 = r0;
@@ -692,7 +692,7 @@ export class AxiusCharts {
     create_price_line(price, color_r, color_g, color_b, color_a, line_width, line_style, draggable) {
         const ptr0 = passStringToWasm0(line_style, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_create_price_line(this.__wbg_ptr, price, color_r, color_g, color_b, color_a, line_width, ptr0, len0, draggable);
+        const ret = wasm.aion_charts_create_price_line(this.__wbg_ptr, price, color_r, color_g, color_b, color_a, line_width, ptr0, len0, draggable);
         return ret >>> 0;
     }
     /**
@@ -705,21 +705,21 @@ export class AxiusCharts {
     create_study(study_type) {
         const ptr0 = passStringToWasm0(study_type, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_create_study(this.__wbg_ptr, ptr0, len0);
+        const ret = wasm.aion_charts_create_study(this.__wbg_ptr, ptr0, len0);
         return ret >>> 0;
     }
     /**
      * Create with a specific renderer backend (`auto`, `webgpu`, `canvas2d`).
      * @param {string} container_id
      * @param {string} renderer
-     * @returns {Promise<AxiusCharts>}
+     * @returns {Promise<Aion_charts>}
      */
     static create_with(container_id, renderer) {
         const ptr0 = passStringToWasm0(container_id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(renderer, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_create_with(ptr0, len0, ptr1, len1);
+        const ret = wasm.aion_charts_create_with(ptr0, len0, ptr1, len1);
         return takeObject(ret);
     }
     /**
@@ -730,7 +730,7 @@ export class AxiusCharts {
         let deferred1_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_crosshair_mode(retptr, this.__wbg_ptr);
+            wasm.aion_charts_crosshair_mode(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred1_0 = r0;
@@ -748,7 +748,7 @@ export class AxiusCharts {
     crosshair_state() {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_crosshair_state(retptr, this.__wbg_ptr);
+            wasm.aion_charts_crosshair_state(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var v1 = getArrayF64FromWasm0(r0, r1).slice();
@@ -765,7 +765,7 @@ export class AxiusCharts {
     data_range() {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_data_range(retptr, this.__wbg_ptr);
+            wasm.aion_charts_data_range(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var v1 = getArrayF64FromWasm0(r0, r1).slice();
@@ -776,7 +776,7 @@ export class AxiusCharts {
         }
     }
     demo_mode() {
-        wasm.axiuscharts_demo_mode(this.__wbg_ptr);
+        wasm.aion_charts_demo_mode(this.__wbg_ptr);
     }
     /**
      * Load synthetic demo data dedicated for footprint chart mode.
@@ -785,23 +785,23 @@ export class AxiusCharts {
      * switches the chart type to `footprint`.
      */
     demo_mode_footprint() {
-        wasm.axiuscharts_demo_mode_footprint(this.__wbg_ptr);
+        wasm.aion_charts_demo_mode_footprint(this.__wbg_ptr);
     }
     /**
      * Deselect all drawings.
      */
     deselect_drawings() {
-        wasm.axiuscharts_deselect_drawings(this.__wbg_ptr);
+        wasm.aion_charts_deselect_drawings(this.__wbg_ptr);
     }
     /**
      * Dispose: remove all event listeners, disconnect resize observer, and clean up resources.
      *
      * IMPORTANT: Call this when destroying the chart to prevent memory leaks.
      * Event listeners attached to DOM elements will keep the closures alive
-     * even after AxiusCharts is dropped, unless explicitly removed.
+     * even after Aion_charts is dropped, unless explicitly removed.
      */
     dispose() {
-        wasm.axiuscharts_dispose(this.__wbg_ptr);
+        wasm.aion_charts_dispose(this.__wbg_ptr);
     }
     /**
      * Drag a separator to resize adjacent panes.
@@ -812,14 +812,14 @@ export class AxiusCharts {
      * @param {number} delta_y
      */
     drag_pane_separator(separator_idx, delta_y) {
-        wasm.axiuscharts_drag_pane_separator(this.__wbg_ptr, separator_idx, delta_y);
+        wasm.aion_charts_drag_pane_separator(this.__wbg_ptr, separator_idx, delta_y);
     }
     /**
      * Get the number of drawings.
      * @returns {number}
      */
     drawing_count() {
-        const ret = wasm.axiuscharts_drawing_count(this.__wbg_ptr);
+        const ret = wasm.aion_charts_drawing_count(this.__wbg_ptr);
         return ret >>> 0;
     }
     /**
@@ -827,7 +827,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     end_selected_drawing_text_edit(cancel) {
-        const ret = wasm.axiuscharts_end_selected_drawing_text_edit(this.__wbg_ptr, cancel);
+        const ret = wasm.aion_charts_end_selected_drawing_text_edit(this.__wbg_ptr, cancel);
         return ret !== 0;
     }
     /**
@@ -835,7 +835,7 @@ export class AxiusCharts {
      * @returns {number}
      */
     execution_mark_count() {
-        const ret = wasm.axiuscharts_execution_mark_count(this.__wbg_ptr);
+        const ret = wasm.aion_charts_execution_mark_count(this.__wbg_ptr);
         return ret >>> 0;
     }
     /**
@@ -848,7 +848,7 @@ export class AxiusCharts {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passStringToWasm0(leader_id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len0 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_expand_execution_cluster(retptr, this.__wbg_ptr, ptr0, len0);
+            wasm.aion_charts_expand_execution_cluster(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var v2 = getArrayJsValueFromWasm0(r0, r1).slice();
@@ -869,7 +869,7 @@ export class AxiusCharts {
         let deferred1_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_export_drawings(retptr, this.__wbg_ptr);
+            wasm.aion_charts_export_drawings(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred1_0 = r0;
@@ -894,7 +894,7 @@ export class AxiusCharts {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             var ptr0 = isLikeNone(layout_id) ? 0 : passStringToWasm0(layout_id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             var len0 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_export_persistence_state(retptr, this.__wbg_ptr, ptr0, len0);
+            wasm.aion_charts_export_persistence_state(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred2_0 = r0;
@@ -910,7 +910,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     get_auto_scroll() {
-        const ret = wasm.axiuscharts_get_auto_scroll(this.__wbg_ptr);
+        const ret = wasm.aion_charts_get_auto_scroll(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -922,7 +922,7 @@ export class AxiusCharts {
         let deferred1_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_get_available_chart_types(retptr);
+            wasm.aion_charts_get_available_chart_types(retptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred1_0 = r0;
@@ -942,7 +942,7 @@ export class AxiusCharts {
         let deferred1_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_get_chart_type(retptr, this.__wbg_ptr);
+            wasm.aion_charts_get_chart_type(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred1_0 = r0;
@@ -958,7 +958,7 @@ export class AxiusCharts {
      * @returns {any}
      */
     get_css_variables() {
-        const ret = wasm.axiuscharts_get_css_variables(this.__wbg_ptr);
+        const ret = wasm.aion_charts_get_css_variables(this.__wbg_ptr);
         return takeObject(ret);
     }
     /**
@@ -970,7 +970,7 @@ export class AxiusCharts {
         let deferred1_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_get_drawings_lock_summary_json(retptr, this.__wbg_ptr);
+            wasm.aion_charts_get_drawings_lock_summary_json(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred1_0 = r0;
@@ -990,7 +990,7 @@ export class AxiusCharts {
         let deferred1_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_get_execution_label_mode(retptr, this.__wbg_ptr);
+            wasm.aion_charts_get_execution_label_mode(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred1_0 = r0;
@@ -1006,7 +1006,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     get_execution_mark_text_visible() {
-        const ret = wasm.axiuscharts_get_execution_mark_text_visible(this.__wbg_ptr);
+        const ret = wasm.aion_charts_get_execution_mark_text_visible(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -1018,7 +1018,7 @@ export class AxiusCharts {
         let deferred1_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_get_execution_marks_json(retptr, this.__wbg_ptr);
+            wasm.aion_charts_get_execution_marks_json(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred1_0 = r0;
@@ -1034,7 +1034,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     get_execution_pnl_visible() {
-        const ret = wasm.axiuscharts_get_execution_pnl_visible(this.__wbg_ptr);
+        const ret = wasm.aion_charts_get_execution_pnl_visible(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -1042,7 +1042,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     get_footprint_xy_zoom_enabled() {
-        const ret = wasm.axiuscharts_get_footprint_xy_zoom_enabled(this.__wbg_ptr);
+        const ret = wasm.aion_charts_get_footprint_xy_zoom_enabled(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -1054,7 +1054,7 @@ export class AxiusCharts {
         let deferred1_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_get_order_lines_json(retptr, this.__wbg_ptr);
+            wasm.aion_charts_get_order_lines_json(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred1_0 = r0;
@@ -1075,7 +1075,7 @@ export class AxiusCharts {
         let deferred1_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_get_selected_drawing_info_json(retptr, this.__wbg_ptr);
+            wasm.aion_charts_get_selected_drawing_info_json(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred1_0 = r0;
@@ -1093,7 +1093,7 @@ export class AxiusCharts {
     get_selected_execution_mark() {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_get_selected_execution_mark(retptr, this.__wbg_ptr);
+            wasm.aion_charts_get_selected_execution_mark(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             let v1;
@@ -1114,14 +1114,14 @@ export class AxiusCharts {
      * @returns {any}
      */
     get_study_output(id, output_index) {
-        const ret = wasm.axiuscharts_get_study_output(this.__wbg_ptr, id, output_index);
+        const ret = wasm.aion_charts_get_study_output(this.__wbg_ptr, id, output_index);
         return takeObject(ret);
     }
     /**
      * @returns {Array<any>}
      */
     static get_supported_renderers() {
-        const ret = wasm.axiuscharts_get_supported_renderers();
+        const ret = wasm.aion_charts_get_supported_renderers();
         return takeObject(ret);
     }
     /**
@@ -1129,7 +1129,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     get_volume_visible() {
-        const ret = wasm.axiuscharts_get_volume_visible(this.__wbg_ptr);
+        const ret = wasm.aion_charts_get_volume_visible(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -1141,7 +1141,7 @@ export class AxiusCharts {
      * @returns {any}
      */
     hit_test_marker(x_css, y_css) {
-        const ret = wasm.axiuscharts_hit_test_marker(this.__wbg_ptr, x_css, y_css);
+        const ret = wasm.aion_charts_hit_test_marker(this.__wbg_ptr, x_css, y_css);
         return takeObject(ret);
     }
     /**
@@ -1155,7 +1155,7 @@ export class AxiusCharts {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passStringToWasm0(json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len0 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_import_drawings(retptr, this.__wbg_ptr, ptr0, len0);
+            wasm.aion_charts_import_drawings(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -1174,7 +1174,7 @@ export class AxiusCharts {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passStringToWasm0(json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len0 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_import_persistence_state(retptr, this.__wbg_ptr, ptr0, len0);
+            wasm.aion_charts_import_persistence_state(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -1194,7 +1194,7 @@ export class AxiusCharts {
     indicator_attach(indicator_id, opts_json) {
         const ptr0 = passStringToWasm0(opts_json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_indicator_attach(this.__wbg_ptr, indicator_id, ptr0, len0);
+        const ret = wasm.aion_charts_indicator_attach(this.__wbg_ptr, indicator_id, ptr0, len0);
         return ret >>> 0;
     }
     /**
@@ -1209,7 +1209,7 @@ export class AxiusCharts {
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(meta_json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_indicator_compile(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        const ret = wasm.aion_charts_indicator_compile(this.__wbg_ptr, ptr0, len0, ptr1, len1);
         return takeObject(ret);
     }
     /**
@@ -1218,7 +1218,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     indicator_detach(instance_id) {
-        const ret = wasm.axiuscharts_indicator_detach(this.__wbg_ptr, instance_id);
+        const ret = wasm.aion_charts_indicator_detach(this.__wbg_ptr, instance_id);
         return ret !== 0;
     }
     /**
@@ -1229,7 +1229,7 @@ export class AxiusCharts {
      * @returns {any}
      */
     indicator_drain_events() {
-        const ret = wasm.axiuscharts_indicator_drain_events(this.__wbg_ptr);
+        const ret = wasm.aion_charts_indicator_drain_events(this.__wbg_ptr);
         return takeObject(ret);
     }
     /**
@@ -1238,7 +1238,7 @@ export class AxiusCharts {
      * @returns {any}
      */
     indicator_get_diagnostics(indicator_id) {
-        const ret = wasm.axiuscharts_indicator_get_diagnostics(this.__wbg_ptr, indicator_id);
+        const ret = wasm.aion_charts_indicator_get_diagnostics(this.__wbg_ptr, indicator_id);
         return takeObject(ret);
     }
     /**
@@ -1247,7 +1247,7 @@ export class AxiusCharts {
      * @returns {any}
      */
     indicator_get_mtf_requests(indicator_id) {
-        const ret = wasm.axiuscharts_indicator_get_mtf_requests(this.__wbg_ptr, indicator_id);
+        const ret = wasm.aion_charts_indicator_get_mtf_requests(this.__wbg_ptr, indicator_id);
         return takeObject(ret);
     }
     /**
@@ -1256,7 +1256,7 @@ export class AxiusCharts {
      * @returns {any}
      */
     indicator_get_stats(instance_id) {
-        const ret = wasm.axiuscharts_indicator_get_stats(this.__wbg_ptr, instance_id);
+        const ret = wasm.aion_charts_indicator_get_stats(this.__wbg_ptr, instance_id);
         return takeObject(ret);
     }
     /**
@@ -1264,7 +1264,7 @@ export class AxiusCharts {
      * @returns {any}
      */
     indicator_list() {
-        const ret = wasm.axiuscharts_indicator_list(this.__wbg_ptr);
+        const ret = wasm.aion_charts_indicator_list(this.__wbg_ptr);
         return takeObject(ret);
     }
     /**
@@ -1272,7 +1272,7 @@ export class AxiusCharts {
      * @returns {number}
      */
     indicator_pane_count() {
-        const ret = wasm.axiuscharts_indicator_pane_count(this.__wbg_ptr);
+        const ret = wasm.aion_charts_indicator_pane_count(this.__wbg_ptr);
         return ret >>> 0;
     }
     /**
@@ -1282,7 +1282,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     indicator_set_enabled(instance_id, enabled) {
-        const ret = wasm.axiuscharts_indicator_set_enabled(this.__wbg_ptr, instance_id, enabled);
+        const ret = wasm.aion_charts_indicator_set_enabled(this.__wbg_ptr, instance_id, enabled);
         return ret !== 0;
     }
     /**
@@ -1294,7 +1294,7 @@ export class AxiusCharts {
     indicator_set_inputs(instance_id, inputs_json) {
         const ptr0 = passStringToWasm0(inputs_json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_indicator_set_inputs(this.__wbg_ptr, instance_id, ptr0, len0);
+        const ret = wasm.aion_charts_indicator_set_inputs(this.__wbg_ptr, instance_id, ptr0, len0);
         return ret !== 0;
     }
     /**
@@ -1308,7 +1308,7 @@ export class AxiusCharts {
     indicator_set_mtf_snapshot(snapshot_json) {
         const ptr0 = passStringToWasm0(snapshot_json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_indicator_set_mtf_snapshot(this.__wbg_ptr, ptr0, len0);
+        const ret = wasm.aion_charts_indicator_set_mtf_snapshot(this.__wbg_ptr, ptr0, len0);
         return ret !== 0;
     }
     /**
@@ -1320,7 +1320,7 @@ export class AxiusCharts {
     indicator_set_resource_limits(instance_id, limits_json) {
         const ptr0 = passStringToWasm0(limits_json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_indicator_set_resource_limits(this.__wbg_ptr, instance_id, ptr0, len0);
+        const ret = wasm.aion_charts_indicator_set_resource_limits(this.__wbg_ptr, instance_id, ptr0, len0);
         return ret !== 0;
     }
     /**
@@ -1331,7 +1331,7 @@ export class AxiusCharts {
         let deferred1_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_interval(retptr, this.__wbg_ptr);
+            wasm.aion_charts_interval(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred1_0 = r0;
@@ -1347,7 +1347,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     interval_change_locked() {
-        const ret = wasm.axiuscharts_interval_change_locked(this.__wbg_ptr);
+        const ret = wasm.aion_charts_interval_change_locked(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -1355,7 +1355,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     is_auto_render() {
-        const ret = wasm.axiuscharts_is_auto_render(this.__wbg_ptr);
+        const ret = wasm.aion_charts_is_auto_render(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -1366,7 +1366,7 @@ export class AxiusCharts {
     is_interval_allowed(interval) {
         const ptr0 = passStringToWasm0(interval, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_is_interval_allowed(this.__wbg_ptr, ptr0, len0);
+        const ret = wasm.aion_charts_is_interval_allowed(this.__wbg_ptr, ptr0, len0);
         return ret !== 0;
     }
     /**
@@ -1374,7 +1374,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     marker_auto_scale() {
-        const ret = wasm.axiuscharts_marker_auto_scale(this.__wbg_ptr);
+        const ret = wasm.aion_charts_marker_auto_scale(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -1386,7 +1386,7 @@ export class AxiusCharts {
         let deferred1_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_marker_z_order(retptr, this.__wbg_ptr);
+            wasm.aion_charts_marker_z_order(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred1_0 = r0;
@@ -1402,7 +1402,7 @@ export class AxiusCharts {
      * @returns {number}
      */
     max_bars_per_load() {
-        const ret = wasm.axiuscharts_max_bars_per_load(this.__wbg_ptr);
+        const ret = wasm.aion_charts_max_bars_per_load(this.__wbg_ptr);
         return ret >>> 0;
     }
     /**
@@ -1410,7 +1410,7 @@ export class AxiusCharts {
      * @returns {number}
      */
     max_indicator_panes() {
-        const ret = wasm.axiuscharts_max_indicator_panes(this.__wbg_ptr);
+        const ret = wasm.aion_charts_max_indicator_panes(this.__wbg_ptr);
         return ret >>> 0;
     }
     /**
@@ -1421,7 +1421,7 @@ export class AxiusCharts {
     off(event, callback) {
         const ptr0 = passStringToWasm0(event, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_off(this.__wbg_ptr, ptr0, len0, addHeapObject(callback));
+        wasm.aion_charts_off(this.__wbg_ptr, ptr0, len0, addHeapObject(callback));
     }
     /**
      * Register an event callback.
@@ -1441,7 +1441,7 @@ export class AxiusCharts {
     on(event, callback) {
         const ptr0 = passStringToWasm0(event, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_on(this.__wbg_ptr, ptr0, len0, addHeapObject(callback));
+        wasm.aion_charts_on(this.__wbg_ptr, ptr0, len0, addHeapObject(callback));
     }
     /**
      * Handle host keyboard input for native drawing text editing.
@@ -1458,7 +1458,7 @@ export class AxiusCharts {
     on_key_down(key, ctrl, shift, alt) {
         const ptr0 = passStringToWasm0(key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_on_key_down(this.__wbg_ptr, ptr0, len0, ctrl, shift, alt);
+        const ret = wasm.aion_charts_on_key_down(this.__wbg_ptr, ptr0, len0, ctrl, shift, alt);
         return ret !== 0;
     }
     /**
@@ -1469,14 +1469,14 @@ export class AxiusCharts {
     once(event, callback) {
         const ptr0 = passStringToWasm0(event, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_once(this.__wbg_ptr, ptr0, len0, addHeapObject(callback));
+        wasm.aion_charts_once(this.__wbg_ptr, ptr0, len0, addHeapObject(callback));
     }
     /**
      * Get the number of order lines.
      * @returns {number}
      */
     order_line_count() {
-        const ret = wasm.axiuscharts_order_line_count(this.__wbg_ptr);
+        const ret = wasm.aion_charts_order_line_count(this.__wbg_ptr);
         return ret >>> 0;
     }
     /**
@@ -1484,7 +1484,7 @@ export class AxiusCharts {
      * @returns {number}
      */
     price_line_count() {
-        const ret = wasm.axiuscharts_price_line_count(this.__wbg_ptr);
+        const ret = wasm.aion_charts_price_line_count(this.__wbg_ptr);
         return ret >>> 0;
     }
     /**
@@ -1494,14 +1494,14 @@ export class AxiusCharts {
      * @returns {any}
      */
     project_point(timestamp_ms, price) {
-        const ret = wasm.axiuscharts_project_point(this.__wbg_ptr, timestamp_ms, price);
+        const ret = wasm.aion_charts_project_point(this.__wbg_ptr, timestamp_ms, price);
         return takeObject(ret);
     }
     /**
      * Remove all scale (measurement) drawings.
      */
     remove_all_scale_drawings() {
-        wasm.axiuscharts_remove_all_scale_drawings(this.__wbg_ptr);
+        wasm.aion_charts_remove_all_scale_drawings(this.__wbg_ptr);
     }
     /**
      * Remove a previously registered autoscale contribution.
@@ -1509,7 +1509,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     remove_autoscale_contribution(id) {
-        const ret = wasm.axiuscharts_remove_autoscale_contribution(this.__wbg_ptr, id);
+        const ret = wasm.aion_charts_remove_autoscale_contribution(this.__wbg_ptr, id);
         return ret !== 0;
     }
     /**
@@ -1520,7 +1520,7 @@ export class AxiusCharts {
     remove_execution_mark(id) {
         const ptr0 = passStringToWasm0(id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_remove_execution_mark(this.__wbg_ptr, ptr0, len0);
+        const ret = wasm.aion_charts_remove_execution_mark(this.__wbg_ptr, ptr0, len0);
         return ret !== 0;
     }
     /**
@@ -1529,7 +1529,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     remove_indicator_pane(pane_id) {
-        const ret = wasm.axiuscharts_remove_indicator_pane(this.__wbg_ptr, pane_id);
+        const ret = wasm.aion_charts_remove_indicator_pane(this.__wbg_ptr, pane_id);
         return ret !== 0;
     }
     /**
@@ -1539,7 +1539,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     remove_marker(series_id, marker_id) {
-        const ret = wasm.axiuscharts_remove_marker(this.__wbg_ptr, series_id, marker_id);
+        const ret = wasm.aion_charts_remove_marker(this.__wbg_ptr, series_id, marker_id);
         return ret !== 0;
     }
     /**
@@ -1550,7 +1550,7 @@ export class AxiusCharts {
     remove_order_line(id) {
         const ptr0 = passStringToWasm0(id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_remove_order_line(this.__wbg_ptr, ptr0, len0);
+        const ret = wasm.aion_charts_remove_order_line(this.__wbg_ptr, ptr0, len0);
         return ret !== 0;
     }
     /**
@@ -1562,7 +1562,7 @@ export class AxiusCharts {
     remove_order_lines_by_status(status) {
         const ptr0 = passStringToWasm0(status, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_remove_order_lines_by_status(this.__wbg_ptr, ptr0, len0);
+        wasm.aion_charts_remove_order_lines_by_status(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * Remove a price line by ID.
@@ -1570,14 +1570,14 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     remove_price_line(id) {
-        const ret = wasm.axiuscharts_remove_price_line(this.__wbg_ptr, id);
+        const ret = wasm.aion_charts_remove_price_line(this.__wbg_ptr, id);
         return ret !== 0;
     }
     /**
      * Remove the currently selected drawing.
      */
     remove_selected_drawing() {
-        wasm.axiuscharts_remove_selected_drawing(this.__wbg_ptr);
+        wasm.aion_charts_remove_selected_drawing(this.__wbg_ptr);
     }
     /**
      * Remove a series by ID.
@@ -1585,7 +1585,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     remove_series(id) {
-        const ret = wasm.axiuscharts_remove_series(this.__wbg_ptr, id);
+        const ret = wasm.aion_charts_remove_series(this.__wbg_ptr, id);
         return ret !== 0;
     }
     /**
@@ -1594,14 +1594,14 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     remove_study(id) {
-        const ret = wasm.axiuscharts_remove_study(this.__wbg_ptr, id);
+        const ret = wasm.aion_charts_remove_study(this.__wbg_ptr, id);
         return ret !== 0;
     }
     /**
      * Render one frame. Call from requestAnimationFrame.
      */
     render() {
-        wasm.axiuscharts_render(this.__wbg_ptr);
+        wasm.aion_charts_render(this.__wbg_ptr);
     }
     /**
      * @returns {string}
@@ -1611,7 +1611,7 @@ export class AxiusCharts {
         let deferred1_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_renderer_name(retptr, this.__wbg_ptr);
+            wasm.aion_charts_renderer_name(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred1_0 = r0;
@@ -1627,7 +1627,7 @@ export class AxiusCharts {
      * @returns {bigint}
      */
     replay_cutoff_bar() {
-        const ret = wasm.axiuscharts_replay_cutoff_bar(this.__wbg_ptr);
+        const ret = wasm.aion_charts_replay_cutoff_bar(this.__wbg_ptr);
         return ret;
     }
     /**
@@ -1635,7 +1635,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     replay_mode() {
-        const ret = wasm.axiuscharts_replay_mode(this.__wbg_ptr);
+        const ret = wasm.aion_charts_replay_mode(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -1643,7 +1643,7 @@ export class AxiusCharts {
      * @returns {any}
      */
     replay_options() {
-        const ret = wasm.axiuscharts_replay_options(this.__wbg_ptr);
+        const ret = wasm.aion_charts_replay_options(this.__wbg_ptr);
         return takeObject(ret);
     }
     /**
@@ -1651,7 +1651,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     replay_playing() {
-        const ret = wasm.axiuscharts_replay_playing(this.__wbg_ptr);
+        const ret = wasm.aion_charts_replay_playing(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -1660,7 +1660,7 @@ export class AxiusCharts {
     replay_step_back() {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_replay_step_back(retptr, this.__wbg_ptr);
+            wasm.aion_charts_replay_step_back(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -1676,7 +1676,7 @@ export class AxiusCharts {
     replay_step_forward() {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_replay_step_forward(retptr, this.__wbg_ptr);
+            wasm.aion_charts_replay_step_forward(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -1699,14 +1699,14 @@ export class AxiusCharts {
     reset_viewport(mode) {
         var ptr0 = isLikeNone(mode) ? 0 : passStringToWasm0(mode, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         var len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_reset_viewport(this.__wbg_ptr, ptr0, len0);
+        wasm.aion_charts_reset_viewport(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * Get the number of overlay series.
      * @returns {number}
      */
     series_count() {
-        const ret = wasm.axiuscharts_series_count(this.__wbg_ptr);
+        const ret = wasm.aion_charts_series_count(this.__wbg_ptr);
         return ret >>> 0;
     }
     /**
@@ -1715,7 +1715,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     set_all_drawings_locked(locked) {
-        const ret = wasm.axiuscharts_set_all_drawings_locked(this.__wbg_ptr, locked);
+        const ret = wasm.aion_charts_set_all_drawings_locked(this.__wbg_ptr, locked);
         return ret !== 0;
     }
     /**
@@ -1725,7 +1725,7 @@ export class AxiusCharts {
     set_allowed_intervals(intervals) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_set_allowed_intervals(retptr, this.__wbg_ptr, addHeapObject(intervals));
+            wasm.aion_charts_set_allowed_intervals(retptr, this.__wbg_ptr, addHeapObject(intervals));
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -1748,7 +1748,7 @@ export class AxiusCharts {
      * @param {boolean} enabled
      */
     set_auto_scroll(enabled) {
-        wasm.axiuscharts_set_auto_scroll(this.__wbg_ptr, enabled);
+        wasm.aion_charts_set_auto_scroll(this.__wbg_ptr, enabled);
     }
     /**
      * Set the axis border (separator line) color (RGBA 0-1).
@@ -1758,14 +1758,14 @@ export class AxiusCharts {
      * @param {number} a
      */
     set_axis_border_color(r, g, b, a) {
-        wasm.axiuscharts_set_axis_border_color(this.__wbg_ptr, r, g, b, a);
+        wasm.aion_charts_set_axis_border_color(this.__wbg_ptr, r, g, b, a);
     }
     /**
      * Show or hide the axis border line. Layout is unaffected.
      * @param {boolean} visible
      */
     set_axis_border_visible(visible) {
-        wasm.axiuscharts_set_axis_border_visible(this.__wbg_ptr, visible);
+        wasm.aion_charts_set_axis_border_visible(this.__wbg_ptr, visible);
     }
     /**
      * Set the axis label text color (RGBA 0-1).
@@ -1775,14 +1775,14 @@ export class AxiusCharts {
      * @param {number} a
      */
     set_axis_text_color(r, g, b, a) {
-        wasm.axiuscharts_set_axis_text_color(this.__wbg_ptr, r, g, b, a);
+        wasm.aion_charts_set_axis_text_color(this.__wbg_ptr, r, g, b, a);
     }
     /**
      * Show or hide axis tick marks. Layout is unaffected.
      * @param {boolean} visible
      */
     set_axis_ticks_visible(visible) {
-        wasm.axiuscharts_set_axis_ticks_visible(this.__wbg_ptr, visible);
+        wasm.aion_charts_set_axis_ticks_visible(this.__wbg_ptr, visible);
     }
     /**
      * Set chart and axis background color (RGBA 0-1).
@@ -1792,7 +1792,7 @@ export class AxiusCharts {
      * @param {number} a
      */
     set_background_color(r, g, b, a) {
-        wasm.axiuscharts_set_background_color(this.__wbg_ptr, r, g, b, a);
+        wasm.aion_charts_set_background_color(this.__wbg_ptr, r, g, b, a);
     }
     /**
      * Set data for a bar (OHLC) series.
@@ -1817,7 +1817,7 @@ export class AxiusCharts {
             const len3 = WASM_VECTOR_LEN;
             const ptr4 = passArrayF64ToWasm0(close, wasm.__wbindgen_export);
             const len4 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_bar_series_data(retptr, this.__wbg_ptr, id, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
+            wasm.aion_charts_set_bar_series_data(retptr, this.__wbg_ptr, id, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -1832,7 +1832,7 @@ export class AxiusCharts {
      * @param {number} ratio
      */
     set_bar_width_ratio(ratio) {
-        wasm.axiuscharts_set_bar_width_ratio(this.__wbg_ptr, ratio);
+        wasm.aion_charts_set_bar_width_ratio(this.__wbg_ptr, ratio);
     }
     /**
      * Set bearish (down) candle colors: body fill and wick/border.
@@ -1846,7 +1846,7 @@ export class AxiusCharts {
      * @param {number} wick_a
      */
     set_bearish_color(fill_r, fill_g, fill_b, fill_a, wick_r, wick_g, wick_b, wick_a) {
-        wasm.axiuscharts_set_bearish_color(this.__wbg_ptr, fill_r, fill_g, fill_b, fill_a, wick_r, wick_g, wick_b, wick_a);
+        wasm.aion_charts_set_bearish_color(this.__wbg_ptr, fill_r, fill_g, fill_b, fill_a, wick_r, wick_g, wick_b, wick_a);
     }
     /**
      * Set bullish (up) candle colors: body fill and wick/border.
@@ -1860,7 +1860,7 @@ export class AxiusCharts {
      * @param {number} wick_a
      */
     set_bullish_color(fill_r, fill_g, fill_b, fill_a, wick_r, wick_g, wick_b, wick_a) {
-        wasm.axiuscharts_set_bullish_color(this.__wbg_ptr, fill_r, fill_g, fill_b, fill_a, wick_r, wick_g, wick_b, wick_a);
+        wasm.aion_charts_set_bullish_color(this.__wbg_ptr, fill_r, fill_g, fill_b, fill_a, wick_r, wick_g, wick_b, wick_a);
     }
     /**
      * Set the main chart type.
@@ -1872,7 +1872,7 @@ export class AxiusCharts {
     set_chart_type(chart_type) {
         const ptr0 = passStringToWasm0(chart_type, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_chart_type(this.__wbg_ptr, ptr0, len0);
+        wasm.aion_charts_set_chart_type(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * Set the shared crosshair label text color (applies to both axes).
@@ -1882,7 +1882,7 @@ export class AxiusCharts {
      * @param {number} a
      */
     set_crosshair_label_text_color(r, g, b, a) {
-        wasm.axiuscharts_set_crosshair_label_text_color(this.__wbg_ptr, r, g, b, a);
+        wasm.aion_charts_set_crosshair_label_text_color(this.__wbg_ptr, r, g, b, a);
     }
     /**
      * Set crosshair axis-label visibility.
@@ -1893,7 +1893,7 @@ export class AxiusCharts {
     set_crosshair_label_visible(target, visible) {
         const ptr0 = passStringToWasm0(target, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_crosshair_label_visible(this.__wbg_ptr, ptr0, len0, visible);
+        wasm.aion_charts_set_crosshair_label_visible(this.__wbg_ptr, ptr0, len0, visible);
     }
     /**
      * Set crosshair line color.
@@ -1907,7 +1907,7 @@ export class AxiusCharts {
     set_crosshair_line_color(target, r, g, b, a) {
         const ptr0 = passStringToWasm0(target, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_crosshair_line_color(this.__wbg_ptr, ptr0, len0, r, g, b, a);
+        wasm.aion_charts_set_crosshair_line_color(this.__wbg_ptr, ptr0, len0, r, g, b, a);
     }
     /**
      * Set crosshair label background color.
@@ -1921,7 +1921,7 @@ export class AxiusCharts {
     set_crosshair_line_label_bg_color(target, r, g, b, a) {
         const ptr0 = passStringToWasm0(target, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_crosshair_line_label_bg_color(this.__wbg_ptr, ptr0, len0, r, g, b, a);
+        wasm.aion_charts_set_crosshair_line_label_bg_color(this.__wbg_ptr, ptr0, len0, r, g, b, a);
     }
     /**
      * Set crosshair line style.
@@ -1935,7 +1935,7 @@ export class AxiusCharts {
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(line_style, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len1 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_crosshair_line_style(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        wasm.aion_charts_set_crosshair_line_style(this.__wbg_ptr, ptr0, len0, ptr1, len1);
     }
     /**
      * Set crosshair line visibility.
@@ -1946,7 +1946,7 @@ export class AxiusCharts {
     set_crosshair_line_visible(target, visible) {
         const ptr0 = passStringToWasm0(target, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_crosshair_line_visible(this.__wbg_ptr, ptr0, len0, visible);
+        wasm.aion_charts_set_crosshair_line_visible(this.__wbg_ptr, ptr0, len0, visible);
     }
     /**
      * Set crosshair line width in CSS pixels.
@@ -1957,7 +1957,7 @@ export class AxiusCharts {
     set_crosshair_line_width(target, width) {
         const ptr0 = passStringToWasm0(target, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_crosshair_line_width(this.__wbg_ptr, ptr0, len0, width);
+        wasm.aion_charts_set_crosshair_line_width(this.__wbg_ptr, ptr0, len0, width);
     }
     /**
      * Set crosshair mode: "normal" or "magnet_ohlc".
@@ -1969,7 +1969,7 @@ export class AxiusCharts {
     set_crosshair_mode(mode) {
         const ptr0 = passStringToWasm0(mode, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_crosshair_mode(this.__wbg_ptr, ptr0, len0);
+        wasm.aion_charts_set_crosshair_mode(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * Set crosshair state for synchronized groups.
@@ -1983,7 +1983,7 @@ export class AxiusCharts {
     set_crosshair_state(active, x, y, bar_index, price, mode) {
         const ptr0 = passStringToWasm0(mode, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_crosshair_state(this.__wbg_ptr, active, x, y, bar_index, price, ptr0, len0);
+        wasm.aion_charts_set_crosshair_state(this.__wbg_ptr, active, x, y, bar_index, price, ptr0, len0);
     }
     /**
      * Set crosshair state for synchronized panes by semantic values only.
@@ -1996,7 +1996,7 @@ export class AxiusCharts {
     set_crosshair_sync_state(active, bar_index, price, mode) {
         const ptr0 = passStringToWasm0(mode, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_crosshair_sync_state(this.__wbg_ptr, active, bar_index, price, ptr0, len0);
+        wasm.aion_charts_set_crosshair_sync_state(this.__wbg_ptr, active, bar_index, price, ptr0, len0);
     }
     /**
      * @param {Float64Array} open
@@ -2021,7 +2021,7 @@ export class AxiusCharts {
             const len4 = WASM_VECTOR_LEN;
             const ptr5 = passArray64ToWasm0(timestamps, wasm.__wbindgen_export);
             const len5 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_data_arrays(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5);
+            wasm.aion_charts_set_data_arrays(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2071,7 +2071,7 @@ export class AxiusCharts {
             const len8 = WASM_VECTOR_LEN;
             const ptr9 = passArrayF64ToWasm0(ask_volumes, wasm.__wbindgen_export);
             const len9 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_data_with_footprint_arrays(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8, ptr9, len9);
+            wasm.aion_charts_set_data_with_footprint_arrays(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8, ptr9, len9);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2096,7 +2096,7 @@ export class AxiusCharts {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passStringToWasm0(json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len0 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_data_with_footprint_json(retptr, this.__wbg_ptr, ptr0, len0);
+            wasm.aion_charts_set_data_with_footprint_json(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2114,14 +2114,14 @@ export class AxiusCharts {
     set_drawing_tool(tool) {
         const ptr0 = passStringToWasm0(tool, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_drawing_tool(this.__wbg_ptr, ptr0, len0);
+        wasm.aion_charts_set_drawing_tool(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * Set the CSS-pixel clustering threshold for dense execution marks.
      * @param {number} threshold_px
      */
     set_execution_cluster_threshold_px(threshold_px) {
-        wasm.axiuscharts_set_execution_cluster_threshold_px(this.__wbg_ptr, threshold_px);
+        wasm.aion_charts_set_execution_cluster_threshold_px(this.__wbg_ptr, threshold_px);
     }
     /**
      * Set the chart-wide execution label mode.
@@ -2134,7 +2134,7 @@ export class AxiusCharts {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passStringToWasm0(mode, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len0 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_execution_label_mode(retptr, this.__wbg_ptr, ptr0, len0);
+            wasm.aion_charts_set_execution_label_mode(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2149,7 +2149,7 @@ export class AxiusCharts {
      * @param {boolean} visible
      */
     set_execution_mark_text_visible(visible) {
-        wasm.axiuscharts_set_execution_mark_text_visible(this.__wbg_ptr, visible);
+        wasm.aion_charts_set_execution_mark_text_visible(this.__wbg_ptr, visible);
     }
     /**
      * Set multiple execution marks at once (replaces existing).
@@ -2168,7 +2168,7 @@ export class AxiusCharts {
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passArrayF64ToWasm0(mark_data, wasm.__wbindgen_export);
         const len1 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_execution_marks(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        wasm.aion_charts_set_execution_marks(this.__wbg_ptr, ptr0, len0, ptr1, len1);
     }
     /**
      * Set execution marks from a JSON string.
@@ -2201,7 +2201,7 @@ export class AxiusCharts {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passStringToWasm0(json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len0 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_execution_marks_json(retptr, this.__wbg_ptr, ptr0, len0);
+            wasm.aion_charts_set_execution_marks_json(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2216,7 +2216,7 @@ export class AxiusCharts {
      * @param {boolean} visible
      */
     set_execution_pnl_visible(visible) {
-        wasm.axiuscharts_set_execution_pnl_visible(this.__wbg_ptr, visible);
+        wasm.aion_charts_set_execution_pnl_visible(this.__wbg_ptr, visible);
     }
     /**
      * Set the font family for axis labels.
@@ -2225,14 +2225,14 @@ export class AxiusCharts {
     set_font_family(family) {
         const ptr0 = passStringToWasm0(family, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_font_family(this.__wbg_ptr, ptr0, len0);
+        wasm.aion_charts_set_font_family(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * Set the font size for axis labels (in CSS pixels).
      * @param {number} size
      */
     set_font_size(size) {
-        wasm.axiuscharts_set_font_size(this.__wbg_ptr, size);
+        wasm.aion_charts_set_font_size(this.__wbg_ptr, size);
     }
     /**
      * Set footprint (order-flow) data for a specific bar.
@@ -2257,7 +2257,7 @@ export class AxiusCharts {
             const len1 = WASM_VECTOR_LEN;
             const ptr2 = passArrayF64ToWasm0(ask_volumes, wasm.__wbindgen_export);
             const len2 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_footprint_bar(retptr, this.__wbg_ptr, bar_index, ptr0, len0, ptr1, len1, ptr2, len2);
+            wasm.aion_charts_set_footprint_bar(retptr, this.__wbg_ptr, bar_index, ptr0, len0, ptr1, len1, ptr2, len2);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2299,7 +2299,7 @@ export class AxiusCharts {
             const len3 = WASM_VECTOR_LEN;
             const ptr4 = passArrayF64ToWasm0(ask_volumes, wasm.__wbindgen_export);
             const len4 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_footprint_data_arrays(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
+            wasm.aion_charts_set_footprint_data_arrays(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2326,7 +2326,7 @@ export class AxiusCharts {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passStringToWasm0(json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len0 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_footprint_data_json(retptr, this.__wbg_ptr, ptr0, len0);
+            wasm.aion_charts_set_footprint_data_json(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2344,7 +2344,7 @@ export class AxiusCharts {
     set_footprint_display_mode(mode) {
         const ptr0 = passStringToWasm0(mode, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_footprint_display_mode(this.__wbg_ptr, ptr0, len0);
+        wasm.aion_charts_set_footprint_display_mode(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * Configure footprint options from a JSON object.
@@ -2371,7 +2371,7 @@ export class AxiusCharts {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passStringToWasm0(json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len0 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_footprint_options(retptr, this.__wbg_ptr, ptr0, len0);
+            wasm.aion_charts_set_footprint_options(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2386,14 +2386,14 @@ export class AxiusCharts {
      * @param {number} tick_size
      */
     set_footprint_tick_size(tick_size) {
-        wasm.axiuscharts_set_footprint_tick_size(this.__wbg_ptr, tick_size);
+        wasm.aion_charts_set_footprint_tick_size(this.__wbg_ptr, tick_size);
     }
     /**
      * Enable/disable footprint pane two-axis zoom (X+Y) for wheel and pinch.
      * @param {boolean} enabled
      */
     set_footprint_xy_zoom_enabled(enabled) {
-        wasm.axiuscharts_set_footprint_xy_zoom_enabled(this.__wbg_ptr, enabled);
+        wasm.aion_charts_set_footprint_xy_zoom_enabled(this.__wbg_ptr, enabled);
     }
     /**
      * Set the grid line color (RGBA 0-1).
@@ -2403,7 +2403,7 @@ export class AxiusCharts {
      * @param {number} a
      */
     set_grid_color(r, g, b, a) {
-        wasm.axiuscharts_set_grid_color(this.__wbg_ptr, r, g, b, a);
+        wasm.aion_charts_set_grid_color(this.__wbg_ptr, r, g, b, a);
     }
     /**
      * Set data for a histogram series. `values` and `timestamps` must be same length.
@@ -2431,7 +2431,7 @@ export class AxiusCharts {
             const len4 = WASM_VECTOR_LEN;
             const ptr5 = passArrayF32ToWasm0(colors_a, wasm.__wbindgen_export);
             const len5 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_histogram_data(retptr, this.__wbg_ptr, id, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5);
+            wasm.aion_charts_set_histogram_data(retptr, this.__wbg_ptr, id, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2449,7 +2449,7 @@ export class AxiusCharts {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passStringToWasm0(interval, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len0 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_interval(retptr, this.__wbg_ptr, ptr0, len0);
+            wasm.aion_charts_set_interval(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2466,7 +2466,7 @@ export class AxiusCharts {
     set_interval_change_locked(locked) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_set_interval_change_locked(retptr, this.__wbg_ptr, locked);
+            wasm.aion_charts_set_interval_change_locked(retptr, this.__wbg_ptr, locked);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2481,7 +2481,7 @@ export class AxiusCharts {
      * @param {boolean} visible
      */
     set_last_price_label_visible(visible) {
-        wasm.axiuscharts_set_last_price_label_visible(this.__wbg_ptr, visible);
+        wasm.aion_charts_set_last_price_label_visible(this.__wbg_ptr, visible);
     }
     /**
      * Set live last-price line style.
@@ -2491,28 +2491,28 @@ export class AxiusCharts {
     set_last_price_line_style(line_style) {
         const ptr0 = passStringToWasm0(line_style, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_last_price_line_style(this.__wbg_ptr, ptr0, len0);
+        wasm.aion_charts_set_last_price_line_style(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * Set live last-price line visibility.
      * @param {boolean} visible
      */
     set_last_price_line_visible(visible) {
-        wasm.axiuscharts_set_last_price_line_visible(this.__wbg_ptr, visible);
+        wasm.aion_charts_set_last_price_line_visible(this.__wbg_ptr, visible);
     }
     /**
      * Set live last-price line width in CSS pixels.
      * @param {number} width
      */
     set_last_price_line_width(width) {
-        wasm.axiuscharts_set_last_price_line_width(this.__wbg_ptr, width);
+        wasm.aion_charts_set_last_price_line_width(this.__wbg_ptr, width);
     }
     /**
      * Include marker visual size in automatic price scaling.
      * @param {boolean} auto_scale
      */
     set_marker_auto_scale(auto_scale) {
-        wasm.axiuscharts_set_marker_auto_scale(this.__wbg_ptr, auto_scale);
+        wasm.aion_charts_set_marker_auto_scale(this.__wbg_ptr, auto_scale);
     }
     /**
      * Set the global marker z-order: "normal", "aboveSeries", or "top".
@@ -2523,7 +2523,7 @@ export class AxiusCharts {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passStringToWasm0(z_order, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len0 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_marker_z_order(retptr, this.__wbg_ptr, ptr0, len0);
+            wasm.aion_charts_set_marker_z_order(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2546,7 +2546,7 @@ export class AxiusCharts {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passArrayF64ToWasm0(marker_data, wasm.__wbindgen_export);
             const len0 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_markers(retptr, this.__wbg_ptr, series_id, ptr0, len0);
+            wasm.aion_charts_set_markers(retptr, this.__wbg_ptr, series_id, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2561,14 +2561,14 @@ export class AxiusCharts {
      * @param {number} max_bars
      */
     set_max_bars_per_load(max_bars) {
-        wasm.axiuscharts_set_max_bars_per_load(this.__wbg_ptr, max_bars);
+        wasm.aion_charts_set_max_bars_per_load(this.__wbg_ptr, max_bars);
     }
     /**
      * Set the maximum indicator sub-pane count. Pass 0 to disable the cap.
      * @param {number} max_panes
      */
     set_max_indicator_panes(max_panes) {
-        wasm.axiuscharts_set_max_indicator_panes(this.__wbg_ptr, max_panes);
+        wasm.aion_charts_set_max_indicator_panes(this.__wbg_ptr, max_panes);
     }
     /**
      * Update the filled quantity of an order line (for partial fills).
@@ -2579,7 +2579,7 @@ export class AxiusCharts {
     set_order_line_filled_quantity(id, filled) {
         const ptr0 = passStringToWasm0(id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_set_order_line_filled_quantity(this.__wbg_ptr, ptr0, len0, filled);
+        const ret = wasm.aion_charts_set_order_line_filled_quantity(this.__wbg_ptr, ptr0, len0, filled);
         return ret !== 0;
     }
     /**
@@ -2594,7 +2594,7 @@ export class AxiusCharts {
     set_order_line_label_text_color(id, r, g, b, a) {
         const ptr0 = passStringToWasm0(id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_set_order_line_label_text_color(this.__wbg_ptr, ptr0, len0, r, g, b, a);
+        const ret = wasm.aion_charts_set_order_line_label_text_color(this.__wbg_ptr, ptr0, len0, r, g, b, a);
         return ret !== 0;
     }
     /**
@@ -2606,7 +2606,7 @@ export class AxiusCharts {
     set_order_line_pnl(id, pnl) {
         const ptr0 = passStringToWasm0(id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_set_order_line_pnl(this.__wbg_ptr, ptr0, len0, pnl);
+        const ret = wasm.aion_charts_set_order_line_pnl(this.__wbg_ptr, ptr0, len0, pnl);
         return ret !== 0;
     }
     /**
@@ -2618,7 +2618,7 @@ export class AxiusCharts {
     set_order_line_price(id, price) {
         const ptr0 = passStringToWasm0(id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_set_order_line_price(this.__wbg_ptr, ptr0, len0, price);
+        const ret = wasm.aion_charts_set_order_line_price(this.__wbg_ptr, ptr0, len0, price);
         return ret !== 0;
     }
     /**
@@ -2626,14 +2626,14 @@ export class AxiusCharts {
      * @param {number} precision
      */
     set_order_line_price_precision(precision) {
-        wasm.axiuscharts_set_order_line_price_precision(this.__wbg_ptr, precision);
+        wasm.aion_charts_set_order_line_price_precision(this.__wbg_ptr, precision);
     }
     /**
      * Set whether to show cancel buttons on order lines.
      * @param {boolean} show
      */
     set_order_line_show_cancel_buttons(show) {
-        wasm.axiuscharts_set_order_line_show_cancel_buttons(this.__wbg_ptr, show);
+        wasm.aion_charts_set_order_line_show_cancel_buttons(this.__wbg_ptr, show);
     }
     /**
      * Update the status of an order line.
@@ -2648,7 +2648,7 @@ export class AxiusCharts {
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(status, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_set_order_line_status(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        const ret = wasm.aion_charts_set_order_line_status(this.__wbg_ptr, ptr0, len0, ptr1, len1);
         return ret !== 0;
     }
     /**
@@ -2660,7 +2660,7 @@ export class AxiusCharts {
     set_order_line_visible(id, visible) {
         const ptr0 = passStringToWasm0(id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_set_order_line_visible(this.__wbg_ptr, ptr0, len0, visible);
+        const ret = wasm.aion_charts_set_order_line_visible(this.__wbg_ptr, ptr0, len0, visible);
         return ret !== 0;
     }
     /**
@@ -2693,7 +2693,7 @@ export class AxiusCharts {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passStringToWasm0(json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len0 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_order_lines_json(retptr, this.__wbg_ptr, ptr0, len0);
+            wasm.aion_charts_set_order_lines_json(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2711,7 +2711,7 @@ export class AxiusCharts {
     set_price_line_label(id, label) {
         const ptr0 = passStringToWasm0(label, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_price_line_label(this.__wbg_ptr, id, ptr0, len0);
+        wasm.aion_charts_set_price_line_label(this.__wbg_ptr, id, ptr0, len0);
     }
     /**
      * Update the price of an existing price line.
@@ -2719,7 +2719,7 @@ export class AxiusCharts {
      * @param {number} price
      */
     set_price_line_price(id, price) {
-        wasm.axiuscharts_set_price_line_price(this.__wbg_ptr, id, price);
+        wasm.aion_charts_set_price_line_price(this.__wbg_ptr, id, price);
     }
     /**
      * Set whether a price line is visible.
@@ -2727,7 +2727,7 @@ export class AxiusCharts {
      * @param {boolean} visible
      */
     set_price_line_visible(id, visible) {
-        wasm.axiuscharts_set_price_line_visible(this.__wbg_ptr, id, visible);
+        wasm.aion_charts_set_price_line_visible(this.__wbg_ptr, id, visible);
     }
     /**
      * Set the price scale margins (top and bottom as fractions 0.0-1.0).
@@ -2736,7 +2736,7 @@ export class AxiusCharts {
      * @param {number} bottom
      */
     set_price_scale_margins(top, bottom) {
-        wasm.axiuscharts_set_price_scale_margins(this.__wbg_ptr, top, bottom);
+        wasm.aion_charts_set_price_scale_margins(this.__wbg_ptr, top, bottom);
     }
     /**
      * Set the price scale mode.
@@ -2748,14 +2748,14 @@ export class AxiusCharts {
     set_price_scale_mode(mode) {
         const ptr0 = passStringToWasm0(mode, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_price_scale_mode(this.__wbg_ptr, ptr0, len0);
+        wasm.aion_charts_set_price_scale_mode(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * Set the price scale tick mark density multiplier.
      * @param {number} density
      */
     set_price_scale_tick_density(density) {
-        wasm.axiuscharts_set_price_scale_tick_density(this.__wbg_ptr, density);
+        wasm.aion_charts_set_price_scale_tick_density(this.__wbg_ptr, density);
     }
     /**
      * Set replay cutoff bar (inclusive right-edge trim).
@@ -2764,7 +2764,7 @@ export class AxiusCharts {
     set_replay_cutoff_bar(index) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_set_replay_cutoff_bar(retptr, this.__wbg_ptr, index);
+            wasm.aion_charts_set_replay_cutoff_bar(retptr, this.__wbg_ptr, index);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2781,7 +2781,7 @@ export class AxiusCharts {
     set_replay_mode(enabled) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_set_replay_mode(retptr, this.__wbg_ptr, enabled);
+            wasm.aion_charts_set_replay_mode(retptr, this.__wbg_ptr, enabled);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2798,7 +2798,7 @@ export class AxiusCharts {
     set_replay_options(options) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_set_replay_options(retptr, this.__wbg_ptr, addHeapObject(options));
+            wasm.aion_charts_set_replay_options(retptr, this.__wbg_ptr, addHeapObject(options));
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2813,7 +2813,7 @@ export class AxiusCharts {
      * @param {boolean} playing
      */
     set_replay_playing(playing) {
-        wasm.axiuscharts_set_replay_playing(this.__wbg_ptr, playing);
+        wasm.aion_charts_set_replay_playing(this.__wbg_ptr, playing);
     }
     /**
      * Lock or unlock the currently selected drawing.
@@ -2821,7 +2821,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     set_selected_drawing_locked(locked) {
-        const ret = wasm.axiuscharts_set_selected_drawing_locked(this.__wbg_ptr, locked);
+        const ret = wasm.aion_charts_set_selected_drawing_locked(this.__wbg_ptr, locked);
         return ret !== 0;
     }
     /**
@@ -2832,7 +2832,7 @@ export class AxiusCharts {
     set_selected_drawing_text(text) {
         const ptr0 = passStringToWasm0(text, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_set_selected_drawing_text(this.__wbg_ptr, ptr0, len0);
+        const ret = wasm.aion_charts_set_selected_drawing_text(this.__wbg_ptr, ptr0, len0);
         return ret !== 0;
     }
     /**
@@ -2846,7 +2846,7 @@ export class AxiusCharts {
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(vertical, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.axiuscharts_set_selected_drawing_text_alignment(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        const ret = wasm.aion_charts_set_selected_drawing_text_alignment(this.__wbg_ptr, ptr0, len0, ptr1, len1);
         return ret !== 0;
     }
     /**
@@ -2861,7 +2861,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     set_selected_drawing_text_style(font_size, italic, r, g, b, a, follow_drawing_color) {
-        const ret = wasm.axiuscharts_set_selected_drawing_text_style(this.__wbg_ptr, font_size, italic, r, g, b, a, follow_drawing_color);
+        const ret = wasm.aion_charts_set_selected_drawing_text_style(this.__wbg_ptr, font_size, italic, r, g, b, a, follow_drawing_color);
         return ret !== 0;
     }
     /**
@@ -2872,7 +2872,7 @@ export class AxiusCharts {
     set_selected_execution_mark(mark_id) {
         var ptr0 = isLikeNone(mark_id) ? 0 : passStringToWasm0(mark_id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         var len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_selected_execution_mark(this.__wbg_ptr, ptr0, len0);
+        wasm.aion_charts_set_selected_execution_mark(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * Replace the currently selected Fibonacci drawing's levels from JSON.
@@ -2885,7 +2885,7 @@ export class AxiusCharts {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passStringToWasm0(json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len0 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_selected_fibonacci_levels_json(retptr, this.__wbg_ptr, ptr0, len0);
+            wasm.aion_charts_set_selected_fibonacci_levels_json(retptr, this.__wbg_ptr, ptr0, len0);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -2914,7 +2914,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     set_selected_rectangle_middle_line(enabled, r, g, b, a, line_width, dash_on, dash_off) {
-        const ret = wasm.axiuscharts_set_selected_rectangle_middle_line(this.__wbg_ptr, enabled, r, g, b, a, line_width, dash_on, dash_off);
+        const ret = wasm.aion_charts_set_selected_rectangle_middle_line(this.__wbg_ptr, enabled, r, g, b, a, line_width, dash_on, dash_off);
         return ret !== 0;
     }
     /**
@@ -2935,7 +2935,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     set_selected_text_border(enabled, r, g, b, a, line_width, dash_on, dash_off) {
-        const ret = wasm.axiuscharts_set_selected_text_border(this.__wbg_ptr, enabled, r, g, b, a, line_width, dash_on, dash_off);
+        const ret = wasm.aion_charts_set_selected_text_border(this.__wbg_ptr, enabled, r, g, b, a, line_width, dash_on, dash_off);
         return ret !== 0;
     }
     /**
@@ -2950,7 +2950,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     set_selected_text_fill(enabled, r, g, b, a) {
-        const ret = wasm.axiuscharts_set_selected_text_fill(this.__wbg_ptr, enabled, r, g, b, a);
+        const ret = wasm.aion_charts_set_selected_text_fill(this.__wbg_ptr, enabled, r, g, b, a);
         return ret !== 0;
     }
     /**
@@ -2966,7 +2966,7 @@ export class AxiusCharts {
             const len0 = WASM_VECTOR_LEN;
             const ptr1 = passArray64ToWasm0(timestamps, wasm.__wbindgen_export);
             const len1 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_series_data(retptr, this.__wbg_ptr, id, ptr0, len0, ptr1, len1);
+            wasm.aion_charts_set_series_data(retptr, this.__wbg_ptr, id, ptr0, len0, ptr1, len1);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -2982,7 +2982,7 @@ export class AxiusCharts {
      * @param {boolean} visible
      */
     set_series_visible(id, visible) {
-        wasm.axiuscharts_set_series_visible(this.__wbg_ptr, id, visible);
+        wasm.aion_charts_set_series_visible(this.__wbg_ptr, id, visible);
     }
     /**
      * Set a study parameter (e.g., "period" for SMA/EMA, "fast_period" for MACD).
@@ -2994,7 +2994,7 @@ export class AxiusCharts {
     set_study_parameter(id, key, value) {
         const ptr0 = passStringToWasm0(key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_study_parameter(this.__wbg_ptr, id, ptr0, len0, value);
+        wasm.aion_charts_set_study_parameter(this.__wbg_ptr, id, ptr0, len0, value);
     }
     /**
      * Set indicator sub-pane separator line color (RGBA, 0.0-1.0).
@@ -3004,14 +3004,14 @@ export class AxiusCharts {
      * @param {number} a
      */
     set_subpane_separator_color(r, g, b, a) {
-        wasm.axiuscharts_set_subpane_separator_color(this.__wbg_ptr, r, g, b, a);
+        wasm.aion_charts_set_subpane_separator_color(this.__wbg_ptr, r, g, b, a);
     }
     /**
      * Set indicator sub-pane separator drag hit-area thickness (CSS px).
      * @param {number} hit_area_css
      */
     set_subpane_separator_hit_area(hit_area_css) {
-        wasm.axiuscharts_set_subpane_separator_hit_area(this.__wbg_ptr, hit_area_css);
+        wasm.aion_charts_set_subpane_separator_hit_area(this.__wbg_ptr, hit_area_css);
     }
     /**
      * Set indicator sub-pane separator hover/active color (RGBA, 0.0-1.0).
@@ -3021,14 +3021,14 @@ export class AxiusCharts {
      * @param {number} a
      */
     set_subpane_separator_hover_color(r, g, b, a) {
-        wasm.axiuscharts_set_subpane_separator_hover_color(this.__wbg_ptr, r, g, b, a);
+        wasm.aion_charts_set_subpane_separator_hover_color(this.__wbg_ptr, r, g, b, a);
     }
     /**
      * Set indicator sub-pane separator visible line thickness (CSS px).
      * @param {number} thickness_css
      */
     set_subpane_separator_thickness(thickness_css) {
-        wasm.axiuscharts_set_subpane_separator_thickness(this.__wbg_ptr, thickness_css);
+        wasm.aion_charts_set_subpane_separator_thickness(this.__wbg_ptr, thickness_css);
     }
     /**
      * @param {string} symbol
@@ -3036,7 +3036,7 @@ export class AxiusCharts {
     set_symbol(symbol) {
         const ptr0 = passStringToWasm0(symbol, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.axiuscharts_set_symbol(this.__wbg_ptr, ptr0, len0);
+        wasm.aion_charts_set_symbol(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * Set multiple timestamp-anchored markers for a series at once.
@@ -3054,7 +3054,7 @@ export class AxiusCharts {
             const len0 = WASM_VECTOR_LEN;
             const ptr1 = passArrayF64ToWasm0(marker_data, wasm.__wbindgen_export);
             const len1 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_set_time_markers(retptr, this.__wbg_ptr, series_id, ptr0, len0, ptr1, len1);
+            wasm.aion_charts_set_time_markers(retptr, this.__wbg_ptr, series_id, ptr0, len0, ptr1, len1);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -3070,7 +3070,7 @@ export class AxiusCharts {
      * @param {number} end
      */
     set_visible_range(start, end) {
-        wasm.axiuscharts_set_visible_range(this.__wbg_ptr, start, end);
+        wasm.aion_charts_set_visible_range(this.__wbg_ptr, start, end);
     }
     /**
      * Set volume bar colors: bullish and bearish.
@@ -3084,33 +3084,33 @@ export class AxiusCharts {
      * @param {number} down_a
      */
     set_volume_colors(up_r, up_g, up_b, up_a, down_r, down_g, down_b, down_a) {
-        wasm.axiuscharts_set_volume_colors(this.__wbg_ptr, up_r, up_g, up_b, up_a, down_r, down_g, down_b, down_a);
+        wasm.aion_charts_set_volume_colors(this.__wbg_ptr, up_r, up_g, up_b, up_a, down_r, down_g, down_b, down_a);
     }
     /**
      * Show/hide volume bars in the main pane.
      * @param {boolean} visible
      */
     set_volume_visible(visible) {
-        wasm.axiuscharts_set_volume_visible(this.__wbg_ptr, visible);
+        wasm.aion_charts_set_volume_visible(this.__wbg_ptr, visible);
     }
     /**
      * Start the auto-render RAF loop.
      */
     start_auto_render() {
-        wasm.axiuscharts_start_auto_render(this.__wbg_ptr);
+        wasm.aion_charts_start_auto_render(this.__wbg_ptr);
     }
     /**
      * Stop the auto-render RAF loop. Caller must manually call render().
      */
     stop_auto_render() {
-        wasm.axiuscharts_stop_auto_render(this.__wbg_ptr);
+        wasm.aion_charts_stop_auto_render(this.__wbg_ptr);
     }
     /**
      * Get the number of studies.
      * @returns {number}
      */
     study_count() {
-        const ret = wasm.axiuscharts_study_count(this.__wbg_ptr);
+        const ret = wasm.aion_charts_study_count(this.__wbg_ptr);
         return ret >>> 0;
     }
     /**
@@ -3121,7 +3121,7 @@ export class AxiusCharts {
         let deferred1_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_symbol(retptr, this.__wbg_ptr);
+            wasm.aion_charts_symbol(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred1_0 = r0;
@@ -3141,7 +3141,7 @@ export class AxiusCharts {
         let deferred1_1;
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_theme(retptr, this.__wbg_ptr);
+            wasm.aion_charts_theme(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             deferred1_0 = r0;
@@ -3162,7 +3162,7 @@ export class AxiusCharts {
      * @returns {boolean}
      */
     tick_drawing_caret_blink(now_ms) {
-        const ret = wasm.axiuscharts_tick_drawing_caret_blink(this.__wbg_ptr, now_ms);
+        const ret = wasm.aion_charts_tick_drawing_caret_blink(this.__wbg_ptr, now_ms);
         return ret !== 0;
     }
     /**
@@ -3172,7 +3172,7 @@ export class AxiusCharts {
      * @returns {bigint}
      */
     timestamp_to_bar_index(timestamp_ms) {
-        const ret = wasm.axiuscharts_timestamp_to_bar_index(this.__wbg_ptr, timestamp_ms);
+        const ret = wasm.aion_charts_timestamp_to_bar_index(this.__wbg_ptr, timestamp_ms);
         return ret;
     }
     /**
@@ -3181,7 +3181,7 @@ export class AxiusCharts {
      * @param {number} study_id
      */
     update_indicator_pane(pane_id, study_id) {
-        wasm.axiuscharts_update_indicator_pane(this.__wbg_ptr, pane_id, study_id);
+        wasm.aion_charts_update_indicator_pane(this.__wbg_ptr, pane_id, study_id);
     }
     /**
      * Update the last bar in the data array. Used for real-time tick updates.
@@ -3195,7 +3195,7 @@ export class AxiusCharts {
     update_last_bar(timestamp, open, high, low, close, volume) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_update_last_bar(retptr, this.__wbg_ptr, timestamp, open, high, low, close, volume);
+            wasm.aion_charts_update_last_bar(retptr, this.__wbg_ptr, timestamp, open, high, low, close, volume);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -3217,7 +3217,7 @@ export class AxiusCharts {
     update_last_bar_series_point(id, timestamp, open, high, low, close) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_update_last_bar_series_point(retptr, this.__wbg_ptr, id, timestamp, open, high, low, close);
+            wasm.aion_charts_update_last_bar_series_point(retptr, this.__wbg_ptr, id, timestamp, open, high, low, close);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -3240,7 +3240,7 @@ export class AxiusCharts {
     update_last_histogram_point(id, timestamp, value, color_r, color_g, color_b, color_a) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_update_last_histogram_point(retptr, this.__wbg_ptr, id, timestamp, value, color_r, color_g, color_b, color_a);
+            wasm.aion_charts_update_last_histogram_point(retptr, this.__wbg_ptr, id, timestamp, value, color_r, color_g, color_b, color_a);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -3259,7 +3259,7 @@ export class AxiusCharts {
     update_last_series_point(id, timestamp, value) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_update_last_series_point(retptr, this.__wbg_ptr, id, timestamp, value);
+            wasm.aion_charts_update_last_series_point(retptr, this.__wbg_ptr, id, timestamp, value);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -3282,7 +3282,7 @@ export class AxiusCharts {
     upsert_bar(timestamp, open, high, low, close, volume) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_upsert_bar(retptr, this.__wbg_ptr, timestamp, open, high, low, close, volume);
+            wasm.aion_charts_upsert_bar(retptr, this.__wbg_ptr, timestamp, open, high, low, close, volume);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -3305,7 +3305,7 @@ export class AxiusCharts {
     upsert_bar_series_point(id, timestamp, open, high, low, close) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_upsert_bar_series_point(retptr, this.__wbg_ptr, id, timestamp, open, high, low, close);
+            wasm.aion_charts_upsert_bar_series_point(retptr, this.__wbg_ptr, id, timestamp, open, high, low, close);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -3339,7 +3339,7 @@ export class AxiusCharts {
             const len1 = WASM_VECTOR_LEN;
             const ptr2 = passArrayF64ToWasm0(ask_volumes, wasm.__wbindgen_export);
             const len2 = WASM_VECTOR_LEN;
-            wasm.axiuscharts_upsert_bar_with_footprint(retptr, this.__wbg_ptr, timestamp, open, high, low, close, volume, ptr0, len0, ptr1, len1, ptr2, len2);
+            wasm.aion_charts_upsert_bar_with_footprint(retptr, this.__wbg_ptr, timestamp, open, high, low, close, volume, ptr0, len0, ptr1, len1, ptr2, len2);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -3363,7 +3363,7 @@ export class AxiusCharts {
     upsert_histogram_point(id, timestamp, value, color_r, color_g, color_b, color_a) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_upsert_histogram_point(retptr, this.__wbg_ptr, id, timestamp, value, color_r, color_g, color_b, color_a);
+            wasm.aion_charts_upsert_histogram_point(retptr, this.__wbg_ptr, id, timestamp, value, color_r, color_g, color_b, color_a);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -3383,7 +3383,7 @@ export class AxiusCharts {
     upsert_series_point(id, timestamp, value) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_upsert_series_point(retptr, this.__wbg_ptr, id, timestamp, value);
+            wasm.aion_charts_upsert_series_point(retptr, this.__wbg_ptr, id, timestamp, value);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -3399,7 +3399,7 @@ export class AxiusCharts {
     visible_range() {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.axiuscharts_visible_range(retptr, this.__wbg_ptr);
+            wasm.aion_charts_visible_range(retptr, this.__wbg_ptr);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var v1 = getArrayF64FromWasm0(r0, r1).slice();
@@ -3414,10 +3414,10 @@ export class AxiusCharts {
      * @param {bigint} end
      */
     zoom_to_range(start, end) {
-        wasm.axiuscharts_zoom_to_range(this.__wbg_ptr, start, end);
+        wasm.aion_charts_zoom_to_range(this.__wbg_ptr, start, end);
     }
 }
-if (Symbol.dispose) AxiusCharts.prototype[Symbol.dispose] = AxiusCharts.prototype.free;
+if (Symbol.dispose) Aion_charts.prototype[Symbol.dispose] = Aion_charts.prototype.free;
 
 export class ChartGroup {
     __destroy_into_raw() {
@@ -4019,8 +4019,8 @@ function __wbg_get_imports() {
         __wbg_arc_60bf829e1bd2add5: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4, arg5) {
             getObject(arg0).arc(arg1, arg2, arg3, arg4, arg5);
         }, arguments); },
-        __wbg_axiuscharts_new: function(arg0) {
-            const ret = AxiusCharts.__wrap(arg0);
+        __wbg_aion_charts_new: function(arg0) {
+            const ret = Aion_charts.__wrap(arg0);
             return addHeapObject(ret);
         },
         __wbg_beginPath_9873f939d695759c: function(arg0) {
@@ -5297,7 +5297,7 @@ function __wbg_get_imports() {
     };
     return {
         __proto__: null,
-        "./axiuscharts_wasm_bg.js": import0,
+        "./aion_charts_wasm_bg.js": import0,
     };
 }
 
@@ -5368,9 +5368,9 @@ const __wbindgen_enum_GpuVertexFormat = ["uint8", "uint8x2", "uint8x4", "sint8",
 
 
 const __wbindgen_enum_GpuVertexStepMode = ["vertex", "instance"];
-const AxiusChartsFinalization = (typeof FinalizationRegistry === 'undefined')
+const Aion_chartsFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
-    : new FinalizationRegistry(ptr => wasm.__wbg_axiuscharts_free(ptr >>> 0, 1));
+    : new FinalizationRegistry(ptr => wasm.__wbg_aion_charts_free(ptr >>> 0, 1));
 const ChartGroupFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_chartgroup_free(ptr >>> 0, 1));
@@ -5798,7 +5798,7 @@ async function __wbg_init(module_or_path) {
     }
 
     if (module_or_path === undefined) {
-        module_or_path = new URL('axiuscharts_wasm_bg.wasm', import.meta.url);
+        module_or_path = new URL('aion_charts_wasm_bg.wasm', import.meta.url);
     }
     const imports = __wbg_get_imports();
 

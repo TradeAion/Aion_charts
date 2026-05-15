@@ -1,9 +1,9 @@
 [package]
-name = "axiuscharts-wasm"
+name = "aion_charts-wasm"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.83"
-description = "AxiusCharts WASM entry point — thin JS interop layer"
+description = "Aion_charts WASM entry point — thin JS interop layer"
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false
@@ -13,7 +13,7 @@ crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [dependencies]
-axiuscharts = { path = "..", features = ["indicator_runtime_v1"] }
+aion_charts = { path = "..", features = ["indicator_runtime_v1"] }
 wgpu = "28.0"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

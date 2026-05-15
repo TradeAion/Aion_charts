@@ -3,11 +3,11 @@ members = [".", "wasm"]
 resolver = "2"
 
 [package]
-name = "axiuscharts"
+name = "aion_charts"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.83"
-description = "AxiusCharts — high-performance GPU-accelerated charting engine"
+description = "Aion_charts — high-performance GPU-accelerated charting engine"
 
 [features]
 default = []
@@ -15,7 +15,7 @@ indicator_runtime_v1 = []
 parity-tests = []
 
 [lib]
-name = "axiuscharts"
+name = "aion_charts"
 path = "src/lib.rs"
 
 [dependencies]

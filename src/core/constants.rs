@@ -1,4 +1,4 @@
-//! Centralized constants for AxiusCharts.
+//! Centralized constants for Aion_charts.
 //!
 //! This module eliminates magic numbers scattered throughout the codebase,
 //! improving readability and maintainability. Constants are organized by category.

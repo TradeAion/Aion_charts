@@ -1,18 +1,18 @@
 # Framework Integration Guide
 
-AxiusCharts is framework-agnostic. The stable pattern is: initialize WASM once, create one chart per mounted container, dispose on unmount, and feed data through `Float64Array` / `BigUint64Array` without any precision adapters.
+Aion_charts is framework-agnostic. The stable pattern is: initialize WASM once, create one chart per mounted container, dispose on unmount, and feed data through `Float64Array` / `BigUint64Array` without any precision adapters.
 
 ## React
 
 ```tsx
 import { useEffect, useRef } from 'react';
-import init, { AxiusCharts } from 'axiuscharts-wasm';
+import init, { Aion_charts } from 'aion_charts-wasm';
 
 const wasmReady = init();
 
 export function Chart() {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const chartRef = useRef<AxiusCharts | null>(null);
+  const chartRef = useRef<Aion_charts | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -21,7 +21,7 @@ export function Chart() {
       await wasmReady;
       if (disposed || !containerRef.current) return;
 
-      const chart = await AxiusCharts.create_chart(containerRef.current, {
+      const chart = await Aion_charts.create_chart(containerRef.current, {
         renderer: 'auto',
         autoRender: true,
         theme: 'dark',
@@ -55,15 +55,15 @@ export function Chart() {
 
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref } from 'vue';
-import init, { AxiusCharts } from 'axiuscharts-wasm';
+import init, { Aion_charts } from 'aion_charts-wasm';
 
 const container = ref<HTMLDivElement | null>(null);
-let chart: AxiusCharts | null = null;
+let chart: Aion_charts | null = null;
 
 onMounted(async () => {
   await init();
   if (!container.value) return;
-  chart = await AxiusCharts.create_chart(container.value, { renderer: 'auto' });
+  chart = await Aion_charts.create_chart(container.value, { renderer: 'auto' });
 });
 
 onBeforeUnmount(() => {
@@ -78,14 +78,14 @@ onBeforeUnmount(() => {
 ```svelte
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import init, { AxiusCharts } from 'axiuscharts-wasm';
+  import init, { Aion_charts } from 'aion_charts-wasm';
 
   let container: HTMLDivElement;
-  let chart: AxiusCharts | null = null;
+  let chart: Aion_charts | null = null;
 
   onMount(async () => {
     await init();
-    chart = await AxiusCharts.create_chart(container, { renderer: 'auto' });
+    chart = await Aion_charts.create_chart(container, { renderer: 'auto' });
   });
 
   onDestroy(() => {
@@ -98,13 +98,13 @@ onBeforeUnmount(() => {
 
 ## Bundlers
 
-- Vite: exclude `axiuscharts-wasm` from dependency prebundling if needed
+- Vite: exclude `aion_charts-wasm` from dependency prebundling if needed
 - webpack 5: enable `experiments.asyncWebAssembly`
 - Next.js: wire async WebAssembly through the webpack config
 
 ## Events
 
-AxiusCharts uses camelCase event payload fields:
+Aion_charts uses camelCase event payload fields:
 
 ```ts
 chart.on('crosshairMove', (e) => {

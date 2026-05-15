@@ -66,7 +66,7 @@ struct WorkspaceDividerStyle {
 
 impl Default for WorkspaceDividerStyle {
     fn default() -> Self {
-        let theme = axiuscharts::ThemeConfig::default();
+        let theme = aion_charts::ThemeConfig::default();
         Self {
             thickness_css: 1.0,
             hit_area_css: 9.0,
@@ -92,7 +92,7 @@ struct WorkspacePaneStyle {
 
 impl Default for WorkspacePaneStyle {
     fn default() -> Self {
-        let theme = axiuscharts::ThemeConfig::default();
+        let theme = aion_charts::ThemeConfig::default();
         Self {
             background_color: theme.workspace.pane_background,
             active_border_color: theme.workspace.pane_active_border,
@@ -131,7 +131,7 @@ struct WorkspaceInner {
     drag_pointer_id: Option<i32>,
     fullscreen_pane_id: Option<u32>,
     style: WorkspaceStyleConfig,
-    guardrails: axiuscharts::WorkspaceGuardrails,
+    guardrails: aion_charts::WorkspaceGuardrails,
     active_pane_change_handler: Option<Function>,
 }
 
@@ -179,7 +179,7 @@ impl WorkspaceInner {
             drag_pointer_id: None,
             fullscreen_pane_id: None,
             style: WorkspaceStyleConfig::default(),
-            guardrails: axiuscharts::WorkspaceGuardrails::default(),
+            guardrails: aion_charts::WorkspaceGuardrails::default(),
             active_pane_change_handler: None,
         };
         this.style.divider.normalize();
@@ -193,7 +193,7 @@ impl WorkspaceInner {
         let host = document
             .create_element("div")?
             .dyn_into::<HtmlDivElement>()?;
-        let host_id = format!("axiuscharts-workspace-pane-{pane_id}");
+        let host_id = format!("aion_charts-workspace-pane-{pane_id}");
         host.set_id(&host_id);
         host.set_class_name("chart-host");
         host.set_attribute("data-pane-id", &pane_id.to_string())?;

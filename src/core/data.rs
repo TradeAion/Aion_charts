@@ -25,7 +25,7 @@
 //! # Example
 //!
 //! ```rust
-//! use axiuscharts::{Bar, BarArray};
+//! use aion_charts::{Bar, BarArray};
 //!
 //! let mut bars = BarArray::new();
 //!
@@ -65,7 +65,7 @@ const DEFAULT_CHUNK_SIZE: usize = 64;
 /// # Example
 ///
 /// ```rust
-/// use axiuscharts::Bar;
+/// use aion_charts::Bar;
 ///
 /// let bar = Bar::new(1700000000000, 100.0, 105.0, 98.0, 103.0, 1000.0);
 ///

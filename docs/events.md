@@ -1,6 +1,6 @@
 # Events
 
-AxiusCharts emits typed chart events through `on(...)`, `off(...)`, and `once(...)`. Public JS payload fields use camelCase.
+Aion_charts emits typed chart events through `on(...)`, `off(...)`, and `once(...)`. Public JS payload fields use camelCase.
 
 ## Subscription Lifecycle
 
@@ -49,4 +49,4 @@ chart.once('click', ({ price }) => console.log(price));
 
 ## Public Naming Notes
 
-Public event payload fields are camelCase even when the internal Rust event struct uses snake_case fields. Treat [`wasm/axiuscharts.d.ts`](../wasm/axiuscharts.d.ts) as the canonical payload contract.
+Public event payload fields are camelCase even when the internal Rust event struct uses snake_case fields. Treat [`wasm/aion_charts.d.ts`](../wasm/aion_charts.d.ts) as the canonical payload contract.

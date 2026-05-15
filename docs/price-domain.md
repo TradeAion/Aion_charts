@@ -1,6 +1,6 @@
 # Price Domain
 
-AxiusCharts uses a two-domain price architecture:
+Aion_charts uses a two-domain price architecture:
 
 - Logical price domain: `f64`
 - Render attribute domain: single-precision screen-space values
@@ -25,7 +25,7 @@ This separation is deliberate. Crypto prices like `103842.5712345` and micro-pri
 The seam is the projection layer. Logical prices remain `f64` until the point where they have been converted into pane-local coordinates.
 
 ```rust
-use axiuscharts::core::renderer::value_projection::price_to_pane_y_phys;
+use aion_charts::core::renderer::value_projection::price_to_pane_y_phys;
 
 fn project_price_for_gpu(price: f64, viewport: &Viewport, pane_height: f64) -> f32 {
     // SEAM: logical f64 -> single-precision render-space
@@ -54,7 +54,7 @@ A price written into the logical domain and read back from the logical domain is
 ## Regression Examples
 
 ```rust
-use axiuscharts::{Bar, BarArray};
+use aion_charts::{Bar, BarArray};
 
 #[test]
 fn bar_preserves_crypto_precision() {

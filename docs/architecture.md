@@ -1,12 +1,12 @@
 # Architecture
 
-AxiusCharts ships as a two-crate system: the core engine is platform-agnostic Rust, and the WASM crate adapts that engine to the browser DOM and JavaScript event model.
+Aion_charts ships as a two-crate system: the core engine is platform-agnostic Rust, and the WASM crate adapts that engine to the browser DOM and JavaScript event model.
 
 ## Crate Layout
 
 ```mermaid
 flowchart LR
-  Core["axiuscharts<br/>src/"] --> Wasm["axiuscharts-wasm<br/>wasm/src/"]
+  Core["aion_charts<br/>src/"] --> Wasm["aion_charts-wasm<br/>wasm/src/"]
   Wasm --> Browser["DOM, Canvas, WebGPU, JS callbacks"]
 ```
 

@@ -6,7 +6,7 @@ test('compat facade creates a chart, series, time scale, and subscriptions', asy
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const result = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-facade-harness';
     host.style.cssText = [
@@ -50,7 +50,7 @@ test('compat facade creates a chart, series, time scale, and subscriptions', asy
     const priceScaleOptions = chart.priceScale().options();
     const priceScaleWidth = chart.priceScale().width();
     const exportedOptions = JSON.parse(chart.raw().export_persistence_state(null)).options;
-    const paneTouchAction = host.querySelector('#axiuscharts-pane')?.style.touchAction;
+    const paneTouchAction = host.querySelector('#aion_charts-pane')?.style.touchAction;
 
     const crosshairEvents: any[] = [];
     chart.subscribeCrosshairMove(event => {
@@ -114,7 +114,7 @@ test('compat facade manages series markers and chart marker options', async ({ p
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const result = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-marker-harness';
     host.style.cssText = [
@@ -234,7 +234,7 @@ test('compat facade manages text and image watermarks', async ({ page }) => {
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const result = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-watermark-harness';
     host.style.cssText = [
@@ -255,7 +255,7 @@ test('compat facade manages text and image watermarks', async ({ page }) => {
     });
     chart.applyWatermarkOptions({
       visible: true,
-      text: 'AXIUS',
+      text: 'AION_CHARTS',
       color: 'rgba(148, 163, 184, 0.32)',
       fontSize: 54,
       fontWeight: 700,
@@ -263,7 +263,7 @@ test('compat facade manages text and image watermarks', async ({ page }) => {
       vertAlign: 'center',
       zOrder: 'top',
     });
-    const textNode = host.querySelector('.axiuscharts-watermark');
+    const textNode = host.querySelector('.aion_charts-watermark');
     const textStyle = textNode ? window.getComputedStyle(textNode) : null;
     const textSnapshot = {
       text: textNode?.textContent,
@@ -287,8 +287,8 @@ test('compat facade manages text and image watermarks', async ({ page }) => {
       paddingY: 16,
       layer: 'background',
     });
-    const imageNode = host.querySelector('.axiuscharts-watermark img') as HTMLImageElement | null;
-    const imageWrapper = host.querySelector('.axiuscharts-watermark') as HTMLElement | null;
+    const imageNode = host.querySelector('.aion_charts-watermark img') as HTMLImageElement | null;
+    const imageWrapper = host.querySelector('.aion_charts-watermark') as HTMLElement | null;
     const imageStyle = imageWrapper ? window.getComputedStyle(imageWrapper) : null;
     const box = imageWrapper?.getBoundingClientRect();
     const imageSnapshot = {
@@ -302,18 +302,18 @@ test('compat facade manages text and image watermarks', async ({ page }) => {
     };
 
     chart.clearWatermark();
-    const afterClear = host.querySelector('.axiuscharts-watermark');
+    const afterClear = host.querySelector('.aion_charts-watermark');
     chart.remove();
 
     return {
       textSnapshot,
       imageSnapshot,
       afterClearExists: !!afterClear,
-      afterRemoveExists: !!host.querySelector('.axiuscharts-watermark'),
+      afterRemoveExists: !!host.querySelector('.aion_charts-watermark'),
     };
   });
 
-  expect(result.textSnapshot.text).toBe('AXIUS');
+  expect(result.textSnapshot.text).toBe('AION_CHARTS');
   expect(result.textSnapshot.fontSize).toBe('54px');
   expect(result.textSnapshot.pointerEvents).toBe('none');
   expect(result.textSnapshot.zIndex).toBe('20');
@@ -336,7 +336,7 @@ test('compat facade autoscale contributions expand and release price fit', async
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const result = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-autoscale-harness';
     host.style.cssText = [
@@ -410,7 +410,7 @@ test('compat facade manages custom canvas series lifecycle', async ({ page }) =>
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const result = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-custom-series-harness';
     host.style.cssText = [
@@ -458,7 +458,7 @@ test('compat facade manages custom canvas series lifecycle', async ({ page }) =>
     custom.update({ time: data[21].time, value: data[21].close + 4 });
     custom.applyOptions({ color: '#22c55e', zOrder: 12 });
 
-    const canvas = host.querySelector('.axiuscharts-custom-series') as HTMLCanvasElement | null;
+    const canvas = host.querySelector('.aion_charts-custom-series') as HTMLCanvasElement | null;
     const projected = chart.raw().project_point(BigInt(data[21].time), data[21].close + 4);
     const context = canvas?.getContext('2d');
     const sample = context?.getImageData(Math.round(projected.x), Math.round(projected.y), 1, 1).data;
@@ -466,7 +466,7 @@ test('compat facade manages custom canvas series lifecycle', async ({ page }) =>
     const storedDataLength = custom.data().length;
     const options = custom.options();
     chart.removeSeries(custom);
-    const removed = !host.querySelector('.axiuscharts-custom-series');
+    const removed = !host.querySelector('.aion_charts-custom-series');
     chart.remove();
 
     return {
@@ -496,7 +496,7 @@ test('handleScroll.pressedMouseMove disables chart-pane drag panning', async ({ 
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const setup = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-scroll-options-harness';
     host.style.cssText = [
@@ -548,7 +548,7 @@ test('time scale logical ranges and overlay times stay consistent', async ({ pag
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const result = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-logical-range-harness';
     host.style.cssText = [
@@ -634,7 +634,7 @@ test('handleScale.axisDoubleClickReset disables double-click viewport reset', as
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const setup = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-double-click-options-harness';
     host.style.cssText = [
@@ -685,7 +685,7 @@ test('handleScroll.horzTouchDrag disables horizontal touch panning', async ({ pa
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const result = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-touch-options-harness';
     host.style.cssText = [
@@ -714,7 +714,7 @@ test('handleScroll.horzTouchDrag disables horizontal touch panning', async ({ pa
     chart.raw().set_visible_range(20, 40);
     chart.raw().render();
 
-    const pane = host.querySelector('#axiuscharts-pane')!;
+    const pane = host.querySelector('#aion_charts-pane')!;
     const before = chart.raw().visible_range();
     const dispatch = (type: string, x: number, y: number) => pane.dispatchEvent(new PointerEvent(type, {
       bubbles: true,
@@ -751,7 +751,7 @@ test('handleScroll.vertTouchDrag disables vertical touch price panning', async (
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const result = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-vertical-touch-options-harness';
     host.style.cssText = [
@@ -780,8 +780,8 @@ test('handleScroll.vertTouchDrag disables vertical touch price panning', async (
     chart.raw().set_visible_range(20, 40);
     chart.raw().render();
 
-    const pane = host.querySelector('#axiuscharts-pane')!;
-    const priceAxis = host.querySelector('#axiuscharts-price-axis')!;
+    const pane = host.querySelector('#aion_charts-pane')!;
+    const priceAxis = host.querySelector('#aion_charts-price-axis')!;
     const priceRect = priceAxis.getBoundingClientRect();
     priceAxis.dispatchEvent(new WheelEvent('wheel', {
       bubbles: true,
@@ -827,7 +827,7 @@ test('vertical touch price panning remains enabled by default', async ({ page })
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const result = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-vertical-touch-enabled-harness';
     host.style.cssText = [
@@ -855,8 +855,8 @@ test('vertical touch price panning remains enabled by default', async ({ page })
     chart.raw().set_visible_range(20, 40);
     chart.raw().render();
 
-    const pane = host.querySelector('#axiuscharts-pane')!;
-    const priceAxis = host.querySelector('#axiuscharts-price-axis')!;
+    const pane = host.querySelector('#aion_charts-pane')!;
+    const priceAxis = host.querySelector('#aion_charts-price-axis')!;
     const priceRect = priceAxis.getBoundingClientRect();
     priceAxis.dispatchEvent(new WheelEvent('wheel', {
       bubbles: true,
@@ -902,7 +902,7 @@ test('mouse wheel scroll and scale options disable pane wheel changes', async ({
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const result = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-wheel-options-harness';
     host.style.cssText = [
@@ -932,7 +932,7 @@ test('mouse wheel scroll and scale options disable pane wheel changes', async ({
     chart.raw().set_visible_range(20, 40);
     chart.raw().render();
 
-    const pane = host.querySelector('#axiuscharts-pane')!;
+    const pane = host.querySelector('#aion_charts-pane')!;
     const rect = pane.getBoundingClientRect();
     const before = chart.raw().visible_range();
     pane.dispatchEvent(new WheelEvent('wheel', {
@@ -964,7 +964,7 @@ test('handleScale.axisPressedMouseMove disables time-axis drag scaling', async (
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const setup = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-axis-drag-options-harness';
     host.style.cssText = [
@@ -994,7 +994,7 @@ test('handleScale.axisPressedMouseMove disables time-axis drag scaling', async (
     chart.raw().render();
 
     (window as any).__compatChart = chart;
-    const rect = host.querySelector('#axiuscharts-time-axis')!.getBoundingClientRect();
+    const rect = host.querySelector('#aion_charts-time-axis')!.getBoundingClientRect();
     return {
       rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
       before: chart.raw().visible_range(),
@@ -1020,7 +1020,7 @@ test('handleScale.axisPressedMouseMove disables price-axis drag scaling', async 
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const setup = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-price-axis-drag-options-harness';
     host.style.cssText = [
@@ -1050,7 +1050,7 @@ test('handleScale.axisPressedMouseMove disables price-axis drag scaling', async 
     chart.raw().render();
 
     (window as any).__compatChart = chart;
-    const rect = host.querySelector('#axiuscharts-price-axis')!.getBoundingClientRect();
+    const rect = host.querySelector('#aion_charts-price-axis')!.getBoundingClientRect();
     return {
       rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
       before: JSON.parse(chart.raw().export_persistence_state(null)).viewport,
@@ -1076,7 +1076,7 @@ test('handleScale.mouseWheel disables time-axis and price-axis wheel scaling', a
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const result = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-axis-wheel-options-harness';
     host.style.cssText = [
@@ -1107,8 +1107,8 @@ test('handleScale.mouseWheel disables time-axis and price-axis wheel scaling', a
 
     const beforeVisibleRange = chart.raw().visible_range();
     const beforeViewport = JSON.parse(chart.raw().export_persistence_state(null)).viewport;
-    const timeAxis = host.querySelector('#axiuscharts-time-axis')!;
-    const priceAxis = host.querySelector('#axiuscharts-price-axis')!;
+    const timeAxis = host.querySelector('#aion_charts-time-axis')!;
+    const priceAxis = host.querySelector('#aion_charts-price-axis')!;
     const timeRect = timeAxis.getBoundingClientRect();
     const priceRect = priceAxis.getBoundingClientRect();
 
@@ -1152,7 +1152,7 @@ test('time-axis and price-axis wheel scaling remain enabled by default', async (
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const result = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-axis-wheel-enabled-harness';
     host.style.cssText = [
@@ -1180,8 +1180,8 @@ test('time-axis and price-axis wheel scaling remain enabled by default', async (
     chart.raw().set_visible_range(20, 40);
     chart.raw().render();
 
-    const timeAxis = host.querySelector('#axiuscharts-time-axis')!;
-    const priceAxis = host.querySelector('#axiuscharts-price-axis')!;
+    const timeAxis = host.querySelector('#aion_charts-time-axis')!;
+    const priceAxis = host.querySelector('#aion_charts-price-axis')!;
     const timeRect = timeAxis.getBoundingClientRect();
     const priceRect = priceAxis.getBoundingClientRect();
     const beforeTimeRange = chart.raw().visible_range();
@@ -1231,7 +1231,7 @@ test('price-axis drag scaling remains enabled by default', async ({ page }) => {
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const setup = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-price-axis-drag-enabled-harness';
     host.style.cssText = [
@@ -1260,7 +1260,7 @@ test('price-axis drag scaling remains enabled by default', async ({ page }) => {
     chart.raw().render();
 
     (window as any).__compatChart = chart;
-    const rect = host.querySelector('#axiuscharts-price-axis')!.getBoundingClientRect();
+    const rect = host.querySelector('#aion_charts-price-axis')!.getBoundingClientRect();
     return {
       rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
       before: JSON.parse(chart.raw().export_persistence_state(null)).viewport,
@@ -1285,7 +1285,7 @@ test('handleScale.pinch disables touch pinch zoom', async ({ page }) => {
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const setup = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-pinch-options-harness';
     host.style.cssText = [
@@ -1315,7 +1315,7 @@ test('handleScale.pinch disables touch pinch zoom', async ({ page }) => {
     chart.raw().set_visible_range(20, 40);
     chart.raw().render();
     (window as any).__compatChart = chart;
-    const rect = host.querySelector('#axiuscharts-pane')!.getBoundingClientRect();
+    const rect = host.querySelector('#aion_charts-pane')!.getBoundingClientRect();
     return {
       points: {
         y: rect.top + rect.height * 0.5,
@@ -1358,7 +1358,7 @@ test('touch pinch zoom remains enabled by default', async ({ page }) => {
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const setup = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-pinch-enabled-harness';
     host.style.cssText = [
@@ -1386,7 +1386,7 @@ test('touch pinch zoom remains enabled by default', async ({ page }) => {
     chart.raw().set_visible_range(20, 40);
     chart.raw().render();
     (window as any).__compatChart = chart;
-    const rect = host.querySelector('#axiuscharts-pane')!.getBoundingClientRect();
+    const rect = host.querySelector('#aion_charts-pane')!.getBoundingClientRect();
     return {
       points: {
         y: rect.top + rect.height * 0.5,
@@ -1428,7 +1428,7 @@ test('trackingMode.exitMode onTouchEnd hides touch tracking crosshair on release
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const setup = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-tracking-options-harness';
     host.style.cssText = [
@@ -1456,7 +1456,7 @@ test('trackingMode.exitMode onTouchEnd hides touch tracking crosshair on release
     })));
     chart.raw().render();
     (window as any).__compatChart = chart;
-    (window as any).__compatPane = host.querySelector('#axiuscharts-pane');
+    (window as any).__compatPane = host.querySelector('#aion_charts-pane');
     const rect = (window as any).__compatPane.getBoundingClientRect();
     return {
       point: { x: rect.left + 300, y: rect.top + 180 },
@@ -1505,7 +1505,7 @@ test('chart-pane drag panning remains enabled by default', async ({ page }) => {
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const setup = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-scroll-enabled-harness';
     host.style.cssText = [
@@ -1534,7 +1534,7 @@ test('chart-pane drag panning remains enabled by default', async ({ page }) => {
     chart.raw().render();
 
     (window as any).__compatChart = chart;
-    const rect = host.querySelector('#axiuscharts-pane')!.getBoundingClientRect();
+    const rect = host.querySelector('#aion_charts-pane')!.getBoundingClientRect();
     return {
       rect: { left: rect.left, top: rect.top },
       before: chart.raw().visible_range(),
@@ -1559,7 +1559,7 @@ test('time-axis drag scaling remains enabled by default', async ({ page }) => {
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const setup = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-time-axis-drag-enabled-harness';
     host.style.cssText = [
@@ -1588,7 +1588,7 @@ test('time-axis drag scaling remains enabled by default', async ({ page }) => {
     chart.raw().render();
 
     (window as any).__compatChart = chart;
-    const rect = host.querySelector('#axiuscharts-time-axis')!.getBoundingClientRect();
+    const rect = host.querySelector('#aion_charts-time-axis')!.getBoundingClientRect();
     return {
       rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
       before: chart.raw().visible_range(),
@@ -1613,7 +1613,7 @@ test('double-click viewport reset remains enabled by default', async ({ page }) 
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const setup = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-double-click-enabled-harness';
     host.style.cssText = [
@@ -1642,7 +1642,7 @@ test('double-click viewport reset remains enabled by default', async ({ page }) 
     chart.raw().render();
 
     (window as any).__compatChart = chart;
-    const rect = host.querySelector('#axiuscharts-pane')!.getBoundingClientRect();
+    const rect = host.querySelector('#aion_charts-pane')!.getBoundingClientRect();
     return {
       rect: { left: rect.left, top: rect.top },
       before: chart.raw().visible_range(),
@@ -1664,7 +1664,7 @@ test('trackingMode.exitMode onNextTap keeps touch tracking crosshair until the n
   await expect(page.locator('#error-banner')).toBeHidden();
 
   const setup = await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'compat-tracking-default-harness';
     host.style.cssText = [
@@ -1691,7 +1691,7 @@ test('trackingMode.exitMode onNextTap keeps touch tracking crosshair until the n
     })));
     chart.raw().render();
     (window as any).__compatChart = chart;
-    (window as any).__compatPane = host.querySelector('#axiuscharts-pane');
+    (window as any).__compatPane = host.querySelector('#aion_charts-pane');
     const rect = (window as any).__compatPane.getBoundingClientRect();
     return {
       point: { x: rect.left + 300, y: rect.top + 180 },

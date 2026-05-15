@@ -1,12 +1,12 @@
-//! # AxiusCharts — High-Performance GPU Charting Engine
+//! # Aion_charts — High-Performance GPU Charting Engine
 //!
-//! AxiusCharts is a Rust/WebAssembly financial charting library designed for
+//! Aion_charts is a Rust/WebAssembly financial charting library designed for
 //! professional-grade performance and visual quality. It supports WebGPU
 //! with Canvas2D fallback on web platforms.
 //!
 //! ## Architecture Overview
 //!
-//! AxiusCharts uses a widget-based chart architecture:
+//! Aion_charts uses a widget-based chart architecture:
 //!
 //! - **Pane System**: Multiple panes with independent price scales
 //! - **Layered Rendering**: Separate base and overlay (Canvas2D) layers
@@ -16,7 +16,7 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use axiuscharts::{Bar, BarArray, Viewport, ChartEngine};
+//! use aion_charts::{Bar, BarArray, Viewport, ChartEngine};
 //!
 //! // Create a bar array and populate with data
 //! let mut bars = BarArray::new();

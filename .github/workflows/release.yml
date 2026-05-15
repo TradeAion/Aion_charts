@@ -1,4 +1,4 @@
-# AxiusCharts Release Workflow
+# Aion_charts Release Workflow
 # Triggered manually or on version tags
 #
 # Creates:
@@ -34,16 +34,16 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: axiuscharts-linux-x64
+            artifact: aion_charts-linux-x64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: axiuscharts-windows-x64
+            artifact: aion_charts-windows-x64
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact: axiuscharts-macos-x64
+            artifact: aion_charts-macos-x64
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact: axiuscharts-macos-arm64
+            artifact: aion_charts-macos-arm64
 
     steps:
       - name: Checkout repository
@@ -61,7 +61,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: target/${{ matrix.target }}/release/libaxiuscharts*
+          path: target/${{ matrix.target }}/release/libaion_charts*
           retention-days: 7
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -98,13 +98,13 @@ jobs:
       - name: Package WASM
         run: |
           cd wasm/pkg
-          tar -czvf ../../axiuscharts-wasm.tar.gz .
+          tar -czvf ../../aion_charts-wasm.tar.gz .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: axiuscharts-wasm
-          path: axiuscharts-wasm.tar.gz
+          name: aion_charts-wasm
+          path: aion_charts-wasm.tar.gz
           retention-days: 7
 
   # ═══════════════════════════════════════════════════════════════════════════

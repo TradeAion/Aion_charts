@@ -1,5 +1,5 @@
 {
-  "name": "@axiusflow/axiuscharts-wasm",
+  "name": "@aion_charts/aion_charts-wasm",
   "version": "0.1.1",
   "type": "module",
   "publishConfig": {
@@ -8,15 +8,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Axiusflow/Axius_charts.git"
+    "url": "git+https://github.com/Aion_charts/Aion_charts.git"
   },
   "description": "High-performance Canvas2D charting engine — WASM build",
-  "main": "./wasm/pkg/axiuscharts_wasm.js",
-  "module": "./wasm/pkg/axiuscharts_wasm.js",
-  "types": "./wasm/pkg/axiuscharts_wasm.d.ts",
+  "main": "./wasm/pkg/aion_charts_wasm.js",
+  "module": "./wasm/pkg/aion_charts_wasm.js",
+  "types": "./wasm/pkg/aion_charts_wasm.d.ts",
   "scripts": {
-    "build": "wasm-pack build --target web wasm && node -e \"require('fs').writeFileSync('wasm/pkg/.gitignore', '!axiuscharts_wasm_bg.wasm\\n!axiuscharts_wasm_bg.wasm.d.ts\\n!axiuscharts_wasm.d.ts\\n!axiuscharts_wasm.js\\n!package.json\\n')\"",
-    "build:release": "wasm-pack build --target web --release wasm && node -e \"require('fs').writeFileSync('wasm/pkg/.gitignore', '!axiuscharts_wasm_bg.wasm\\n!axiuscharts_wasm_bg.wasm.d.ts\\n!axiuscharts_wasm.d.ts\\n!axiuscharts_wasm.js\\n!package.json\\n')\"",
+    "build": "wasm-pack build --target web wasm && node -e \"require('fs').writeFileSync('wasm/pkg/.gitignore', '!aion_charts_wasm_bg.wasm\\n!aion_charts_wasm_bg.wasm.d.ts\\n!aion_charts_wasm.d.ts\\n!aion_charts_wasm.js\\n!package.json\\n')\"",
+    "build:release": "wasm-pack build --target web --release wasm && node -e \"require('fs').writeFileSync('wasm/pkg/.gitignore', '!aion_charts_wasm_bg.wasm\\n!aion_charts_wasm_bg.wasm.d.ts\\n!aion_charts_wasm.d.ts\\n!aion_charts_wasm.js\\n!package.json\\n')\"",
     "test:e2e": "playwright test",
     "test:artifacts": "node scripts/check-wasm-artifacts.mjs",
     "prepack": "npm run build:release",
@@ -25,24 +25,24 @@
   },
   "exports": {
     ".": {
-      "types": "./wasm/pkg/axiuscharts_wasm.d.ts",
-      "import": "./wasm/pkg/axiuscharts_wasm.js"
+      "types": "./wasm/pkg/aion_charts_wasm.d.ts",
+      "import": "./wasm/pkg/aion_charts_wasm.js"
     },
     "./compat": {
-      "types": "./wasm/axiuscharts-compat.d.ts",
-      "import": "./wasm/axiuscharts-compat.js"
+      "types": "./wasm/aion_charts-compat.d.ts",
+      "import": "./wasm/aion_charts-compat.js"
     },
-    "./axiuscharts_wasm_bg.wasm": "./wasm/pkg/axiuscharts_wasm_bg.wasm"
+    "./aion_charts_wasm_bg.wasm": "./wasm/pkg/aion_charts_wasm_bg.wasm"
   },
   "files": [
     "LICENSE",
     "README.md",
-    "wasm/axiuscharts-compat.js",
-    "wasm/axiuscharts-compat.d.ts",
-    "wasm/pkg/axiuscharts_wasm_bg.wasm",
-    "wasm/pkg/axiuscharts_wasm_bg.wasm.d.ts",
-    "wasm/pkg/axiuscharts_wasm.js",
-    "wasm/pkg/axiuscharts_wasm.d.ts"
+    "wasm/aion_charts-compat.js",
+    "wasm/aion_charts-compat.d.ts",
+    "wasm/pkg/aion_charts_wasm_bg.wasm",
+    "wasm/pkg/aion_charts_wasm_bg.wasm.d.ts",
+    "wasm/pkg/aion_charts_wasm.js",
+    "wasm/pkg/aion_charts_wasm.d.ts"
   ],
   "license": "SEE LICENSE IN LICENSE",
   "keywords": [

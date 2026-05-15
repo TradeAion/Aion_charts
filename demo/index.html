@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="icon" href="data:,">
-  <title>AxiusCharts Demo</title>
+  <title>Aion_charts Demo</title>
   <style>
     /* ═══════════════════════════════════════════════════════════════════════
        Base Styles
@@ -539,7 +539,7 @@
 
   <!-- Toolbar -->
   <div class="toolbar">
-    <span class="toolbar-title">AxiusCharts</span>
+    <span class="toolbar-title">Aion_charts</span>
     <span id="renderer-badge" class="badge">…</span>
     <div class="toolbar-divider"></div>
     
@@ -1048,10 +1048,10 @@
   <script type="module">
     // Demo uses the current local wasm/pkg artifact directly.
     const cacheBust = Date.now().toString();
-    const wasmModule = await import(`../wasm/pkg/axiuscharts_wasm.js?v=${cacheBust}`);
+    const wasmModule = await import(`../wasm/pkg/aion_charts_wasm.js?v=${cacheBust}`);
     const init = wasmModule.default;
-    const { AxiusCharts, ChartGroup, ChartWorkspace } = wasmModule;
-    const wasmBinaryUrl = `../wasm/pkg/axiuscharts_wasm_bg.wasm?v=${cacheBust}`;
+    const { Aion_charts, ChartGroup, ChartWorkspace } = wasmModule;
+    const wasmBinaryUrl = `../wasm/pkg/aion_charts_wasm_bg.wasm?v=${cacheBust}`;
 
     // ═══════════════════════════════════════════════════════════════════════
     // DOM & State
@@ -1201,7 +1201,7 @@
         if (!raw || raw === 'null') return null;
         return JSON.parse(raw);
       } catch (err) {
-        console.warn('[axiuscharts demo] failed to parse selected drawing info', err);
+        console.warn('[aion_charts demo] failed to parse selected drawing info', err);
         return null;
       }
     }
@@ -1630,14 +1630,14 @@
 
     // Deterministic renderer verification helper.
     // Run in DevTools:
-    //   await window.axiuschartsVerifyRendererBackend()
+    //   await window.aion_chartsVerifyRendererBackend()
     async function probeRenderer(requested) {
       const host = document.createElement('div');
       host.style.cssText = 'position:fixed;left:-100000px;top:-100000px;width:640px;height:320px;overflow:hidden;';
       document.body.appendChild(host);
       let chart = null;
       try {
-        chart = await AxiusCharts.create_chart(host, {
+        chart = await Aion_charts.create_chart(host, {
           renderer: requested,
           autoRender: false,
           theme: isDark ? 'dark' : 'light',
@@ -1666,8 +1666,8 @@
       }
     }
 
-    window.axiuschartsVerifyRendererBackend = async function axiuschartsVerifyRendererBackend() {
-      const supported = toJsArray(AxiusCharts.get_supported_renderers()).map(v => String(v).toLowerCase());
+    window.aion_chartsVerifyRendererBackend = async function aion_chartsVerifyRendererBackend() {
+      const supported = toJsArray(Aion_charts.get_supported_renderers()).map(v => String(v).toLowerCase());
       const webgpuSupported = supported.includes('webgpu');
 
       const forcedWebgpu = await probeRenderer('webgpu');
@@ -1708,7 +1708,7 @@
         { mode: 'auto', active: auto.active, fallback: auto.fallback },
         ...(live ? [{ mode: 'live chart', active: live.active, fallback: live.fallback }] : []),
       ]);
-      console.log('axiuscharts renderer verification report:', report);
+      console.log('aion_charts renderer verification report:', report);
       return report;
     };
 
@@ -2017,7 +2017,7 @@
         const paneId = workspace.root_pane_id();
         const hostId = workspace.pane_host_id(paneId);
 
-        core = await AxiusCharts.create_chart(hostId, {
+        core = await Aion_charts.create_chart(hostId, {
           renderer,
           autoRender: true,
           theme: isDark ? 'dark' : 'light',
@@ -2056,14 +2056,14 @@
         });
         core.on('executionMarkClick', e => {
           hudExecution.textContent = `Clicked ${e.id} · ${buildExecutionLabel(e.side)} · ${e.price.toFixed(2)} · qty ${e.quantity}`;
-          console.log('[axiuscharts demo] executionMarkClick', e);
+          console.log('[aion_charts demo] executionMarkClick', e);
         });
         core.on('orderLineModified', e => {
-          console.log('[axiuscharts demo] orderLineModified', e);
+          console.log('[aion_charts demo] orderLineModified', e);
           hudExecution.textContent = `Order ${e.id} modified: ${e.oldPrice.toFixed(2)} → ${e.newPrice.toFixed(2)}`;
         });
         core.on('orderLineCancelled', e => {
-          console.log('[axiuscharts demo] orderLineCancelled', e);
+          console.log('[aion_charts demo] orderLineCancelled', e);
           hudExecution.textContent = `Order ${e.id} cancelled at ${e.price.toFixed(2)}`;
         });
         core.on('error', e => showError(e.message));
@@ -2328,8 +2328,8 @@
       const fallback = ['candlestick', 'ohlc', 'line', 'area', 'heikin_ashi', 'footprint'];
       let raw = '';
       try {
-        if (typeof AxiusCharts.get_available_chart_types === 'function') {
-          raw = String(AxiusCharts.get_available_chart_types() || '');
+        if (typeof Aion_charts.get_available_chart_types === 'function') {
+          raw = String(Aion_charts.get_available_chart_types() || '');
         }
       } catch (_) {
         raw = '';

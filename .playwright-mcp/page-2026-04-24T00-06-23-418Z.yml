@@ -1,6 +1,6 @@
 - generic [active] [ref=e1]:
   - generic [ref=e2]:
-    - generic [ref=e3]: AxiusCharts
+    - generic [ref=e3]: Aion_charts
     - generic [ref=e4]: …
     - generic [ref=e6]:
       - button "☀ Light" [ref=e7] [cursor=pointer]

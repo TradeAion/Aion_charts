@@ -12,15 +12,15 @@ function output(command, args) {
 run('wasm-pack', ['build', '--target', 'web', 'wasm']);
 writeFileSync(
   'wasm/pkg/.gitignore',
-  '!axiuscharts_wasm_bg.wasm\n!axiuscharts_wasm_bg.wasm.d.ts\n!axiuscharts_wasm.d.ts\n!axiuscharts_wasm.js\n!package.json\n',
+  '!aion_charts_wasm_bg.wasm\n!aion_charts_wasm_bg.wasm.d.ts\n!aion_charts_wasm.d.ts\n!aion_charts_wasm.js\n!package.json\n',
 );
 
 const artifactPaths = [
   'wasm/pkg/.gitignore',
-  'wasm/pkg/axiuscharts_wasm.d.ts',
-  'wasm/pkg/axiuscharts_wasm.js',
-  'wasm/pkg/axiuscharts_wasm_bg.wasm',
-  'wasm/pkg/axiuscharts_wasm_bg.wasm.d.ts',
+  'wasm/pkg/aion_charts_wasm.d.ts',
+  'wasm/pkg/aion_charts_wasm.js',
+  'wasm/pkg/aion_charts_wasm_bg.wasm',
+  'wasm/pkg/aion_charts_wasm_bg.wasm.d.ts',
   'wasm/pkg/package.json',
 ];
 

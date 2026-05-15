@@ -16,7 +16,7 @@
 //! ## Usage
 //!
 //! ```rust,no_run
-//! use axiuscharts::core::renderer::theme::{ThemeConfig, ThemePreset};
+//! use aion_charts::core::renderer::theme::{ThemeConfig, ThemePreset};
 //!
 //! // Use a preset
 //! let dark = ThemeConfig::dark();
@@ -90,7 +90,7 @@ pub const CROSSHAIR_LABEL_BG: [f32; 4] = [ch(0x22), ch(0x26), ch(0x2A), 1.0];
 pub const CROSSHAIR_LABEL_TEXT: [f32; 4] = [ch(0xE7), ch(0xE7), ch(0xE7), 1.0];
 /// Default font family.
 ///
-/// This matches the Axiusflow app chart stack so chart text (axes, overlays,
+/// This matches the Aion_charts app chart stack so chart text (axes, overlays,
 /// drawing labels) stays visually aligned with the host UI by default.
 pub const FONT_FAMILY: &str =
     "'Geist Sans', 'Noto Sans SC', 'Noto Sans', Roboto, 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif";
@@ -106,7 +106,7 @@ pub const AXIS_TICK_LENGTH: f32 = 5.0;
 /// Match the reference contrast selection for solid label backgrounds.
 ///
 /// reference implementation converts the background to grayscale and chooses black text for bright
-/// labels, otherwise white text. AxiusCharts stores colors normalized to 0.0-1.0,
+/// labels, otherwise white text. Aion_charts stores colors normalized to 0.0-1.0,
 /// so the grayscale threshold is normalized from 160/255.
 pub fn contrast_text_color(background: [f32; 4]) -> [f32; 4] {
     let grayscale =
@@ -363,7 +363,7 @@ pub struct ThemeSubpaneSeparator {
 
 // ── ThemeConfig (top-level) ─────────────────────────────────────────────────
 
-/// Complete theme configuration for a AxiusCharts chart.
+/// Complete theme configuration for a Aion_charts chart.
 ///
 /// Organizes all visual settings into logical groups.
 /// Use [`ThemeConfig::dark()`] or [`ThemeConfig::light()`] for presets,
@@ -397,7 +397,7 @@ pub struct ThemeConfig {
 impl ThemeConfig {
     // ── Presets ──────────────────────────────────────────────────────────
 
-    /// Dark theme preset — matches the existing AxiusCharts default.
+    /// Dark theme preset — matches the existing Aion_charts default.
     pub fn dark() -> Self {
         Self {
             colors: ThemeColors {
@@ -701,52 +701,52 @@ impl ThemeConfig {
     /// Generate CSS custom properties (variables) from this theme.
     ///
     /// Returns a list of `(name, value)` pairs suitable for setting on a
-    /// DOM element's style. Variable names use the `--axiuscharts-` prefix.
+    /// DOM element's style. Variable names use the `--aion_charts-` prefix.
     pub fn to_css_variables(&self) -> Vec<(String, String)> {
         let mut vars = Vec::with_capacity(24);
 
         vars.push((
-            "--axiuscharts-bg".into(),
+            "--aion_charts-bg".into(),
             Self::color_to_css(&self.colors.background),
         ));
         vars.push((
-            "--axiuscharts-text".into(),
+            "--aion_charts-text".into(),
             Self::color_to_css(&self.colors.axis_text),
         ));
         vars.push((
-            "--axiuscharts-bullish".into(),
+            "--aion_charts-bullish".into(),
             Self::color_to_css(&self.colors.bullish),
         ));
         vars.push((
-            "--axiuscharts-bearish".into(),
+            "--aion_charts-bearish".into(),
             Self::color_to_css(&self.colors.bearish),
         ));
         vars.push((
-            "--axiuscharts-grid".into(),
+            "--aion_charts-grid".into(),
             Self::color_to_css(&self.colors.grid),
         ));
         vars.push((
-            "--axiuscharts-border".into(),
+            "--aion_charts-border".into(),
             Self::color_to_css(&self.colors.axis_border),
         ));
         vars.push((
-            "--axiuscharts-crosshair".into(),
+            "--aion_charts-crosshair".into(),
             Self::color_to_css(&self.crosshair.line_color),
         ));
         vars.push((
-            "--axiuscharts-crosshair-label-bg".into(),
+            "--aion_charts-crosshair-label-bg".into(),
             Self::color_to_css(&self.crosshair.label_bg),
         ));
         vars.push((
-            "--axiuscharts-crosshair-label-text".into(),
+            "--aion_charts-crosshair-label-text".into(),
             Self::color_to_css(&self.crosshair.label_text),
         ));
         vars.push((
-            "--axiuscharts-font-family".into(),
+            "--aion_charts-font-family".into(),
             self.typography.font_family.clone(),
         ));
         vars.push((
-            "--axiuscharts-font-size".into(),
+            "--aion_charts-font-size".into(),
             format!("{}px", self.typography.font_size),
         ));
 
@@ -824,9 +824,9 @@ mod tests {
     fn css_variable_generation() {
         let theme = ThemeConfig::dark();
         let vars = theme.to_css_variables();
-        assert!(vars.iter().any(|(k, _)| k == "--axiuscharts-bg"));
-        assert!(vars.iter().any(|(k, _)| k == "--axiuscharts-bullish"));
-        assert!(vars.iter().any(|(k, _)| k == "--axiuscharts-font-family"));
+        assert!(vars.iter().any(|(k, _)| k == "--aion_charts-bg"));
+        assert!(vars.iter().any(|(k, _)| k == "--aion_charts-bullish"));
+        assert!(vars.iter().any(|(k, _)| k == "--aion_charts-font-family"));
     }
 
     #[test]

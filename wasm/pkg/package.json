@@ -1,15 +1,15 @@
 {
-  "name": "axiuscharts-wasm",
+  "name": "aion_charts-wasm",
   "type": "module",
-  "description": "AxiusCharts WASM entry point — thin JS interop layer",
+  "description": "Aion_charts WASM entry point — thin JS interop layer",
   "version": "0.1.0",
   "files": [
-    "axiuscharts_wasm_bg.wasm",
-    "axiuscharts_wasm.js",
-    "axiuscharts_wasm.d.ts"
+    "aion_charts_wasm_bg.wasm",
+    "aion_charts_wasm.js",
+    "aion_charts_wasm.d.ts"
   ],
-  "main": "axiuscharts_wasm.js",
-  "types": "axiuscharts_wasm.d.ts",
+  "main": "aion_charts_wasm.js",
+  "types": "aion_charts_wasm.d.ts",
   "sideEffects": [
     "./snippets/*"
   ]

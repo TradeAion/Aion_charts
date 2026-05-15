@@ -16,7 +16,7 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use axiuscharts::MainChartType;
+//! use aion_charts::MainChartType;
 //!
 //! engine.set_main_chart_type(MainChartType::OhlcBars);
 //! ```

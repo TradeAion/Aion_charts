@@ -1,8 +1,8 @@
 /**
- * AxiusCharts — Production-grade WASM charting library
+ * Aion_charts — Production-grade WASM charting library
  *
  * This is the hand-crafted TypeScript definitions file.
- * It supplements the auto-generated `wasm/pkg/axiuscharts_wasm.d.ts` with:
+ * It supplements the auto-generated `wasm/pkg/aion_charts_wasm.d.ts` with:
  *   - Full typed event system (ChartEventMap, per-event payload types)
  *   - Properly typed `on<K>()`, `off<K>()`, `once<K>()` overloads
  *   - Typed CreateChartOptions / ThemeConfig interfaces
@@ -14,12 +14,12 @@
  *
  * @example
  * ```ts
- * import init, { AxiusCharts } from './pkg/axiuscharts_wasm.js';
+ * import init, { Aion_charts } from './pkg/aion_charts_wasm.js';
  * await init();
  *
  * const chartHost = document.getElementById('chart');
  * if (!chartHost) throw new Error("Missing chart element with id 'chart'");
- * const chart = await AxiusCharts.create_chart(chartHost, {
+ * const chart = await Aion_charts.create_chart(chartHost, {
  *   theme: 'dark',
  *   autoRender: true,
  *   symbol: 'BTCUSD',
@@ -165,7 +165,7 @@ export interface FootprintOptionsPatch {
 }
 
 /**
- * Options for `AxiusCharts.create_chart()` and `chart.apply_options()`.
+ * Options for `Aion_charts.create_chart()` and `chart.apply_options()`.
  * All fields are optional. Omitted fields use defaults on creation
  * or keep current values when passed to `apply_options()`.
  */
@@ -367,26 +367,26 @@ export interface ChartEventMap {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * CSS custom properties AxiusCharts writes to its container element.
+ * CSS custom properties Aion_charts writes to its container element.
  *
  * @example
  * ```css
- * .tooltip { background: var(--axiuscharts-bg); color: var(--axiuscharts-text); }
- * .signal  { color: var(--axiuscharts-bullish); }
+ * .tooltip { background: var(--aion_charts-bg); color: var(--aion_charts-text); }
+ * .signal  { color: var(--aion_charts-bullish); }
  * ```
  */
-export interface AxiusChartsCssVariables {
-  '--axiuscharts-bg': string;
-  '--axiuscharts-text': string;
-  '--axiuscharts-bullish': string;
-  '--axiuscharts-bearish': string;
-  '--axiuscharts-grid': string;
-  '--axiuscharts-border': string;
-  '--axiuscharts-crosshair': string;
-  '--axiuscharts-crosshair-label-bg': string;
-  '--axiuscharts-crosshair-label-text': string;
-  '--axiuscharts-font-family': string;
-  '--axiuscharts-font-size': string;
+export interface Aion_chartsCssVariables {
+  '--aion_charts-bg': string;
+  '--aion_charts-text': string;
+  '--aion_charts-bullish': string;
+  '--aion_charts-bearish': string;
+  '--aion_charts-grid': string;
+  '--aion_charts-border': string;
+  '--aion_charts-crosshair': string;
+  '--aion_charts-crosshair-label-bg': string;
+  '--aion_charts-crosshair-label-text': string;
+  '--aion_charts-font-family': string;
+  '--aion_charts-font-size': string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -489,19 +489,19 @@ export declare class ChartGroup {
 
 /**
  * Manages a resizable split-pane workspace container.
- * Each pane gets a host `<div>` that you pass to `AxiusCharts.create_chart()`.
+ * Each pane gets a host `<div>` that you pass to `Aion_charts.create_chart()`.
  *
  * @example
  * ```ts
  * const ws = new ChartWorkspace('my-container-id');
  * const rootPaneId = ws.root_pane_id();
  * const hostId     = ws.pane_host_id(rootPaneId);
- * const chart      = await AxiusCharts.create_chart(hostId, { autoRender: true });
+ * const chart      = await Aion_charts.create_chart(hostId, { autoRender: true });
  *
  * // Split vertically
  * const newPaneId = ws.split_active('vertical');
  * const newHostId = ws.pane_host_id(newPaneId);
- * const chart2    = await AxiusCharts.create_chart(newHostId, { autoRender: true });
+ * const chart2    = await Aion_charts.create_chart(newHostId, { autoRender: true });
  * ```
  */
 export declare class ChartWorkspace {
@@ -525,7 +525,7 @@ export declare class ChartWorkspace {
 
   /**
    * Get the host element ID for a pane.
-   * Pass this string to `AxiusCharts.create_chart()`.
+   * Pass this string to `Aion_charts.create_chart()`.
    */
   pane_host_id(pane_id: number): string;
 
@@ -591,10 +591,10 @@ export declare class ChartWorkspace {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AxiusCharts — main chart class
+// Aion_charts — main chart class
 // ─────────────────────────────────────────────────────────────────────────────
 
-export declare class AxiusCharts {
+export declare class Aion_charts {
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   /**
@@ -605,7 +605,7 @@ export declare class AxiusCharts {
    *
    * @example
    * ```ts
-   * const chart = await AxiusCharts.create_chart(
+   * const chart = await Aion_charts.create_chart(
    *   document.getElementById('chart')!,
    *   { theme: 'dark', autoRender: true, symbol: 'BTCUSD' }
    * );
@@ -614,12 +614,12 @@ export declare class AxiusCharts {
   static create_chart(
     container: HTMLElement | string,
     options?: CreateChartOptions,
-  ): Promise<AxiusCharts>;
+  ): Promise<Aion_charts>;
 
   /**
-   * @deprecated Use `AxiusCharts.create_chart(container, { renderer })` instead.
+   * @deprecated Use `Aion_charts.create_chart(container, { renderer })` instead.
    */
-  static create_with(container_id: string, renderer: string): Promise<AxiusCharts>;
+  static create_with(container_id: string, renderer: string): Promise<Aion_charts>;
 
   /**
    * Apply a partial options update at runtime.
@@ -741,10 +741,10 @@ export declare class AxiusCharts {
    * @example
    * ```ts
    * const vars = chart.get_css_variables();
-   * myTooltip.style.background = vars['--axiuscharts-bg'];
+   * myTooltip.style.background = vars['--aion_charts-bg'];
    * ```
    */
-  get_css_variables(): AxiusChartsCssVariables;
+  get_css_variables(): Aion_chartsCssVariables;
 
   /** Set the maximum indicator sub-pane count. Pass `0` to disable the cap. */
   set_max_indicator_panes(max_panes: number): void;
@@ -1853,9 +1853,9 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
  *
  * @example
  * ```ts
- * import init, { AxiusCharts } from './pkg/axiuscharts_wasm.js';
+ * import init, { Aion_charts } from './pkg/aion_charts_wasm.js';
  * await init();
- * const chart = await AxiusCharts.create_chart(document.getElementById('chart')!, { theme: 'dark' });
+ * const chart = await Aion_charts.create_chart(document.getElementById('chart')!, { theme: 'dark' });
  * ```
  */
 export default function init(

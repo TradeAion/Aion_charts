@@ -87,7 +87,7 @@ impl EventEmitter {
             for (i, entry) in list.iter().enumerate() {
                 if let Err(e) = entry.func.call1(&JsValue::NULL, data) {
                     web_sys::console::error_2(
-                        &JsValue::from_str(&format!("AxiusCharts: Error in '{}' callback:", event)),
+                        &JsValue::from_str(&format!("Aion_charts: Error in '{}' callback:", event)),
                         &e,
                     );
                 }
@@ -136,7 +136,7 @@ impl Default for EventEmitter {
 ///
 /// Each event type produces a plain JS object with the event's fields
 /// as properties, plus a `type` field with the event name string.
-pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
+pub fn chart_event_to_js(event: &aion_charts::ChartEvent) -> JsValue {
     let obj = js_sys::Object::new();
     let _ = js_sys::Reflect::set(
         &obj,
@@ -145,7 +145,7 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
     );
 
     match event {
-        axiuscharts::ChartEvent::CrosshairMove {
+        aion_charts::ChartEvent::CrosshairMove {
             x,
             y,
             bar_index,
@@ -176,7 +176,7 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
                 },
             );
         }
-        axiuscharts::ChartEvent::VisibleRangeChange { start_bar, end_bar } => {
+        aion_charts::ChartEvent::VisibleRangeChange { start_bar, end_bar } => {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("startBar"),
@@ -188,7 +188,7 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
                 &JsValue::from_f64(*end_bar),
             );
         }
-        axiuscharts::ChartEvent::Click {
+        aion_charts::ChartEvent::Click {
             x,
             y,
             bar_index,
@@ -210,7 +210,7 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
                 &JsValue::from_f64(*price),
             );
         }
-        axiuscharts::ChartEvent::DrawingCreated { id, tool } => {
+        aion_charts::ChartEvent::DrawingCreated { id, tool } => {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("id"),
@@ -219,7 +219,7 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
             let _ =
                 js_sys::Reflect::set(&obj, &JsValue::from_str("tool"), &JsValue::from_str(tool));
         }
-        axiuscharts::ChartEvent::DrawingSelected { id } => {
+        aion_charts::ChartEvent::DrawingSelected { id } => {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("id"),
@@ -229,32 +229,32 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
                 },
             );
         }
-        axiuscharts::ChartEvent::SymbolChange { symbol } => {
+        aion_charts::ChartEvent::SymbolChange { symbol } => {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("symbol"),
                 &JsValue::from_str(symbol),
             );
         }
-        axiuscharts::ChartEvent::IntervalChange { interval } => {
+        aion_charts::ChartEvent::IntervalChange { interval } => {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("interval"),
                 &JsValue::from_str(interval),
             );
         }
-        axiuscharts::ChartEvent::PriceScaleChange { mode } => {
+        aion_charts::ChartEvent::PriceScaleChange { mode } => {
             let _ =
                 js_sys::Reflect::set(&obj, &JsValue::from_str("mode"), &JsValue::from_str(mode));
         }
-        axiuscharts::ChartEvent::ChartTypeChange { chart_type } => {
+        aion_charts::ChartEvent::ChartTypeChange { chart_type } => {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("chartType"),
                 &JsValue::from_str(chart_type),
             );
         }
-        axiuscharts::ChartEvent::Resize { width, height } => {
+        aion_charts::ChartEvent::Resize { width, height } => {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("width"),
@@ -266,7 +266,7 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
                 &JsValue::from_f64(*height),
             );
         }
-        axiuscharts::ChartEvent::RendererFallback {
+        aion_charts::ChartEvent::RendererFallback {
             requested,
             active,
             reason,
@@ -287,14 +287,14 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
                 &JsValue::from_str(reason),
             );
         }
-        axiuscharts::ChartEvent::Error { message } => {
+        aion_charts::ChartEvent::Error { message } => {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("message"),
                 &JsValue::from_str(message),
             );
         }
-        axiuscharts::ChartEvent::ExecutionMarkClick {
+        aion_charts::ChartEvent::ExecutionMarkClick {
             id,
             timestamp_ms,
             price,
@@ -332,7 +332,7 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
                 },
             );
         }
-        axiuscharts::ChartEvent::ExecutionClusterClick {
+        aion_charts::ChartEvent::ExecutionClusterClick {
             leader_id,
             member_ids,
         } => {
@@ -348,7 +348,7 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
             let _ =
                 js_sys::Reflect::set(&obj, &JsValue::from_str("memberIds"), &member_array.into());
         }
-        axiuscharts::ChartEvent::ExecutionMarkHover {
+        aion_charts::ChartEvent::ExecutionMarkHover {
             id,
             timestamp_ms,
             price,
@@ -414,7 +414,7 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
                 },
             );
         }
-        axiuscharts::ChartEvent::MarkerHover {
+        aion_charts::ChartEvent::MarkerHover {
             series_id,
             marker_id,
             bar_index,
@@ -489,7 +489,7 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
                 },
             );
         }
-        axiuscharts::ChartEvent::OrderLineModified {
+        aion_charts::ChartEvent::OrderLineModified {
             id,
             old_price,
             new_price,
@@ -521,7 +521,7 @@ pub fn chart_event_to_js(event: &axiuscharts::ChartEvent) -> JsValue {
                 &JsValue::from_f64(*quantity),
             );
         }
-        axiuscharts::ChartEvent::OrderLineCancelled {
+        aion_charts::ChartEvent::OrderLineCancelled {
             id,
             price,
             order_type,

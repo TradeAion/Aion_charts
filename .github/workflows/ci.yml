@@ -1,4 +1,4 @@
-# AxiusCharts CI/CD Pipeline
+# Aion_charts CI/CD Pipeline
 # Runs on pushes to main and selected PR lifecycle events.
 #
 # Jobs:

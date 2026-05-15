@@ -1,6 +1,6 @@
-# AxiusCharts Docs
+# Aion_charts Docs
 
-This directory is the working documentation set for the AxiusCharts repository. It tracks the current Rust core, the WASM bridge, and the public JS contract.
+This directory is the working documentation set for the Aion_charts repository. It tracks the current Rust core, the WASM bridge, and the public JS contract.
 
 | Document | Purpose |
 | --- | --- |

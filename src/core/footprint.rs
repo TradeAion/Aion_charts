@@ -28,7 +28,7 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use axiuscharts::footprint::*;
+//! use aion_charts::footprint::*;
 //!
 //! let mut fp_data = FootprintData::new();
 //!

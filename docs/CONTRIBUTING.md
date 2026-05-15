@@ -6,7 +6,7 @@ Run these before handing off Rust changes:
 
 ```bash
 cargo check
-cargo check --target wasm32-unknown-unknown -p axiuscharts-wasm
+cargo check --target wasm32-unknown-unknown -p aion_charts-wasm
 cargo test
 cargo clippy -- -D warnings
 wasm-pack build wasm --target web --release
@@ -29,7 +29,7 @@ cargo test --features parity-tests
 
 Keep these in sync:
 
-- `wasm/axiuscharts.d.ts`
+- `wasm/aion_charts.d.ts`
 - `docs/api-reference.md`
 - `docs/events.md`
 - `docs/feature-matrix.md`
@@ -40,7 +40,7 @@ Keep these in sync:
 1. Add the event variant in `src/core/events.rs`
 2. Emit it from the engine path that owns the state change
 3. Bridge it through the WASM emitter
-4. Update `wasm/axiuscharts.d.ts`
+4. Update `wasm/aion_charts.d.ts`
 5. Document it in `docs/events.md`
 
 ## Adding A New Drawing Tool

@@ -1,4 +1,4 @@
-import init, { AxiusCharts } from './pkg/axiuscharts_wasm.js';
+import init, { Aion_charts } from './pkg/aion_charts_wasm.js';
 
 let initPromise = null;
 
@@ -10,7 +10,7 @@ export const HistogramSeries = 'Histogram';
 export const BaselineSeries = 'Baseline';
 export const CustomSeries = 'Custom';
 
-export function initAxiusCharts(initOptions) {
+export function initAion_charts(initOptions) {
   if (!initPromise) {
     initPromise = init(initOptions);
   }
@@ -18,8 +18,8 @@ export function initAxiusCharts(initOptions) {
 }
 
 export async function createChart(container, options = {}) {
-  await initAxiusCharts(options.wasm);
-  const chart = await AxiusCharts.create_chart(container, options);
+  await initAion_charts(options.wasm);
+  const chart = await Aion_charts.create_chart(container, options);
   return new ChartApi(chart, container);
 }
 
@@ -269,7 +269,7 @@ class ChartApi {
     let watermark = this._watermark;
     if (!watermark) {
       watermark = document.createElement('div');
-      watermark.className = 'axiuscharts-watermark';
+      watermark.className = 'aion_charts-watermark';
       watermark.style.cssText = [
         'position:absolute',
         'pointer-events:none',
@@ -612,7 +612,7 @@ class CustomSeriesApi {
     this._data = [];
     this._dataChangedHandlers = new Set();
     this._canvas = document.createElement('canvas');
-    this._canvas.className = 'axiuscharts-custom-series';
+    this._canvas.className = 'aion_charts-custom-series';
     this._canvas.style.cssText = [
       'position:absolute',
       'left:0',
@@ -909,7 +909,7 @@ function readPersistence(raw) {
 
 export default {
   createChart,
-  initAxiusCharts,
+  initAion_charts,
   LineSeries,
   AreaSeries,
   BarSeries,

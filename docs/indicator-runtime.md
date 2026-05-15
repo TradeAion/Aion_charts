@@ -1,6 +1,6 @@
 # Indicator Runtime
 
-AxiusCharts includes a user-indicator pipeline that compiles source into an intermediate representation, attaches runtime instances, and emits draw instructions and diagnostics back into the chart engine.
+Aion_charts includes a user-indicator pipeline that compiles source into an intermediate representation, attaches runtime instances, and emits draw instructions and diagnostics back into the chart engine.
 
 ## Runtime Overview
 

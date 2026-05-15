@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installHarness } from './axius-harness';
+import { installHarness } from './aion-harness';
 
 test.beforeEach(async ({ page }) => {
   await installHarness(page);
@@ -7,7 +7,7 @@ test.beforeEach(async ({ page }) => {
 
 test('marker APIs reject malformed input and stale series IDs', async ({ page }) => {
   const result = await page.evaluate(() => {
-    const { chart } = (window as any).__axiusHarness;
+    const { chart } = (window as any).__aionHarness;
     const errors: string[] = [];
 
     const capture = (fn: () => unknown) => {
@@ -38,7 +38,7 @@ test('marker APIs reject malformed input and stale series IDs', async ({ page })
 
     const series = chart.add_line_series(0.2, 0.4, 1, 1, 2, 'solid');
     const markerId = chart.add_marker(series, 1, 'circle', 'above_bar', 0, 0.2, 0.4, 1, 1, 6, 'ok');
-    const timeMarkerId = chart.add_marker_at_time(series, (window as any).__axiusHarness.bars.timestamps[2], 'circle', 'above_bar', 0, 0.2, 0.4, 1, 1, 6, 'time');
+    const timeMarkerId = chart.add_marker_at_time(series, (window as any).__aionHarness.bars.timestamps[2], 'circle', 'above_bar', 0, 0.2, 0.4, 1, 1, 6, 'time');
     const removed = chart.remove_series(series);
     capture(() => chart.add_marker(series, 1, 'circle', 'above_bar', 0, 0.2, 0.4, 1, 1, 6, 'stale'));
 
@@ -72,7 +72,7 @@ test('marker APIs reject malformed input and stale series IDs', async ({ page })
 
 test('timestamp-anchored markers stay attached after data prepend', async ({ page }) => {
   const result = await page.evaluate(() => {
-    const { chart, bars } = (window as any).__axiusHarness;
+    const { chart, bars } = (window as any).__aionHarness;
     const markerTime = bars.timestamps[24];
     const markerPrice = bars.close[24] + 8;
 
@@ -117,7 +117,7 @@ test('timestamp-anchored markers stay attached after data prepend', async ({ pag
     const after = chart.project_point(markerTime, markerPrice);
 
     const countMarkerPixelsNear = (point: { x: number; y: number }) => {
-      const canvases = Array.from(document.querySelectorAll<HTMLCanvasElement>('#axius-e2e-harness canvas'));
+      const canvases = Array.from(document.querySelectorAll<HTMLCanvasElement>('#aion-e2e-harness canvas'));
       let count = 0;
       for (const canvas of canvases) {
         const ctx = canvas.getContext('2d');
@@ -158,7 +158,7 @@ test('timestamp-anchored markers stay attached after data prepend', async ({ pag
 
 test('timestamp-anchored markers survive trims and full reloads while their timestamp remains', async ({ page }) => {
   const result = await page.evaluate(() => {
-    const { chart, bars } = (window as any).__axiusHarness;
+    const { chart, bars } = (window as any).__aionHarness;
     const markerTime = bars.timestamps[24];
     const markerPrice = bars.close[24] + 8;
 
@@ -166,7 +166,7 @@ test('timestamp-anchored markers survive trims and full reloads while their time
     chart.add_marker_at_time(0, markerTime, 'circle', 'at_price', markerPrice, 1, 0, 1, 1, 9, 'trim');
 
     const countMarkerPixelsNear = (point: { x: number; y: number }) => {
-      const canvases = Array.from(document.querySelectorAll<HTMLCanvasElement>('#axius-e2e-harness canvas'));
+      const canvases = Array.from(document.querySelectorAll<HTMLCanvasElement>('#aion-e2e-harness canvas'));
       let count = 0;
       for (const canvas of canvases) {
         const ctx = canvas.getContext('2d');
@@ -245,7 +245,7 @@ test('timestamp-anchored markers survive trims and full reloads while their time
 
 test('marker auto scale keeps above-bar markers inside the pane', async ({ page }) => {
   const result = await page.evaluate(() => {
-    const { chart, bars } = (window as any).__axiusHarness;
+    const { chart, bars } = (window as any).__aionHarness;
     let markerIndex = 0;
     for (let i = 1; i < bars.high.length; i += 1) {
       if (bars.high[i] > bars.high[markerIndex]) markerIndex = i;
@@ -271,7 +271,7 @@ test('marker auto scale keeps above-bar markers inside the pane', async ({ page 
     };
 
     const countMarkerPixelsNear = (point: { x: number; y: number }) => {
-      const canvases = Array.from(document.querySelectorAll<HTMLCanvasElement>('#axius-e2e-harness canvas'));
+      const canvases = Array.from(document.querySelectorAll<HTMLCanvasElement>('#aion-e2e-harness canvas'));
       let count = 0;
       for (const canvas of canvases) {
         const ctx = canvas.getContext('2d');
@@ -316,7 +316,7 @@ test('marker auto scale keeps above-bar markers inside the pane', async ({ page 
 
 test('marker hit testing returns rendered marker metadata', async ({ page }) => {
   const result = await page.evaluate(() => {
-    const { chart, bars } = (window as any).__axiusHarness;
+    const { chart, bars } = (window as any).__aionHarness;
     const markerTime = bars.timestamps[18];
     const markerPrice = bars.close[18] + 4;
 
@@ -354,7 +354,7 @@ test('marker hit testing returns rendered marker metadata', async ({ page }) => 
 
 test('marker hover events fire on enter and leave without duplicates', async ({ page }) => {
   const setup = await page.evaluate(() => {
-    const { chart, bars } = (window as any).__axiusHarness;
+    const { chart, bars } = (window as any).__aionHarness;
     const markerTime = bars.timestamps[20];
     const markerPrice = bars.close[20] + 3;
 
@@ -374,17 +374,17 @@ test('marker hover events fire on enter and leave without duplicates', async ({ 
   });
 
   expect(setup.visible).toBe(true);
-  const canvasBox = await page.locator('#axius-e2e-harness canvas').first().boundingBox();
+  const canvasBox = await page.locator('#aion-e2e-harness canvas').first().boundingBox();
   expect(canvasBox).not.toBeNull();
 
   await page.mouse.move(canvasBox!.x + setup.x, canvasBox!.y + setup.y);
-  await page.evaluate(() => (window as any).__axiusHarness.chart.render());
+  await page.evaluate(() => (window as any).__aionHarness.chart.render());
   await page.waitForTimeout(30);
   await page.mouse.move(canvasBox!.x + setup.x + 2, canvasBox!.y + setup.y + 1);
-  await page.evaluate(() => (window as any).__axiusHarness.chart.render());
+  await page.evaluate(() => (window as any).__aionHarness.chart.render());
   await page.waitForTimeout(30);
   await page.mouse.move(canvasBox!.x + setup.x + 120, canvasBox!.y + setup.y + 120);
-  await page.evaluate(() => (window as any).__axiusHarness.chart.render());
+  await page.evaluate(() => (window as any).__aionHarness.chart.render());
   await page.waitForTimeout(30);
 
   const events = await page.evaluate(() => (window as any).__markerHoverEvents);

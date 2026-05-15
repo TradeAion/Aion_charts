@@ -3,14 +3,14 @@
 ## Install
 
 ```bash
-npm install axiuscharts-wasm
+npm install aion_charts-wasm
 ```
 
 For local development in this repository:
 
 ```bash
 cargo check
-cargo check --target wasm32-unknown-unknown -p axiuscharts-wasm
+cargo check --target wasm32-unknown-unknown -p aion_charts-wasm
 cargo test
 wasm-pack build wasm --target web --release
 ```
@@ -21,11 +21,11 @@ wasm-pack build wasm --target web --release
 <div id="chart" style="width: 100%; height: 420px;"></div>
 
 <script type="module">
-  import init, { AxiusCharts } from './pkg/axiuscharts_wasm.js';
+  import init, { Aion_charts } from './pkg/aion_charts_wasm.js';
 
   await init();
 
-  const chart = await AxiusCharts.create_chart('chart', {
+  const chart = await Aion_charts.create_chart('chart', {
     renderer: 'auto',
     autoRender: true,
     theme: 'dark',
@@ -50,7 +50,7 @@ wasm-pack build wasm --target web --release
 
 ### Why `Float64Array`?
 
-Logical prices are stored and processed as `f64` across the engine, persistence layer, studies, and WASM boundary. That preserves values such as `103842.5712345` and `0.00000012345678` exactly through the AxiusCharts data path. Only the final renderer projection converts into single-precision GPU-friendly attributes.
+Logical prices are stored and processed as `f64` across the engine, persistence layer, studies, and WASM boundary. That preserves values such as `103842.5712345` and `0.00000012345678` exactly through the Aion_charts data path. Only the final renderer projection converts into single-precision GPU-friendly attributes.
 
 ## Initialization Rules
 
@@ -64,11 +64,11 @@ Logical prices are stored and processed as `f64` across the engine, persistence 
 `autoRender` defaults to `true`. When you need explicit frame control:
 
 ```ts
-const chart = await AxiusCharts.create_chart(host, { autoRender: false });
+const chart = await Aion_charts.create_chart(host, { autoRender: false });
 chart.render();
 ```
 
-Auto-render is invalidation-driven. AxiusCharts schedules a one-shot RAF when state changes; it does not spin a permanent RAF loop.
+Auto-render is invalidation-driven. Aion_charts schedules a one-shot RAF when state changes; it does not spin a permanent RAF loop.
 
 ## Common Next Steps
 

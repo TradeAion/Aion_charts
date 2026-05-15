@@ -1,11 +1,11 @@
 # Theming
 
-AxiusCharts supports built-in dark and light presets plus partial custom theme objects passed through `create_chart(...)` or `apply_options(...)`.
+Aion_charts supports built-in dark and light presets plus partial custom theme objects passed through `create_chart(...)` or `apply_options(...)`.
 
 ## Presets
 
 ```ts
-const chart = await AxiusCharts.create_chart(host, { theme: 'dark' });
+const chart = await Aion_charts.create_chart(host, { theme: 'dark' });
 chart.apply_options({ theme: 'light' });
 ```
 
@@ -17,13 +17,13 @@ const vars = chart.get_css_variables();
 
 Common emitted variables:
 
-- `--axiuscharts-bg`
-- `--axiuscharts-text`
-- `--axiuscharts-border`
-- `--axiuscharts-grid`
-- `--axiuscharts-crosshair`
-- `--axiuscharts-bullish`
-- `--axiuscharts-bearish`
+- `--aion_charts-bg`
+- `--aion_charts-text`
+- `--aion_charts-border`
+- `--aion_charts-grid`
+- `--aion_charts-crosshair`
+- `--aion_charts-bullish`
+- `--aion_charts-bearish`
 
 ## Custom Theme Objects
 

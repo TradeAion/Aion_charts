@@ -595,7 +595,7 @@ impl ChartRenderer for WgpuRenderer {
             .gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("axiuscharts_encoder"),
+                label: Some("aion_charts_encoder"),
             });
         // Cache the theme bg_color as a wgpu::Color for all LoadOp::Clear calls this frame.
         // Previously this was hardcoded to 0.09020 (#131315 dark) — now it always matches

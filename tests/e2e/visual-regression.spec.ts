@@ -6,7 +6,7 @@ async function installVisualHarness(page: Page, name: string) {
   await expect(page.locator('#error-banner')).toBeHidden();
 
   await page.evaluate(async ({ harnessName }) => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = `visual-${harnessName}`;
     host.style.cssText = [
@@ -399,7 +399,7 @@ test('visual baseline: initial light area facade options', async ({ page }) => {
   await expect(page.locator('#error-banner')).toBeHidden();
 
   await page.evaluate(async () => {
-    const module = await import('/wasm/axiuscharts-compat.js');
+    const module = await import('/wasm/aion_charts-compat.js');
     const host = document.createElement('div');
     host.id = 'visual-initial-light-area-options';
     host.style.cssText = [
