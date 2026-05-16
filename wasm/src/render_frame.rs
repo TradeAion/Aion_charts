@@ -615,7 +615,8 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
             let scroll = subpane.scroll_state.borrow();
             scroll.dragging || scroll.animation.is_active()
         })
-        || (s.replay_active && s.replay_playing);
+        || (s.replay_active && s.replay_playing)
+        || text_edit_animation_active;
     drop(s);
     dirty.set(false);
 

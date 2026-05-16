@@ -56,7 +56,7 @@
 use aion_charts::core::guardrails::{DEFAULT_MAX_BARS_PER_LOAD, DEFAULT_MAX_INDICATOR_PANES};
 use aion_charts::{
     generate_footprint_sample_data, generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions,
-    BaselineSeriesOptions, Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup,
+    BarArray, BaselineSeriesOptions, Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup,
     ChartGuardrails, ChartPaneId, ChartStyle, CrosshairMagnetMode, CrosshairSnapshot, DataRange,
     GpuContext, HistogramPoint, HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint,
     LineSeriesOptions, LineStyle, MainChartType, MainViewportPreset, MarkerPosition, MarkerShape,
@@ -460,6 +460,39 @@ fn request_auto_render_frame_if_needed(dirty: &Rc<RenderInvalidation>) {
     if let Ok(id) = window.request_animation_frame(callback.as_ref().unchecked_ref()) {
         dirty.raf_id.set(id);
     }
+}
+
+fn draw_canvas_onto(
+    ctx: &web_sys::CanvasRenderingContext2d,
+    canvas: &web_sys::HtmlCanvasElement,
+    dx: f64,
+    dy: f64,
+) -> Result<(), JsValue> {
+    ctx.draw_image_with_html_canvas_element(canvas, dx, dy)
+}
+
+fn create_export_canvas(width: u32, height: u32) -> Result<web_sys::HtmlCanvasElement, JsValue> {
+    let window = web_sys::window().ok_or_else(|| js_err("export_image: no window"))?;
+    let document = window
+        .document()
+        .ok_or_else(|| js_err("export_image: no document"))?;
+    let canvas = document
+        .create_element("canvas")?
+        .dyn_into::<web_sys::HtmlCanvasElement>()
+        .map_err(|_| js_err("export_image: failed to create canvas"))?;
+    canvas.set_width(width.max(1));
+    canvas.set_height(height.max(1));
+    Ok(canvas)
+}
+
+fn canvas_2d_context(
+    canvas: &web_sys::HtmlCanvasElement,
+) -> Result<web_sys::CanvasRenderingContext2d, JsValue> {
+    canvas
+        .get_context("2d")?
+        .ok_or_else(|| js_err("export_image: 2d context unavailable"))?
+        .dyn_into::<web_sys::CanvasRenderingContext2d>()
+        .map_err(|_| js_err("export_image: context is not CanvasRenderingContext2d"))
 }
 
 fn with_crosshair_lines_mut<F>(style: &mut ChartStyle, target: &str, mut f: F)
@@ -6457,6 +6490,8 @@ impl Aion_charts {
             .emit(aion_charts::ChartEvent::PriceScaleChange {
                 mode: mode.to_string(),
             });
+        drop(s);
+        self.mark_dirty();
     }
 
     // ── Main Chart Type API ────────────────────────────────────────────────────
@@ -6475,6 +6510,8 @@ impl Aion_charts {
             .emit(aion_charts::ChartEvent::ChartTypeChange {
                 chart_type: ct.as_str().to_string(),
             });
+        drop(s);
+        self.mark_dirty();
         log::info!("set_chart_type: {}", ct.as_str());
     }
 
@@ -7747,6 +7784,7 @@ impl Aion_charts {
         opts.line_width = line_width as f64;
         opts.line_style = LineStyle::from_str(line_style);
         let id = self.inner.borrow_mut().engine.add_line_series(opts);
+        self.mark_dirty();
         log::info!("add_line_series: id={}, style={}", id.0, line_style);
         id.0
     }
@@ -7783,6 +7821,7 @@ impl Aion_charts {
         ];
         opts.line_width = line_width as f64;
         let id = self.inner.borrow_mut().engine.add_area_series(opts);
+        self.mark_dirty();
         log::info!("add_area_series: id={}", id.0);
         id.0
     }
@@ -7803,6 +7842,7 @@ impl Aion_charts {
         opts.color = [color_r, color_g, color_b, color_a];
         opts.base = base;
         let id = self.inner.borrow_mut().engine.add_histogram_series(opts);
+        self.mark_dirty();
         log::info!("add_histogram_series: id={}", id.0);
         id.0
     }
@@ -7858,6 +7898,8 @@ impl Aion_charts {
                 .set_histogram_data_arrays(SeriesId(id), timestamps, values)
                 .map_err(js_err)?;
         }
+        drop(s);
+        self.mark_dirty();
         log::info!(
             "set_histogram_data: id={}, {} points, colors={}",
             id,
@@ -7892,6 +7934,7 @@ impl Aion_charts {
         opts.open_visible = open_visible;
         opts.thin_bars = thin_bars;
         let id = self.inner.borrow_mut().engine.add_bar_series(opts);
+        self.mark_dirty();
         log::info!("add_bar_series: id={}", id.0);
         id.0
     }
@@ -7920,6 +7963,8 @@ impl Aion_charts {
         s.engine
             .set_bar_data_arrays(SeriesId(id), timestamps, open, high, low, close)
             .map_err(js_err)?;
+        drop(s);
+        self.mark_dirty();
         let count = timestamps.len();
         log::info!("set_bar_series_data: id={}, {} bars", id, count);
         Ok(())
@@ -7979,6 +8024,7 @@ impl Aion_charts {
         ];
         opts.line_width = line_width as f64;
         let id = self.inner.borrow_mut().engine.add_baseline_series(opts);
+        self.mark_dirty();
         log::info!(
             "add_baseline_series: id={}, base_value={}",
             id.0,
@@ -8008,6 +8054,7 @@ impl Aion_charts {
             .engine
             .set_series_data(SeriesId(id), data)
             .map_err(js_err)?;
+        self.mark_dirty();
         log::info!("set_series_data: id={}, {} points", id, count);
         Ok(())
     }
@@ -8015,6 +8062,9 @@ impl Aion_charts {
     /// Remove a series by ID.
     pub fn remove_series(&mut self, id: u32) -> bool {
         let removed = self.inner.borrow_mut().engine.remove_series(SeriesId(id));
+        if removed {
+            self.mark_dirty();
+        }
         log::info!("remove_series: id={}, removed={}", id, removed);
         removed
     }
@@ -10086,10 +10136,13 @@ impl Aion_charts {
             .try_borrow_mut()
             .map_err(|_| js_err("append_bar: runtime busy"))?;
         if inner.replay_active {
-            inner.replay_buffer_append_bar(bar).map_err(js_err)
+            inner.replay_buffer_append_bar(bar).map_err(js_err)?;
         } else {
-            inner.engine.append_bar(bar).map_err(js_err)
+            inner.engine.append_bar(bar).map_err(js_err)?;
         }
+        drop(inner);
+        self.mark_dirty();
+        Ok(())
     }
 
     /// Update the last bar in the data array. Used for real-time tick updates.
@@ -10118,10 +10171,13 @@ impl Aion_charts {
             .try_borrow_mut()
             .map_err(|_| js_err("update_last_bar: runtime busy"))?;
         if inner.replay_active {
-            inner.replay_buffer_update_last_bar(bar).map_err(js_err)
+            inner.replay_buffer_update_last_bar(bar).map_err(js_err)?;
         } else {
-            inner.engine.update_bar(bar).map_err(js_err)
+            inner.engine.update_bar(bar).map_err(js_err)?;
         }
+        drop(inner);
+        self.mark_dirty();
+        Ok(())
     }
 
     /// compatibility-style main series update semantics:
@@ -10151,10 +10207,13 @@ impl Aion_charts {
             .map_err(|_| js_err("upsert_bar: runtime busy"))?;
         let bar = Bar::new(timestamp, open, high, low, close, volume);
         if inner.replay_active {
-            inner.replay_buffer_upsert_bar(bar).map_err(js_err)
+            inner.replay_buffer_upsert_bar(bar).map_err(js_err)?;
         } else {
-            inner.engine.upsert_bar(bar).map_err(js_err)
+            inner.engine.upsert_bar(bar).map_err(js_err)?;
         }
+        drop(inner);
+        self.mark_dirty();
+        Ok(())
     }
 
     /// Upsert a main bar and atomically set its footprint levels.
@@ -10206,6 +10265,84 @@ impl Aion_charts {
         inner
             .engine
             .set_footprint_bar(bar_index, aion_charts::FootprintBar { levels });
+        drop(inner);
+        self.mark_dirty();
+        Ok(())
+    }
+
+    /// Append multiple bars in one call. The arrays must be equal length and strictly increasing.
+    pub fn append_bars(
+        &self,
+        open: &[f64],
+        high: &[f64],
+        low: &[f64],
+        close: &[f64],
+        volume: &[f64],
+        timestamps: &[u64],
+    ) -> Result<(), JsValue> {
+        enforce_bar_load_guardrail("append_bars", &self.guardrails, open.len())?;
+        let bars = build_main_bars_from_arrays(
+            "append_bars",
+            open,
+            high,
+            low,
+            close,
+            volume,
+            timestamps,
+        )?;
+        let count = bars.len();
+        enforce_bar_load_guardrail("append_bars", &self.guardrails, count)?;
+        let mut inner = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| js_err("append_bars: runtime busy"))?;
+        for bar in bars {
+            if inner.replay_active {
+                inner.replay_buffer_append_bar(bar).map_err(js_err)?;
+            } else {
+                inner.engine.append_bar(bar).map_err(js_err)?;
+            }
+        }
+        drop(inner);
+        self.mark_dirty();
+        Ok(())
+    }
+
+    /// Upsert multiple bars in one call. Existing latest timestamp is updated; newer bars append.
+    pub fn upsert_bars(
+        &self,
+        open: &[f64],
+        high: &[f64],
+        low: &[f64],
+        close: &[f64],
+        volume: &[f64],
+        timestamps: &[u64],
+    ) -> Result<(), JsValue> {
+        enforce_bar_load_guardrail("upsert_bars", &self.guardrails, open.len())?;
+        let bars = build_main_bars_from_arrays(
+            "upsert_bars",
+            open,
+            high,
+            low,
+            close,
+            volume,
+            timestamps,
+        )?;
+        let count = bars.len();
+        enforce_bar_load_guardrail("upsert_bars", &self.guardrails, count)?;
+        let mut inner = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| js_err("upsert_bars: runtime busy"))?;
+        for bar in bars {
+            if inner.replay_active {
+                inner.replay_buffer_upsert_bar(bar).map_err(js_err)?;
+            } else {
+                inner.engine.upsert_bar(bar).map_err(js_err)?;
+            }
+        }
+        drop(inner);
+        self.mark_dirty();
         Ok(())
     }
 
@@ -10221,7 +10358,10 @@ impl Aion_charts {
         inner
             .engine
             .append_series_point(SeriesId(id), LinePoint { timestamp, value })
-            .map_err(js_err)
+            .map_err(js_err)?;
+        drop(inner);
+        self.mark_dirty();
+        Ok(())
     }
 
     /// Update the last point in a line/area/baseline overlay series.
@@ -10241,7 +10381,10 @@ impl Aion_charts {
         inner
             .engine
             .update_last_series_point(SeriesId(id), LinePoint { timestamp, value })
-            .map_err(js_err)
+            .map_err(js_err)?;
+        drop(inner);
+        self.mark_dirty();
+        Ok(())
     }
 
     /// compatibility-style update semantics for line/area/baseline overlays:
@@ -10257,7 +10400,10 @@ impl Aion_charts {
         inner
             .engine
             .upsert_series_point(SeriesId(id), LinePoint { timestamp, value })
-            .map_err(js_err)
+            .map_err(js_err)?;
+        drop(inner);
+        self.mark_dirty();
+        Ok(())
     }
 
     /// Append a single point to a histogram overlay series.
@@ -10290,7 +10436,10 @@ impl Aion_charts {
                     color: [color_r, color_g, color_b, color_a],
                 },
             )
-            .map_err(js_err)
+            .map_err(js_err)?;
+        drop(inner);
+        self.mark_dirty();
+        Ok(())
     }
 
     /// Update the last point in a histogram overlay series.
@@ -10323,7 +10472,10 @@ impl Aion_charts {
                     color: [color_r, color_g, color_b, color_a],
                 },
             )
-            .map_err(js_err)
+            .map_err(js_err)?;
+        drop(inner);
+        self.mark_dirty();
+        Ok(())
     }
 
     /// compatibility-style update semantics for histogram overlays:
@@ -10357,7 +10509,10 @@ impl Aion_charts {
                     color: [color_r, color_g, color_b, color_a],
                 },
             )
-            .map_err(js_err)
+            .map_err(js_err)?;
+        drop(inner);
+        self.mark_dirty();
+        Ok(())
     }
 
     /// Append a single point to a bar (OHLC) overlay series.
@@ -10395,7 +10550,10 @@ impl Aion_charts {
                     close,
                 },
             )
-            .map_err(js_err)
+            .map_err(js_err)?;
+        drop(inner);
+        self.mark_dirty();
+        Ok(())
     }
 
     /// Update the last point in a bar (OHLC) overlay series.
@@ -10433,7 +10591,10 @@ impl Aion_charts {
                     close,
                 },
             )
-            .map_err(js_err)
+            .map_err(js_err)?;
+        drop(inner);
+        self.mark_dirty();
+        Ok(())
     }
 
     /// compatibility-style update semantics for OHLC bar overlays:
@@ -10472,7 +10633,10 @@ impl Aion_charts {
                     close,
                 },
             )
-            .map_err(js_err)
+            .map_err(js_err)?;
+        drop(inner);
+        self.mark_dirty();
+        Ok(())
     }
 
     // ── Render ───────────────────────────────────────────────────────────────
@@ -10481,6 +10645,43 @@ impl Aion_charts {
     pub fn render(&mut self) {
         self.dirty.set(true);
         let _ = render_frame::do_render_frame(&self.inner, &self.dirty);
+    }
+
+    /// Export the main chart pane canvases as a PNG data URL.
+    pub fn export_pane_image_data_url(&mut self) -> Result<String, JsValue> {
+        self.render();
+        let s = self.inner.borrow();
+        let source = &s.layout.pane.chart;
+        let out = create_export_canvas(source.width(), source.height())?;
+        let ctx = canvas_2d_context(&out)?;
+        draw_canvas_onto(&ctx, &s.layout.pane.chart, 0.0, 0.0)?;
+        draw_canvas_onto(&ctx, &s.layout.pane.top, 0.0, 0.0)?;
+        out.to_data_url_with_type("image/png")
+    }
+
+    /// Export the pane, price axis, and time axis canvases as one PNG data URL.
+    pub fn export_image_data_url(&mut self) -> Result<String, JsValue> {
+        self.render();
+        let s = self.inner.borrow();
+        let pane_w = s.layout.pane.chart.width();
+        let pane_h = s.layout.pane.chart.height();
+        let price_w = s.layout.price_axis.base.width();
+        let time_h = s.layout.time_axis.base.height();
+        let out = create_export_canvas(pane_w + price_w, pane_h + time_h)?;
+        let ctx = canvas_2d_context(&out)?;
+
+        draw_canvas_onto(&ctx, &s.layout.pane.chart, 0.0, 0.0)?;
+        draw_canvas_onto(&ctx, &s.layout.pane.top, 0.0, 0.0)?;
+
+        let price_x = pane_w as f64;
+        draw_canvas_onto(&ctx, &s.layout.price_axis.base, price_x, 0.0)?;
+        draw_canvas_onto(&ctx, &s.layout.price_axis.top, price_x, 0.0)?;
+
+        let time_y = pane_h as f64;
+        draw_canvas_onto(&ctx, &s.layout.time_axis.base, 0.0, time_y)?;
+        draw_canvas_onto(&ctx, &s.layout.time_axis.top, 0.0, time_y)?;
+
+        out.to_data_url_with_type("image/png")
     }
 
     // ── Private helpers ────────────────────────────────────────────────────────
@@ -10612,6 +10813,190 @@ impl Aion_charts {
 
         log::info!("Aion_charts disposed: all event listeners removed");
     }
+}
+
+#[wasm_bindgen]
+pub struct IndicatorWorkerRuntime {
+    manager: aion_charts::IndicatorManager,
+    bars: BarArray,
+    symbol: String,
+    interval: String,
+}
+
+#[wasm_bindgen]
+impl IndicatorWorkerRuntime {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            manager: aion_charts::IndicatorManager::new(true),
+            bars: BarArray::new(),
+            symbol: "AION".to_string(),
+            interval: "1m".to_string(),
+        }
+    }
+
+    pub fn set_context(&mut self, symbol: &str, interval: &str) {
+        self.symbol = symbol.to_string();
+        self.interval = interval.to_string();
+    }
+
+    pub fn compile(&mut self, source: &str, meta_json: &str) -> JsValue {
+        if source.len() > MAX_INDICATOR_SOURCE_BYTES {
+            return indicator_error_result(
+                "INDL-3005",
+                &format!(
+                    "indicator source is {} bytes; max is {}",
+                    source.len(),
+                    MAX_INDICATOR_SOURCE_BYTES
+                ),
+                "reduce the indicator source size",
+            );
+        }
+        let feature_flags = serde_json::from_str::<JsonValue>(meta_json)
+            .ok()
+            .and_then(|v| v.get("featureFlags").cloned())
+            .and_then(|v| v.as_array().cloned())
+            .map(|arr| {
+                arr.into_iter()
+                    .filter_map(|x| x.as_str().map(ToString::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let result = self.manager.compile(source, &feature_flags);
+        let obj = js_sys::Object::new();
+        let indicator_id = result
+            .indicator_id
+            .map(|id| JsValue::from_f64(id as f64))
+            .unwrap_or(JsValue::NULL);
+        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("indicatorId"), &indicator_id);
+        if let Some(id) = result.indicator_id {
+            if let Some(mode) = self.manager.get_program_compile_mode(id) {
+                let _ = js_sys::Reflect::set(
+                    &obj,
+                    &JsValue::from_str("compileMode"),
+                    &JsValue::from_str(&mode),
+                );
+            }
+        }
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("diagnostics"),
+            &diagnostics_to_js(&result.diagnostics),
+        );
+        obj.into()
+    }
+
+    pub fn attach(&mut self, indicator_id: u32, opts_json: &str) -> u32 {
+        let mut inputs = serde_json::from_str::<JsonValue>(opts_json)
+            .ok()
+            .and_then(|v| v.get("inputs").cloned())
+            .unwrap_or(JsonValue::Null);
+        inputs = with_worker_indicator_input_defaults(inputs, &self.symbol, &self.interval);
+        let instance_id = self.manager.attach(indicator_id, inputs).unwrap_or(0);
+        if instance_id > 0 && self.bars.len() > 0 {
+            self.manager.on_set_data(&self.bars);
+        }
+        instance_id
+    }
+
+    pub fn set_data_arrays(
+        &mut self,
+        open: &[f64],
+        high: &[f64],
+        low: &[f64],
+        close: &[f64],
+        volume: &[f64],
+        timestamps: &[u64],
+    ) -> Result<(), JsValue> {
+        let bars = build_main_bars_from_arrays(
+            "indicator_worker.set_data_arrays",
+            open,
+            high,
+            low,
+            close,
+            volume,
+            timestamps,
+        )?;
+        self.bars.set(bars).map_err(js_err)?;
+        self.manager.on_set_data(&self.bars);
+        Ok(())
+    }
+
+    pub fn upsert_bar(
+        &mut self,
+        timestamp: u64,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
+        volume: f64,
+    ) -> Result<(), JsValue> {
+        ensure_finite_fields(
+            "indicator_worker.upsert_bar",
+            &[
+                ("open", open),
+                ("high", high),
+                ("low", low),
+                ("close", close),
+                ("volume", volume),
+            ],
+        )?;
+        let bar = Bar::new(timestamp, open, high, low, close, volume);
+        let len = self.bars.len();
+        if len == 0 {
+            self.bars.append(bar).map_err(js_err)?;
+        } else {
+            let last_timestamp = self.bars.timestamp(len - 1);
+            if timestamp == last_timestamp {
+                self.bars.update_last(bar).map_err(js_err)?;
+            } else if timestamp > last_timestamp {
+                self.bars.append(bar).map_err(js_err)?;
+            } else {
+                return Err(js_err(&format!(
+                    "indicator_worker.upsert_bar: timestamp {timestamp} is older than last timestamp {last_timestamp}"
+                )));
+            }
+        }
+        self.manager.on_incremental_update(&self.bars);
+        Ok(())
+    }
+
+    pub fn draw_instructions_json(&self) -> String {
+        serde_json::to_string(&self.manager.collect_sorted_draw_instructions())
+            .unwrap_or_else(|_| "[]".to_string())
+    }
+
+    pub fn drain_events_json(&mut self) -> String {
+        serde_json::to_string(&self.manager.drain_runtime_events())
+            .unwrap_or_else(|_| "[]".to_string())
+    }
+}
+
+impl Default for IndicatorWorkerRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn with_worker_indicator_input_defaults(
+    inputs: JsonValue,
+    symbol: &str,
+    interval: &str,
+) -> JsonValue {
+    let mut obj = match inputs {
+        JsonValue::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    if !obj.contains_key("symbol") {
+        obj.insert("symbol".to_string(), JsonValue::String(symbol.to_string()));
+    }
+    if !obj.contains_key("chartTimeframe") && !obj.contains_key("chart_timeframe") {
+        obj.insert(
+            "chartTimeframe".to_string(),
+            JsonValue::String(interval.to_string()),
+        );
+    }
+    JsonValue::Object(obj)
 }
 
 #[wasm_bindgen]

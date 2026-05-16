@@ -1,5 +1,4 @@
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
 
 function run(command, args) {
   execFileSync(command, args, { stdio: 'inherit' });
@@ -8,12 +7,6 @@ function run(command, args) {
 function output(command, args) {
   return execFileSync(command, args, { encoding: 'utf8' }).trim();
 }
-
-run('wasm-pack', ['build', '--target', 'web', 'wasm']);
-writeFileSync(
-  'wasm/pkg/.gitignore',
-  '!aion_charts_wasm_bg.wasm\n!aion_charts_wasm_bg.wasm.d.ts\n!aion_charts_wasm.d.ts\n!aion_charts_wasm.js\n!package.json\n',
-);
 
 const artifactPaths = [
   'wasm/pkg/.gitignore',
@@ -24,8 +17,12 @@ const artifactPaths = [
   'wasm/pkg/package.json',
 ];
 
-const diff = output('git', ['status', '--porcelain', '--', ...artifactPaths]);
-if (diff) {
+const beforeDiff = output('git', ['diff', '--binary', '--', ...artifactPaths]);
+run('node', ['scripts/build-wasm-artifacts.mjs']);
+const afterDiff = output('git', ['diff', '--binary', '--', ...artifactPaths]);
+
+if (beforeDiff !== afterDiff) {
+  const diff = output('git', ['status', '--porcelain', '--', ...artifactPaths]);
   console.error('\nWASM package artifacts are stale. Run `npm run build` and commit the generated files.');
   console.error(diff);
   process.exit(1);

@@ -15,8 +15,8 @@
   "module": "./wasm/pkg/aion_charts_wasm.js",
   "types": "./wasm/pkg/aion_charts_wasm.d.ts",
   "scripts": {
-    "build": "wasm-pack build --target web wasm && node -e \"require('fs').writeFileSync('wasm/pkg/.gitignore', '!aion_charts_wasm_bg.wasm\\n!aion_charts_wasm_bg.wasm.d.ts\\n!aion_charts_wasm.d.ts\\n!aion_charts_wasm.js\\n!package.json\\n')\"",
-    "build:release": "wasm-pack build --target web --release wasm && node -e \"require('fs').writeFileSync('wasm/pkg/.gitignore', '!aion_charts_wasm_bg.wasm\\n!aion_charts_wasm_bg.wasm.d.ts\\n!aion_charts_wasm.d.ts\\n!aion_charts_wasm.js\\n!package.json\\n')\"",
+    "build": "node scripts/build-wasm-artifacts.mjs",
+    "build:release": "node scripts/build-wasm-artifacts.mjs --release",
     "test:e2e": "playwright test",
     "test:artifacts": "node scripts/check-wasm-artifacts.mjs",
     "prepack": "npm run build:release",
@@ -32,6 +32,10 @@
       "types": "./wasm/aion_charts-compat.d.ts",
       "import": "./wasm/aion_charts-compat.js"
     },
+    "./indicator-worker": {
+      "types": "./wasm/indicator-worker.d.ts",
+      "import": "./wasm/indicator-worker.js"
+    },
     "./aion_charts_wasm_bg.wasm": "./wasm/pkg/aion_charts_wasm_bg.wasm"
   },
   "files": [
@@ -39,6 +43,8 @@
     "README.md",
     "wasm/aion_charts-compat.js",
     "wasm/aion_charts-compat.d.ts",
+    "wasm/indicator-worker.js",
+    "wasm/indicator-worker.d.ts",
     "wasm/pkg/aion_charts_wasm_bg.wasm",
     "wasm/pkg/aion_charts_wasm_bg.wasm.d.ts",
     "wasm/pkg/aion_charts_wasm.js",

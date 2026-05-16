@@ -24,6 +24,8 @@ pub struct ParityFixtureResult {
     pub rect_count: usize,
     pub line_count: usize,
     pub structural_digest: String,
+    pub pixel_digest: String,
+    pub non_background_pixels: usize,
     pub note: String,
 }
 
@@ -57,6 +59,12 @@ struct StructuralLine {
 struct StructuralLog {
     rects: Vec<StructuralRect>,
     lines: Vec<StructuralLine>,
+}
+
+#[derive(Debug, Clone)]
+struct PixelSnapshot {
+    digest: String,
+    non_background_pixels: usize,
 }
 
 impl StructuralLog {
@@ -284,7 +292,7 @@ impl OffscreenWgpuRenderer {
         rects: &[ColoredRect],
         lines: &[LineSegment],
         background: [f32; 4],
-    ) -> Result<(), String> {
+    ) -> Result<PixelSnapshot, String> {
         self.ensure_rect_capacity(rects.len());
         self.ensure_line_capacity(lines.len());
 
@@ -316,7 +324,7 @@ impl OffscreenWgpuRenderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: self.format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -366,8 +374,88 @@ impl OffscreenWgpuRenderer {
             }
         }
 
+        let bytes_per_pixel = 4_u32;
+        let unpadded_bytes_per_row = PARITY_WIDTH * bytes_per_pixel;
+        let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(256) * 256;
+        let output_buffer_size = padded_bytes_per_row as u64 * PARITY_HEIGHT as u64;
+        let output_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("backend-parity-readback"),
+            size: output_buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &output_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(PARITY_HEIGHT),
+                },
+            },
+            wgpu::Extent3d {
+                width: PARITY_WIDTH,
+                height: PARITY_HEIGHT,
+                depth_or_array_layers: 1,
+            },
+        );
+
         self.queue.submit(std::iter::once(encoder.finish()));
-        Ok(())
+        self.read_pixels(output_buffer, padded_bytes_per_row, background)
+    }
+
+    fn read_pixels(
+        &self,
+        output_buffer: wgpu::Buffer,
+        padded_bytes_per_row: u32,
+        background: [f32; 4],
+    ) -> Result<PixelSnapshot, String> {
+        let slice = output_buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        self.device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map_err(|e| format!("failed to poll parity readback: {e:?}"))?;
+        rx.recv()
+            .map_err(|e| format!("failed to receive parity readback: {e}"))?
+            .map_err(|e| format!("failed to map parity readback: {e:?}"))?;
+
+        let data = slice.get_mapped_range();
+        let bg = [
+            (background[0].clamp(0.0, 1.0) * 255.0).round() as u8,
+            (background[1].clamp(0.0, 1.0) * 255.0).round() as u8,
+            (background[2].clamp(0.0, 1.0) * 255.0).round() as u8,
+            (background[3].clamp(0.0, 1.0) * 255.0).round() as u8,
+        ];
+        let mut hasher = Sha256::new();
+        let mut non_background_pixels = 0;
+        let row_len = (PARITY_WIDTH * 4) as usize;
+        for y in 0..PARITY_HEIGHT as usize {
+            let row_start = y * padded_bytes_per_row as usize;
+            let row = &data[row_start..row_start + row_len];
+            hasher.update(row);
+            for pixel in row.chunks_exact(4) {
+                if pixel != bg {
+                    non_background_pixels += 1;
+                }
+            }
+        }
+        let digest = format!("{:x}", hasher.finalize());
+        drop(data);
+        output_buffer.unmap();
+        Ok(PixelSnapshot {
+            digest,
+            non_background_pixels,
+        })
     }
 }
 
@@ -488,16 +576,18 @@ fn write_report(report: &ParityRunReport) -> Result<PathBuf, String> {
     let mut body = String::new();
     body.push_str("# Backend Parity Report\n\n");
     body.push_str(&format!("Adapter: `{}`\n\n", report.adapter_summary));
-    body.push_str("| Fixture | Status | Rects | Lines | Structural Digest | Notes |\n");
-    body.push_str("| --- | --- | ---: | ---: | --- | --- |\n");
+    body.push_str("| Fixture | Status | Rects | Lines | Structural Digest | Pixel Digest | Non-bg Pixels | Notes |\n");
+    body.push_str("| --- | --- | ---: | ---: | --- | --- | ---: | --- |\n");
     for result in &report.results {
         body.push_str(&format!(
-            "| {} | {} | {} | {} | `{}` | {} |\n",
+            "| {} | {} | {} | {} | `{}` | `{}` | {} | {} |\n",
             result.name,
             if result.passed { "pass" } else { "fail" },
             result.rect_count,
             result.line_count,
             &result.structural_digest[..12],
+            &result.pixel_digest[..12],
+            result.non_background_pixels,
             result.note
         ));
     }
@@ -512,12 +602,18 @@ pub fn run_backend_parity_harness() -> Result<ParityRunReport, String> {
 
     for (name, kind) in fixture_specs() {
         let geometry = render_fixture_geometry(kind)?;
-        renderer.render(&geometry.rects, &geometry.lines, geometry.background)?;
+        let pixels = renderer.render(&geometry.rects, &geometry.lines, geometry.background)?;
 
         let expected = StructuralLog::from_primitives(&geometry.rects, &geometry.lines);
         let mut mock_canvas = MockCanvas2DRenderer::default();
         mock_canvas.record(&geometry.rects, &geometry.lines);
-        let comparison = expected.compare(&mock_canvas.log);
+        let comparison = expected.compare(&mock_canvas.log).and_then(|_| {
+            if pixels.non_background_pixels == 0 {
+                Err("pixel readback was blank".to_string())
+            } else {
+                Ok(())
+            }
+        });
 
         let passed = comparison.is_ok();
         let note = match comparison {
@@ -530,6 +626,8 @@ pub fn run_backend_parity_harness() -> Result<ParityRunReport, String> {
             rect_count: geometry.rects.len(),
             line_count: geometry.lines.len(),
             structural_digest: expected.digest(),
+            pixel_digest: pixels.digest,
+            non_background_pixels: pixels.non_background_pixels,
             note,
         });
     }

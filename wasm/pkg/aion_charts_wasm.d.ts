@@ -109,6 +109,10 @@ export class Aion_charts {
      */
     append_bar_series_point(id: number, timestamp: bigint, open: number, high: number, low: number, close: number): void;
     /**
+     * Append multiple bars in one call. The arrays must be equal length and strictly increasing.
+     */
+    append_bars(open: Float64Array, high: Float64Array, low: Float64Array, close: Float64Array, volume: Float64Array, timestamps: BigUint64Array): void;
+    /**
      * Append a single point to a histogram overlay series.
      */
     append_histogram_point(id: number, timestamp: bigint, value: number, color_r: number, color_g: number, color_b: number, color_a: number): void;
@@ -306,6 +310,14 @@ export class Aion_charts {
      * The returned string is versioned and can be stored externally.
      */
     export_drawings(): string;
+    /**
+     * Export the pane, price axis, and time axis canvases as one PNG data URL.
+     */
+    export_image_data_url(): string;
+    /**
+     * Export the main chart pane canvases as a PNG data URL.
+     */
+    export_pane_image_data_url(): string;
     /**
      * Export a full chart persistence snapshot (styles + viewport + pane layout + drawings).
      *
@@ -1207,6 +1219,10 @@ export class Aion_charts {
      */
     upsert_bar_with_footprint(timestamp: bigint, open: number, high: number, low: number, close: number, volume: number, prices: Float64Array, bid_volumes: Float64Array, ask_volumes: Float64Array): void;
     /**
+     * Upsert multiple bars in one call. Existing latest timestamp is updated; newer bars append.
+     */
+    upsert_bars(open: Float64Array, high: Float64Array, low: Float64Array, close: Float64Array, volume: Float64Array, timestamps: BigUint64Array): void;
+    /**
      * compatibility-style update semantics for histogram overlays:
      * update last point if timestamp matches, append if timestamp is newer.
      */
@@ -1285,6 +1301,19 @@ export class ChartWorkspace {
     toggle_pane_fullscreen(pane_id: number): boolean;
 }
 
+export class IndicatorWorkerRuntime {
+    free(): void;
+    [Symbol.dispose](): void;
+    attach(indicator_id: number, opts_json: string): number;
+    compile(source: string, meta_json: string): any;
+    drain_events_json(): string;
+    draw_instructions_json(): string;
+    constructor();
+    set_context(symbol: string, interval: string): void;
+    set_data_arrays(open: Float64Array, high: Float64Array, low: Float64Array, close: Float64Array, volume: Float64Array, timestamps: BigUint64Array): void;
+    upsert_bar(timestamp: bigint, open: number, high: number, low: number, close: number, volume: number): void;
+}
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -1292,6 +1321,7 @@ export interface InitOutput {
     readonly __wbg_aion_charts_free: (a: number, b: number) => void;
     readonly __wbg_chartgroup_free: (a: number, b: number) => void;
     readonly __wbg_chartworkspace_free: (a: number, b: number) => void;
+    readonly __wbg_indicatorworkerruntime_free: (a: number, b: number) => void;
     readonly aion_charts_active_order_line_count: (a: number) => number;
     readonly aion_charts_add_area_series: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => number;
     readonly aion_charts_add_autoscale_contribution: (a: number, b: number, c: number, d: number) => void;
@@ -1307,6 +1337,7 @@ export interface InitOutput {
     readonly aion_charts_allowed_intervals: (a: number) => number;
     readonly aion_charts_append_bar: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number) => void;
     readonly aion_charts_append_bar_series_point: (a: number, b: number, c: number, d: bigint, e: number, f: number, g: number, h: number) => void;
+    readonly aion_charts_append_bars: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => void;
     readonly aion_charts_append_histogram_point: (a: number, b: number, c: number, d: bigint, e: number, f: number, g: number, h: number, i: number) => void;
     readonly aion_charts_append_series_point: (a: number, b: number, c: number, d: bigint, e: number) => void;
     readonly aion_charts_apply_options: (a: number, b: number) => void;
@@ -1346,6 +1377,8 @@ export interface InitOutput {
     readonly aion_charts_execution_mark_count: (a: number) => number;
     readonly aion_charts_expand_execution_cluster: (a: number, b: number, c: number, d: number) => void;
     readonly aion_charts_export_drawings: (a: number, b: number) => void;
+    readonly aion_charts_export_image_data_url: (a: number, b: number) => void;
+    readonly aion_charts_export_pane_image_data_url: (a: number, b: number) => void;
     readonly aion_charts_export_persistence_state: (a: number, b: number, c: number, d: number) => void;
     readonly aion_charts_get_auto_scroll: (a: number) => number;
     readonly aion_charts_get_available_chart_types: (a: number) => void;
@@ -1525,6 +1558,7 @@ export interface InitOutput {
     readonly aion_charts_upsert_bar: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number) => void;
     readonly aion_charts_upsert_bar_series_point: (a: number, b: number, c: number, d: bigint, e: number, f: number, g: number, h: number) => void;
     readonly aion_charts_upsert_bar_with_footprint: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => void;
+    readonly aion_charts_upsert_bars: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => void;
     readonly aion_charts_upsert_histogram_point: (a: number, b: number, c: number, d: bigint, e: number, f: number, g: number, h: number, i: number) => void;
     readonly aion_charts_upsert_series_point: (a: number, b: number, c: number, d: bigint, e: number) => void;
     readonly aion_charts_visible_range: (a: number, b: number) => void;
@@ -1574,12 +1608,20 @@ export interface InitOutput {
     readonly chartworkspace_split_active: (a: number, b: number, c: number, d: number) => void;
     readonly chartworkspace_split_pane: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly chartworkspace_toggle_pane_fullscreen: (a: number, b: number) => number;
-    readonly __wasm_bindgen_func_elem_458: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_469: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_2678: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_459: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_462: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_467: (a: number, b: number) => void;
+    readonly indicatorworkerruntime_attach: (a: number, b: number, c: number, d: number) => number;
+    readonly indicatorworkerruntime_compile: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly indicatorworkerruntime_drain_events_json: (a: number, b: number) => void;
+    readonly indicatorworkerruntime_draw_instructions_json: (a: number, b: number) => void;
+    readonly indicatorworkerruntime_new: () => number;
+    readonly indicatorworkerruntime_set_context: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly indicatorworkerruntime_set_data_arrays: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => void;
+    readonly indicatorworkerruntime_upsert_bar: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number) => void;
+    readonly __wasm_bindgen_func_elem_472: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_482: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_2726: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_478: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_475: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_473: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;
