@@ -49,43 +49,43 @@ pub const fn ch(v: u8) -> f32 {
 // ═════════════════════════════════════════════════════════════════════════════
 
 /// Main chart & axis background.
-pub const BG: [f32; 4] = [ch(0x13), ch(0x13), ch(0x15), 1.0];
-/// Bullish candle body (#097564).
-pub const BULLISH: [f32; 4] = [ch(0x09), ch(0x75), ch(0x64), 1.0];
-/// Bearish candle body (#A70B3C).
-pub const BEARISH: [f32; 4] = [ch(0xA7), ch(0x0B), ch(0x3C), 1.0];
+pub const BG: [f32; 4] = [ch(0x07), ch(0x0A), ch(0x0F), 1.0];
+/// Bullish candle body (#18A8C8).
+pub const BULLISH: [f32; 4] = [ch(0x18), ch(0xA8), ch(0xC8), 1.0];
+/// Bearish candle body (#E25362).
+pub const BEARISH: [f32; 4] = [ch(0xE2), ch(0x53), ch(0x62), 1.0];
 /// Bullish volume (same hue, lower alpha).
-pub const BULLISH_VOLUME: [f32; 4] = [ch(0x09), ch(0x75), ch(0x64), 0.35];
+pub const BULLISH_VOLUME: [f32; 4] = [ch(0x18), ch(0xA8), ch(0xC8), 0.34];
 /// Bearish volume.
-pub const BEARISH_VOLUME: [f32; 4] = [ch(0xA7), ch(0x0B), ch(0x3C), 0.35];
-/// Bullish wick (#097564), matching the body fill.
-pub const WICK_BULLISH: [f32; 4] = [ch(0x09), ch(0x75), ch(0x64), 1.0];
-/// Bearish wick (#A70B3C), matching the body fill.
-pub const WICK_BEARISH: [f32; 4] = [ch(0xA7), ch(0x0B), ch(0x3C), 1.0];
-/// Bullish candle border (#097564).
-pub const BORDER_BULLISH: [f32; 4] = [ch(0x09), ch(0x75), ch(0x64), 1.0];
-/// Bearish candle border (#A70B3C).
-pub const BORDER_BEARISH: [f32; 4] = [ch(0xA7), ch(0x0B), ch(0x3C), 1.0];
-/// Light theme bullish candle body (#01A88C).
-pub const LIGHT_BULLISH: [f32; 4] = [ch(0x01), ch(0xA8), ch(0x8C), 1.0];
-/// Light theme bullish volume (#01A88C, alpha 35%).
-pub const LIGHT_BULLISH_VOLUME: [f32; 4] = [ch(0x01), ch(0xA8), ch(0x8C), 0.35];
-/// Light theme bearish candle body (#F20751).
-pub const LIGHT_BEARISH: [f32; 4] = [ch(0xF2), ch(0x07), ch(0x51), 1.0];
-/// Light theme bullish wick (#01A88C).
-pub const LIGHT_WICK_BULLISH: [f32; 4] = [ch(0x01), ch(0xA8), ch(0x8C), 1.0];
-/// Light theme bearish wick (#F20751).
-pub const LIGHT_WICK_BEARISH: [f32; 4] = [ch(0xF2), ch(0x07), ch(0x51), 1.0];
+pub const BEARISH_VOLUME: [f32; 4] = [ch(0xE2), ch(0x53), ch(0x62), 0.30];
+/// Bullish wick (#18A8C8), matching the body fill.
+pub const WICK_BULLISH: [f32; 4] = [ch(0x18), ch(0xA8), ch(0xC8), 1.0];
+/// Bearish wick (#E25362), matching the body fill.
+pub const WICK_BEARISH: [f32; 4] = [ch(0xE2), ch(0x53), ch(0x62), 1.0];
+/// Bullish candle border (#18A8C8).
+pub const BORDER_BULLISH: [f32; 4] = [ch(0x18), ch(0xA8), ch(0xC8), 1.0];
+/// Bearish candle border (#E25362).
+pub const BORDER_BEARISH: [f32; 4] = [ch(0xE2), ch(0x53), ch(0x62), 1.0];
+/// Light theme bullish candle body (#18A8C8).
+pub const LIGHT_BULLISH: [f32; 4] = [ch(0x18), ch(0xA8), ch(0xC8), 1.0];
+/// Light theme bullish volume (#18A8C8, alpha 34%).
+pub const LIGHT_BULLISH_VOLUME: [f32; 4] = [ch(0x18), ch(0xA8), ch(0xC8), 0.34];
+/// Light theme bearish candle body (#E25362).
+pub const LIGHT_BEARISH: [f32; 4] = [ch(0xE2), ch(0x53), ch(0x62), 1.0];
+/// Light theme bullish wick (#18A8C8).
+pub const LIGHT_WICK_BULLISH: [f32; 4] = [ch(0x18), ch(0xA8), ch(0xC8), 1.0];
+/// Light theme bearish wick (#E25362).
+pub const LIGHT_WICK_BEARISH: [f32; 4] = [ch(0xE2), ch(0x53), ch(0x62), 1.0];
 /// Grid line color.
-pub const GRID: [f32; 4] = [0.2, 0.2, 0.24, 0.4];
-/// Axis border / tick color (#22262A).
-pub const AXIS_BORDER: [f32; 4] = [ch(0x22), ch(0x26), ch(0x2A), 1.0];
-/// Axis label text color (#949698).
-pub const AXIS_TEXT: [f32; 4] = [ch(0x94), ch(0x96), ch(0x98), 1.0];
-/// Crosshair line color for the dark theme (#22262A).
-pub const CROSSHAIR: [f32; 4] = [ch(0x22), ch(0x26), ch(0x2A), 1.0];
-/// Crosshair label background for both themes (#22262A).
-pub const CROSSHAIR_LABEL_BG: [f32; 4] = [ch(0x22), ch(0x26), ch(0x2A), 1.0];
+pub const GRID: [f32; 4] = [ch(0x16), ch(0x19), ch(0x1F), 0.45];
+/// Axis border / tick color (#16191F).
+pub const AXIS_BORDER: [f32; 4] = [ch(0x16), ch(0x19), ch(0x1F), 1.0];
+/// Axis label text color (#B5B8C0).
+pub const AXIS_TEXT: [f32; 4] = [ch(0xB5), ch(0xB8), ch(0xC0), 1.0];
+/// Crosshair line color for the dark theme (#5B5CF0).
+pub const CROSSHAIR: [f32; 4] = [ch(0x5B), ch(0x5C), ch(0xF0), 1.0];
+/// Crosshair label background for both themes (#16191F).
+pub const CROSSHAIR_LABEL_BG: [f32; 4] = [ch(0x16), ch(0x19), ch(0x1F), 1.0];
 /// Crosshair label text for the dark theme (#E7E7E7).
 pub const CROSSHAIR_LABEL_TEXT: [f32; 4] = [ch(0xE7), ch(0xE7), ch(0xE7), 1.0];
 /// Default font family.
@@ -93,7 +93,7 @@ pub const CROSSHAIR_LABEL_TEXT: [f32; 4] = [ch(0xE7), ch(0xE7), ch(0xE7), 1.0];
 /// This matches the Aion_charts app chart stack so chart text (axes, overlays,
 /// drawing labels) stays visually aligned with the host UI by default.
 pub const FONT_FAMILY: &str =
-    "'Geist Sans', 'Noto Sans SC', 'Noto Sans', Roboto, 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif";
+    "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif";
 /// Axis label font size in CSS px.
 pub const FONT_SIZE: f32 = 12.0;
 /// Bar width as fraction of bar slot (0.0-1.0).
@@ -440,57 +440,56 @@ impl ThemeConfig {
                 label_visible: true,
             },
             series_defaults: ThemeSeriesDefaults {
-                // Vibrant blue #3B82F6 (Tailwind blue-500)
-                line_color: [0.231, 0.510, 0.965, 1.0],
-                area_line_color: [0.231, 0.510, 0.965, 1.0],
-                area_top_fill: [0.231, 0.510, 0.965, 0.28],
-                area_bottom_fill: [0.231, 0.510, 0.965, 0.0],
+                line_color: [ch(0x5B), ch(0x5C), ch(0xF0), 1.0],
+                area_line_color: [ch(0x5B), ch(0x5C), ch(0xF0), 1.0],
+                area_top_fill: [ch(0x5B), ch(0x5C), ch(0xF0), 0.28],
+                area_bottom_fill: [ch(0x5B), ch(0x5C), ch(0xF0), 0.0],
                 histogram_color: BULLISH,
                 bar_up_color: BULLISH,
                 bar_down_color: BEARISH,
                 // Baseline
                 baseline_top_line: BULLISH,
                 baseline_bottom_line: BEARISH,
-                baseline_top_fill_1: [ch(0x35), ch(0x59), ch(0xE9), 0.28],
-                baseline_top_fill_2: [ch(0x35), ch(0x59), ch(0xE9), 0.05],
-                baseline_bottom_fill_1: [ch(0xFB), ch(0x37), ch(0x48), 0.05],
-                baseline_bottom_fill_2: [ch(0xFB), ch(0x37), ch(0x48), 0.28],
+                baseline_top_fill_1: [ch(0x5B), ch(0x5C), ch(0xF0), 0.28],
+                baseline_top_fill_2: [ch(0x5B), ch(0x5C), ch(0xF0), 0.05],
+                baseline_bottom_fill_1: [ch(0xE2), ch(0x53), ch(0x62), 0.05],
+                baseline_bottom_fill_2: [ch(0xE2), ch(0x53), ch(0x62), 0.28],
                 // Markers & price lines
-                marker_color: [0.231, 0.510, 0.965, 1.0],
+                marker_color: [ch(0x5B), ch(0x5C), ch(0xF0), 1.0],
                 marker_text_color: [1.0, 1.0, 1.0, 0.9],
                 price_line_color: [0.5, 0.5, 0.5, 1.0],
                 price_line_text_color: [1.0, 1.0, 1.0, 0.9],
             },
             drawing_defaults: ThemeDrawingDefaults {
-                color: [0.35, 0.55, 0.95, 1.0],
-                fibonacci_color: [0.95, 0.75, 0.25, 1.0],
-                fibonacci_fill: [0.95, 0.75, 0.25, 0.05],
-                scale_color: [0.6, 0.8, 0.4, 1.0],
-                scale_fill: [0.6, 0.8, 0.4, 0.1],
+                color: [ch(0x5B), ch(0x5C), ch(0xF0), 1.0],
+                fibonacci_color: [ch(0xF5), ch(0x9E), ch(0x0B), 1.0],
+                fibonacci_fill: [ch(0xF5), ch(0x9E), ch(0x0B), 0.05],
+                scale_color: [ch(0x18), ch(0xA8), ch(0xC8), 1.0],
+                scale_fill: [ch(0x18), ch(0xA8), ch(0xC8), 0.1],
                 anchor_color: [1.0, 1.0, 1.0, 1.0],
                 font_size: 12.0,
                 fibonacci_font_size: 11.0,
             },
             indicator_palette: ThemeIndicatorPalette {
                 colors: vec![
-                    [0.161, 0.384, 1.0, 1.0],   // Blue (#2962FF)
-                    [1.0, 0.627, 0.0, 1.0],     // Amber (#FFA000)
-                    [0.608, 0.349, 0.714, 1.0], // Purple (#9B59B6)
-                    [0.9, 0.3, 0.3, 1.0],       // Red
-                    [0.18, 0.8, 0.44, 1.0],     // Green (#2ECC71)
-                    [0.5, 0.5, 0.5, 0.6],       // Grey (muted)
+                    [ch(0x5B), ch(0x5C), ch(0xF0), 1.0],
+                    [ch(0xF5), ch(0x9E), ch(0x0B), 1.0],
+                    [ch(0x8B), ch(0x5C), ch(0xF6), 1.0],
+                    [ch(0xE2), ch(0x53), ch(0x62), 1.0],
+                    [ch(0x18), ch(0xA8), ch(0xC8), 1.0],
+                    [0.5, 0.5, 0.5, 0.6],
                 ],
                 fallback: [0.5, 0.5, 0.5, 1.0],
             },
             workspace: ThemeWorkspace {
-                divider_color: [0.18, 0.18, 0.22, 1.0],
-                divider_active_color: [0.102, 0.737, 0.612, 0.55],
-                pane_background: [0.09, 0.09, 0.09, 1.0],
-                pane_active_border: [0.102, 0.737, 0.612, 0.45],
+                divider_color: [ch(0x16), ch(0x19), ch(0x1F), 1.0],
+                divider_active_color: [ch(0x5B), ch(0x5C), ch(0xF0), 0.55],
+                pane_background: [ch(0x07), ch(0x0A), ch(0x0F), 1.0],
+                pane_active_border: [ch(0x5B), ch(0x5C), ch(0xF0), 0.45],
             },
             subpane_separator: ThemeSubpaneSeparator {
-                color: [0.2, 0.2, 0.24, 1.0],
-                hover_color: [0.102, 0.737, 0.612, 0.55],
+                color: [ch(0x16), ch(0x19), ch(0x1F), 1.0],
+                hover_color: [ch(0x5B), ch(0x5C), ch(0xF0), 0.55],
             },
         }
     }
@@ -539,54 +538,54 @@ impl ThemeConfig {
                 label_visible: true,
             },
             series_defaults: ThemeSeriesDefaults {
-                line_color: [0.161, 0.384, 1.0, 1.0],
-                area_line_color: [0.161, 0.384, 1.0, 1.0],
-                area_top_fill: [0.161, 0.384, 1.0, 0.28],
-                area_bottom_fill: [0.161, 0.384, 1.0, 0.0],
+                line_color: [ch(0x5B), ch(0x5C), ch(0xF0), 1.0],
+                area_line_color: [ch(0x5B), ch(0x5C), ch(0xF0), 1.0],
+                area_top_fill: [ch(0x5B), ch(0x5C), ch(0xF0), 0.28],
+                area_bottom_fill: [ch(0x5B), ch(0x5C), ch(0xF0), 0.0],
                 histogram_color: LIGHT_BULLISH,
                 bar_up_color: LIGHT_BULLISH,
                 bar_down_color: LIGHT_BEARISH,
                 baseline_top_line: LIGHT_BULLISH,
                 baseline_bottom_line: LIGHT_BEARISH,
-                baseline_top_fill_1: [ch(0x35), ch(0x59), ch(0xE9), 0.28],
-                baseline_top_fill_2: [ch(0x35), ch(0x59), ch(0xE9), 0.05],
-                baseline_bottom_fill_1: [ch(0xFB), ch(0x37), ch(0x48), 0.05],
-                baseline_bottom_fill_2: [ch(0xFB), ch(0x37), ch(0x48), 0.28],
-                marker_color: [0.161, 0.384, 1.0, 1.0],
+                baseline_top_fill_1: [ch(0x5B), ch(0x5C), ch(0xF0), 0.28],
+                baseline_top_fill_2: [ch(0x5B), ch(0x5C), ch(0xF0), 0.05],
+                baseline_bottom_fill_1: [ch(0xE2), ch(0x53), ch(0x62), 0.05],
+                baseline_bottom_fill_2: [ch(0xE2), ch(0x53), ch(0x62), 0.28],
+                marker_color: [ch(0x5B), ch(0x5C), ch(0xF0), 1.0],
                 marker_text_color: [ch(0x13), ch(0x17), ch(0x22), 0.9], // Dark text on light
                 price_line_color: [0.5, 0.5, 0.5, 1.0],
                 price_line_text_color: [1.0, 1.0, 1.0, 0.9],
             },
             drawing_defaults: ThemeDrawingDefaults {
-                color: [0.35, 0.55, 0.95, 1.0],
-                fibonacci_color: [0.95, 0.75, 0.25, 1.0],
-                fibonacci_fill: [0.95, 0.75, 0.25, 0.05],
-                scale_color: [0.6, 0.8, 0.4, 1.0],
-                scale_fill: [0.6, 0.8, 0.4, 0.1],
+                color: [ch(0x5B), ch(0x5C), ch(0xF0), 1.0],
+                fibonacci_color: [ch(0xF5), ch(0x9E), ch(0x0B), 1.0],
+                fibonacci_fill: [ch(0xF5), ch(0x9E), ch(0x0B), 0.05],
+                scale_color: [ch(0x18), ch(0xA8), ch(0xC8), 1.0],
+                scale_fill: [ch(0x18), ch(0xA8), ch(0xC8), 0.1],
                 anchor_color: [ch(0x13), ch(0x17), ch(0x22), 1.0], // Dark anchors on light bg
                 font_size: 12.0,
                 fibonacci_font_size: 11.0,
             },
             indicator_palette: ThemeIndicatorPalette {
                 colors: vec![
-                    [0.161, 0.384, 1.0, 1.0],
-                    [1.0, 0.627, 0.0, 1.0],
-                    [0.608, 0.349, 0.714, 1.0],
-                    [0.9, 0.3, 0.3, 1.0],
-                    [0.18, 0.8, 0.44, 1.0],
+                    [ch(0x5B), ch(0x5C), ch(0xF0), 1.0],
+                    [ch(0xF5), ch(0x9E), ch(0x0B), 1.0],
+                    [ch(0x8B), ch(0x5C), ch(0xF6), 1.0],
+                    [ch(0xE2), ch(0x53), ch(0x62), 1.0],
+                    [ch(0x18), ch(0xA8), ch(0xC8), 1.0],
                     [0.5, 0.5, 0.5, 0.6],
                 ],
                 fallback: [0.5, 0.5, 0.5, 1.0],
             },
             workspace: ThemeWorkspace {
-                divider_color: [ch(0xE0), ch(0xE3), ch(0xEB), 1.0],
-                divider_active_color: [0.161, 0.384, 1.0, 0.55],
-                pane_background: [ch(0xF8), ch(0xF9), ch(0xFD), 1.0], // #F8F9FD
-                pane_active_border: [0.161, 0.384, 1.0, 0.45],
+                divider_color: [ch(0xF5), ch(0xF5), ch(0xF5), 1.0],
+                divider_active_color: [ch(0x5B), ch(0x5C), ch(0xF0), 0.55],
+                pane_background: [1.0, 1.0, 1.0, 1.0],
+                pane_active_border: [ch(0x5B), ch(0x5C), ch(0xF0), 0.45],
             },
             subpane_separator: ThemeSubpaneSeparator {
-                color: [ch(0xE0), ch(0xE3), ch(0xEB), 1.0],
-                hover_color: [0.161, 0.384, 1.0, 0.55],
+                color: [ch(0xF5), ch(0xF5), ch(0xF5), 1.0],
+                hover_color: [ch(0x5B), ch(0x5C), ch(0xF0), 0.55],
             },
         }
     }
@@ -870,34 +869,22 @@ mod tests {
         let dark = ThemeConfig::dark();
         let light = ThemeConfig::light();
 
-        assert_eq!(dark.colors.bullish, [ch(0x09), ch(0x75), ch(0x64), 1.0]);
-        assert_eq!(dark.colors.bearish, [ch(0xA7), ch(0x0B), ch(0x3C), 1.0]);
-        assert_eq!(light.colors.bullish, [ch(0x01), ch(0xA8), ch(0x8C), 1.0]);
-        assert_eq!(light.colors.bearish, [ch(0xF2), ch(0x07), ch(0x51), 1.0]);
-        assert_eq!(dark.colors.axis_border, [ch(0x22), ch(0x26), ch(0x2A), 1.0]);
-        assert_eq!(dark.colors.axis_text, [ch(0x94), ch(0x96), ch(0x98), 1.0]);
-        assert_eq!(
-            light.colors.axis_border,
-            [ch(0xF0), ch(0xF0), ch(0xF0), 1.0]
-        );
+        assert_eq!(dark.colors.bullish, [ch(0x18), ch(0xA8), ch(0xC8), 1.0]);
+        assert_eq!(dark.colors.bearish, [ch(0xE2), ch(0x53), ch(0x62), 1.0]);
+        assert_eq!(light.colors.bullish, [ch(0x18), ch(0xA8), ch(0xC8), 1.0]);
+        assert_eq!(light.colors.bearish, [ch(0xE2), ch(0x53), ch(0x62), 1.0]);
+        assert_eq!(dark.colors.axis_border, [ch(0x16), ch(0x19), ch(0x1F), 1.0]);
+        assert_eq!(dark.colors.axis_text, [ch(0xB5), ch(0xB8), ch(0xC0), 1.0]);
+        assert_eq!(light.colors.axis_border, [ch(0xF5), ch(0xF5), ch(0xF5), 1.0]);
         assert_eq!(light.colors.axis_text, [ch(0x20), ch(0x20), ch(0x20), 1.0]);
-        assert_eq!(
-            dark.crosshair.line_color,
-            [ch(0x22), ch(0x26), ch(0x2A), 1.0]
-        );
-        assert_eq!(dark.crosshair.label_bg, [ch(0x22), ch(0x26), ch(0x2A), 1.0]);
+        assert_eq!(dark.crosshair.line_color, [ch(0x5B), ch(0x5C), ch(0xF0), 1.0]);
+        assert_eq!(dark.crosshair.label_bg, [ch(0x16), ch(0x19), ch(0x1F), 1.0]);
         assert_eq!(
             dark.crosshair.label_text,
             [ch(0xE7), ch(0xE7), ch(0xE7), 1.0]
         );
-        assert_eq!(
-            light.crosshair.line_color,
-            [ch(0x22), ch(0x26), ch(0x2A), 1.0]
-        );
-        assert_eq!(
-            light.crosshair.label_bg,
-            [ch(0x22), ch(0x26), ch(0x2A), 1.0]
-        );
+        assert_eq!(light.crosshair.line_color, [ch(0x22), ch(0x26), ch(0x2A), 1.0]);
+        assert_eq!(light.crosshair.label_bg, [ch(0x22), ch(0x26), ch(0x2A), 1.0]);
         assert_eq!(
             light.crosshair.label_text,
             [ch(0xF5), ch(0xF5), ch(0xF5), 1.0]

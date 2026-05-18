@@ -1,4 +1,4 @@
-//! String namespace builtin functions for RayDSL.
+//! String namespace builtin functions for AionDSL.
 //!
 //! Provides Pine Script-compatible string operations including:
 //! - Basic: `str.length`, `str.substring`, `str.replace`, `str.replace_all`

@@ -51,7 +51,7 @@ pub fn compile_source(
     }
     let normalized_source = normalize_source(source);
     let source_hash = source_sha256(&normalized_source);
-    let compile_mode_key = format!("raydsl_v{}", compile_mode.mode.as_version());
+    let compile_mode_key = format!("aiondsl_v{}", compile_mode.mode.as_version());
 
     if normalized_source.is_empty() {
         diagnostics.push(CompileDiagnostic {

@@ -1,4 +1,4 @@
-pub const RAYDSL_NAME: &str = "raydsl";
+pub const AIONDSL_NAME: &str = "aiondsl";
 pub const RAYDSL_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +59,7 @@ pub fn parse_compile_mode(source: &str) -> CompileModeParseResult {
                     column: 1,
                     len: trimmed.len(),
                     message: format!(
-                        "unsupported RayDSL version '{}'; falling back to version 1",
+                        "unsupported AionDSL version '{}'; falling back to version 1",
                         version_token
                     ),
                     hint: "use //@version=1 or //@version=2".to_string(),

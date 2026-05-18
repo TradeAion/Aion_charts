@@ -149,14 +149,14 @@ impl OrderStatus {
 
 /// Default colors for order lines.
 pub mod colors {
-    /// Buy order color (blue) [R, G, B, A] in 0.0-1.0 range.
-    pub const BUY_COLOR: [f32; 4] = [0.20, 0.36, 1.0, 1.0]; // #335CFF
+    /// Buy order color (Tradeaion cyan) [R, G, B, A] in 0.0-1.0 range.
+    pub const BUY_COLOR: [f32; 4] = [0.09411765, 0.65882355, 0.78431374, 1.0]; // #18A8C8
 
-    /// Sell order color (red) [R, G, B, A] in 0.0-1.0 range.
-    pub const SELL_COLOR: [f32; 4] = [0.9843137, 0.21568628, 0.28235295, 1.0]; // #FB3748
+    /// Sell order color (Tradeaion red) [R, G, B, A] in 0.0-1.0 range.
+    pub const SELL_COLOR: [f32; 4] = [0.8862745, 0.3254902, 0.38431373, 1.0]; // #E25362
 
-    /// Take profit color (green) [R, G, B, A] in 0.0-1.0 range.
-    pub const TAKE_PROFIT_COLOR: [f32; 4] = [0.12, 0.74, 0.43, 1.0]; // #1EBE6E
+    /// Take profit color follows the bullish accent.
+    pub const TAKE_PROFIT_COLOR: [f32; 4] = BUY_COLOR;
 
     /// Stop loss color (orange-red) [R, G, B, A] in 0.0-1.0 range.
     pub const STOP_LOSS_COLOR: [f32; 4] = SELL_COLOR;
@@ -164,11 +164,11 @@ pub mod colors {
     /// Label text color (white).
     pub const LABEL_TEXT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 
-    /// Cancel button color (muted red).
-    pub const CANCEL_BUTTON_COLOR: [f32; 4] = [0.6, 0.2, 0.2, 1.0];
+    /// Cancel button color (muted Tradeaion red).
+    pub const CANCEL_BUTTON_COLOR: [f32; 4] = [0.55, 0.24, 0.30, 1.0];
 
-    /// Modify button color (muted blue).
-    pub const MODIFY_BUTTON_COLOR: [f32; 4] = [0.2, 0.4, 0.6, 1.0];
+    /// Modify button color (muted Tradeaion primary).
+    pub const MODIFY_BUTTON_COLOR: [f32; 4] = [0.36, 0.36, 0.94, 1.0];
 }
 
 /// Configuration options for an order line.

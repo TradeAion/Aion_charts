@@ -1,4 +1,4 @@
-//! Map namespace builtin functions for RayDSL.
+//! Map namespace builtin functions for AionDSL.
 //!
 //! Provides Pine Script-compatible map operations including:
 //! - Creation: `map.new`, `map.from`

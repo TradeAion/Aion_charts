@@ -1,4 +1,4 @@
-//! Array namespace builtin functions for RayDSL.
+//! Array namespace builtin functions for AionDSL.
 //!
 //! Provides Pine Script-compatible array operations including:
 //! - Creation: `array.new<type>`, `array.from`

@@ -1,4 +1,4 @@
-//! Line namespace builtin functions for RayDSL.
+//! Line namespace builtin functions for AionDSL.
 //!
 //! Provides Pine Script-compatible line drawing operations including:
 //! - Creation: `line.new` (creates a line between two points)

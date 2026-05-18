@@ -1,4 +1,4 @@
-//! Strategy namespace builtins for RayDSL.
+//! Strategy namespace builtins for AionDSL.
 //!
 //! Provides strategy execution functions for backtesting and paper trading:
 //! - Order functions: entry, exit, close, cancel, cancel_all

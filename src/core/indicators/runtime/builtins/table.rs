@@ -1,4 +1,4 @@
-//! Table namespace builtins for RayDSL.
+//! Table namespace builtins for AionDSL.
 //!
 //! Provides table positioning constants and cell configuration helpers.
 //! Note: table.new/cell/delete are handled by the compiler as object mutations,
