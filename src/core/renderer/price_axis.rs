@@ -42,6 +42,8 @@ pub struct PriceAxisRenderer {
     pw: u32,
     ph: u32,
     dpr: f64,
+    h_ratio: f64,
+    v_ratio: f64,
     text_cache: TextWidthCache,
 }
 
@@ -63,20 +65,40 @@ impl PriceAxisRenderer {
             pw,
             ph,
             dpr,
+            h_ratio: dpr,
+            v_ratio: dpr,
             text_cache: TextWidthCache::new(50),
         })
     }
 
     pub fn resize(&mut self, pw: u32, ph: u32, dpr: f64) {
+        self.resize_with_pixel_ratios(pw, ph, dpr, dpr, dpr);
+    }
+
+    pub fn resize_with_pixel_ratios(
+        &mut self,
+        pw: u32,
+        ph: u32,
+        dpr: f64,
+        h_ratio: f64,
+        v_ratio: f64,
+    ) {
         let pw = pw.max(1);
         let ph = ph.max(1);
-        if self.pw == pw && self.ph == ph && (self.dpr - dpr).abs() < 1e-6 {
+        if self.pw == pw
+            && self.ph == ph
+            && (self.dpr - dpr).abs() < 1e-6
+            && (self.h_ratio - h_ratio).abs() < 1e-6
+            && (self.v_ratio - v_ratio).abs() < 1e-6
+        {
             return;
         }
 
         self.pw = pw;
         self.ph = ph;
         self.dpr = dpr;
+        self.h_ratio = h_ratio.max(0.0001);
+        self.v_ratio = v_ratio.max(0.0001);
         if self.base_canvas.width() != pw {
             self.base_canvas.set_width(pw);
         }
@@ -99,7 +121,9 @@ impl PriceAxisRenderer {
     /// canvases so the browser displays them at the correct size. Required for
     /// subpane price axes where the layout system doesn't manage canvas CSS.
     pub fn resize_with_css(&mut self, pw: u32, ph: u32, dpr: f64, css_w: f64, css_h: f64) {
-        self.resize(pw, ph, dpr);
+        let h_ratio = if css_w > 0.0 { pw as f64 / css_w } else { dpr };
+        let v_ratio = if css_h > 0.0 { ph as f64 / css_h } else { dpr };
+        self.resize_with_pixel_ratios(pw, ph, dpr, h_ratio, v_ratio);
         let w_str = format!("{}px", css_w);
         let h_str = format!("{}px", css_h);
         if let Some(elem) = self.base_canvas.dyn_ref::<HtmlElement>() {
@@ -249,7 +273,8 @@ impl PriceAxisRenderer {
     pub fn render_base(&mut self, style: &ChartStyle, ticks: &[TickMark]) {
         let w = self.pw as f64;
         let h = self.ph as f64;
-        let dpr = self.dpr;
+        let h_ratio = self.h_ratio;
+        let v_ratio = self.v_ratio;
 
         // Clear + background
         self.base_ctx.clear_rect(0.0, 0.0, w, h);
@@ -257,7 +282,7 @@ impl PriceAxisRenderer {
         self.base_ctx.fill_rect(0.0, 0.0, w, h);
 
         // Border line at left edge (reference implementation: right price scale border is at its left)
-        let border_size = (style.axis_border_size as f64 * dpr).max(1.0).floor();
+        let border_size = (style.axis_border_size as f64 * h_ratio).max(1.0).floor();
         if style.axis_border_visible {
             self.base_ctx
                 .set_fill_style_str(&rgba(&style.axis_border_color));
@@ -267,8 +292,8 @@ impl PriceAxisRenderer {
         if style.axis_border_visible && style.axis_ticks_visible {
             self.base_ctx
                 .set_fill_style_str(&rgba(&style.axis_border_color));
-            let tick_height = dpr.floor().max(1.0);
-            let tick_length = (style.axis_tick_length as f64 * dpr).round().max(1.0);
+            let tick_height = v_ratio.floor().max(1.0);
+            let tick_length = (style.axis_tick_length as f64 * h_ratio).round().max(1.0);
             for t in ticks {
                 let y = t.pixel.round();
                 if y < 0.0 || y > h {
@@ -284,9 +309,12 @@ impl PriceAxisRenderer {
         }
 
         // Tick labels — draw in media (CSS) coordinate space for sharp text.
-        // reference pattern: save → scale(dpr,dpr) → draw text with CSS-px font → restore.
+        // Match the actual canvas bitmap/CSS ratios; exact resize observers can
+        // differ slightly from window.devicePixelRatio at fractional zoom.
         self.base_ctx.save();
-        let _ = self.base_ctx.set_transform(dpr, 0.0, 0.0, dpr, 0.0, 0.0);
+        let _ = self
+            .base_ctx
+            .set_transform(h_ratio, 0.0, 0.0, v_ratio, 0.0, 0.0);
 
         let css_font = format!("{}px {}", style.font_size, style.font_family);
         self.base_ctx.set_font(&css_font);
@@ -297,16 +325,16 @@ impl PriceAxisRenderer {
         let tick_length_css = style.axis_tick_length as f64;
         // reference implementation: textLeftX = tickMarkLeftX + tickLength + paddingInner
         // tickMarkLeftX = 0 (at border), so text_x = border + tickLength + paddingInner.
-        let text_x_css = border_size / dpr + tick_length_css + inner_inset_css;
+        let text_x_css = border_size / h_ratio + tick_length_css + inner_inset_css;
 
-        let h_css = h / dpr;
+        let h_css = h / v_ratio;
         self.base_ctx
             .set_fill_style_str(&rgba(&style.axis_text_color));
         let label_half_css = style.font_size as f64 * 0.5;
         let min_label_y_css = label_half_css;
         let max_label_y_css = (h_css - label_half_css).max(min_label_y_css);
         for t in ticks {
-            let y_css = t.pixel / dpr;
+            let y_css = t.pixel / v_ratio;
             if y_css < min_label_y_css || y_css > max_label_y_css {
                 continue;
             }

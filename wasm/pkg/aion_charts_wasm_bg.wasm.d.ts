@@ -301,7 +301,7 @@ export const indicatorworkerruntime_set_data_arrays: (a: number, b: number, c: n
 export const indicatorworkerruntime_upsert_bar: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number) => void;
 export const __wasm_bindgen_func_elem_472: (a: number, b: number) => void;
 export const __wasm_bindgen_func_elem_482: (a: number, b: number, c: number) => void;
-export const __wasm_bindgen_func_elem_2726: (a: number, b: number, c: number, d: number) => void;
+export const __wasm_bindgen_func_elem_2734: (a: number, b: number, c: number, d: number) => void;
 export const __wasm_bindgen_func_elem_478: (a: number, b: number, c: number) => void;
 export const __wasm_bindgen_func_elem_475: (a: number, b: number, c: number) => void;
 export const __wasm_bindgen_func_elem_473: (a: number, b: number) => void;

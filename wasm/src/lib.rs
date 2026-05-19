@@ -331,8 +331,23 @@ fn sync_widget_sizes(s: &mut ChartInner, dpr: f64, prefer_exact: bool) {
         s.engine.resize(es.pane_pw.max(1), es.pane_ph.max(1), dpr);
         s.overlay
             .resize(es.pane_pw.max(1), es.pane_ph.max(1), dpr, h_ratio, v_ratio);
-        s.price_axis_renderer
-            .resize(es.price_axis_pw.max(1), es.price_axis_ph.max(1), dpr);
+        let axis_h_ratio = if acw > 0.0 {
+            es.price_axis_pw as f64 / acw
+        } else {
+            dpr
+        };
+        let axis_v_ratio = if ach > 0.0 {
+            es.price_axis_ph as f64 / ach
+        } else {
+            dpr
+        };
+        s.price_axis_renderer.resize_with_pixel_ratios(
+            es.price_axis_pw.max(1),
+            es.price_axis_ph.max(1),
+            dpr,
+            axis_h_ratio,
+            axis_v_ratio,
+        );
         s.time_axis_renderer
             .resize(es.time_axis_pw.max(1), es.time_axis_ph.max(1), dpr);
         return;

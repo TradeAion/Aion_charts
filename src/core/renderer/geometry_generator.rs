@@ -333,9 +333,10 @@ pub fn project_candles(
             low_y = body_bottom + 1.0;
         }
 
-        // Resolve a single visible candle footprint first, then derive border,
-        // fill, and wick from it. Independent overlap clamps make the body and
-        // wick drift apart at tight spacing.
+        // Resolve the reference-style footprints independently. Wicks and
+        // borders clamp overlap, but body fill keeps the full bar width so
+        // candle "brick" thickness stays visually stable across DPR/viewport
+        // combinations.
         let ideal_bar_left = center_x - half_bar;
         let bar_right = ideal_bar_left + sizing.bar_width - 1.0;
         let mut bar_left = ideal_bar_left;
@@ -345,8 +346,8 @@ pub fn project_candles(
         let bar_width = (bar_right - bar_left + 1.0).max(1.0);
         prev_bar_right = Some(bar_right);
 
-        let body_left = bar_left;
-        let body_width = bar_width;
+        let body_left = ideal_bar_left;
+        let body_width = sizing.bar_width;
 
         let wick_width = effective_wick_width(sizing).min(bar_width).max(1.0);
         let visible_center_x = ((bar_left + bar_right) * 0.5).round();
@@ -1272,7 +1273,7 @@ mod tests {
     }
 
     #[test]
-    fn body_fill_border_and_wick_share_clamped_footprint() {
+    fn wick_and_border_share_clamped_footprint_while_body_stays_full_width() {
         let bars = sample_bars();
         let time_scale = TimeScaleIndex::from_bars(&bars);
         let mut viewport = Viewport::new(8, 200);
@@ -1287,23 +1288,40 @@ mod tests {
         assert_eq!(sizing.bar_width, 3.0);
         assert_eq!(projected.len(), 4);
 
-        let clamped = projected
-            .iter()
-            .find(|c| c.bar_width < c.body_width)
-            .is_none();
-        assert!(
-            clamped,
-            "body fill should use the same clamped width as border"
-        );
-
         let narrow = projected
             .iter()
             .find(|c| c.bar_width < sizing.bar_width)
             .expect("expected at least one overlap-clamped candle");
-        assert_eq!(narrow.body_width, narrow.bar_width);
+        assert_eq!(narrow.body_width, sizing.bar_width);
+        assert!(narrow.body_left <= narrow.bar_left);
         assert!(narrow.wick_width <= narrow.bar_width);
         assert!(narrow.wick_left >= narrow.bar_left);
         assert!(narrow.wick_left + narrow.wick_width <= narrow.bar_left + narrow.bar_width);
+    }
+
+    #[test]
+    fn body_fill_keeps_reference_width_when_border_is_overlap_clamped() {
+        let bars = sample_bars();
+        let time_scale = TimeScaleIndex::from_bars(&bars);
+        let mut viewport = Viewport::new(30, 200);
+        viewport.volume_height_ratio = 0.0;
+        viewport.set_range(0.0, 4.0);
+        viewport.price_min = 9.0;
+        viewport.price_max = 12.0;
+
+        let sizing = CandleSizing::compute_from_pane(30.0, &viewport, 3.0, 3.0);
+        let projected = project_candles(&bars, &time_scale, &viewport, 30.0, 200.0, &sizing);
+
+        assert!(
+            projected.iter().any(|c| c.bar_width < sizing.bar_width),
+            "dense mobile spacing should clamp at least one border footprint"
+        );
+        assert!(
+            projected
+                .iter()
+                .all(|c| (c.body_width - sizing.bar_width).abs() < f64::EPSILON),
+            "body fill must keep the stable full bar width like lightweight-charts"
+        );
     }
 
     #[test]

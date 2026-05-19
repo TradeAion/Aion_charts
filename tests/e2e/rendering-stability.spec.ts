@@ -145,3 +145,80 @@ test('canvas rendering stays stable across responsive viewport sizes', async ({ 
     expect(metrics.tallColoredColumns, `long candle wicks/bodies should survive at ${size.width}x${size.height}`).toBeGreaterThan(20);
   }
 });
+
+test.describe('mobile DPR rendering', () => {
+  test.use({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 3,
+    isMobile: true,
+    hasTouch: true,
+  });
+
+  test('candlestick wicks keep TradingView-style physical width on high-DPR mobile', async ({ page }) => {
+    await installResponsiveHarness(page);
+    await page.evaluate(() => {
+      const { chart } = (window as any).__responsiveHarness;
+      chart.render();
+    });
+    await page.waitForTimeout(80);
+
+    const metrics = await page.evaluate(() => {
+      const dpr = window.devicePixelRatio || 1;
+      const pane = document.querySelector<HTMLCanvasElement>('#aion_charts-pane-chart');
+      if (!pane) throw new Error('pane chart canvas missing');
+      const ctx = pane.getContext('2d', { willReadFrequently: true });
+      if (!ctx) throw new Error('2d context missing');
+      const image = ctx.getImageData(0, 0, pane.width, pane.height);
+      const { data, width, height } = image;
+
+      const isCandlePixel = (idx: number) => {
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+        const a = data[idx + 3];
+        const bullish = Math.abs(r - 9) <= 4 && Math.abs(g - 117) <= 6 && Math.abs(b - 100) <= 6;
+        const bearish = Math.abs(r - 167) <= 6 && Math.abs(g - 11) <= 4 && Math.abs(b - 60) <= 6;
+        return a > 180 && (bullish || bearish);
+      };
+
+      const narrowRuns: number[] = [];
+      const allRuns: number[] = [];
+      for (let y = 0; y < height; y += 1) {
+        let run = 0;
+        for (let x = 0; x < width; x += 1) {
+          if (isCandlePixel((y * width + x) * 4)) {
+            run += 1;
+          } else if (run > 0) {
+            allRuns.push(run);
+            if (run <= 8) narrowRuns.push(run);
+            run = 0;
+          }
+        }
+        if (run > 0) {
+          allRuns.push(run);
+          if (run <= 8) narrowRuns.push(run);
+        }
+      }
+
+      const expectedWickWidth = Math.floor(dpr);
+      const matchingWickRuns = narrowRuns.filter(run => Math.abs(run - expectedWickWidth) <= 1).length;
+      const tooThickNarrowRuns = narrowRuns.filter(run => run > expectedWickWidth + 1).length;
+      return {
+        dpr,
+        bitmapWidth: pane.width,
+        bitmapHeight: pane.height,
+        cssWidth: pane.getBoundingClientRect().width,
+        cssHeight: pane.getBoundingClientRect().height,
+        expectedWickWidth,
+        allRunCount: allRuns.length,
+        narrowRunCount: narrowRuns.length,
+        matchingWickRuns,
+        tooThickNarrowRuns,
+      };
+    });
+
+    expect(metrics.dpr).toBe(3);
+    expect(metrics.matchingWickRuns).toBeGreaterThan(20);
+    expect(metrics.tooThickNarrowRuns / Math.max(1, metrics.narrowRunCount)).toBeLessThan(0.1);
+  });
+});
