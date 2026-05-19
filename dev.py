@@ -129,8 +129,20 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
             super().log_message(format, *args)
 
 
+class DevServer(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def handle_error(self, request, client_address):
+        exc_type, exc, _ = sys.exc_info()
+        if exc_type in (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            log(f"Client disconnected while serving {client_address}: {exc}")
+            return
+        super().handle_error(request, client_address)
+
+
 def start_server():
-    server = http.server.HTTPServer(("", PORT), NoCacheHandler)
+    server = DevServer(("", PORT), NoCacheHandler)
     log_ok(f"Serving at http://localhost:{PORT}/demo/")
     server.serve_forever()
 
