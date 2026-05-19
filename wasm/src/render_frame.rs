@@ -51,9 +51,15 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
         || (s.replay_active && s.replay_playing)
         || text_edit_animation_active;
     if !dirty.get() && !needs_continuous_render {
-        return false;
+        let snap_adjusted = s.layout.snap_canvases_to_device_pixels(current_dpr);
+        if s.layout_settle_frames > 0 {
+            s.layout_settle_frames -= 1;
+            return true;
+        }
+        return snap_adjusted;
     }
 
+    let was_dirty = dirty.get();
     let dpr = s.engine.dpr;
     let anim_time = js_sys::Date::now(); // For pulsing animations
 
@@ -609,14 +615,30 @@ pub(crate) fn do_render_frame(inner: &SharedInner, dirty: &Rc<RenderInvalidation
         }
     }
 
+    // The host page can move the chart without resizing it. Re-snap at the end
+    // of every rendered frame so canvas compositing stays on physical pixels
+    // even after layout/scroll/toolbar changes outside our ResizeObserver.
+    if was_dirty {
+        s.layout_settle_frames = 8;
+    }
+    let snap_adjusted = s.layout.snap_canvases_to_device_pixels(dpr);
+
     // 10. Clear dirty flag + release borrow
+    let settling_layout = if s.layout_settle_frames > 0 {
+        s.layout_settle_frames -= 1;
+        true
+    } else {
+        false
+    };
     let keep_animating = s.interaction.is_gliding
         || s.subpanes.iter().any(|subpane| {
             let scroll = subpane.scroll_state.borrow();
             scroll.dragging || scroll.animation.is_active()
         })
         || (s.replay_active && s.replay_playing)
-        || text_edit_animation_active;
+        || text_edit_animation_active
+        || settling_layout
+        || snap_adjusted;
     drop(s);
     dirty.set(false);
 

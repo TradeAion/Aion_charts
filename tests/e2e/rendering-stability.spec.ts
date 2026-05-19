@@ -222,3 +222,83 @@ test.describe('mobile DPR rendering', () => {
     expect(metrics.tooThickNarrowRuns / Math.max(1, metrics.narrowRunCount)).toBeLessThan(0.1);
   });
 });
+
+test.describe('canvas layer alignment', () => {
+  test.use({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 3,
+    isMobile: true,
+    hasTouch: true,
+  });
+
+  test('canvases snap back to physical pixel grid inside fractional host placement', async ({ page }) => {
+    await installResponsiveHarness(page);
+    await page.evaluate(() => {
+      const { host, chart } = (window as any).__responsiveHarness;
+      host.style.left = '0.17px';
+      host.style.top = '0.23px';
+      chart.render();
+    });
+    await page.waitForTimeout(80);
+
+    const metrics = await page.evaluate(() => {
+      const dpr = window.devicePixelRatio || 1;
+      const frac = (value: number) => Math.abs(value - Math.round(value));
+      return Array.from(document.querySelectorAll<HTMLCanvasElement>('#responsive-render-harness canvas')).map((canvas) => {
+        const rect = canvas.getBoundingClientRect();
+        return {
+          id: canvas.id,
+          leftFraction: frac(rect.left * dpr),
+          topFraction: frac(rect.top * dpr),
+          transform: getComputedStyle(canvas).transform,
+        };
+      });
+    });
+
+    expect(metrics).not.toHaveLength(0);
+    for (const canvas of metrics) {
+      expect(canvas.leftFraction, `${canvas.id} left should land on device pixel`).toBeLessThan(0.02);
+      expect(canvas.topFraction, `${canvas.id} top should land on device pixel`).toBeLessThan(0.02);
+      expect(canvas.transform, `${canvas.id} must not use transform-based snapping`).toBe('none');
+    }
+  });
+
+  test('canvas CSS boxes preserve fractional layout sizes instead of truncating them', async ({ page }) => {
+    await installResponsiveHarness(page);
+    await page.evaluate(() => {
+      const { host, chart } = (window as any).__responsiveHarness;
+      host.style.left = '0.17px';
+      host.style.top = '0.23px';
+      host.style.width = '389.37px';
+      host.style.height = '727.61px';
+      chart.render();
+      chart.render();
+    });
+    await page.waitForTimeout(80);
+
+    const metrics = await page.evaluate(() => {
+      const dpr = window.devicePixelRatio || 1;
+      return Array.from(document.querySelectorAll<HTMLCanvasElement>('#responsive-render-harness canvas')).map((canvas) => {
+        const rect = canvas.getBoundingClientRect();
+        const parentRect = canvas.parentElement!.getBoundingClientRect();
+        return {
+          id: canvas.id,
+          rectWidth: rect.width,
+          rectHeight: rect.height,
+          parentWidth: parentRect.width,
+          parentHeight: parentRect.height,
+          widthError: Math.abs(canvas.width - Math.round(rect.width * dpr)),
+          heightError: Math.abs(canvas.height - Math.round(rect.height * dpr)),
+        };
+      });
+    });
+
+    expect(metrics).not.toHaveLength(0);
+    for (const canvas of metrics) {
+      expect(Math.abs(canvas.rectWidth - canvas.parentWidth), `${canvas.id} width should preserve the fractional parent size`).toBeLessThan(0.02);
+      expect(Math.abs(canvas.rectHeight - canvas.parentHeight), `${canvas.id} height should preserve the fractional parent size`).toBeLessThan(0.02);
+      expect(canvas.widthError, `${canvas.id} bitmap width should match its fractional CSS box`).toBeLessThanOrEqual(1);
+      expect(canvas.heightError, `${canvas.id} bitmap height should match its fractional CSS box`).toBeLessThanOrEqual(1);
+    }
+  });
+});

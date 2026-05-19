@@ -55,15 +55,15 @@
 
 use aion_charts::core::guardrails::{DEFAULT_MAX_BARS_PER_LOAD, DEFAULT_MAX_INDICATOR_PANES};
 use aion_charts::{
-    generate_footprint_sample_data, generate_sample_data, AreaSeriesOptions, Bar, BarSeriesOptions,
-    BarArray, BaselineSeriesOptions, Canvas2DRenderer, ChartEngine, ChartGroup as NativeChartGroup,
-    ChartGuardrails, ChartPaneId, ChartStyle, CrosshairMagnetMode, CrosshairSnapshot, DataRange,
-    GpuContext, HistogramPoint, HistogramSeriesOptions, HitZone, InteractionHandler, LinePoint,
-    LineSeriesOptions, LineStyle, MainChartType, MainViewportPreset, MarkerPosition, MarkerShape,
-    MarkerZOrder, MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint, OrderLineId, OrderLineOptions,
-    OrderSide, OrderStatus, OrderType, OverlayRenderer, PriceAxisRenderer, PriceLineOptions,
-    RendererBackend, ResourceLimits, RuntimeEvent, SeriesId, SeriesMarker, SnapshotMtfResolver,
-    TimeAxisRenderer, TimeRange, Viewport, WgpuRenderer,
+    generate_footprint_sample_data, generate_sample_data, AreaSeriesOptions, Bar, BarArray,
+    BarSeriesOptions, BaselineSeriesOptions, Canvas2DRenderer, ChartEngine,
+    ChartGroup as NativeChartGroup, ChartGuardrails, ChartPaneId, ChartStyle, CrosshairMagnetMode,
+    CrosshairSnapshot, DataRange, GpuContext, HistogramPoint, HistogramSeriesOptions, HitZone,
+    InteractionHandler, LinePoint, LineSeriesOptions, LineStyle, MainChartType, MainViewportPreset,
+    MarkerPosition, MarkerShape, MarkerZOrder, MtfMode, MtfRequest, MtfResolvedSample, OhlcPoint,
+    OrderLineId, OrderLineOptions, OrderSide, OrderStatus, OrderType, OverlayRenderer,
+    PriceAxisRenderer, PriceLineOptions, RendererBackend, ResourceLimits, RuntimeEvent, SeriesId,
+    SeriesMarker, SnapshotMtfResolver, TimeAxisRenderer, TimeRange, Viewport, WgpuRenderer,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -350,6 +350,7 @@ fn sync_widget_sizes(s: &mut ChartInner, dpr: f64, prefer_exact: bool) {
         );
         s.time_axis_renderer
             .resize(es.time_axis_pw.max(1), es.time_axis_ph.max(1), dpr);
+        s.layout.snap_canvases_to_device_pixels(dpr);
         return;
     }
 
@@ -369,6 +370,7 @@ fn sync_widget_sizes(s: &mut ChartInner, dpr: f64, prefer_exact: bool) {
     let (tw, th) = s.layout.time_axis_css_size();
     s.time_axis_renderer
         .resize((tw * dpr).round() as u32, (th * dpr).round() as u32, dpr);
+    s.layout.snap_canvases_to_device_pixels(dpr);
 }
 
 pub(crate) struct RenderInvalidation {
@@ -2143,6 +2145,7 @@ impl Aion_charts {
             interaction,
             interaction_options: InteractionOptions::default(),
             exact_sizes: ExactPixelSizes::default(),
+            layout_settle_frames: 0,
             subpanes: Vec::new(),
             next_subpane_id: 1,
             active_subpane_id: None,
@@ -10296,15 +10299,8 @@ impl Aion_charts {
         timestamps: &[u64],
     ) -> Result<(), JsValue> {
         enforce_bar_load_guardrail("append_bars", &self.guardrails, open.len())?;
-        let bars = build_main_bars_from_arrays(
-            "append_bars",
-            open,
-            high,
-            low,
-            close,
-            volume,
-            timestamps,
-        )?;
+        let bars =
+            build_main_bars_from_arrays("append_bars", open, high, low, close, volume, timestamps)?;
         let count = bars.len();
         enforce_bar_load_guardrail("append_bars", &self.guardrails, count)?;
         let mut inner = self
@@ -10334,15 +10330,8 @@ impl Aion_charts {
         timestamps: &[u64],
     ) -> Result<(), JsValue> {
         enforce_bar_load_guardrail("upsert_bars", &self.guardrails, open.len())?;
-        let bars = build_main_bars_from_arrays(
-            "upsert_bars",
-            open,
-            high,
-            low,
-            close,
-            volume,
-            timestamps,
-        )?;
+        let bars =
+            build_main_bars_from_arrays("upsert_bars", open, high, low, close, volume, timestamps)?;
         let count = bars.len();
         enforce_bar_load_guardrail("upsert_bars", &self.guardrails, count)?;
         let mut inner = self

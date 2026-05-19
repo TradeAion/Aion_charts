@@ -173,6 +173,9 @@ pub struct ChartInner {
     pub interaction_options: InteractionOptions,
     /// Exact pixel sizes from device-pixel-content-box ResizeObserver.
     pub exact_sizes: ExactPixelSizes,
+    /// Extra RAF ticks after a render to catch late browser layout/font shifts
+    /// and re-align canvas compositing to the physical pixel grid.
+    pub layout_settle_frames: u8,
     /// Sub-panes for indicators (RSI, ATR, etc.)
     pub subpanes: Vec<SubPane>,
     /// Next sub-pane ID

@@ -201,10 +201,7 @@ impl WidgetLayout {
 
     /// Get container CSS dimensions.
     pub fn container_css_size(&self) -> (f64, f64) {
-        (
-            self.container.client_width() as f64,
-            self.container.client_height() as f64,
-        )
+        element_css_size(&self.container)
     }
 
     /// Update the grid sizing based on computed axis dimensions (CSS px).
@@ -263,26 +260,17 @@ impl WidgetLayout {
 
     /// Get the pane's actual CSS size (chart area only).
     pub fn pane_css_size(&self) -> (f64, f64) {
-        (
-            self.pane_container.client_width() as f64,
-            self.pane_container.client_height() as f64,
-        )
+        element_css_size(&self.pane_container)
     }
 
     /// Get the price axis container's CSS size.
     pub fn price_axis_css_size(&self) -> (f64, f64) {
-        (
-            self.price_axis_container.client_width() as f64,
-            self.price_axis_container.client_height() as f64,
-        )
+        element_css_size(&self.price_axis_container)
     }
 
     /// Get the time axis container's CSS size.
     pub fn time_axis_css_size(&self) -> (f64, f64) {
-        (
-            self.time_axis_container.client_width() as f64,
-            self.time_axis_container.client_height() as f64,
-        )
+        element_css_size(&self.time_axis_container)
     }
 
     /// Resize all widget canvases to their container sizes at the given DPR.
@@ -325,6 +313,31 @@ impl WidgetLayout {
         self.time_axis
             .set_size_with_css(exact_pw.max(1), exact_ph.max(1), css_w, css_h);
     }
+
+    /// Snap all canvas layers onto device-pixel boundaries.
+    ///
+    /// A host page can place the chart at a fractional CSS position. Even with
+    /// exact bitmap sizes, that makes the browser composite the canvas between
+    /// physical pixels and softens otherwise integer-aligned candle geometry.
+    /// Use `left/top`, not CSS transforms: transforms can promote the canvas
+    /// to a filtered texture and reintroduce the very blur this avoids.
+    pub fn snap_canvases_to_device_pixels(&self, dpr: f64) -> bool {
+        if dpr <= 0.0 || !dpr.is_finite() {
+            return false;
+        }
+        let mut changed = false;
+        for canvas in [
+            &self.pane.chart,
+            &self.pane.top,
+            &self.price_axis.base,
+            &self.price_axis.top,
+            &self.time_axis.base,
+            &self.time_axis.top,
+        ] {
+            changed |= snap_canvas_to_device_pixels(canvas, dpr);
+        }
+        changed
+    }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -338,8 +351,40 @@ fn create_widget_container(doc: &Document, id: &str) -> Result<HtmlDivElement, J
     Ok(div)
 }
 
-fn set_style_property_if_needed(style: &CssStyleDeclaration, property: &str, value: &str) {
+fn element_css_size<T: AsRef<web_sys::Element>>(element: &T) -> (f64, f64) {
+    let rect = element.as_ref().get_bounding_client_rect();
+    (rect.width(), rect.height())
+}
+
+fn set_style_property_if_needed(style: &CssStyleDeclaration, property: &str, value: &str) -> bool {
     if style.get_property_value(property).ok().as_deref() != Some(value) {
         let _ = style.set_property(property, value);
+        true
+    } else {
+        false
     }
+}
+
+fn snap_canvas_to_device_pixels(canvas: &HtmlCanvasElement, dpr: f64) -> bool {
+    let rect = canvas.get_bounding_client_rect();
+    let physical_left = rect.left() * dpr;
+    let physical_top = rect.top() * dpr;
+    let style = canvas.style();
+    let mut changed = set_style_property_if_needed(&style, "transform", "none");
+    let offset_x = parse_css_px(&style.get_property_value("left").unwrap_or_default())
+        + (physical_left.round() - physical_left) / dpr;
+    let offset_y = parse_css_px(&style.get_property_value("top").unwrap_or_default())
+        + (physical_top.round() - physical_top) / dpr;
+    if offset_x.abs() < 0.000_001 && offset_y.abs() < 0.000_001 {
+        changed |= set_style_property_if_needed(&style, "left", "0px");
+        changed |= set_style_property_if_needed(&style, "top", "0px");
+    } else {
+        changed |= set_style_property_if_needed(&style, "left", &format!("{offset_x:.6}px"));
+        changed |= set_style_property_if_needed(&style, "top", &format!("{offset_y:.6}px"));
+    }
+    changed
+}
+
+fn parse_css_px(value: &str) -> f64 {
+    value.trim_end_matches("px").parse::<f64>().unwrap_or(0.0)
 }
