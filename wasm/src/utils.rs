@@ -25,7 +25,7 @@ pub fn create_canvas(
     canvas.set_id(id);
     canvas.style().set_css_text(&format!(
         "position:absolute;top:0;left:0;display:block;z-index:{z_index};\
-         pointer-events:none;image-rendering:pixelated;image-rendering:crisp-edges;"
+         pointer-events:none;"
     ));
     Ok(canvas)
 }
