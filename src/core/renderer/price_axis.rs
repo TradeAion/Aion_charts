@@ -210,14 +210,13 @@ impl PriceAxisRenderer {
             }
         }
 
-        // Order-line labels use the same full-width price-axis chip as the
-        // live price label, so they must participate in axis width reservation.
-        let order_price_precision = order_lines.price_precision() as usize;
+        // Order-line labels use the same formatter as the price-axis ticks so
+        // toggling them on does not widen the axis with extra precision.
         for line in order_lines.iter() {
             if !line.is_visible() {
                 continue;
             }
-            let text = format_order_line_axis_label(line.options.price, order_price_precision);
+            let text = format_scale_value(vp, line.options.price, step);
             let w = self.text_cache.measure(&self.base_ctx, &text, &font);
             if w > max_w {
                 max_w = w;
@@ -898,7 +897,7 @@ impl PriceAxisRenderer {
         let font = style.axis_font(dpr);
         self.base_ctx.set_font(&font);
         let metrics = RightAxisLabelMetrics::from_style(style, dpr);
-        let order_price_precision = order_lines.price_precision() as usize;
+        let step = y_tick_step_internal(vp, pane_ph, dpr, style);
 
         struct OrderLineLabel {
             text: String,
@@ -923,7 +922,7 @@ impl PriceAxisRenderer {
             }
 
             entries.push(OrderLineLabel {
-                text: format_order_line_axis_label(opts.price, order_price_precision),
+                text: format_scale_value(vp, opts.price, step),
                 y_phys,
                 bg_color: opts.effective_color(),
                 text_color: opts.label_text_color,
@@ -994,10 +993,6 @@ pub(crate) fn append_countdown_to_labels(
     if let Some(countdown_str) = format_countdown(remaining_ms, Some(interval_ms)) {
         labels[0].countdown = Some(countdown_str);
     }
-}
-
-fn format_order_line_axis_label(price: f64, precision: usize) -> String {
-    format!("{:.precision$}", price, precision = precision)
 }
 
 fn draw_right_axis_label_background(

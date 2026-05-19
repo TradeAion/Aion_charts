@@ -224,7 +224,7 @@
       display: none;
       transform-origin: 0 0;
       will-change: left, top, width, height, transform;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+      font-family: 'Geist Sans', 'Noto Sans SC', 'Noto Sans', Roboto, 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif;
     }
     #drawing-placeholder {
       min-height: 0;
@@ -788,15 +788,15 @@
         <div class="setting-row">
           <span class="setting-label">Bullish</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-bullish-fill" value="#18a8c8" title="Fill">
-            <input type="color" class="setting-input" id="cfg-bullish-wick" value="#18a8c8" title="Wick">
+            <input type="color" class="setting-input" id="cfg-bullish-fill" value="#097564" title="Fill">
+            <input type="color" class="setting-input" id="cfg-bullish-wick" value="#097564" title="Wick">
           </div>
         </div>
         <div class="setting-row">
           <span class="setting-label">Bearish</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-bearish-fill" value="#e25362" title="Fill">
-            <input type="color" class="setting-input" id="cfg-bearish-wick" value="#e25362" title="Wick">
+            <input type="color" class="setting-input" id="cfg-bearish-fill" value="#a70b3c" title="Fill">
+            <input type="color" class="setting-input" id="cfg-bearish-wick" value="#a70b3c" title="Wick">
           </div>
         </div>
         <div class="setting-row">
@@ -814,13 +814,13 @@
         <div class="setting-row">
           <span class="setting-label">Up Volume</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-volume-up" value="#18a8c8">
+            <input type="color" class="setting-input" id="cfg-volume-up" value="#097564">
           </div>
         </div>
         <div class="setting-row">
           <span class="setting-label">Down Volume</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-volume-down" value="#e25362">
+            <input type="color" class="setting-input" id="cfg-volume-down" value="#a70b3c">
           </div>
         </div>
       </div>
@@ -840,7 +840,7 @@
         <div class="setting-row">
           <span class="setting-label">Line Color</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-crosshair-color" value="#5b5cf0">
+            <input type="color" class="setting-input" id="cfg-crosshair-color" value="#22262a">
           </div>
         </div>
         <div class="setting-row">
@@ -863,7 +863,7 @@
         <div class="setting-row">
           <span class="setting-label">Label BG</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-crosshair-label-bg" value="#16191f">
+            <input type="color" class="setting-input" id="cfg-crosshair-label-bg" value="#22262a">
           </div>
         </div>
         <div class="setting-row">
@@ -965,7 +965,7 @@
         <div class="setting-row">
           <span class="setting-label">Border Color</span>
           <div class="setting-control">
-            <input type="color" class="setting-input" id="cfg-axis-border-color" value="#16191f">
+            <input type="color" class="setting-input" id="cfg-axis-border-color" value="#22262a">
           </div>
         </div>
         <div class="setting-row">
@@ -1121,17 +1121,17 @@
     const themeLinkedSettings = {
       dark: {
         background: '#131315',
-        bullishFill: '#18a8c8',
-        bullishWick: '#18a8c8',
-        bearishFill: '#e25362',
-        bearishWick: '#e25362',
-        volumeUp: '#18a8c8',
-        volumeDown: '#e25362',
-        axisBorder: '#16191f',
+        bullishFill: '#097564',
+        bullishWick: '#097564',
+        bearishFill: '#a70b3c',
+        bearishWick: '#a70b3c',
+        volumeUp: '#097564',
+        volumeDown: '#a70b3c',
+        axisBorder: '#22262a',
         axisText: '#E7E7E7',
-        crosshair: '#5b5cf0',
+        crosshair: '#22262a',
         crosshairStyle: 'dashed',
-        crosshairLabelBg: '#16191f',
+        crosshairLabelBg: '#22262a',
         crosshairLabelText: '#E7E7E7',
       },
       light: {
@@ -1144,9 +1144,9 @@
         volumeDown: '#f20751',
         axisBorder: '#f0f0f0',
         axisText: '#202020',
-        crosshair: '#5b5cf0',
+        crosshair: '#22262a',
         crosshairStyle: 'dotted',
-        crosshairLabelBg: '#16191f',
+        crosshairLabelBg: '#22262a',
         crosshairLabelText: '#f5f5f5',
       },
     };
@@ -1921,11 +1921,6 @@
         core.clear_order_lines();
         syncOrderLinesToggle();
         return;
-      }
-
-      // Set price precision (2 decimals for demo)
-      if (typeof core.set_order_line_price_precision === 'function') {
-        core.set_order_line_price_precision(2);
       }
 
       const orders = createDemoOrderLines();

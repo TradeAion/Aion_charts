@@ -2267,8 +2267,16 @@ impl OverlayRenderer {
         };
 
         // Font setup
-        let font_size = (style.font_size as f64).max(12.0) * dpr;
-        let font = format!("600 {}px {}", font_size.round(), style.font_family);
+        let label_font_size_css = (style.font_size as f64 * 0.85).clamp(9.0, 11.0);
+        let font = format!(
+            "500 {}px {}",
+            (label_font_size_css * dpr).round(),
+            style.font_family
+        );
+        let arrow_scale_css = arrow_size / dpr / 7.0;
+        let arrow_extent_css = 4.5 * arrow_scale_css;
+        let label_gap_css = 3.0;
+        let label_offset = (arrow_extent_css + label_gap_css) * dpr;
         let background_luminance = 0.2126 * style.bg_color[0] as f64
             + 0.7152 * style.bg_color[1] as f64
             + 0.0722 * style.bg_color[2] as f64;
@@ -2369,13 +2377,13 @@ impl OverlayRenderer {
                 match leader.side {
                     ExecutionSide::Buy => {
                         self.ctx.set_text_baseline("top");
-                        let text_y = arrow_y_phys + (arrow_size * 2.35) + 3.0 * dpr;
+                        let text_y = arrow_y_phys + label_offset;
                         self.ctx.set_fill_style_str(&execution_text_color);
                         let _ = self.ctx.fill_text(execution_text, x_phys, text_y);
                     }
                     ExecutionSide::Sell => {
                         self.ctx.set_text_baseline("bottom");
-                        let text_y = arrow_y_phys - (arrow_size * 2.35) - 3.0 * dpr;
+                        let text_y = arrow_y_phys - label_offset;
                         self.ctx.set_fill_style_str(&execution_text_color);
                         let _ = self.ctx.fill_text(execution_text, x_phys, text_y);
                     }

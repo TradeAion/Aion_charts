@@ -1,7 +1,7 @@
 {
-  "name": "aion_charts-wasm",
+  "name": "@aion_charts/aion_charts-wasm",
   "type": "module",
-  "description": "Aion_charts WASM entry point — thin JS interop layer",
+  "description": "High-performance Canvas2D charting engine — WASM build",
   "version": "0.1.1",
   "files": [
     "aion_charts_wasm_bg.wasm",
@@ -12,5 +12,14 @@
   "types": "aion_charts_wasm.d.ts",
   "sideEffects": [
     "./snippets/*"
-  ]
+  ],
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aion_charts/Aion_charts.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  }
 }
