@@ -2405,6 +2405,20 @@
       }
 
       if (!core) return;
+
+      if (typeof core.on_key_down === 'function') {
+        const handledByDrawingText = core.on_key_down(
+          e.key,
+          e.ctrlKey || e.metaKey,
+          e.shiftKey,
+          e.altKey,
+        );
+        if (handledByDrawingText) {
+          e.preventDefault();
+          return;
+        }
+      }
+
       let handled = false;
       const isModified = e.ctrlKey || e.metaKey || e.altKey;
       const platformToolShortcuts = {

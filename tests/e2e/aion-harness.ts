@@ -74,15 +74,12 @@ export async function installHarness(page: Page) {
       let handled = false;
 
       if (selected?.text_editing) {
-        if (event.key === 'Enter') {
-          handled = chart.end_selected_drawing_text_edit(false);
-        } else if (event.key === 'Escape') {
-          handled = chart.end_selected_drawing_text_edit(true);
-        } else if (event.key === 'Backspace') {
-          handled = chart.set_selected_drawing_text((selected.text || '').slice(0, -1));
-        } else if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.length === 1) {
-          handled = chart.set_selected_drawing_text(`${selected.text || ''}${event.key}`);
-        }
+        handled = chart.on_key_down(
+          event.key,
+          event.ctrlKey || event.metaKey,
+          event.shiftKey,
+          event.altKey,
+        );
       } else if (event.key === 'Enter') {
         handled = chart.complete_drawing();
       } else if (event.key === 'Delete' || event.key === 'Backspace') {

@@ -98,7 +98,8 @@ impl DrawingManager {
     const DRAWING_PLACEHOLDER: &'static str = "+ Add text";
     const LINE_LABEL_SIDE_GAP_CSS: f64 = TEXT_LABEL_CLEARANCE_CSS;
     const RECT_OUTSIDE_GAP_CSS: f64 = TEXT_DRAWING_GAP_CSS;
-    const TEXT_CARET_VERTICAL_INSET_CSS: f64 = 1.0;
+    const TEXT_CARET_TOP_INSET_CSS: f64 = 0.0;
+    const TEXT_CARET_BOTTOM_INSET_CSS: f64 = 2.0;
 
     pub fn new() -> Self {
         Self {
@@ -622,10 +623,12 @@ impl DrawingManager {
             target.height.max(clamped_caret_top + 1.0),
         );
         let line_height = clamped_caret_bottom - clamped_caret_top;
-        let caret_inset = Self::TEXT_CARET_VERTICAL_INSET_CSS.min((line_height - 1.0) * 0.5);
-        let animated_top = (clamped_caret_top + caret_inset).min(clamped_caret_bottom - 1.0);
-        let animated_bottom = (clamped_caret_top + font_size - caret_inset)
-            .clamp(animated_top + 1.0, clamped_caret_bottom);
+        let top_inset = Self::TEXT_CARET_TOP_INSET_CSS.min((line_height - 1.0).max(0.0));
+        let bottom_inset =
+            Self::TEXT_CARET_BOTTOM_INSET_CSS.min((line_height - top_inset - 1.0).max(0.0));
+        let animated_top = (clamped_caret_top + top_inset).min(clamped_caret_bottom - 1.0);
+        let animated_bottom =
+            (clamped_caret_bottom - bottom_inset).clamp(animated_top + 1.0, clamped_caret_bottom);
         let (caret_top_x, caret_top_y) = local_to_css(clamped_caret_x, animated_top);
         let (caret_bottom_x, caret_bottom_y) = local_to_css(clamped_caret_x, animated_bottom);
         let (caret_top_x, caret_top_y) = css_to_bitmap(caret_top_x, caret_top_y);
@@ -926,11 +929,15 @@ impl DrawingManager {
         let Some(state) = self.text_edit.as_mut() else {
             return false;
         };
-        // First tick after begin_text_edit / reset: prime the timer.
+
+        // First tick after begin_text_edit / reset: restart the normal blink
+        // cycle at its visible phase. This avoids a key press landing during
+        // the hidden half of the cycle without slowing the blink cadence.
         if state.last_blink_ms <= 0.0 {
             state.last_blink_ms = now_ms;
+            let changed = state.caret_alpha < 1.0;
             state.caret_alpha = 1.0;
-            return false;
+            return changed;
         }
 
         let new_alpha = DrawingTextEditState::caret_alpha_for_elapsed(now_ms - state.last_blink_ms);
@@ -1162,7 +1169,12 @@ impl DrawingManager {
         } else {
             (block.max_width as f64 + 2.0).clamp(1.0, 320.0)
         };
-        let height = (block.total_height as f64 + 2.0).clamp(1.0, 120.0);
+        let height = if use_placeholder_when_empty {
+            block.total_height as f64 + 2.0
+        } else {
+            block.total_height as f64
+        }
+        .clamp(1.0, 120.0);
         let placement = line_label_placement(
             start_x,
             start_y,
@@ -3261,6 +3273,30 @@ mod tests {
     }
 
     #[test]
+    fn text_input_restarts_normal_blink_without_extended_hold() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::Text;
+        manager.start_creating(10.0, 110.0).expect("text id");
+        manager.finalize_creation_step(10.0, 110.0);
+
+        assert!(manager.handle_text_key("A", false, false, false));
+        assert!(!manager.tick_caret_blink(1000.0));
+        assert!(manager.tick_caret_blink(1600.0));
+        assert!(
+            manager.text_edit.as_ref().expect("edit state").caret_alpha <= 0.001,
+            "caret should resume the normal hidden blink phase after typing"
+        );
+
+        assert!(manager.handle_text_key(" ", false, false, false));
+        assert!(!manager.tick_caret_blink(2000.0));
+        assert!(manager.tick_caret_blink(2600.0));
+        assert!(
+            manager.text_edit.as_ref().expect("edit state").caret_alpha <= 0.001,
+            "caret should resume the normal hidden blink phase after inserting a space"
+        );
+    }
+
+    #[test]
     fn entering_text_edit_renders_caret_and_fades_placeholder() {
         // While editing with empty text: the caret renders, AND the "+ Add
         // text" placeholder stays visible but faded (alpha reduced) as a
@@ -3312,10 +3348,10 @@ mod tests {
         assert!(manager.set_selected_drawing_text("Ray".to_string()));
         assert!(manager.begin_text_edit_selected());
 
-        let font_size = manager
+        let info = manager
             .selected_drawing_info(&test_viewport(), 800.0, 600.0)
-            .expect("selected drawing info")
-            .text_font_size;
+            .expect("selected drawing info");
+        let font_size = info.text_font_size;
         let (_bottom, top) =
             manager.generate_all_geometry(&test_viewport(), 800.0, 600.0, 1.0, 1.0, 1.0);
         let caret = top
@@ -3323,11 +3359,61 @@ mod tests {
             .and_then(|geom| geom.lines.last())
             .expect("caret line");
         let rendered_height = f64::from((caret.x1 - caret.x0).hypot(caret.y1 - caret.y0));
-        let expected_height = font_size - DrawingManager::TEXT_CARET_VERTICAL_INSET_CSS * 2.0;
+        let expected_height = font_size
+            - DrawingManager::TEXT_CARET_TOP_INSET_CSS
+            - DrawingManager::TEXT_CARET_BOTTOM_INSET_CSS;
 
         assert!(
             (rendered_height - expected_height).abs() <= 0.01,
             "caret should stay slightly inside the glyph height, got {rendered_height} expected {expected_height}"
+        );
+    }
+
+    #[test]
+    fn line_label_caret_reaches_font_top_and_keeps_bottom_clearance() {
+        let mut manager = DrawingManager::new();
+        manager.active_tool = DrawingTool::HorizontalLine;
+        let id = manager
+            .start_creating(10.0, 100.0)
+            .expect("horizontal line id");
+        manager.finalize_creation_step(10.0, 100.0);
+        manager.select(id);
+        assert!(manager.set_selected_drawing_text("deeeD".to_string()));
+        assert!(manager.begin_text_edit_selected());
+
+        let info = manager
+            .selected_drawing_info(&test_viewport(), 800.0, 600.0)
+            .expect("selected drawing info");
+        let id = manager.selected_id.expect("selected id");
+        let drawing = manager.get(id).expect("selected drawing");
+        let target = DrawingManager::editor_target_for_drawing_sized(
+            drawing.as_ref(),
+            &test_viewport(),
+            800.0,
+            600.0,
+            false,
+        )
+        .expect("caret editor target");
+        let (_bottom, top) =
+            manager.generate_all_geometry(&test_viewport(), 800.0, 600.0, 1.0, 1.0, 1.0);
+        let caret = top
+            .first()
+            .and_then(|geom| geom.lines.last())
+            .expect("caret line");
+
+        let top_gap = f64::from(caret.y0) - target.top;
+        let bottom_gap = target.top + target.height - f64::from(caret.y1);
+        assert!(
+            (top_gap - DrawingManager::TEXT_CARET_TOP_INSET_CSS).abs() <= 0.51,
+            "caret should reach the top of the text font box, top_gap={top_gap}"
+        );
+        assert!(
+            (bottom_gap - DrawingManager::TEXT_CARET_BOTTOM_INSET_CSS).abs() <= 0.51,
+            "caret should keep the line-safe bottom clearance, bottom_gap={bottom_gap}"
+        );
+        assert!(
+            target.height < info.editor_target.expect("public editor target").height,
+            "caret target should avoid the padded hit-test height used by the public editor target"
         );
     }
 
