@@ -354,22 +354,45 @@ fn sync_widget_sizes(s: &mut ChartInner, dpr: f64, prefer_exact: bool) {
         return;
     }
 
-    s.layout.resize_all_canvases(dpr);
-    s.engine.h_pixel_ratio = dpr;
-    s.engine.v_pixel_ratio = dpr;
-
     let (pw, ph) = s.layout.pane_css_size();
     let ppw = (pw * dpr).round() as u32;
     let pph = (ph * dpr).round() as u32;
+    let pane_css_w_quant = if dpr > 0.0 { ppw as f64 / dpr } else { pw };
+    let pane_css_h_quant = if dpr > 0.0 { pph as f64 / dpr } else { ph };
+    s.layout
+        .resize_pane_exact(ppw.max(1), pph.max(1), pane_css_w_quant, pane_css_h_quant);
+    let pane_h_ratio = if pw > 0.0 { ppw as f64 / pw } else { dpr };
+    let pane_v_ratio = if ph > 0.0 { pph as f64 / ph } else { dpr };
+    s.engine.h_pixel_ratio = pane_h_ratio;
+    s.engine.v_pixel_ratio = pane_v_ratio;
     s.engine.resize(ppw.max(1), pph.max(1), dpr);
-    s.overlay.resize(ppw.max(1), pph.max(1), dpr, dpr, dpr);
+    s.overlay
+        .resize(ppw.max(1), pph.max(1), dpr, pane_h_ratio, pane_v_ratio);
 
     let (aw, ah) = s.layout.price_axis_css_size();
-    s.price_axis_renderer
-        .resize((aw * dpr).round() as u32, (ah * dpr).round() as u32, dpr);
+    let apw = (aw * dpr).round() as u32;
+    let aph = (ah * dpr).round() as u32;
+    let axis_css_w_quant = if dpr > 0.0 { apw as f64 / dpr } else { aw };
+    let axis_css_h_quant = if dpr > 0.0 { aph as f64 / dpr } else { ah };
+    s.layout
+        .resize_price_axis_exact(apw.max(1), aph.max(1), axis_css_w_quant, axis_css_h_quant);
+    let axis_h_ratio = if aw > 0.0 { apw as f64 / aw } else { dpr };
+    let axis_v_ratio = if ah > 0.0 { aph as f64 / ah } else { dpr };
+    s.price_axis_renderer.resize_with_pixel_ratios(
+        apw.max(1),
+        aph.max(1),
+        dpr,
+        axis_h_ratio,
+        axis_v_ratio,
+    );
     let (tw, th) = s.layout.time_axis_css_size();
-    s.time_axis_renderer
-        .resize((tw * dpr).round() as u32, (th * dpr).round() as u32, dpr);
+    let tpw = (tw * dpr).round() as u32;
+    let tph = (th * dpr).round() as u32;
+    let time_css_w_quant = if dpr > 0.0 { tpw as f64 / dpr } else { tw };
+    let time_css_h_quant = if dpr > 0.0 { tph as f64 / dpr } else { th };
+    s.layout
+        .resize_time_axis_exact(tpw.max(1), tph.max(1), time_css_w_quant, time_css_h_quant);
+    s.time_axis_renderer.resize(tpw.max(1), tph.max(1), dpr);
     s.layout.snap_canvases_to_device_pixels(dpr);
 }
 

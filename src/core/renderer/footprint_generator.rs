@@ -31,7 +31,7 @@ use crate::core::renderer::draw_list::{
 };
 use crate::core::renderer::series::CandleSizing;
 use crate::core::renderer::traits::ChartStyle;
-use crate::core::renderer::transforms::{bar_to_x, color4, price_to_y};
+use crate::core::renderer::transforms::{color4, price_to_y};
 use crate::core::renderer::value_projection::TimeScaleIndex;
 use crate::core::viewport::Viewport;
 
@@ -53,10 +53,16 @@ fn main_bar_center_x(
     viewport: &Viewport,
     time_scale: &TimeScaleIndex,
     chart_w: f64,
+    h_pixel_ratio: f64,
 ) -> Option<f64> {
+    let ratio = h_pixel_ratio.max(1.0);
     time_scale
         .logical_index_for_main_bar(bar_index)
-        .map(|logical_index| bar_to_x(logical_index + 0.5, viewport, chart_w))
+        .map(|logical_index| {
+            let frac = (logical_index + 0.5 - viewport.start_bar)
+                / (viewport.end_bar - viewport.start_bar);
+            frac * chart_w - ratio
+        })
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -180,7 +186,7 @@ pub fn generate_footprint_geometry(
         // ── Compute bar geometry ──
         // Layout: [candle | gap | ladder]
         // The candle occupies the left portion, the ladder the right.
-        let Some(center_x) = main_bar_center_x(i, viewport, time_scale, pane_w) else {
+        let Some(center_x) = main_bar_center_x(i, viewport, time_scale, pane_w, h_ratio) else {
             continue;
         };
         let half_bar = (sizing.bar_width * 0.5).floor();
@@ -1066,7 +1072,9 @@ fn generate_fallback_candle(
         color4(&style.wick_bearish_color)
     };
 
-    let Some(center_x) = main_bar_center_x(bar_idx, vp, time_scale, chart_w).map(f64::round) else {
+    let Some(center_x) =
+        main_bar_center_x(bar_idx, vp, time_scale, chart_w, sizing.h_pixel_ratio).map(f64::round)
+    else {
         return;
     };
     let body_top = price_to_y(open.max(close), vp, candle_h).round();

@@ -1618,7 +1618,7 @@ export interface InitOutput {
     readonly indicatorworkerruntime_upsert_bar: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number) => void;
     readonly __wasm_bindgen_func_elem_470: (a: number, b: number) => void;
     readonly __wasm_bindgen_func_elem_480: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_2735: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_2734: (a: number, b: number, c: number, d: number) => void;
     readonly __wasm_bindgen_func_elem_476: (a: number, b: number, c: number) => void;
     readonly __wasm_bindgen_func_elem_473: (a: number, b: number, c: number) => void;
     readonly __wasm_bindgen_func_elem_471: (a: number, b: number) => void;

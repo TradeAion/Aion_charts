@@ -25,10 +25,19 @@ use crate::core::viewport::Viewport;
 /// candle geometry is rendered as filled rects by every backend.
 #[inline]
 fn effective_wick_width(sizing: &CandleSizing) -> f64 {
+    let ratio = sizing.h_pixel_ratio.max(1.0);
+    let ratio_floor = ratio.floor().max(1.0);
+    let min_visible_phys = if ratio - ratio_floor <= 0.05 {
+        ratio_floor
+    } else {
+        ratio.ceil()
+    };
     sizing
         .wick_width
         .round()
-        .clamp(1.0, sizing.bar_width.max(1.0))
+        .max(min_visible_phys)
+        .min(sizing.bar_width.max(1.0))
+        .max(1.0)
 }
 
 #[inline]
@@ -53,6 +62,23 @@ fn main_bar_center_x(
     time_scale
         .logical_index_for_main_bar(bar_index)
         .map(|logical_index| bar_to_x(logical_index + 0.5, vp, chart_w))
+}
+
+#[inline]
+fn main_bar_center_x_phys(
+    bar_index: usize,
+    vp: &Viewport,
+    time_scale: &TimeScaleIndex,
+    chart_w: f64,
+    h_pixel_ratio: f64,
+) -> Option<f64> {
+    let ratio = h_pixel_ratio.max(1.0);
+    time_scale
+        .logical_index_for_main_bar(bar_index)
+        .map(|logical_index| {
+            let frac = (logical_index + 0.5 - vp.start_bar) / (vp.end_bar - vp.start_bar);
+            frac * chart_w - ratio
+        })
 }
 
 #[inline]
@@ -288,7 +314,7 @@ pub struct ProjectedCandle {
 }
 
 /// Shared candle projection for all backends.
-/// This centralizes the bar/wick overlap clamp and pixel rounding policy.
+/// This centralizes pixel rounding policy for bar/wick/body footprints.
 pub fn project_candles(
     bars: &crate::core::data::BarArray,
     time_scale: &TimeScaleIndex,
@@ -305,7 +331,6 @@ pub fn project_candles(
     }
 
     let half_bar = (sizing.bar_width * 0.5).floor();
-    let mut prev_bar_right: Option<f64> = None;
 
     let mut projected = Vec::with_capacity(end - start);
     for i in start..end {
@@ -313,7 +338,10 @@ pub fn project_candles(
         let b = bars.get_unchecked(i);
         let bull = b.close >= b.open;
 
-        let Some(center_x) = main_bar_center_x(i, vp, time_scale, chart_w).map(f64::round) else {
+        let Some(center_x) =
+            main_bar_center_x_phys(i, vp, time_scale, chart_w, sizing.h_pixel_ratio)
+                .map(f64::round)
+        else {
             continue;
         };
         let body_price_high = b.open.max(b.close);
@@ -333,27 +361,21 @@ pub fn project_candles(
             low_y = body_bottom + 1.0;
         }
 
-        // Resolve the reference-style footprints independently. Wicks and
-        // borders clamp overlap, but body fill keeps the full bar width so
-        // candle "brick" thickness stays visually stable across DPR/viewport
-        // combinations.
+        // Keep border/body footprints width-stable per frame. Clamping adjacent
+        // bars to avoid overlap creates position-dependent apparent thickness,
+        // which is exactly the blur/thickness jitter users notice when panning.
         let ideal_bar_left = center_x - half_bar;
-        let bar_right = ideal_bar_left + sizing.bar_width - 1.0;
-        let mut bar_left = ideal_bar_left;
-        if let Some(prev) = prev_bar_right {
-            bar_left = bar_left.max(prev + 1.0).min(bar_right);
-        }
-        let bar_width = (bar_right - bar_left + 1.0).max(1.0);
-        prev_bar_right = Some(bar_right);
+        let bar_left = ideal_bar_left;
+        let bar_width = sizing.bar_width.max(1.0);
 
         let body_left = ideal_bar_left;
-        let body_width = sizing.bar_width;
+        let body_width = sizing.bar_width.max(1.0);
 
-        let wick_width = effective_wick_width(sizing).min(bar_width).max(1.0);
-        let visible_center_x = ((bar_left + bar_right) * 0.5).round();
-        let wick_left = (visible_center_x - (wick_width * 0.5).floor())
-            .max(bar_left)
-            .min(bar_right - wick_width + 1.0);
+        // Keep wick width/centering stable candle-to-candle. Clamping wick
+        // width to overlap-reduced bar footprints makes adjacent candles look
+        // uneven on some viewport sizes.
+        let wick_width = effective_wick_width(sizing).max(1.0);
+        let wick_left = center_x - (wick_width * 0.5).floor();
 
         projected.push(ProjectedCandle {
             body_left,
@@ -533,7 +555,8 @@ fn generate_volume_into(
             color4(&style.bearish_volume_color)
         };
 
-        let Some(cx) = main_bar_center_x(i, vp, time_scale, chart_w) else {
+        let Some(cx) = main_bar_center_x_phys(i, vp, time_scale, chart_w, sizing.h_pixel_ratio)
+        else {
             continue;
         };
         let h = (b.volume / max_vol) * vol_h;
@@ -614,7 +637,9 @@ fn generate_ohlc_bars_into(
             color4(&style.wick_bearish_color)
         };
 
-        let Some(phys_x) = main_bar_center_x(i, vp, time_scale, chart_w).map(f64::round) else {
+        let Some(phys_x) = main_bar_center_x_phys(i, vp, time_scale, chart_w, sizing.h_pixel_ratio)
+            .map(f64::round)
+        else {
             continue;
         };
         let high_y = price_to_y(b.high as f64, vp, candle_h).round();
@@ -1159,7 +1184,9 @@ fn generate_heikin_ashi_into(
             color4(&style.bearish_color)
         };
 
-        let Some(phys_x) = main_bar_center_x(i, vp, time_scale, chart_w).map(f64::round) else {
+        let Some(phys_x) = main_bar_center_x_phys(i, vp, time_scale, chart_w, sizing.h_pixel_ratio)
+            .map(f64::round)
+        else {
             continue;
         };
         let ha_body_high = ha_open.max(ha_close);
@@ -1273,7 +1300,7 @@ mod tests {
     }
 
     #[test]
-    fn wick_and_border_share_clamped_footprint_while_body_stays_full_width() {
+    fn wick_and_bar_widths_stay_constant_in_dense_views() {
         let bars = sample_bars();
         let time_scale = TimeScaleIndex::from_bars(&bars);
         let mut viewport = Viewport::new(8, 200);
@@ -1288,19 +1315,28 @@ mod tests {
         assert_eq!(sizing.bar_width, 3.0);
         assert_eq!(projected.len(), 4);
 
-        let narrow = projected
-            .iter()
-            .find(|c| c.bar_width < sizing.bar_width)
-            .expect("expected at least one overlap-clamped candle");
-        assert_eq!(narrow.body_width, sizing.bar_width);
-        assert!(narrow.body_left <= narrow.bar_left);
-        assert!(narrow.wick_width <= narrow.bar_width);
-        assert!(narrow.wick_left >= narrow.bar_left);
-        assert!(narrow.wick_left + narrow.wick_width <= narrow.bar_left + narrow.bar_width);
+        assert!(
+            projected
+                .iter()
+                .all(|c| (c.bar_width - sizing.bar_width).abs() < f64::EPSILON),
+            "bar border footprint should remain width-stable candle-to-candle"
+        );
+        assert!(
+            projected
+                .iter()
+                .all(|c| (c.body_width - sizing.bar_width).abs() < f64::EPSILON),
+            "body footprint should remain width-stable candle-to-candle"
+        );
+        assert!(
+            projected
+                .iter()
+                .all(|c| (c.wick_width - effective_wick_width(&sizing)).abs() < f64::EPSILON),
+            "wick width should remain width-stable candle-to-candle"
+        );
     }
 
     #[test]
-    fn body_fill_keeps_reference_width_when_border_is_overlap_clamped() {
+    fn dense_mobile_projection_keeps_uniform_widths() {
         let bars = sample_bars();
         let time_scale = TimeScaleIndex::from_bars(&bars);
         let mut viewport = Viewport::new(30, 200);
@@ -1313,14 +1349,44 @@ mod tests {
         let projected = project_candles(&bars, &time_scale, &viewport, 30.0, 200.0, &sizing);
 
         assert!(
-            projected.iter().any(|c| c.bar_width < sizing.bar_width),
-            "dense mobile spacing should clamp at least one border footprint"
+            projected
+                .iter()
+                .all(|c| (c.bar_width - sizing.bar_width).abs() < f64::EPSILON),
+            "dense mobile spacing should keep a uniform bar footprint width"
         );
         assert!(
             projected
                 .iter()
                 .all(|c| (c.body_width - sizing.bar_width).abs() < f64::EPSILON),
-            "body fill must keep the stable full bar width like lightweight-charts"
+            "dense mobile spacing should keep a uniform body footprint width"
+        );
+    }
+
+    #[test]
+    fn candle_x_projection_applies_css_bias_in_physical_pixels() {
+        let bars = sample_bars();
+        let time_scale = TimeScaleIndex::from_bars(&bars);
+        let mut viewport = Viewport::new(1000, 200);
+        viewport.volume_height_ratio = 0.0;
+        viewport.set_range(0.0, 100.0);
+        viewport.price_min = 9.0;
+        viewport.price_max = 12.0;
+
+        let sizing = CandleSizing {
+            bar_width: 3.0,
+            wick_width: 1.0,
+            border_width: 1.0,
+            draw_body: true,
+            bar_spacing: 5.0,
+            h_pixel_ratio: 2.0,
+            v_pixel_ratio: 2.0,
+        };
+        let projected = project_candles(&bars, &time_scale, &viewport, 1000.0, 200.0, &sizing);
+
+        assert_eq!(projected.len(), 4);
+        assert_eq!(
+            projected[0].body_left, 2.0,
+            "logical x=-1 CSS bias must be scaled to -2 physical px at 2x DPR"
         );
     }
 
@@ -1340,7 +1406,22 @@ mod tests {
     }
 
     #[test]
-    fn wick_width_never_exceeds_visible_bar_footprint() {
+    fn wick_width_is_at_least_one_css_pixel_on_fractional_dpr() {
+        let sizing = CandleSizing {
+            bar_width: 12.0,
+            wick_width: 1.0,
+            border_width: 1.0,
+            draw_body: true,
+            bar_spacing: 5.0,
+            h_pixel_ratio: 1.5,
+            v_pixel_ratio: 1.5,
+        };
+
+        assert_eq!(effective_wick_width(&sizing), 2.0);
+    }
+
+    #[test]
+    fn wick_width_never_exceeds_series_bar_width() {
         let sizing = CandleSizing {
             bar_width: 2.0,
             wick_width: 3.0,
