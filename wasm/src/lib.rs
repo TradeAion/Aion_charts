@@ -357,30 +357,34 @@ fn sync_widget_sizes(s: &mut ChartInner, dpr: f64, prefer_exact: bool) {
     let (pw, ph) = s.layout.pane_css_size();
     let ppw = (pw * dpr).round() as u32;
     let pph = (ph * dpr).round() as u32;
-    let pane_css_w_quant = if dpr > 0.0 { ppw as f64 / dpr } else { pw };
-    let pane_css_h_quant = if dpr > 0.0 { pph as f64 / dpr } else { ph };
+    let ppw_clamped = ppw.max(1);
+    let pph_clamped = pph.max(1);
+    let pane_css_w_quant = if dpr > 0.0 { ppw_clamped as f64 / dpr } else { pw };
+    let pane_css_h_quant = if dpr > 0.0 { pph_clamped as f64 / dpr } else { ph };
     s.layout
-        .resize_pane_exact(ppw.max(1), pph.max(1), pane_css_w_quant, pane_css_h_quant);
-    let pane_h_ratio = if pw > 0.0 { ppw as f64 / pw } else { dpr };
-    let pane_v_ratio = if ph > 0.0 { pph as f64 / ph } else { dpr };
+        .resize_pane_exact(ppw_clamped, pph_clamped, pane_css_w_quant, pane_css_h_quant);
+    let pane_h_ratio = if pw > 0.0 { ppw_clamped as f64 / pw } else { dpr };
+    let pane_v_ratio = if ph > 0.0 { pph_clamped as f64 / ph } else { dpr };
     s.engine.h_pixel_ratio = pane_h_ratio;
     s.engine.v_pixel_ratio = pane_v_ratio;
-    s.engine.resize(ppw.max(1), pph.max(1), dpr);
+    s.engine.resize(ppw_clamped, pph_clamped, dpr);
     s.overlay
-        .resize(ppw.max(1), pph.max(1), dpr, pane_h_ratio, pane_v_ratio);
+        .resize(ppw_clamped, pph_clamped, dpr, pane_h_ratio, pane_v_ratio);
 
     let (aw, ah) = s.layout.price_axis_css_size();
     let apw = (aw * dpr).round() as u32;
     let aph = (ah * dpr).round() as u32;
-    let axis_css_w_quant = if dpr > 0.0 { apw as f64 / dpr } else { aw };
-    let axis_css_h_quant = if dpr > 0.0 { aph as f64 / dpr } else { ah };
+    let apw_clamped = apw.max(1);
+    let aph_clamped = aph.max(1);
+    let axis_css_w_quant = if dpr > 0.0 { apw_clamped as f64 / dpr } else { aw };
+    let axis_css_h_quant = if dpr > 0.0 { aph_clamped as f64 / dpr } else { ah };
     s.layout
-        .resize_price_axis_exact(apw.max(1), aph.max(1), axis_css_w_quant, axis_css_h_quant);
-    let axis_h_ratio = if aw > 0.0 { apw as f64 / aw } else { dpr };
-    let axis_v_ratio = if ah > 0.0 { aph as f64 / ah } else { dpr };
+        .resize_price_axis_exact(apw_clamped, aph_clamped, axis_css_w_quant, axis_css_h_quant);
+    let axis_h_ratio = if aw > 0.0 { apw_clamped as f64 / aw } else { dpr };
+    let axis_v_ratio = if ah > 0.0 { aph_clamped as f64 / ah } else { dpr };
     s.price_axis_renderer.resize_with_pixel_ratios(
-        apw.max(1),
-        aph.max(1),
+        apw_clamped,
+        aph_clamped,
         dpr,
         axis_h_ratio,
         axis_v_ratio,
@@ -388,11 +392,13 @@ fn sync_widget_sizes(s: &mut ChartInner, dpr: f64, prefer_exact: bool) {
     let (tw, th) = s.layout.time_axis_css_size();
     let tpw = (tw * dpr).round() as u32;
     let tph = (th * dpr).round() as u32;
-    let time_css_w_quant = if dpr > 0.0 { tpw as f64 / dpr } else { tw };
-    let time_css_h_quant = if dpr > 0.0 { tph as f64 / dpr } else { th };
+    let tpw_clamped = tpw.max(1);
+    let tph_clamped = tph.max(1);
+    let time_css_w_quant = if dpr > 0.0 { tpw_clamped as f64 / dpr } else { tw };
+    let time_css_h_quant = if dpr > 0.0 { tph_clamped as f64 / dpr } else { th };
     s.layout
-        .resize_time_axis_exact(tpw.max(1), tph.max(1), time_css_w_quant, time_css_h_quant);
-    s.time_axis_renderer.resize(tpw.max(1), tph.max(1), dpr);
+        .resize_time_axis_exact(tpw_clamped, tph_clamped, time_css_w_quant, time_css_h_quant);
+    s.time_axis_renderer.resize(tpw_clamped, tph_clamped, dpr);
     s.layout.snap_canvases_to_device_pixels(dpr);
 }
 
