@@ -23,12 +23,17 @@
     <label><input type="radio" name="series" value="3"> area</label>
     <span id="status"></span>
   </div>
-  <div id="chart_container"><canvas id="chart"></canvas></div>
+  <div id="chart_container">
+    <canvas id="pane"></canvas>
+    <canvas id="overlay"></canvas>
+  </div>
 </div>
 <script type="module">
 import init, { create_chart } from "./pkg/aion_wasm.js";
 
-const canvas = document.getElementById("chart");
+// pane = WebGPU (candles/grid/series), overlay = Canvas2D (native axis text) stacked on top.
+const pane = document.getElementById("pane");
+const overlay = document.getElementById("overlay");
 const container = document.getElementById("chart_container");
 const status = document.getElementById("status");
 
@@ -38,8 +43,10 @@ function css_size() {
 
 function apply_bitmap_size() {
   const { w, h, dpr } = css_size();
-  canvas.width = Math.max(1, Math.round(w * dpr));
-  canvas.height = Math.max(1, Math.round(h * dpr));
+  for (const c of [pane, overlay]) {
+    c.width = Math.max(1, Math.round(w * dpr));
+    c.height = Math.max(1, Math.round(h * dpr));
+  }
   return { w, h, dpr };
 }
 
@@ -66,7 +73,7 @@ function generate_data(n) {
 
 await init();
 const { w, h, dpr } = apply_bitmap_size();
-const chart = await create_chart(canvas, w, h, dpr);
+const chart = await create_chart(pane, overlay, w, h, dpr);
 
 window.__chart = chart; // debug/test handle
 
@@ -81,7 +88,8 @@ document.querySelectorAll('input[name="series"]').forEach((el) => {
 
 const rerender = () => { chart.render(); status.textContent = `1000 bars · dpr ${css_size().dpr} · spacing ${chart.bar_spacing().toFixed(2)}px`; };
 
-canvas.addEventListener("wheel", (e) => {
+// overlay is the topmost element, so it receives the pointer events
+overlay.addEventListener("wheel", (e) => {
   e.preventDefault();
   // LWC wheel formula (RENDERING_SPEC.md §1.1)
   const deltaY = -(e.deltaY / 100);
@@ -93,15 +101,15 @@ canvas.addEventListener("wheel", (e) => {
 }, { passive: false });
 
 let dragging = false;
-canvas.addEventListener("mousedown", (e) => { dragging = true; chart.scroll_start(e.offsetX); });
+overlay.addEventListener("mousedown", (e) => { dragging = true; chart.scroll_start(e.offsetX); });
 window.addEventListener("mouseup", () => { if (dragging) { dragging = false; chart.scroll_end(); } });
-canvas.addEventListener("mousemove", (e) => {
+overlay.addEventListener("mousemove", (e) => {
   if (dragging) chart.scroll_move(e.offsetX);
   chart.set_crosshair(e.offsetX, e.offsetY);
   rerender();
 });
-canvas.addEventListener("mouseleave", () => { chart.clear_crosshair(); rerender(); });
-canvas.addEventListener("dblclick", () => { chart.fit_content(); rerender(); });
+overlay.addEventListener("mouseleave", () => { chart.clear_crosshair(); rerender(); });
+overlay.addEventListener("dblclick", () => { chart.fit_content(); rerender(); });
 
 new ResizeObserver(() => {
   const { w, h, dpr } = apply_bitmap_size();

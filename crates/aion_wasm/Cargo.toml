@@ -19,11 +19,8 @@ js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "HtmlCanvasElement",
     "Window",
-    "Document",
-    "Element",
     "CanvasRenderingContext2d",
     "TextMetrics",
-    "ImageData",
     "console",
 ] }
 wgpu = { version = "25", default-features = false, features = ["webgpu", "wgsl"] }

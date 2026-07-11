@@ -6,8 +6,6 @@
 
 #[cfg(target_arch = "wasm32")]
 mod chart;
-#[cfg(target_arch = "wasm32")]
-mod text;
 
 #[cfg(target_arch = "wasm32")]
 pub use chart::{create_chart, AionChart};

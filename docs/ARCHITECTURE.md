@@ -344,13 +344,24 @@ bar + histogram renderers, options structs, RAF/invalidation plumbing in the she
 time tick marks (weights) for vertical grid. Then first goldens.
 *Exit: a candlestick chart with grid, correct at every bar spacing and DPR.*
 
-**Phase 2 — Axes & text (2–3 wks). PARTIALLY DONE.** Done: Canvas2D-rasterized label atlas
-(white-on-transparent, shader-tinted — pixel-identical glyphs to LWC) + textured-quad
-pipeline + scissored draw groups (pane/axis separation), price axis (optimal-width formula,
-border, tick labels), time axis (28px optimalHeight, weight-based labels, en-US tick
-formatter), crosshair axis labels (dark boxes + white text). Remaining: label overlap
-resolution, bold high-weight time labels, `Intl` locale hook, edge tick marks, axis
-drag-scale gestures wiring, goldens.
+**Phase 2 — Axes & text (2–3 wks). PARTIALLY DONE.**
+
+Text architecture decision (2026-07): axes render on a **stacked Canvas2D overlay**, not the
+GPU — mirroring LWC's per-cell canvas layout. The pane is one WebGPU canvas; a second
+full-size Canvas2D canvas sits exactly on top, transparent except over the axis strips, and
+Rust draws all axis chrome/labels to it via web-sys `fillText`/`fillRect`. This gives native,
+premium axis text (the product goal) while all layout/format logic stays in Rust. The GPU
+label atlas + textured-quad pipeline are kept, constructed-but-idle, reserved for future
+*in-pane* text (legend, watermark, series markers) — a canvas is `webgpu` XOR `2d`, so
+anything inside the GPU pane still needs the atlas. Tradeoff accepted: the native/`takeScreenshot`/
+golden path will still need the atlas text path, and the time-axis overlay can desync from the
+GPU pane by a frame under heavy jank (price axis is immune — it doesn't move on horizontal pan).
+
+Done: hybrid pane(GPU)/axes(2D) rendering, price axis (optimal-width formula via real browser
+metrics, border, tick labels), time axis (28px optimalHeight, weight-based labels, en-US tick
+formatter), crosshair axis labels (dark boxes + white text), all native 2D. Remaining: label
+overlap resolution, bold high-weight time labels, `Intl` locale hook, edge tick marks,
+rounded crosshair-label corners, axis drag-scale gestures, goldens.
 *Exit: goldens of full chart with both axes match LWC.*
 
 **Phase 3 — Interaction (2–3 wks).** Gesture recognizer, wheel/pinch zoom, pan, axis drag scale,
