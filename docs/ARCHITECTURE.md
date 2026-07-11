@@ -358,10 +358,12 @@ double-click reset, kinetic scroll, crosshair + magnet + tracking mode (touch), 
 labels, hit testing, click/crosshair subscriptions. Interaction parity tests.
 *Exit: feels identical to LWC side-by-side.*
 
-**Phase 4 — Series completeness & streaming (2–3 wks).** Line/area/baseline (polyline pipeline,
-gradients, markers, last-price animation), whitespace handling, `update()` streaming path,
-new-bar shift behavior, series price lines & last-value labels, custom price lines,
-data conflation port.
+**Phase 4 — Series completeness & streaming (2–3 wks). PARTIALLY DONE.** Done: line + area
+series (CPU-tessellated polyline stroke with round joins, gradient area fill, 4x MSAA for edge
+AA — pixel-aligned rects/text stay bit-identical), triangle pipeline, MSAA frame target,
+`update()` streaming path, new-bar shift. Remaining: baseline series, WithSteps/Curved line
+types, crosshair markers, point markers, last-price animation, whitespace handling, series
+price lines & last-value labels, data conflation port.
 
 **Phase 5 — Multi-pane & platform features (2–3 wks).** Panes + separators + resize, overlay
 price scales, `moveSeriesToPane`, pane primitives, watermark, screenshot, autoSize, multi-chart

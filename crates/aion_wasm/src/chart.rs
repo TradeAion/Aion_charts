@@ -26,10 +26,13 @@ use aion_core::scale::time_tick_marks::{fill_weights_for_points, TimeTickMarks};
 use aion_render::bars::{build_bars, BarItem, BarsParams};
 use aion_render::candles::{build_candles, CandleItem, CandlesParams};
 use aion_render::color::Color;
-use aion_render::draw_list::{LineStyle, Prim};
+use aion_render::draw_list::{LineStyle, LineType, Prim};
+use aion_render::line::{
+    build_area_fill, build_line_stroke, AreaMesh, LineParams, LinePoint, StrokeMesh,
+};
 use aion_render_wgpu::{
-    prims_to_instances, render_frame, AtlasSlot, DrawGroup, LabelAtlas, QuadInstance,
-    QuadRenderer, TexQuadInstance, TexQuadRenderer,
+    prims_to_instances, render_frame, AtlasSlot, DrawGroup, LabelAtlas, MsaaTarget, QuadInstance,
+    QuadRenderer, TexQuadInstance, TexQuadRenderer, TriRenderer, TriVertex, SAMPLE_COUNT,
 };
 
 use crate::text::TextPainter;
@@ -44,6 +47,13 @@ const LABEL_BG_COLOR: Color = Color::rgb(0x13, 0x17, 0x22);
 
 const TEXT_COLOR: [f32; 4] = [0x19 as f32 / 255.0, 0x19 as f32 / 255.0, 0x19 as f32 / 255.0, 1.0];
 const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+
+// Line/Area series defaults (line-series.ts / area-series.ts)
+const LINE_COLOR: Color = Color::rgb(0x21, 0x96, 0xf3);
+const AREA_LINE_COLOR: Color = Color::rgb(0x33, 0xd7, 0x78);
+const AREA_TOP_COLOR: Color = Color::rgba(0x2e, 0xdc, 0x87, 102); // rgba(46,220,135,0.4)
+const AREA_BOTTOM_COLOR: Color = Color::rgba(0x28, 0xdd, 0x64, 0); // rgba(40,221,100,0)
+const DEFAULT_LINE_WIDTH: f64 = 3.0;
 
 /// Axis metrics (RENDERING_SPEC.md §10, §11), font size 12.
 const FONT_SIZE: f64 = 12.0;
@@ -68,6 +78,8 @@ const TIME_AXIS_HEIGHT: f64 = 28.0;
 enum SeriesKind {
     Candlestick,
     Bar,
+    Line,
+    Area,
 }
 
 struct Gfx {
@@ -77,6 +89,8 @@ struct Gfx {
     config: wgpu::SurfaceConfiguration,
     quad_renderer: QuadRenderer,
     tex_renderer: TexQuadRenderer,
+    tri_renderer: TriRenderer,
+    msaa: MsaaTarget,
 }
 
 #[wasm_bindgen]
@@ -137,9 +151,11 @@ pub async fn create_chart(
         .ok_or_else(|| JsValue::from_str("surface not supported by adapter"))?;
     surface.configure(&device, &config);
 
-    let quad_renderer = QuadRenderer::new(&device, config.format);
+    let quad_renderer = QuadRenderer::new(&device, config.format, SAMPLE_COUNT);
     let atlas = LabelAtlas::new(&device);
-    let tex_renderer = TexQuadRenderer::new(&device, config.format, atlas.view());
+    let tex_renderer = TexQuadRenderer::new(&device, config.format, atlas.view(), SAMPLE_COUNT);
+    let tri_renderer = TriRenderer::new(&device, config.format, SAMPLE_COUNT);
+    let msaa = MsaaTarget::new(&device, config.format, bitmap_w, bitmap_h);
     let text = TextPainter::new()?;
 
     let mut time_scale = TimeScaleCore::new(TimeScaleOptions::default());
@@ -149,7 +165,7 @@ pub async fn create_chart(
     price_scale.set_height(css_height);
 
     Ok(AionChart {
-        gfx: Gfx { device, queue, surface, config, quad_renderer, tex_renderer },
+        gfx: Gfx { device, queue, surface, config, quad_renderer, tex_renderer, tri_renderer, msaa },
         atlas,
         text,
         time_scale,
@@ -215,9 +231,14 @@ impl AionChart {
         }
     }
 
-    /// 0 = candlestick, 1 = OHLC bars.
+    /// 0 = candlestick, 1 = OHLC bars, 2 = line, 3 = area.
     pub fn set_series_type(&mut self, kind: u8) {
-        self.series_kind = if kind == 1 { SeriesKind::Bar } else { SeriesKind::Candlestick };
+        self.series_kind = match kind {
+            1 => SeriesKind::Bar,
+            2 => SeriesKind::Line,
+            3 => SeriesKind::Area,
+            _ => SeriesKind::Candlestick,
+        };
     }
 
     /// Show intraday time in tick labels and the crosshair label (LWC `timeScale.timeVisible`).
@@ -314,6 +335,9 @@ impl AionChart {
             match self.series_kind {
                 SeriesKind::Candlestick => self.build_candle_prims(&mut pane_prims, from, to, hpr, vpr),
                 SeriesKind::Bar => self.build_bar_prims(&mut pane_prims, from, to, hpr, vpr),
+                SeriesKind::Line | SeriesKind::Area => {
+                    self.build_line_prims(&mut pane_group, from, to, pane_h, hpr, vpr)
+                }
             }
         }
         self.build_crosshair_lines(&mut pane_prims, pane_w_px as i32, pane_h_px as i32, pane_w, pane_h, hpr, vpr);
@@ -328,6 +352,13 @@ impl AionChart {
         self.build_crosshair_labels(&mut axis_group, pane_w, pane_h, hpr, vpr);
 
         // ---- submit ----
+        self.gfx.msaa.ensure(
+            &self.gfx.device,
+            self.gfx.config.format,
+            self.gfx.config.width,
+            self.gfx.config.height,
+        );
+
         let frame = self
             .gfx
             .surface
@@ -338,12 +369,14 @@ impl AionChart {
         render_frame(
             &self.gfx.device,
             &self.gfx.queue,
+            self.gfx.msaa.view(),
             &view,
             self.gfx.config.width,
             self.gfx.config.height,
             wgpu::Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }, // layout.background default #FFFFFF
             &self.gfx.quad_renderer,
             &self.gfx.tex_renderer,
+            &self.gfx.tri_renderer,
             &[pane_group, axis_group],
         );
 
@@ -522,6 +555,51 @@ impl AionChart {
             },
             prims,
         );
+    }
+
+    /// Line / area series: polyline of close prices, with an optional gradient fill below.
+    /// Emitted as triangle meshes into the pane group (AA'd by the frame's MSAA).
+    fn build_line_prims(
+        &mut self,
+        group: &mut DrawGroup,
+        from: i64,
+        to: i64,
+        pane_h: f64,
+        hpr: f64,
+        vpr: f64,
+    ) {
+        let close_col = self.plot_list.column(PlotValueIndex::Close);
+        let mut points: Vec<LinePoint> = Vec::with_capacity((to - from + 1) as usize);
+        for i in from..=to {
+            let close = close_col[i as usize];
+            points.push(LinePoint {
+                x: self.time_scale.index_to_coordinate(i),
+                y: self.price_scale.price_to_coordinate(close, close),
+            });
+        }
+
+        let params = LineParams {
+            horizontal_pixel_ratio: hpr,
+            vertical_pixel_ratio: vpr,
+            line_width: DEFAULT_LINE_WIDTH,
+            line_type: LineType::Simple,
+        };
+
+        let line_color = match self.series_kind {
+            SeriesKind::Area => AREA_LINE_COLOR,
+            _ => LINE_COLOR,
+        };
+
+        if self.series_kind == SeriesKind::Area {
+            let mut area = AreaMesh::default();
+            // fill down to the pane bottom (baseLevelCoordinate default = pane height)
+            build_area_fill(&points, pane_h, AREA_TOP_COLOR, AREA_BOTTOM_COLOR, &params, &mut area);
+            group.fill_tris.extend(area.vertices.iter().map(mesh_vertex));
+        }
+
+        let mut stroke = StrokeMesh::default();
+        build_line_stroke(&points, line_color, &params, &mut stroke);
+        group.stroke_tris.extend(stroke.vertices.iter().map(mesh_vertex));
     }
 
     /// Crosshair lines inside the pane (labels are drawn by `build_crosshair_labels`).
@@ -776,4 +854,8 @@ impl AionChart {
 
 fn color_rgba(c: Color) -> [f32; 4] {
     [c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0, c.a() as f32 / 255.0]
+}
+
+fn mesh_vertex(v: &aion_render::line::LineVertex) -> TriVertex {
+    TriVertex { pos: [v.x, v.y], color: v.color }
 }

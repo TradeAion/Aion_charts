@@ -10,3 +10,4 @@ pub mod candles;
 pub mod color;
 pub mod draw_list;
 pub mod histogram;
+pub mod line;

@@ -1,0 +1,279 @@
+//! Line / area / baseline geometry builder. Port of `walk-line.ts` + `line-renderer.ts` +
+//! `area-renderer-base.ts` (RENDERING_SPEC.md §5).
+//!
+//! Unlike the integer-rect series, lines are anti-aliased: points stay as floats in bitmap
+//! space and are emitted as CPU-tessellated triangles. The stroke is a series of quads (one
+//! per segment) plus round-join fans at interior vertices; the area fill is a triangle strip
+//! between the polyline and a base level. The backend feathers edges for AA.
+//!
+//! Line type Simple is implemented; WithSteps/Curved land with the corresponding pane views.
+
+use crate::color::Color;
+use crate::draw_list::LineType;
+
+/// A vertex the backend will render: bitmap-space position + straight RGBA color.
+/// The stroke pipeline extrudes these with AA; the fill pipeline draws them opaque.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LineVertex {
+    pub x: f32,
+    pub y: f32,
+    pub color: [f32; 4],
+}
+
+/// One data point in media coordinates (already converted by the views layer).
+#[derive(Clone, Copy, Debug)]
+pub struct LinePoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct LineParams {
+    pub horizontal_pixel_ratio: f64,
+    pub vertical_pixel_ratio: f64,
+    pub line_width: f64,
+    pub line_type: LineType,
+}
+
+fn color_to_rgba(c: Color) -> [f32; 4] {
+    [c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0, c.a() as f32 / 255.0]
+}
+
+/// A tessellated stroke: triangle list of extruded segment quads + round joins.
+/// The backend applies 1px edge feathering for AA.
+#[derive(Default)]
+pub struct StrokeMesh {
+    pub vertices: Vec<LineVertex>,
+}
+
+impl StrokeMesh {
+    fn push_tri(&mut self, a: LineVertex, b: LineVertex, c: LineVertex) {
+        self.vertices.push(a);
+        self.vertices.push(b);
+        self.vertices.push(c);
+    }
+
+    fn push_quad(&mut self, p0: [f32; 2], p1: [f32; 2], p2: [f32; 2], p3: [f32; 2], color: [f32; 4]) {
+        let v = |p: [f32; 2]| LineVertex { x: p[0], y: p[1], color };
+        // p0-p1-p2, p0-p2-p3 (winding-agnostic; no culling in the pipeline)
+        self.push_tri(v(p0), v(p1), v(p2));
+        self.push_tri(v(p0), v(p2), v(p3));
+    }
+
+    fn push_round_join(&mut self, center: [f32; 2], radius: f32, color: [f32; 4]) {
+        // fan approximation of the joint cap; 8 segments is plenty at typical line widths
+        const SEGMENTS: usize = 8;
+        let v = |p: [f32; 2]| LineVertex { x: p[0], y: p[1], color };
+        let c = v(center);
+        for i in 0..SEGMENTS {
+            let a0 = (i as f32) / SEGMENTS as f32 * std::f32::consts::TAU;
+            let a1 = ((i + 1) as f32) / SEGMENTS as f32 * std::f32::consts::TAU;
+            let p0 = [center[0] + radius * a0.cos(), center[1] + radius * a0.sin()];
+            let p1 = [center[0] + radius * a1.cos(), center[1] + radius * a1.sin()];
+            self.push_tri(c, v(p0), v(p1));
+        }
+    }
+}
+
+/// Builds a stroke mesh over `points` (single color). `visible_range` is `[from, to)` row
+/// offsets. Returns triangles in bitmap space.
+pub fn build_line_stroke(
+    points: &[LinePoint],
+    color: Color,
+    params: &LineParams,
+    out: &mut StrokeMesh,
+) {
+    if points.len() < 2 {
+        // single point: LWC draws a short horizontal segment of barWidth; skip until we
+        // carry barWidth here (area/line with 1 visible point is a rare edge).
+        return;
+    }
+
+    let hpr = params.horizontal_pixel_ratio;
+    let vpr = params.vertical_pixel_ratio;
+    let half = (params.line_width * vpr / 2.0) as f32;
+    let rgba = color_to_rgba(color);
+
+    let bp = |p: &LinePoint| [(p.x * hpr) as f32, (p.y * vpr) as f32];
+
+    for i in 0..points.len() - 1 {
+        let a = bp(&points[i]);
+        let b = bp(&points[i + 1]);
+
+        let dx = b[0] - a[0];
+        let dy = b[1] - a[1];
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 1e-6 {
+            continue;
+        }
+        // normal
+        let nx = -dy / len * half;
+        let ny = dx / len * half;
+
+        self_push_segment(out, a, b, nx, ny, rgba);
+
+        // round join at the shared interior vertex
+        if i > 0 {
+            out.push_round_join(a, half, rgba);
+        }
+    }
+    let _ = params.line_type; // Simple only for now
+}
+
+fn self_push_segment(out: &mut StrokeMesh, a: [f32; 2], b: [f32; 2], nx: f32, ny: f32, rgba: [f32; 4]) {
+    out.push_quad(
+        [a[0] + nx, a[1] + ny],
+        [b[0] + nx, b[1] + ny],
+        [b[0] - nx, b[1] - ny],
+        [a[0] - nx, a[1] - ny],
+        rgba,
+    );
+}
+
+/// Area fill mesh: triangle list between the polyline and `base_y` (media px). The backend
+/// tints each vertex with a vertical gradient (top color at the line, bottom at base) — here
+/// we only emit positions and per-vertex gradient factor via color alpha lerp done by caller.
+#[derive(Default)]
+pub struct AreaMesh {
+    /// Each vertex carries its media-y so the backend can look up the gradient; color is the
+    /// resolved top/bottom mix computed here for simplicity (single draw, no gradient uniform).
+    pub vertices: Vec<LineVertex>,
+}
+
+/// Builds an area fill under `points` down to `base_y` (media px), vertically gradient-shaded
+/// from `top_color` (at each point) to `bottom_color` (at `base_y`). Colors are premultiplied
+/// per-vertex here so the existing solid triangle path can draw it.
+pub fn build_area_fill(
+    points: &[LinePoint],
+    base_y: f64,
+    top_color: Color,
+    bottom_color: Color,
+    params: &LineParams,
+    out: &mut AreaMesh,
+) {
+    if points.len() < 2 {
+        return;
+    }
+    let hpr = params.horizontal_pixel_ratio;
+    let vpr = params.vertical_pixel_ratio;
+    let base = (base_y * vpr) as f32;
+
+    let top = color_to_rgba(top_color);
+    let bottom = color_to_rgba(bottom_color);
+
+    // gradient factor 0 at top_coordinate (min y of points), 1 at bottom (base).
+    let top_coord = points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min) * vpr;
+    let span = (base as f64 - top_coord).max(1.0);
+    let shade = |y: f32| -> [f32; 4] {
+        let t = ((y as f64 - top_coord) / span).clamp(0.0, 1.0) as f32;
+        [
+            top[0] + (bottom[0] - top[0]) * t,
+            top[1] + (bottom[1] - top[1]) * t,
+            top[2] + (bottom[2] - top[2]) * t,
+            top[3] + (bottom[3] - top[3]) * t,
+        ]
+    };
+    let vert = |x: f32, y: f32| LineVertex { x, y, color: shade(y) };
+
+    let bp = |p: &LinePoint| [(p.x * hpr) as f32, (p.y * vpr) as f32];
+
+    for i in 0..points.len() - 1 {
+        let a = bp(&points[i]);
+        let b = bp(&points[i + 1]);
+        // quad a -> b -> (b.x, base) -> (a.x, base)
+        let a_top = vert(a[0], a[1]);
+        let b_top = vert(b[0], b[1]);
+        let b_base = vert(b[0], base);
+        let a_base = vert(a[0], base);
+        out.vertices.push(a_top);
+        out.vertices.push(b_top);
+        out.vertices.push(b_base);
+        out.vertices.push(a_top);
+        out.vertices.push(b_base);
+        out.vertices.push(a_base);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BLUE: Color = Color::rgb(0x21, 0x96, 0xf3);
+
+    fn params(dpr: f64, w: f64) -> LineParams {
+        LineParams {
+            horizontal_pixel_ratio: dpr,
+            vertical_pixel_ratio: dpr,
+            line_width: w,
+            line_type: LineType::Simple,
+        }
+    }
+
+    #[test]
+    fn stroke_emits_two_triangles_per_segment() {
+        let pts = [LinePoint { x: 0.0, y: 10.0 }, LinePoint { x: 10.0, y: 10.0 }];
+        let mut mesh = StrokeMesh::default();
+        build_line_stroke(&pts, BLUE, &params(1.0, 2.0), &mut mesh);
+        // one segment, no interior joins -> 6 vertices (2 tris)
+        assert_eq!(mesh.vertices.len(), 6);
+    }
+
+    #[test]
+    fn horizontal_segment_extrudes_vertically() {
+        let pts = [LinePoint { x: 0.0, y: 10.0 }, LinePoint { x: 10.0, y: 10.0 }];
+        let mut mesh = StrokeMesh::default();
+        build_line_stroke(&pts, BLUE, &params(1.0, 4.0), &mut mesh);
+        // half width 2; the extruded quad should span y in [8, 12]
+        let ys: Vec<f32> = mesh.vertices.iter().map(|v| v.y).collect();
+        assert!(ys.iter().cloned().fold(f32::INFINITY, f32::min) == 8.0);
+        assert!(ys.iter().cloned().fold(f32::NEG_INFINITY, f32::max) == 12.0);
+    }
+
+    #[test]
+    fn interior_vertices_get_round_joins() {
+        let pts = [
+            LinePoint { x: 0.0, y: 0.0 },
+            LinePoint { x: 10.0, y: 10.0 },
+            LinePoint { x: 20.0, y: 0.0 },
+        ];
+        let mut mesh = StrokeMesh::default();
+        build_line_stroke(&pts, BLUE, &params(1.0, 3.0), &mut mesh);
+        // 2 segments (2*6=12) + 1 round join (8 tris = 24 verts) = 36
+        assert_eq!(mesh.vertices.len(), 12 + 24);
+    }
+
+    #[test]
+    fn dpr_scales_positions() {
+        let pts = [LinePoint { x: 5.0, y: 5.0 }, LinePoint { x: 15.0, y: 5.0 }];
+        let mut mesh = StrokeMesh::default();
+        build_line_stroke(&pts, BLUE, &params(2.0, 2.0), &mut mesh);
+        // x coords should be scaled by dpr: 10 and 30
+        let xs: Vec<f32> = mesh.vertices.iter().map(|v| v.x).collect();
+        assert!(xs.contains(&10.0));
+        assert!(xs.contains(&30.0));
+    }
+
+    #[test]
+    fn area_fill_reaches_base() {
+        let pts = [LinePoint { x: 0.0, y: 10.0 }, LinePoint { x: 10.0, y: 20.0 }];
+        let mut mesh = AreaMesh::default();
+        build_area_fill(&pts, 100.0, BLUE, Color::rgba(0x21, 0x96, 0xf3, 0), &params(1.0, 2.0), &mut mesh);
+        // 6 verts per segment
+        assert_eq!(mesh.vertices.len(), 6);
+        // some vertex sits at base y = 100
+        assert!(mesh.vertices.iter().any(|v| v.y == 100.0));
+        // top color opaque, base color transparent (gradient endpoints)
+        let at_line = mesh.vertices.iter().find(|v| v.y == 10.0).unwrap();
+        assert!(at_line.color[3] > 0.9);
+        let at_base = mesh.vertices.iter().find(|v| v.y == 100.0).unwrap();
+        assert!(at_base.color[3] < 0.1);
+    }
+
+    #[test]
+    fn empty_and_single_point_no_geometry() {
+        let mut mesh = StrokeMesh::default();
+        build_line_stroke(&[], BLUE, &params(1.0, 2.0), &mut mesh);
+        build_line_stroke(&[LinePoint { x: 0.0, y: 0.0 }], BLUE, &params(1.0, 2.0), &mut mesh);
+        assert!(mesh.vertices.is_empty());
+    }
+}

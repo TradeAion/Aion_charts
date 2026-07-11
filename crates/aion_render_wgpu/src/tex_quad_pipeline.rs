@@ -80,6 +80,7 @@ impl TexQuadRenderer {
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         atlas_view: &wgpu::TextureView,
+        sample_count: u32,
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tex_quad_shader"),
@@ -197,7 +198,7 @@ impl TexQuadRenderer {
             },
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState { count: sample_count, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: Some("fs_main"),
