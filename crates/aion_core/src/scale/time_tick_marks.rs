@@ -44,7 +44,8 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
-fn civil_from_timestamp(ts: i64) -> (i64, u32, u32) {
+/// (year, month 1-12, day 1-31) of a UTC timestamp in seconds.
+pub fn civil_from_timestamp(ts: i64) -> (i64, u32, u32) {
     civil_from_days(ts.div_euclid(86_400))
 }
 

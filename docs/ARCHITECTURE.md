@@ -344,9 +344,13 @@ bar + histogram renderers, options structs, RAF/invalidation plumbing in the she
 time tick marks (weights) for vertical grid. Then first goldens.
 *Exit: a candlestick chart with grid, correct at every bar spacing and DPR.*
 
-**Phase 2 — Axes & text (2–3 wks).** Glyph atlas + measurement, price tick builder, time tick
-weights/marks, axis widgets (optimal width/height negotiation, borders, ticks, label overlap
-resolution), price/date formatters, axis label boxes.
+**Phase 2 — Axes & text (2–3 wks). PARTIALLY DONE.** Done: Canvas2D-rasterized label atlas
+(white-on-transparent, shader-tinted — pixel-identical glyphs to LWC) + textured-quad
+pipeline + scissored draw groups (pane/axis separation), price axis (optimal-width formula,
+border, tick labels), time axis (28px optimalHeight, weight-based labels, en-US tick
+formatter), crosshair axis labels (dark boxes + white text). Remaining: label overlap
+resolution, bold high-weight time labels, `Intl` locale hook, edge tick marks, axis
+drag-scale gestures wiring, goldens.
 *Exit: goldens of full chart with both axes match LWC.*
 
 **Phase 3 — Interaction (2–3 wks).** Gesture recognizer, wheel/pinch zoom, pan, axis drag scale,
