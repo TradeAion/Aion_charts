@@ -1,0 +1,21 @@
+[package]
+name = "aion_wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "wasm-bindgen host shell: canvas surface, data ingestion, gestures, RAF plumbing"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+aion_core = { path = "../aion_core" }
+aion_render = { path = "../aion_render" }
+aion_render_wgpu = { path = "../aion_render_wgpu" }
+
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["HtmlCanvasElement", "Window", "console"] }
+wgpu = { version = "25", default-features = false, features = ["webgpu", "wgsl"] }
+console_error_panic_hook = "0.1"

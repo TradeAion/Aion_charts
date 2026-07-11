@@ -1,0 +1,14 @@
+{
+  "name": "@aion/charts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Aion Charts public TypeScript API (snake_case, semantics mirror lightweight-charts v5)",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

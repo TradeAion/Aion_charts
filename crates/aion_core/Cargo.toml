@@ -1,0 +1,8 @@
+[package]
+name = "aion_core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Platform-free chart model: scales, ranges, invalidation, formatters (ported from lightweight-charts)"
+
+[dependencies]

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Aion Charts — Phase 0 demo</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif; }
+  #wrap { display: flex; flex-direction: column; height: 100%; }
+  #bar { padding: 8px 12px; font-size: 13px; color: #191919; border-bottom: 1px solid #e0e3eb; display: flex; gap: 16px; align-items: center; }
+  #chart_container { flex: 1; position: relative; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+  #status { color: #787b86; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="bar">
+    <strong>aion_charts</strong>
+    <span>wheel = zoom &middot; drag = pan &middot; double-click = fit</span>
+    <span id="status"></span>
+  </div>
+  <div id="chart_container"><canvas id="chart"></canvas></div>
+</div>
+<script type="module">
+import init, { create_chart } from "./pkg/aion_wasm.js";
+
+const canvas = document.getElementById("chart");
+const container = document.getElementById("chart_container");
+const status = document.getElementById("status");
+
+function css_size() {
+  return { w: container.clientWidth, h: container.clientHeight, dpr: window.devicePixelRatio || 1 };
+}
+
+function apply_bitmap_size() {
+  const { w, h, dpr } = css_size();
+  canvas.width = Math.max(1, Math.round(w * dpr));
+  canvas.height = Math.max(1, Math.round(h * dpr));
+  return { w, h, dpr };
+}
+
+// deterministic random-walk OHLC data
+function generate_data(n) {
+  const open = new Float64Array(n), high = new Float64Array(n), low = new Float64Array(n), close = new Float64Array(n);
+  let seed = 42;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  let price = 100;
+  for (let i = 0; i < n; i++) {
+    const o = price;
+    const drift = (rnd() - 0.5) * 2.4;
+    const c = Math.max(1, o + drift);
+    const hi = Math.max(o, c) + rnd() * 1.2;
+    const lo = Math.min(o, c) - rnd() * 1.2;
+    open[i] = o; high[i] = hi; low[i] = lo; close[i] = c;
+    price = c;
+  }
+  return { open, high, low, close };
+}
+
+await init();
+const { w, h, dpr } = apply_bitmap_size();
+const chart = await create_chart(canvas, w, h, dpr);
+
+const data = generate_data(1000);
+chart.set_data(data.open, data.high, data.low, data.close);
+chart.render();
+status.textContent = `1000 bars · dpr ${dpr}`;
+
+const rerender = () => { chart.render(); status.textContent = `1000 bars · dpr ${css_size().dpr} · spacing ${chart.bar_spacing().toFixed(2)}px`; };
+
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  // LWC wheel formula (RENDERING_SPEC.md §1.1)
+  const deltaY = -(e.deltaY / 100);
+  if (deltaY !== 0) {
+    const zoom_scale = Math.sign(deltaY) * Math.min(1, Math.abs(deltaY));
+    chart.zoom(e.offsetX, zoom_scale);
+    rerender();
+  }
+}, { passive: false });
+
+let dragging = false;
+canvas.addEventListener("mousedown", (e) => { dragging = true; chart.scroll_start(e.offsetX); });
+window.addEventListener("mouseup", () => { if (dragging) { dragging = false; chart.scroll_end(); } });
+canvas.addEventListener("mousemove", (e) => {
+  if (dragging) chart.scroll_move(e.offsetX);
+  chart.set_crosshair(e.offsetX, e.offsetY);
+  rerender();
+});
+canvas.addEventListener("mouseleave", () => { chart.clear_crosshair(); rerender(); });
+canvas.addEventListener("dblclick", () => { chart.fit_content(); rerender(); });
+
+new ResizeObserver(() => {
+  const { w, h, dpr } = apply_bitmap_size();
+  chart.resize(w, h, dpr);
+  rerender();
+}).observe(container);
+</script>
+</body>
+</html>

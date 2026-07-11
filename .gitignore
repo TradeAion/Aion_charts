@@ -1,0 +1,15 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+dist/
+pkg/
+
+# vendored lightweight-charts study copy (reference only, not part of the product)
+/tmp/
+
+# editor/os noise
+.DS_Store
+Thumbs.db
