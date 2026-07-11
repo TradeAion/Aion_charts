@@ -17,6 +17,8 @@
   <div id="bar">
     <strong>aion_charts</strong>
     <span>wheel = zoom &middot; drag = pan &middot; double-click = fit</span>
+    <label><input type="radio" name="series" value="0" checked> candles</label>
+    <label><input type="radio" name="series" value="1"> bars</label>
     <span id="status"></span>
   </div>
   <div id="chart_container"><canvas id="chart"></canvas></div>
@@ -39,32 +41,41 @@ function apply_bitmap_size() {
   return { w, h, dpr };
 }
 
-// deterministic random-walk OHLC data
+// deterministic random-walk OHLC data (hourly bars ending "now")
 function generate_data(n) {
-  const open = new Float64Array(n), high = new Float64Array(n), low = new Float64Array(n), close = new Float64Array(n);
+  const times = new Float64Array(n), open = new Float64Array(n), high = new Float64Array(n), low = new Float64Array(n), close = new Float64Array(n);
   let seed = 42;
   const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
   let price = 100;
+  const hour = 3600;
+  const start = Math.floor(Date.now() / 1000 / hour) * hour - (n - 1) * hour;
   for (let i = 0; i < n; i++) {
     const o = price;
     const drift = (rnd() - 0.5) * 2.4;
     const c = Math.max(1, o + drift);
     const hi = Math.max(o, c) + rnd() * 1.2;
     const lo = Math.min(o, c) - rnd() * 1.2;
+    times[i] = start + i * hour;
     open[i] = o; high[i] = hi; low[i] = lo; close[i] = c;
     price = c;
   }
-  return { open, high, low, close };
+  return { times, open, high, low, close };
 }
 
 await init();
 const { w, h, dpr } = apply_bitmap_size();
 const chart = await create_chart(canvas, w, h, dpr);
 
+window.__chart = chart; // debug/test handle
+
 const data = generate_data(1000);
-chart.set_data(data.open, data.high, data.low, data.close);
+chart.set_data(data.times, data.open, data.high, data.low, data.close);
 chart.render();
 status.textContent = `1000 bars · dpr ${dpr}`;
+
+document.querySelectorAll('input[name="series"]').forEach((el) => {
+  el.addEventListener("change", () => { chart.set_series_type(Number(el.value)); rerender(); });
+});
 
 const rerender = () => { chart.render(); status.textContent = `1000 bars · dpr ${css_size().dpr} · spacing ${chart.bar_spacing().toFixed(2)}px`; };
 

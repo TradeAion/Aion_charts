@@ -5,6 +5,8 @@
 //! Pixel math is specified in `docs/RENDERING_SPEC.md`.
 
 pub mod bar_width;
+pub mod bars;
 pub mod candles;
 pub mod color;
 pub mod draw_list;
+pub mod histogram;
