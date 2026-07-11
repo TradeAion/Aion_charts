@@ -476,9 +476,14 @@ impl AionChart {
     }
 
     /// Text width in css px via the overlay 2D context (mirrors LWC's `TextWidthCache`).
+    ///
+    /// Sets the **device-px** font (`fontSize * dpr`) — the same font used for drawing — so the
+    /// context is never left in a CSS-px state. Otherwise a `fill_text` after a `measure` would
+    /// render at half size on HiDPI (dpr != 1) displays. Returns the width back in css px.
     fn measure(&self, text: &str) -> f64 {
-        self.axis_ctx.set_font(&format!("{FONT_SIZE}px {FONT_FAMILY}"));
-        self.axis_ctx.measure_text(text).map(|m| m.width()).unwrap_or(0.0)
+        self.axis_ctx.set_font(&format!("{}px {FONT_FAMILY}", FONT_SIZE * self.dpr));
+        let device_w = self.axis_ctx.measure_text(text).map(|m| m.width()).unwrap_or(0.0);
+        device_w / self.dpr
     }
 
     /// Port of `PriceAxisWidget.optimalWidth()` (RENDERING_SPEC.md §10).
@@ -880,6 +885,7 @@ impl AionChart {
         }
 
         let ctx = &self.axis_ctx;
+        ctx.set_font(&format!("{}px {FONT_FAMILY}", FONT_SIZE * dpr));
         let color = self.last_value_color();
         let label = self.price_formatter.format(close);
         let text_w = self.measure(&label);
