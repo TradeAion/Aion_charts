@@ -194,6 +194,22 @@ pub fn build_area_fill(
     }
 }
 
+/// Tessellates a filled disc (triangle fan) at `center` with `radius`, all in bitmap px.
+/// Used for the crosshair marker on line/area series (RENDERING_SPEC.md §8).
+pub fn build_disc(center: [f32; 2], radius: f32, color: Color, out: &mut Vec<LineVertex>) {
+    const SEGMENTS: usize = 24;
+    let rgba = color_to_rgba(color);
+    let v = |x: f32, y: f32| LineVertex { x, y, color: rgba };
+    let c = v(center[0], center[1]);
+    for i in 0..SEGMENTS {
+        let a0 = (i as f32) / SEGMENTS as f32 * std::f32::consts::TAU;
+        let a1 = ((i + 1) as f32) / SEGMENTS as f32 * std::f32::consts::TAU;
+        out.push(c);
+        out.push(v(center[0] + radius * a0.cos(), center[1] + radius * a0.sin()));
+        out.push(v(center[0] + radius * a1.cos(), center[1] + radius * a1.sin()));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,5 +291,20 @@ mod tests {
         build_line_stroke(&[], BLUE, &params(1.0, 2.0), &mut mesh);
         build_line_stroke(&[LinePoint { x: 0.0, y: 0.0 }], BLUE, &params(1.0, 2.0), &mut mesh);
         assert!(mesh.vertices.is_empty());
+    }
+
+    #[test]
+    fn disc_is_a_fan_around_center() {
+        let mut v = Vec::new();
+        build_disc([10.0, 20.0], 4.0, BLUE, &mut v);
+        assert_eq!(v.len(), 24 * 3); // 24 fan triangles
+        // every triangle's first vertex is the center
+        for tri in v.chunks(3) {
+            assert_eq!([tri[0].x, tri[0].y], [10.0, 20.0]);
+        }
+        // rim vertices lie ~radius from center
+        let rim = &v[1];
+        let d = ((rim.x - 10.0).powi(2) + (rim.y - 20.0).powi(2)).sqrt();
+        assert!((d - 4.0).abs() < 1e-4);
     }
 }

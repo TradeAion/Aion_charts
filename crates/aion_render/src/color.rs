@@ -37,6 +37,26 @@ impl Color {
     pub const fn a(&self) -> u8 {
         self.0 as u8
     }
+
+    /// Perceptual luminance (Rec. 601), 0..255.
+    pub fn luminance(&self) -> f64 {
+        0.299 * self.r() as f64 + 0.587 * self.g() as f64 + 0.114 * self.b() as f64
+    }
+
+    /// Contrast text color for a label on this background — black on light, white on dark.
+    /// Approximates LWC's `generateContrastColors`.
+    pub fn contrast_text(&self) -> Color {
+        if self.luminance() > 160.0 {
+            Color::rgb(0, 0, 0)
+        } else {
+            Color::rgb(0xFF, 0xFF, 0xFF)
+        }
+    }
+
+    /// CSS `#rrggbb` string (ignores alpha).
+    pub fn to_hex(&self) -> String {
+        format!("#{:02x}{:02x}{:02x}", self.r(), self.g(), self.b())
+    }
 }
 
 #[cfg(test)]
@@ -48,5 +68,13 @@ mod tests {
         assert_eq!(Color::from_hex("#26a69a"), Some(Color::rgb(0x26, 0xa6, 0x9a)));
         assert_eq!(Color::from_hex("#26a69a80"), Some(Color::rgba(0x26, 0xa6, 0x9a, 0x80)));
         assert_eq!(Color::from_hex("oops"), None);
+    }
+
+    #[test]
+    fn contrast_and_hex() {
+        // dark teal -> white text; light gray -> black text
+        assert_eq!(Color::rgb(0x26, 0xa6, 0x9a).contrast_text(), Color::rgb(0xFF, 0xFF, 0xFF));
+        assert_eq!(Color::rgb(0xe0, 0xe3, 0xeb).contrast_text(), Color::rgb(0, 0, 0));
+        assert_eq!(Color::rgb(0x26, 0xa6, 0x9a).to_hex(), "#26a69a");
     }
 }

@@ -21,6 +21,14 @@
     <label><input type="radio" name="series" value="1"> bars</label>
     <label><input type="radio" name="series" value="2"> line</label>
     <label><input type="radio" name="series" value="3"> area</label>
+    <label>crosshair
+      <select id="cross_mode">
+        <option value="1" selected>magnet</option>
+        <option value="0">normal</option>
+        <option value="3">magnet OHLC</option>
+        <option value="2">hidden</option>
+      </select>
+    </label>
     <span id="status"></span>
   </div>
   <div id="chart_container">
@@ -84,6 +92,9 @@ status.textContent = `1000 bars · dpr ${dpr}`;
 
 document.querySelectorAll('input[name="series"]').forEach((el) => {
   el.addEventListener("change", () => { chart.set_series_type(Number(el.value)); rerender(); });
+});
+document.getElementById("cross_mode").addEventListener("change", (e) => {
+  chart.set_crosshair_mode(Number(e.target.value)); rerender();
 });
 
 const rerender = () => { chart.render(); status.textContent = `1000 bars · dpr ${css_size().dpr} · spacing ${chart.bar_spacing().toFixed(2)}px`; };

@@ -372,9 +372,11 @@ labels, hit testing, click/crosshair subscriptions. Interaction parity tests.
 **Phase 4 — Series completeness & streaming (2–3 wks). PARTIALLY DONE.** Done: line + area
 series (CPU-tessellated polyline stroke with round joins, gradient area fill, 4x MSAA for edge
 AA — pixel-aligned rects/text stay bit-identical), triangle pipeline, MSAA frame target,
-`update()` streaming path, new-bar shift. Remaining: baseline series, WithSteps/Curved line
-types, crosshair markers, point markers, last-price animation, whitespace handling, series
-price lines & last-value labels, data conflation port.
+`update()` streaming path, new-bar shift, **magnet crosshair** (Normal/Magnet/MagnetOHLC/Hidden,
+default Magnet like LWC — snaps horizontal line to close/OHLC), **crosshair marker** (white halo
++ series-color disc on line/area), **last-value price line + colored axis label** (dashed line
+to last close, contrast text). Remaining: baseline series, WithSteps/Curved line types, point
+markers, last-price animation, whitespace handling, custom price lines, data conflation port.
 
 **Phase 5 — Multi-pane & platform features (2–3 wks).** Panes + separators + resize, overlay
 price scales, `moveSeriesToPane`, pane primitives, watermark, screenshot, autoSize, multi-chart

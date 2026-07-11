@@ -27,6 +27,7 @@ use aion_core::format::price_formatter::PriceFormatter;
 use aion_core::format::time_formatter::{
     format_crosshair_time, format_tick_label, weight_to_tick_mark_type,
 };
+use aion_core::model::magnet::{magnet_snap, CrosshairMode};
 use aion_core::model::plot_list::{PlotList, PlotValueIndex};
 use aion_core::model::price_range::PriceRange;
 use aion_core::scale::price_scale_core::{PriceScaleCore, PriceScaleCoreOptions};
@@ -37,7 +38,7 @@ use aion_render::candles::{build_candles, CandleItem, CandlesParams};
 use aion_render::color::Color;
 use aion_render::draw_list::{LineStyle, LineType, Prim};
 use aion_render::line::{
-    build_area_fill, build_line_stroke, AreaMesh, LineParams, LinePoint, StrokeMesh,
+    build_area_fill, build_disc, build_line_stroke, AreaMesh, LineParams, LinePoint, StrokeMesh,
 };
 use aion_render_wgpu::{
     prims_to_instances, render_frame, DrawGroup, LabelAtlas, MsaaTarget, QuadRenderer,
@@ -62,6 +63,12 @@ const AREA_LINE_COLOR: Color = Color::rgb(0x33, 0xd7, 0x78);
 const AREA_TOP_COLOR: Color = Color::rgba(0x2e, 0xdc, 0x87, 102); // rgba(46,220,135,0.4)
 const AREA_BOTTOM_COLOR: Color = Color::rgba(0x28, 0xdd, 0x64, 0); // rgba(40,221,100,0)
 const DEFAULT_LINE_WIDTH: f64 = 3.0;
+
+// Crosshair marker (line/area) — line-series.ts defaults.
+const CROSSHAIR_MARKER_RADIUS: f64 = 4.0;
+const CROSSHAIR_MARKER_BORDER_WIDTH: f64 = 2.0;
+const MARKER_BORDER_COLOR: Color = Color::rgb(0xFF, 0xFF, 0xFF); // = chart background
+
 
 /// LWC default font stack (`helpers/make-font.ts` / layout defaults).
 const FONT_FAMILY: &str =
@@ -118,6 +125,7 @@ pub struct AionChart {
     times: Vec<i64>,
     tick_marks: TimeTickMarks,
     series_kind: SeriesKind,
+    crosshair_mode: CrosshairMode,
     time_visible: bool,
     css_width: f64,
     css_height: f64,
@@ -203,6 +211,7 @@ pub async fn create_chart(
         times: Vec::new(),
         tick_marks: TimeTickMarks::new(),
         series_kind: SeriesKind::Candlestick,
+        crosshair_mode: CrosshairMode::Magnet, // LWC default
         time_visible: true,
         css_width,
         css_height,
@@ -275,6 +284,16 @@ impl AionChart {
     /// Show intraday time in tick labels and the crosshair label (LWC `timeScale.timeVisible`).
     pub fn set_time_visible(&mut self, visible: bool) {
         self.time_visible = visible;
+    }
+
+    /// 0 = normal, 1 = magnet (snap to close, LWC default), 2 = hidden, 3 = magnet OHLC.
+    pub fn set_crosshair_mode(&mut self, mode: u8) {
+        self.crosshair_mode = match mode {
+            0 => CrosshairMode::Normal,
+            2 => CrosshairMode::Hidden,
+            3 => CrosshairMode::MagnetOhlc,
+            _ => CrosshairMode::Magnet,
+        };
     }
 
     pub fn resize(&mut self, css_width: f64, css_height: f64, dpr: f64) {
@@ -389,8 +408,11 @@ impl AionChart {
                     self.build_line_prims(&mut pane_group, from, to, pane_h, hpr, vpr)
                 }
             }
+            self.build_last_value_line(&mut pane_prims, pane_w_px as i32, vpr);
         }
-        self.build_crosshair_lines(&mut pane_prims, pane_w_px as i32, pane_h_px as i32, pane_w, pane_h, hpr, vpr);
+        let mut crosshair_stroke: Vec<TriVertex> = Vec::new();
+        self.build_crosshair_lines(&mut pane_prims, &mut crosshair_stroke, pane_w_px as i32, pane_h_px as i32, pane_w, pane_h, hpr, vpr);
+        pane_group.stroke_tris.extend(crosshair_stroke);
         prims_to_instances(&pane_prims, &mut pane_group.quads);
 
         self.gfx.msaa.ensure(
@@ -472,6 +494,12 @@ impl AionChart {
                 let label = self.price_formatter.format(price);
                 max_text_w = max_text_w.max(self.measure(&label));
             }
+        }
+        // last-value label participates in axis width (LWC includes back labels)
+        if !self.plot_list.is_empty() {
+            let last = self.plot_list.size() - 1;
+            let close = self.plot_list.column(PlotValueIndex::Close)[last];
+            max_text_w = max_text_w.max(self.measure(&self.price_formatter.format(close)));
         }
         let text_w = if max_text_w > 0.0 { max_text_w } else { PRICE_DEFAULT_TEXT_WIDTH };
         let w = (AXIS_BORDER_SIZE
@@ -644,10 +672,31 @@ impl AionChart {
         group.stroke_tris.extend(stroke.vertices.iter().map(mesh_vertex));
     }
 
+    /// Dashed horizontal line at the last bar's close, spanning the pane (priceLineSource
+    /// LastBar, priceLineVisible default true).
+    fn build_last_value_line(&self, prims: &mut Vec<Prim>, pane_w_px: i32, vpr: f64) {
+        if self.plot_list.is_empty() || self.price_scale.is_empty() {
+            return;
+        }
+        let last = self.plot_list.size() - 1;
+        let close = self.plot_list.column(PlotValueIndex::Close)[last];
+        let y = self.price_scale.price_to_coordinate(close, close);
+        let width = 1f64.max(vpr.floor()) as i32;
+        prims.push(Prim::HLine {
+            y: (y * vpr).round() as i32,
+            x0: 0,
+            x1: pane_w_px,
+            width,
+            style: LineStyle::Dashed,
+            color: self.last_value_color(),
+        });
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn build_crosshair_lines(
         &mut self,
         prims: &mut Vec<Prim>,
+        group_stroke: &mut Vec<TriVertex>,
         pane_w_px: i32,
         pane_h_px: i32,
         pane_w: f64,
@@ -659,11 +708,12 @@ impl AionChart {
         if self.plot_list.is_empty() || self.time_scale.is_empty() {
             return;
         }
-        if x_css > pane_w || y_css > pane_h {
+        if x_css > pane_w || y_css > pane_h || self.crosshair_mode == CrosshairMode::Hidden {
             return;
         }
 
         let snapped_x = self.snapped_crosshair_x(x_css);
+        let (_price, snap_y) = self.crosshair_snap(x_css, y_css);
         let line_width = 1f64.max(hpr.floor()) as i32;
 
         prims.push(Prim::VLine {
@@ -675,13 +725,28 @@ impl AionChart {
             color: CROSSHAIR_COLOR,
         });
         prims.push(Prim::HLine {
-            y: (y_css * vpr).round() as i32,
+            y: (snap_y * vpr).round() as i32,
             x0: 0,
             x1: pane_w_px,
             width: line_width,
             style: LineStyle::LargeDashed,
             color: CROSSHAIR_COLOR,
         });
+
+        // crosshair marker on line/area: white halo disc + series-color disc at the data point
+        if matches!(self.series_kind, SeriesKind::Line | SeriesKind::Area) {
+            let idx = self.snapped_crosshair_index(x_css) as usize;
+            let close = self.plot_list.column(PlotValueIndex::Close)[idx];
+            let cx = (self.time_scale.index_to_coordinate(self.snapped_crosshair_index(x_css)) * hpr) as f32;
+            let cy = (self.price_scale.price_to_coordinate(close, close) * vpr) as f32;
+            let fill = if self.series_kind == SeriesKind::Area { AREA_LINE_COLOR } else { LINE_COLOR };
+            let outer_r = ((CROSSHAIR_MARKER_RADIUS + CROSSHAIR_MARKER_BORDER_WIDTH) * vpr) as f32;
+            let inner_r = (CROSSHAIR_MARKER_RADIUS * vpr) as f32;
+            let mut disc = Vec::new();
+            build_disc([cx, cy], outer_r, MARKER_BORDER_COLOR, &mut disc);
+            build_disc([cx, cy], inner_r, fill, &mut disc);
+            group_stroke.extend(disc.iter().map(mesh_vertex));
+        }
     }
 
     fn snapped_crosshair_index(&self, x_css: f64) -> i64 {
@@ -694,6 +759,48 @@ impl AionChart {
 
     fn snapped_crosshair_x(&self, x_css: f64) -> f64 {
         self.time_scale.index_to_coordinate(self.snapped_crosshair_index(x_css))
+    }
+
+    /// Magnet-snapped crosshair price + its pane y-coordinate (RENDERING_SPEC.md §8).
+    /// In Normal mode the price follows the cursor; in Magnet it sticks to the hovered bar's
+    /// close; in MagnetOHLC to the nearest of O/H/L/C.
+    fn crosshair_snap(&self, x_css: f64, y_css: f64) -> (f64, f64) {
+        let idx = self.snapped_crosshair_index(x_css) as usize;
+        let close = self.plot_list.column(PlotValueIndex::Close)[idx];
+
+        let price = match self.crosshair_mode {
+            CrosshairMode::Normal => return (self.price_scale.coordinate_to_price(y_css, close), y_css),
+            CrosshairMode::Hidden => return (self.price_scale.coordinate_to_price(y_css, close), y_css),
+            CrosshairMode::Magnet => close,
+            CrosshairMode::MagnetOhlc => {
+                let open = self.plot_list.column(PlotValueIndex::Open)[idx];
+                let high = self.plot_list.column(PlotValueIndex::High)[idx];
+                let low = self.plot_list.column(PlotValueIndex::Low)[idx];
+                let candidates = [
+                    (open, self.price_scale.price_to_coordinate(open, open)),
+                    (high, self.price_scale.price_to_coordinate(high, high)),
+                    (low, self.price_scale.price_to_coordinate(low, low)),
+                    (close, self.price_scale.price_to_coordinate(close, close)),
+                ];
+                magnet_snap(y_css, &candidates).unwrap_or(close)
+            }
+        };
+        (price, self.price_scale.price_to_coordinate(price, price))
+    }
+
+    /// Color of the last-value price line/label: last bar's up/down for OHLC series, or the
+    /// line color for line/area.
+    fn last_value_color(&self) -> Color {
+        match self.series_kind {
+            SeriesKind::Line => LINE_COLOR,
+            SeriesKind::Area => AREA_LINE_COLOR,
+            _ => {
+                let last = self.plot_list.size() - 1;
+                let open = self.plot_list.column(PlotValueIndex::Open)[last];
+                let close = self.plot_list.column(PlotValueIndex::Close)[last];
+                if close >= open { UP_COLOR } else { DOWN_COLOR }
+            }
+        }
     }
 
     // ---- Canvas2D axis overlay (RENDERING_SPEC.md §10, §11) ----
@@ -752,9 +859,47 @@ impl AionChart {
             }
         }
 
+        // ---- last-value label (series-colored box) ----
+        self.draw_last_value_label_2d(pane_w, pane_h, dpr)?;
+
         // ---- crosshair axis labels ----
         self.draw_crosshair_labels_2d(pane_w, pane_h, dpr, &font)?;
 
+        Ok(())
+    }
+
+    fn draw_last_value_label_2d(&self, pane_w: f64, pane_h: f64, dpr: f64) -> Result<(), JsValue> {
+        if self.plot_list.is_empty() || self.price_scale.is_empty() {
+            return Ok(());
+        }
+        let last = self.plot_list.size() - 1;
+        let close = self.plot_list.column(PlotValueIndex::Close)[last];
+        let y = self.price_scale.price_to_coordinate(close, close);
+        if y < 0.0 || y > pane_h {
+            return Ok(());
+        }
+
+        let ctx = &self.axis_ctx;
+        let color = self.last_value_color();
+        let label = self.price_formatter.format(close);
+        let text_w = self.measure(&label);
+
+        let box_h = ((FONT_SIZE + PRICE_LABEL_PADDING_TB * 2.0) * dpr).round();
+        let box_w =
+            ((AXIS_BORDER_SIZE + PRICE_PADDING_INNER + PRICE_PADDING_OUTER + AXIS_TICK_LENGTH + text_w)
+                * dpr)
+                .round();
+        let box_x = (pane_w * dpr).round();
+        let box_y = ((y * dpr).round() - box_h / 2.0).round();
+
+        ctx.set_fill_style_str(&color.to_hex());
+        ctx.fill_rect(box_x, box_y, box_w, box_h);
+
+        ctx.set_text_align("left");
+        ctx.set_text_baseline("middle");
+        ctx.set_fill_style_str(&color.contrast_text().to_hex());
+        let text_x = (pane_w + AXIS_TICK_LENGTH + PRICE_PADDING_INNER) * dpr;
+        ctx.fill_text(&label, text_x, (y * dpr).round())?;
         Ok(())
     }
 
@@ -766,16 +911,19 @@ impl AionChart {
         font: &str,
     ) -> Result<(), JsValue> {
         let Some((x_css, y_css)) = self.crosshair else { return Ok(()) };
-        if self.plot_list.is_empty() || self.time_scale.is_empty() {
+        if self.plot_list.is_empty()
+            || self.time_scale.is_empty()
+            || self.crosshair_mode == CrosshairMode::Hidden
+        {
             return Ok(());
         }
         let ctx = &self.axis_ctx;
         ctx.set_font(font);
         ctx.set_text_baseline("middle");
 
-        // price label on the right axis
+        // price label on the right axis (magnet-snapped price + coordinate)
         if y_css <= pane_h && !self.price_scale.is_empty() {
-            let price = self.price_scale.coordinate_to_price(y_css, 0.0);
+            let (price, snap_y) = self.crosshair_snap(x_css, y_css);
             let label = self.price_formatter.format(price);
             let text_w = self.measure(&label);
 
@@ -785,7 +933,7 @@ impl AionChart {
                     * dpr)
                     .round();
             let box_x = (pane_w * dpr).round();
-            let box_y = ((y_css * dpr).round() - box_h / 2.0).round();
+            let box_y = ((snap_y * dpr).round() - box_h / 2.0).round();
 
             ctx.set_fill_style_str(LABEL_BG_CSS);
             ctx.fill_rect(box_x, box_y, box_w, box_h);
@@ -793,7 +941,7 @@ impl AionChart {
             ctx.set_text_align("left");
             ctx.set_fill_style_str(WHITE_CSS);
             let text_x = (pane_w + AXIS_TICK_LENGTH + PRICE_PADDING_INNER) * dpr;
-            ctx.fill_text(&label, text_x, (y_css * dpr).round())?;
+            ctx.fill_text(&label, text_x, (snap_y * dpr).round())?;
         }
 
         // time label on the bottom axis
