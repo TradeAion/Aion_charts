@@ -99,6 +99,8 @@ export interface series_options {
   pane_stretch: number;
   /** Line/area join type (roadmap Phase B3). */
   line_type: "simple" | "stepped" | "curved";
+  /** Draw a disc at each data point (shown when bars are spaced enough), roadmap Phase B3. */
+  point_markers: boolean;
 }
 
 const LINE_TYPE_TO_U8: Record<NonNullable<series_options["line_type"]>, number> = {
@@ -279,6 +281,9 @@ class series_impl implements series_api {
     }
     if (options.line_type !== undefined) {
       this.chart.wasm.set_series_line_type(this.id, LINE_TYPE_TO_U8[options.line_type]);
+    }
+    if (options.point_markers !== undefined) {
+      this.chart.wasm.set_series_point_markers(this.id, options.point_markers);
     }
     if (options.overlay) {
       const m = options.scale_margins ?? { top: 0.8, bottom: 0 };

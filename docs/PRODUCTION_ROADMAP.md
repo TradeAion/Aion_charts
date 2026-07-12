@@ -222,3 +222,8 @@ Progress is appended here as phases land (newest last).
   'curved' })`. 3 new renderer unit tests (render 34). Verified in-browser: at ~30 visible bars the
   three types render distinct geometry (simple 2680 px, stepped 3354, curved 2734). Remaining B3:
   baseline series, point markers, last-price animation.
+- 2026-07-12 — **B3 increment 2 done** (point markers). Line/area series can draw a filled disc at
+  each data point, gated on bar spacing (≥ 2·r+2) so discs never merge — matching LWC's hide-below-
+  threshold behavior. `set_series_point_markers(id, bool)` → façade `add_series(kind, {
+  point_markers: true })`. Verified in-browser: zoomed in (bar spacing 46) markers add 358 px;
+  zoomed out (0.75) they add 0 (hidden). Remaining B3: baseline series, last-price animation.

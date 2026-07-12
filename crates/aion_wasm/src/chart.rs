@@ -134,6 +134,8 @@ struct SeriesEntry {
     pane_index: usize,
     /// How a line/area series is joined between points (Simple / WithSteps / Curved).
     line_type: LineType,
+    /// Draw a filled disc at each data point (when bars are spaced enough) on line/area series.
+    point_markers: bool,
 }
 
 /// Height (css px) of the separator between stacked panes.
@@ -380,7 +382,7 @@ pub async fn create_chart(
         panes: vec![Pane::new()],
         price_formatter: PriceFormatter::default(),
         data,
-        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple }],
+        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false }],
         tick_marks: TimeTickMarks::new(),
         options: ChartOptionsStore::new(),
         crosshair_mode: CrosshairMode::Magnet,
@@ -484,6 +486,11 @@ impl AionChart {
     /// after (roadmap Phase B3).
     pub fn set_series_line_type(&mut self, id: u32, line_type: u8) {
         self.inner.borrow_mut().set_series_line_type(id, line_type);
+    }
+
+    /// Toggle per-point disc markers on a line/area series. Call `render()` after (Phase B3).
+    pub fn set_series_point_markers(&mut self, id: u32, visible: bool) {
+        self.inner.borrow_mut().set_series_point_markers(id, visible);
     }
 
     /// Move a series to the bottom-band overlay (volume) price scale with the given fractional
@@ -624,7 +631,7 @@ impl ChartInner {
     /// Adds a series and returns its id. `kind`: 0 candles, 1 bars, 2 line, 3 area, 4 histogram.
     pub fn add_series(&mut self, kind: u8) -> u32 {
         let id = self.data.add_series();
-        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple });
+        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false });
         id as u32
     }
 
@@ -698,6 +705,13 @@ impl ChartInner {
         };
         if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
             s.line_type = lt;
+        }
+    }
+
+    /// Toggle per-point disc markers on a line/area series (roadmap Phase B3).
+    pub fn set_series_point_markers(&mut self, id: u32, visible: bool) {
+        if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
+            s.point_markers = visible;
         }
     }
 
@@ -1051,10 +1065,10 @@ impl ChartInner {
         let visible = self.visible_data_range();
         // snapshots to avoid holding a self borrow across the per-pane builder calls
         let panes_geom: Vec<(f64, f64)> = self.panes.iter().map(|p| (p.top, p.height)).collect();
-        let series: Vec<(SeriesId, SeriesKind, Color, usize, bool, LineType)> = self
+        let series: Vec<(SeriesId, SeriesKind, Color, usize, bool, LineType, bool)> = self
             .series
             .iter()
-            .map(|s| (s.id, s.kind, s.line_color, s.pane_index.min(panes_geom.len() - 1), s.overlay, s.line_type))
+            .map(|s| (s.id, s.kind, s.line_color, s.pane_index.min(panes_geom.len() - 1), s.overlay, s.line_type, s.point_markers))
             .collect();
 
         let mut groups: Vec<DrawGroup> = Vec::with_capacity(panes_geom.len());
@@ -1069,7 +1083,7 @@ impl ChartInner {
 
             if let Some((from, to)) = visible {
                 self.build_grid(&mut prims, &time_marks, from, to, pane_w_px as i32, band_top_px, band_h_px, hpr, vpr, &self.panes[pi].price_scale);
-                for &(id, kind, color, spi, overlay, line_type) in &series {
+                for &(id, kind, color, spi, overlay, line_type, markers) in &series {
                     if spi != pi {
                         continue;
                     }
@@ -1079,7 +1093,7 @@ impl ChartInner {
                         SeriesKind::Bar => self.build_bar_prims(id, from, to, hpr, vpr, &mut prims, scale),
                         SeriesKind::Histogram => self.build_histogram_prims(id, from, to, hpr, vpr, &mut prims, scale),
                         SeriesKind::Line | SeriesKind::Area => {
-                            self.build_line_prims(id, kind, color, line_type, from, to, ptop + ph, hpr, vpr, &mut group, scale)
+                            self.build_line_prims(id, kind, color, line_type, markers, from, to, ptop + ph, hpr, vpr, &mut group, scale)
                         }
                     }
                 }
@@ -1339,7 +1353,7 @@ impl ChartInner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn build_line_prims(&self, id: SeriesId, kind: SeriesKind, color: Color, line_type: LineType, from: i64, to: i64, band_bottom: f64, hpr: f64, vpr: f64, group: &mut DrawGroup, scale: &PriceScaleCore) {
+    fn build_line_prims(&self, id: SeriesId, kind: SeriesKind, color: Color, line_type: LineType, point_markers: bool, from: i64, to: i64, band_bottom: f64, hpr: f64, vpr: f64, group: &mut DrawGroup, scale: &PriceScaleCore) {
         let plot = self.data.plot(id);
         let idxs = plot.indices();
         let c = plot.column(PlotValueIndex::Close);
@@ -1367,6 +1381,21 @@ impl ChartInner {
         let mut stroke = StrokeMesh::default();
         build_line_stroke(&points, line_color, &params, &mut stroke);
         group.stroke_tris.extend(stroke.vertices.iter().map(mesh_vertex));
+
+        // point markers on data points, only when bars are spaced enough that discs don't merge
+        // (mirrors LWC, which hides them below a bar-spacing threshold). RENDERING_SPEC.md §5.
+        if point_markers {
+            let radius = (DEFAULT_LINE_WIDTH + 1.0).max(3.0);
+            if self.time_scale.bar_spacing() >= 2.0 * radius + 2.0 {
+                let r = (radius * vpr) as f32;
+                for p in &points {
+                    let center = [(p.x * hpr) as f32, (p.y * vpr) as f32];
+                    let mut disc = Vec::new();
+                    build_disc(center, r, line_color, &mut disc);
+                    group.stroke_tris.extend(disc.iter().map(mesh_vertex));
+                }
+            }
+        }
     }
 
     /// Dashed line at the main series' last close (priceLineSource LastBar).
