@@ -235,3 +235,11 @@ Progress is appended here as phases land (newest last).
   in-browser: both line colors (teal 2604 px / red 2500) and both area fills render, teal correctly
   above red. Remaining B3: last-price animation (needs an rAF animation loop — deferred). **B3 core
   (line types, markers, baseline) done.** Next: B4 (series markers, price-lines API).
+- 2026-07-12 — **B3 increment 4 done → B3 COMPLETE.** Last-price animation: an expanding, fading
+  ring under a solid center dot at the main series' last value, on a ~2600 ms cycle. The engine
+  takes a host clock (`set_animation_time`, `wants_animation`) since render is synchronous; the
+  façade runs an rAF loop while any series has `last_price_animation: true`, stopped on `remove()`.
+  Verified in-browser: `wants_animation` toggles false→true; the ring area grows over the cycle
+  (+8 px at phase 0 → +103 at phase 0.5 → +8 faded at phase 0.98). B3 fully done: line types, point
+  markers, baseline series, last-price animation. Next: **B4** — series markers (arrows/circles) +
+  per-series price-lines API.

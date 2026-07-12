@@ -147,6 +147,8 @@ struct SeriesEntry {
     point_markers: bool,
     /// Baseline price for a Baseline series; `None` = auto (midpoint of the visible range).
     baseline: Option<f64>,
+    /// Pulse an expanding ring at the last value (driven by the host's animation clock).
+    last_price_animation: bool,
 }
 
 /// Height (css px) of the separator between stacked panes.
@@ -239,6 +241,9 @@ struct ChartInner {
     /// background colors in the render path (roadmap Phase A2).
     options: ChartOptionsStore,
     crosshair_mode: CrosshairMode,
+    /// Host animation clock (ms), set each frame by the shell's rAF loop; drives the last-price
+    /// pulse (roadmap Phase B3).
+    animation_time: f64,
     time_visible: bool,
     css_width: f64,
     css_height: f64,
@@ -393,10 +398,11 @@ pub async fn create_chart(
         panes: vec![Pane::new()],
         price_formatter: PriceFormatter::default(),
         data,
-        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false, baseline: None }],
+        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false, baseline: None, last_price_animation: false }],
         tick_marks: TimeTickMarks::new(),
         options: ChartOptionsStore::new(),
         crosshair_mode: CrosshairMode::Magnet,
+        animation_time: 0.0,
         time_visible: true,
         css_width,
         css_height,
@@ -507,6 +513,19 @@ impl AionChart {
     /// Set a Baseline series' baseline price (`NaN` = auto). Call `render()` after (Phase B3).
     pub fn set_series_baseline(&mut self, id: u32, price: f64) {
         self.inner.borrow_mut().set_series_baseline(id, price);
+    }
+
+    /// Toggle the pulsing last-price ring on a series (roadmap Phase B3).
+    pub fn set_series_last_price_animation(&mut self, id: u32, enabled: bool) {
+        self.inner.borrow_mut().set_series_last_price_animation(id, enabled);
+    }
+    /// Whether any series wants the last-price pulse (host uses this to run/stop its rAF loop).
+    pub fn wants_animation(&self) -> bool {
+        self.inner.borrow().wants_animation()
+    }
+    /// Set the host animation clock (ms). Call before `render()` in the rAF loop (Phase B3).
+    pub fn set_animation_time(&mut self, t_ms: f64) {
+        self.inner.borrow_mut().set_animation_time(t_ms);
     }
 
     /// Move a series to the bottom-band overlay (volume) price scale with the given fractional
@@ -647,7 +666,7 @@ impl ChartInner {
     /// Adds a series and returns its id. `kind`: 0 candles, 1 bars, 2 line, 3 area, 4 histogram.
     pub fn add_series(&mut self, kind: u8) -> u32 {
         let id = self.data.add_series();
-        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false, baseline: None });
+        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false, baseline: None, last_price_animation: false });
         id as u32
     }
 
@@ -736,6 +755,23 @@ impl ChartInner {
         if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
             s.baseline = if price.is_finite() { Some(price) } else { None };
         }
+    }
+
+    /// Toggle the pulsing last-price ring on a series (roadmap Phase B3).
+    pub fn set_series_last_price_animation(&mut self, id: u32, enabled: bool) {
+        if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
+            s.last_price_animation = enabled;
+        }
+    }
+
+    /// Whether any series wants the last-price pulse (so the host can start/stop its rAF loop).
+    pub fn wants_animation(&self) -> bool {
+        self.series.iter().any(|s| s.last_price_animation)
+    }
+
+    /// Set the host animation clock (ms). The shell's rAF loop calls this then `render()`.
+    pub fn set_animation_time(&mut self, t_ms: f64) {
+        self.animation_time = t_ms;
     }
 
     /// Move a series onto its pane's bottom-band overlay scale (volume-style) and set that band's
@@ -1123,6 +1159,7 @@ impl ChartInner {
                 }
                 if pi == 0 {
                     self.build_last_value_line(&mut prims, pane_w_px as i32, vpr);
+                    self.build_last_price_pulse(&mut group, hpr, vpr);
                 }
             }
 
@@ -1456,6 +1493,32 @@ impl ChartInner {
         build_baseline(&points, baseline_y, BASELINE_TOP_LINE, BASELINE_BOTTOM_LINE, BASELINE_TOP_FILL, BASELINE_BOTTOM_FILL, &params, &mut stroke, &mut fill);
         group.fill_tris.extend(fill.vertices.iter().map(mesh_vertex));
         group.stroke_tris.extend(stroke.vertices.iter().map(mesh_vertex));
+    }
+
+    /// Pulsing ring at the main series' last value (roadmap Phase B3). An expanding, fading disc
+    /// under a solid center dot, cycling on the host animation clock (LWC ~2600 ms period).
+    fn build_last_price_pulse(&self, group: &mut DrawGroup, hpr: f64, vpr: f64) {
+        if !self.series[0].last_price_animation || self.main_plot().is_empty() || self.price_scale().is_empty() {
+            return;
+        }
+        let plot = self.main_plot();
+        let last = plot.size() - 1;
+        let Some(&idx) = plot.indices().last() else { return };
+        let close = plot.value_at(last, PlotValueIndex::Close);
+        let cx = (self.time_scale.index_to_coordinate(idx) * hpr) as f32;
+        let cy = (self.price_scale().price_to_coordinate(close, close) * vpr) as f32;
+        let base = self.last_value_color();
+
+        const PERIOD_MS: f64 = 2600.0;
+        let phase = ((self.animation_time.rem_euclid(PERIOD_MS)) / PERIOD_MS) as f32; // 0..1
+        let r_expand = (4.0 + phase * 10.0) * vpr as f32;
+        let alpha = ((1.0 - phase) * 0.35 * 255.0) as u8;
+        let ring = Color::rgba(base.r(), base.g(), base.b(), alpha);
+
+        let mut disc = Vec::new();
+        build_disc([cx, cy], r_expand, ring, &mut disc); // expanding fading ring (drawn first)
+        build_disc([cx, cy], 4.0 * vpr as f32, base, &mut disc); // solid center on top
+        group.stroke_tris.extend(disc.iter().map(mesh_vertex));
     }
 
     /// Dashed line at the main series' last close (priceLineSource LastBar).

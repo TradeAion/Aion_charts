@@ -103,6 +103,8 @@ export interface series_options {
   point_markers: boolean;
   /** Baseline price for a baseline series (omit for auto = visible-range midpoint). */
   baseline_value: number;
+  /** Pulse an expanding ring at the last value (drives an rAF loop), roadmap Phase B3. */
+  last_price_animation: boolean;
 }
 
 const LINE_TYPE_TO_U8: Record<NonNullable<series_options["line_type"]>, number> = {
@@ -295,6 +297,10 @@ class series_impl implements series_api {
       const m = options.scale_margins ?? { top: 0.8, bottom: 0 };
       this.chart.wasm.set_series_overlay(this.id, m.top, m.bottom);
     }
+    if (options.last_price_animation !== undefined) {
+      this.chart.wasm.set_series_last_price_animation(this.id, options.last_price_animation);
+      this.chart.sync_animation();
+    }
     this.chart.repaint();
   }
 
@@ -353,6 +359,7 @@ class chart_impl implements chart_api {
   private readonly series_by_id = new Map<number, series_impl>();
   private readonly crosshair_subs = new Set<mouse_event_handler>();
   private readonly click_subs = new Set<mouse_event_handler>();
+  private anim_frame: number | null = null;
 
   constructor(
     readonly wasm: AionChart,
@@ -371,6 +378,35 @@ class chart_impl implements chart_api {
   repaint(): void {
     if (!this.removed) {
       this.wasm.render();
+    }
+  }
+
+  /** Start or stop the animation rAF loop to match whether any series wants the last-price pulse. */
+  sync_animation(): void {
+    if (this.removed) return;
+    if (this.wasm.wants_animation()) {
+      this.start_animation();
+    } else {
+      this.stop_animation();
+    }
+  }
+  private start_animation(): void {
+    if (this.anim_frame !== null || this.removed) return;
+    const tick = () => {
+      if (this.removed || !this.wasm.wants_animation()) {
+        this.anim_frame = null;
+        return;
+      }
+      this.wasm.set_animation_time(performance.now());
+      this.wasm.render();
+      this.anim_frame = requestAnimationFrame(tick);
+    };
+    this.anim_frame = requestAnimationFrame(tick);
+  }
+  private stop_animation(): void {
+    if (this.anim_frame !== null) {
+      cancelAnimationFrame(this.anim_frame);
+      this.anim_frame = null;
     }
   }
 
@@ -482,6 +518,7 @@ class chart_impl implements chart_api {
   remove(): void {
     if (this.removed) return;
     this.removed = true;
+    this.stop_animation();
     this.detach_gestures?.();
     this.observer?.disconnect();
     this.pane.remove();
