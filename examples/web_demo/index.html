@@ -2,20 +2,27 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
+<!-- Without this, mobile browsers lay the page out at a 980px virtual width and then
+     scale it down to the device, squishing the UI (tiny/cramped axis) and adding a
+     fractional CSS scale on top of the canvas bitmap (wicks fall between pixels and
+     vanish; pointer offsets land in the wrong place). user-scalable=no stops the
+     browser's own pinch-zoom from fighting the chart's zoom gesture. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>Aion Charts — Phase 0 demo</title>
 <style>
   html, body { margin: 0; height: 100%; background: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif; }
   #wrap { display: flex; flex-direction: column; height: 100%; }
   #bar { padding: 8px 12px; font-size: 13px; color: #191919; border-bottom: 1px solid #e0e3eb; display: flex; gap: 16px; align-items: center; }
-  #chart_container { flex: 1; position: relative; }
-  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+  #chart_container { flex: 1; position: relative; touch-action: none; overscroll-behavior: none; }
+  /* touch-action:none routes finger drags/pinches to our handlers instead of native scroll/zoom */
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; touch-action: none; }
   #status { color: #787b86; }
 </style>
 </head>
 <body>
 <div id="wrap">
   <div id="bar">
-    <strong style="background:#ef5350;color:#fff;padding:2px 6px;border-radius:3px">aion_charts BUILD&nbsp;B3</strong>
+    <strong style="background:#26a69a;color:#fff;padding:2px 6px;border-radius:3px">aion_charts BUILD&nbsp;B4</strong>
     <span>wheel = zoom &middot; drag = pan &middot; double-click = fit</span>
     <label><input type="radio" name="series" value="0" checked> candles</label>
     <label><input type="radio" name="series" value="1"> bars</label>
@@ -130,7 +137,25 @@ document.getElementById("cross_mode").addEventListener("change", (e) => {
   chart.set_crosshair_mode(Number(e.target.value)); rerender();
 });
 
-const rerender = () => { chart.render(); const s = css_size(); status.textContent = `css ${Math.round(s.w)}x${Math.round(s.h)} · bitmap ${pane.width}x${pane.height} · dpr ${s.dpr.toFixed(2)} · spacing ${chart.bar_spacing().toFixed(1)}px`; };
+// Guarantee the canvas bitmap always equals displayed-size * dpr. Any drift (toolbar
+// height change, monitor/device switch, dpr change) is corrected here before rendering,
+// so the browser never rescales the canvas (which shrinks text and crams axis labels).
+function ensure_sized() {
+  const { w, h, dpr } = css_size();
+  const bw = Math.max(1, Math.round(w * dpr)), bh = Math.max(1, Math.round(h * dpr));
+  if (pane.width !== bw || pane.height !== bh) {
+    for (const c of [pane, overlay]) { c.width = bw; c.height = bh; }
+    chart.resize(w, h, dpr);
+    return true;
+  }
+  return false;
+}
+const rerender = () => {
+  ensure_sized();
+  chart.render();
+  const s = css_size();
+  status.textContent = `css ${Math.round(s.w)}x${Math.round(s.h)} · bitmap ${pane.width}x${pane.height} · dpr ${s.dpr.toFixed(2)} · sp ${chart.bar_spacing().toFixed(1)}`;
+};
 
 // overlay is the topmost element, so it receives the pointer events
 overlay.addEventListener("wheel", (e) => {
@@ -144,15 +169,69 @@ overlay.addEventListener("wheel", (e) => {
   }
 }, { passive: false });
 
+// Pointer Events unify mouse, touch and pen. One pointer = pan + crosshair; two
+// pointers = pinch-zoom around the gesture midpoint (converted to zoom notches).
+const pointers = new Map(); // pointerId -> {x, y}
 let dragging = false;
-overlay.addEventListener("mousedown", (e) => { dragging = true; chart.scroll_start(e.offsetX); });
-window.addEventListener("mouseup", () => { if (dragging) { dragging = false; chart.scroll_end(); } });
-overlay.addEventListener("mousemove", (e) => {
-  if (dragging) chart.scroll_move(e.offsetX);
-  chart.set_crosshair(e.offsetX, e.offsetY);
+let pinch_dist = 0; // last two-finger distance, in css px
+
+// event coords are already in the overlay's local (css) space; use offsetX where
+// available, else derive from the bounding rect (touch points don't set offsetX reliably).
+function local_xy(e) {
+  const r = overlay.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+overlay.addEventListener("pointerdown", (e) => {
+  overlay.setPointerCapture(e.pointerId);
+  const p = local_xy(e);
+  pointers.set(e.pointerId, p);
+  if (pointers.size === 1) {
+    dragging = true;
+    chart.scroll_start(p.x);
+  } else if (pointers.size === 2) {
+    dragging = false;
+    chart.scroll_end();
+    const [a, b] = [...pointers.values()];
+    pinch_dist = Math.hypot(a.x - b.x, a.y - b.y);
+  }
+});
+
+overlay.addEventListener("pointermove", (e) => {
+  const p = local_xy(e);
+  if (pointers.has(e.pointerId)) pointers.set(e.pointerId, p);
+
+  if (pointers.size >= 2) {
+    // pinch: change in finger distance drives zoom, centered on the midpoint
+    const [a, b] = [...pointers.values()];
+    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+    const mid = (a.x + b.x) / 2;
+    if (pinch_dist > 0 && dist > 0) {
+      const zoom_scale = Math.max(-1, Math.min(1, (dist - pinch_dist) / 40));
+      if (zoom_scale !== 0) chart.zoom(mid, zoom_scale);
+    }
+    pinch_dist = dist;
+    rerender();
+    return;
+  }
+
+  if (dragging) chart.scroll_move(p.x);
+  chart.set_crosshair(p.x, p.y);
   rerender();
 });
-overlay.addEventListener("mouseleave", () => { chart.clear_crosshair(); rerender(); });
+
+function end_pointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch_dist = 0;
+  if (pointers.size === 0) {
+    if (dragging) { dragging = false; chart.scroll_end(); }
+    chart.clear_crosshair();
+    rerender();
+  }
+}
+overlay.addEventListener("pointerup", end_pointer);
+overlay.addEventListener("pointercancel", end_pointer);
+overlay.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") end_pointer(e); });
 overlay.addEventListener("dblclick", () => { chart.fit_content(); rerender(); });
 
 function sync_size() {
