@@ -491,6 +491,19 @@ impl AionChart {
         self.inner.borrow_mut().set_series_pane(id, pane_index, stretch_factor);
     }
 
+    /// Number of stacked panes.
+    pub fn pane_count(&self) -> usize {
+        self.inner.borrow().pane_count()
+    }
+    /// CSS Y of each pane boundary (for the host to hit-test separators).
+    pub fn pane_separator_ys(&self) -> Vec<f64> {
+        self.inner.borrow().pane_separator_ys()
+    }
+    /// Drag the separator below pane `i` by `delta_css`. Call `render()` after (roadmap Phase B1).
+    pub fn drag_pane_separator(&mut self, i: usize, delta_css: f64) {
+        self.inner.borrow_mut().drag_pane_separator(i, delta_css);
+    }
+
     /// 0 = candlestick, 1 = OHLC bars, 2 = line, 3 = area, 4 = histogram (sets the main series).
     pub fn set_series_type(&mut self, kind: u8) {
         self.inner.borrow_mut().set_series_type(kind);
@@ -695,6 +708,36 @@ impl ChartInner {
         if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
             s.pane_index = pane_index;
         }
+    }
+
+    /// Number of stacked panes.
+    pub fn pane_count(&self) -> usize {
+        self.panes.len()
+    }
+
+    /// CSS Y of each pane boundary (top edge of panes 1..n), for separator hit-testing by the host.
+    /// Reflects the last layout pass.
+    pub fn pane_separator_ys(&self) -> Vec<f64> {
+        self.panes.iter().skip(1).map(|p| p.top).collect()
+    }
+
+    /// Drag the separator below pane `i` by `delta_css` (positive grows pane `i`, shrinks `i+1`),
+    /// keeping both at least a minimum height. Freezes current heights as stretch factors so the
+    /// other panes hold their size, then re-lays out (roadmap Phase B1).
+    pub fn drag_pane_separator(&mut self, i: usize, delta_css: f64) {
+        if i + 1 >= self.panes.len() {
+            return;
+        }
+        const MIN_PANE_H: f64 = 24.0;
+        for p in &mut self.panes {
+            p.stretch_factor = p.height.max(1.0);
+        }
+        let top = self.panes[i].height;
+        let bot = self.panes[i + 1].height;
+        let new_top = (top + delta_css).clamp(MIN_PANE_H, (top + bot - MIN_PANE_H).max(MIN_PANE_H));
+        let actual = new_top - top;
+        self.panes[i].stretch_factor = new_top;
+        self.panes[i + 1].stretch_factor = bot - actual;
     }
 
     /// 0 = candlestick, 1 = OHLC bars, 2 = line, 3 = area, 4 = histogram (sets the main series).

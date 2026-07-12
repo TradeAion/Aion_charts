@@ -198,3 +198,10 @@ Progress is appended here as phases land (newest last).
   doesn't clip. Verified in-browser: both the price band and the volume band render their own
   right-axis labels (dark text present in each strip), no console errors. Remaining B1: draggable
   separators (resize), façade `panes()`/`move_to_pane`, per-pane crosshair label.
+- 2026-07-12 — **B1 increment 3 done** (draggable separators + move_to_pane). Engine
+  `drag_pane_separator(i, delta)` (freezes heights as stretch factors, moves the boundary, min
+  24px), `pane_separator_ys()`, `pane_count()`. Façade recognizes a press within 4px of a boundary
+  as a separator drag (not a pan), resizes on move, and shows a `row-resize` hover cursor;
+  `series.move_to_pane(index)`. `setPointerCapture` now guarded. Verified in-browser: dragging the
+  separator up 40px / down 60px moves it exactly 40 / 60 px; cursor feedback works; no errors.
+  Remaining B1: façade `panes()` handle surface, per-pane crosshair price label.

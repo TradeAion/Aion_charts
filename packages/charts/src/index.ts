@@ -121,6 +121,8 @@ export interface series_api {
   apply_options(options: Partial<series_options>): void;
   /** Change how the primary series is drawn (candlestick/bar/line/area/histogram). */
   set_type(kind: series_kind): void;
+  /** Move this series into stacked pane `pane_index` (0 = price pane), creating it if needed. */
+  move_to_pane(pane_index: number, stretch?: number): void;
   /** The engine-side series id. */
   readonly id: number;
 }
@@ -280,6 +282,11 @@ class series_impl implements series_api {
     } else {
       console.warn("aion: set_type() currently supports the primary series only");
     }
+    this.chart.repaint();
+  }
+
+  move_to_pane(pane_index: number, stretch = 1): void {
+    this.chart.wasm.set_series_pane(this.id, pane_index, stretch);
     this.chart.repaint();
   }
 }
@@ -470,10 +477,22 @@ function install_gestures(chart: chart_impl): () => void {
   const pointers = new Map<number, { x: number; y: number }>();
   let dragging = false;
   let pinch_dist = 0;
+  // separator drag state (roadmap Phase B1): index of the separator being dragged + last Y
+  let sep_drag: { index: number; last_y: number } | null = null;
+  const SEP_HIT = 4; // css px hit tolerance around a pane boundary
 
   const local_xy = (e: PointerEvent) => {
     const r = overlay.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+
+  /** Index of the separator within SEP_HIT px of css-y `y`, or -1. */
+  const separator_at = (y: number): number => {
+    const ys = wasm.pane_separator_ys();
+    for (let i = 0; i < ys.length; i++) {
+      if (Math.abs(y - ys[i]!) <= SEP_HIT) return i;
+    }
+    return -1;
   };
 
   const on_wheel = (e: WheelEvent) => {
@@ -486,9 +505,21 @@ function install_gestures(chart: chart_impl): () => void {
     }
   };
   const on_down = (e: PointerEvent) => {
-    overlay.setPointerCapture(e.pointerId);
+    try {
+      overlay.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore (e.g. synthetic events with no active pointer)
+    }
     const p = local_xy(e);
     pointers.set(e.pointerId, p);
+    // start a separator drag instead of a pan when pressing on a pane boundary
+    if (pointers.size === 1) {
+      const si = separator_at(p.y);
+      if (si >= 0) {
+        sep_drag = { index: si, last_y: p.y };
+        return;
+      }
+    }
     if (pointers.size === 1) {
       dragging = true;
       wasm.scroll_start(p.x);
@@ -501,6 +532,18 @@ function install_gestures(chart: chart_impl): () => void {
   };
   const on_move = (e: PointerEvent) => {
     const p = local_xy(e);
+    // active separator drag: resize the two adjacent panes
+    if (sep_drag !== null) {
+      const dy = p.y - sep_drag.last_y;
+      sep_drag.last_y = p.y;
+      wasm.drag_pane_separator(sep_drag.index, dy);
+      chart.repaint();
+      return;
+    }
+    // hover cursor feedback over a separator (no button pressed)
+    if (pointers.size === 0) {
+      overlay.style.cursor = separator_at(p.y) >= 0 ? "row-resize" : "crosshair";
+    }
     if (pointers.has(e.pointerId)) pointers.set(e.pointerId, p);
     if (pointers.size >= 2) {
       const [a, b] = [...pointers.values()];
@@ -521,6 +564,10 @@ function install_gestures(chart: chart_impl): () => void {
   };
   const end_pointer = (e: PointerEvent) => {
     pointers.delete(e.pointerId);
+    if (sep_drag !== null && pointers.size === 0) {
+      sep_drag = null;
+      return;
+    }
     if (pointers.size < 2) pinch_dist = 0;
     if (pointers.size === 0) {
       if (dragging) {
