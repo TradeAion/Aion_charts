@@ -171,3 +171,12 @@ Progress is appended here as phases land (newest last).
 
   **Phase A (the library shell) is done: installable, configurable, safe against bad data, with
   coordinate + subscription APIs.** Next up: Phase B — multi-pane + overlay/volume price scales.
+- 2026-07-12 — **B2 done** (overlay/volume price scale). Second `overlay_scale: PriceScaleCore`
+  pinned to a bottom band via `scale_margins` (default `{top:0.8, bottom:0}`); series carry an
+  `overlay` flag; autoscale split so the main price axis ignores overlay magnitude; histogram
+  builder routes through the series' scale; `PriceScaleCore::set_scale_margins`. Engine
+  `set_series_overlay(id, top, bottom)` → façade `add_series("histogram", { overlay: true,
+  scale_margins? })`; demo volume toggle. Verified in-browser: with volume on, the price axis is
+  byte-identical (top 125.74 / bottom 56.76 unchanged) while the histogram fills the bottom 20%
+  band (47% non-white there vs 6% above). Next in B: multi-pane (B1) — separate panes/separators/
+  resize/move_to_pane.

@@ -142,6 +142,13 @@ impl PriceScaleCore {
         self.margin_below = below_px;
     }
 
+    /// Set the fractional scale margins (`top`/`bottom` as fractions of scale height). Used to pin
+    /// an overlay scale to a band of the pane (e.g. volume in the bottom fifth).
+    pub fn set_scale_margins(&mut self, top: f64, bottom: f64) {
+        self.options.scale_margins.top = top;
+        self.options.scale_margins.bottom = bottom;
+    }
+
     pub fn is_empty(&self) -> bool {
         self.height == 0.0
             || self.price_range.is_none()

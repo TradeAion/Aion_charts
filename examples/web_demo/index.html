@@ -30,6 +30,7 @@
     <label><input type="radio" name="series" value="line"> line</label>
     <label><input type="radio" name="series" value="area"> area</label>
     <label><input type="checkbox" id="sma_toggle"> SMA(20)</label>
+    <label><input type="checkbox" id="vol_toggle"> volume</label>
     <label>crosshair
       <select id="cross_mode">
         <option value="1" selected>magnet</option>
@@ -89,6 +90,10 @@ chart.time_scale().fit_content();
 let sma_series = null;
 const sma_data = sma(data, 20);
 
+// volume: single-value histogram on the bottom-band overlay price scale
+const volume_data = data.map((d, i) => ({ time: d.time, value: Math.round(500 + (i % 37) * 90 + Math.abs(d.close - d.open) * 4000) }));
+let vol_series = null;
+
 status.textContent = `1000 bars · dpr ${(window.devicePixelRatio || 1).toFixed(3)}`;
 
 document.getElementById("sma_toggle").addEventListener("change", (e) => {
@@ -98,6 +103,16 @@ document.getElementById("sma_toggle").addEventListener("change", (e) => {
   } else if (!e.target.checked && sma_series !== null) {
     sma_series.set_data([]); // no remove_series yet — hide by clearing
     sma_series = null;
+  }
+});
+
+document.getElementById("vol_toggle").addEventListener("change", (e) => {
+  if (e.target.checked && vol_series === null) {
+    vol_series = chart.add_series("histogram", { overlay: true }); // bottom-band volume scale
+    vol_series.set_data(volume_data);
+  } else if (!e.target.checked && vol_series !== null) {
+    vol_series.set_data([]);
+    vol_series = null;
   }
 });
 

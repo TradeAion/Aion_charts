@@ -82,9 +82,17 @@ export interface chart_options {
   hoveredSeriesOnTop: boolean;
 }
 
-/** Options accepted when adding a series. `color` overrides the kind default (line/area/histogram). */
+/** Options accepted when adding a series. */
 export interface series_options {
+  /** Overrides the kind default color (line/area/histogram). */
   color: string;
+  /**
+   * Place the series on the bottom-band overlay price scale (volume-style): its magnitude is
+   * excluded from the main price axis autoscale. Mirrors LWC's `priceScaleId: ''` + scaleMargins.
+   */
+  overlay: boolean;
+  /** Overlay band as fractions of pane height (default `{ top: 0.8, bottom: 0 }` ⇒ bottom fifth). */
+  scale_margins: { top: number; bottom: number };
 }
 
 const KIND_TO_U8: Record<series_kind, number> = {
@@ -251,6 +259,10 @@ class series_impl implements series_api {
       if (rgb) {
         this.chart.wasm.set_series_color(this.id, rgb[0], rgb[1], rgb[2]);
       }
+    }
+    if (options.overlay) {
+      const m = options.scale_margins ?? { top: 0.8, bottom: 0 };
+      this.chart.wasm.set_series_overlay(this.id, m.top, m.bottom);
     }
     this.chart.repaint();
   }

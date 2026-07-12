@@ -32,7 +32,7 @@ use aion_core::model::price_range::PriceRange;
 use aion_core::model::range::{LogicalRange, StrictRange};
 use aion_core::options::{crosshair_mode, ChartOptions, ChartOptionsStore};
 use aion_core::TimePointIndex;
-use aion_core::scale::price_scale_core::{PriceScaleCore, PriceScaleCoreOptions};
+use aion_core::scale::price_scale_core::{PriceScaleCore, PriceScaleCoreOptions, PriceScaleMargins};
 use aion_core::scale::time_scale_core::{TimeScaleCore, TimeScaleOptions};
 use aion_core::scale::time_tick_marks::{fill_weights_for_points, TimeTickMarks};
 use aion_render::bars::{build_bars, BarItem, BarsParams};
@@ -127,6 +127,9 @@ struct SeriesEntry {
     kind: SeriesKind,
     /// Overrides the default line/area color when set (e.g. an SMA overlay).
     line_color: Color,
+    /// When true the series maps to the bottom-band overlay price scale (volume-style), excluded
+    /// from the main scale's autoscale so its magnitude never distorts the price axis.
+    overlay: bool,
 }
 
 struct Gfx {
@@ -148,6 +151,9 @@ struct ChartInner {
     axis_ctx: CanvasRenderingContext2d,
     time_scale: TimeScaleCore,
     price_scale: PriceScaleCore,
+    /// Bottom-band scale for volume-style overlay series (roadmap Phase B2). Shares the pane with
+    /// the main scale but occupies only the bottom fraction set by its `scale_margins`.
+    overlay_scale: PriceScaleCore,
     price_formatter: PriceFormatter,
     data: DataLayer,
     series: Vec<SeriesEntry>,
@@ -308,9 +314,14 @@ pub async fn create_chart(
         axis_ctx,
         time_scale: TimeScaleCore::new(TimeScaleOptions::default()),
         price_scale: PriceScaleCore::new(PriceScaleCoreOptions::default()),
+        overlay_scale: PriceScaleCore::new(PriceScaleCoreOptions {
+            // pinned to the bottom 20% band by default (LWC volume convention)
+            scale_margins: PriceScaleMargins { top: 0.8, bottom: 0.0 },
+            ..PriceScaleCoreOptions::default()
+        }),
         price_formatter: PriceFormatter::default(),
         data,
-        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR }],
+        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR, overlay: false }],
         tick_marks: TimeTickMarks::new(),
         options: ChartOptionsStore::new(),
         crosshair_mode: CrosshairMode::Magnet,
@@ -408,6 +419,12 @@ impl AionChart {
     /// Sets a series' line/area color (overrides the kind default).
     pub fn set_series_color(&mut self, id: u32, r: u8, g: u8, b: u8) {
         self.inner.borrow_mut().set_series_color(id, r, g, b);
+    }
+
+    /// Move a series to the bottom-band overlay (volume) price scale with the given fractional
+    /// margins (top/bottom of pane height). Call `render()` after (roadmap Phase B2).
+    pub fn set_series_overlay(&mut self, id: u32, top: f64, bottom: f64) {
+        self.inner.borrow_mut().set_series_overlay(id, top, bottom);
     }
 
     /// 0 = candlestick, 1 = OHLC bars, 2 = line, 3 = area, 4 = histogram (sets the main series).
@@ -522,7 +539,7 @@ impl ChartInner {
     /// Adds a series and returns its id. `kind`: 0 candles, 1 bars, 2 line, 3 area, 4 histogram.
     pub fn add_series(&mut self, kind: u8) -> u32 {
         let id = self.data.add_series();
-        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR });
+        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR, overlay: false });
         id as u32
     }
 
@@ -587,6 +604,17 @@ impl ChartInner {
         }
     }
 
+    /// Move a series onto the bottom-band overlay price scale (volume-style) and set that scale's
+    /// margins as fractions of pane height: `top` leaves that fraction of the pane above the band,
+    /// `bottom` below it (e.g. top=0.8, bottom=0.0 ⇒ bottom 20%). Excludes the series from the
+    /// main price axis autoscale (roadmap Phase B2).
+    pub fn set_series_overlay(&mut self, id: u32, top: f64, bottom: f64) {
+        if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
+            s.overlay = true;
+        }
+        self.overlay_scale.set_scale_margins(top.clamp(0.0, 1.0), bottom.clamp(0.0, 1.0));
+    }
+
     /// 0 = candlestick, 1 = OHLC bars, 2 = line, 3 = area, 4 = histogram (sets the main series).
     pub fn set_series_type(&mut self, kind: u8) {
         self.series[0].kind = SeriesKind::from_u8(kind);
@@ -648,6 +676,7 @@ impl ChartInner {
     fn recompute_layout(&mut self) {
         let pane_h = (self.css_height - TIME_AXIS_HEIGHT).max(1.0);
         self.price_scale.set_height(pane_h);
+        self.overlay_scale.set_height(pane_h);
 
         let mut axis_w = self.compute_price_axis_width();
         for _ in 0..2 {
@@ -960,25 +989,44 @@ impl ChartInner {
         Some((from, to))
     }
 
-    /// Autoscale over the union of all series' visible min/max on the (single) price scale.
+    /// Autoscale each price scale over its own series' visible min/max: the main (right) scale over
+    /// non-overlay series, and the overlay (volume) scale over overlay series. Splitting them keeps
+    /// a volume histogram's magnitude from distorting the price axis (roadmap Phase B2).
     fn autoscale(&mut self, from: i64, to: i64) {
-        let mut merged: Option<PriceRange> = None;
-        let ids: Vec<SeriesId> = self.series.iter().map(|s| s.id).collect();
-        for id in ids {
-            if let Some(mm) = self
+        let entries: Vec<(SeriesId, bool)> = self.series.iter().map(|s| (s.id, s.overlay)).collect();
+        let mut main: Option<PriceRange> = None;
+        let mut overlay: Option<PriceRange> = None;
+        for (id, is_overlay) in entries {
+            let Some(mm) = self
                 .data
                 .plot_mut(id)
                 .min_max_on_range_cached(from, to, &[PlotValueIndex::Low, PlotValueIndex::High])
-            {
-                let r = PriceRange::new(mm.min, mm.max);
-                merged = Some(match merged {
-                    None => r,
-                    Some(m) => m.merge(Some(&r)),
-                });
-            }
+            else {
+                continue;
+            };
+            let target = if is_overlay { &mut overlay } else { &mut main };
+            let r = PriceRange::new(mm.min, mm.max);
+            *target = Some(match target.take() {
+                None => r,
+                Some(m) => m.merge(Some(&r)),
+            });
         }
-        if let Some(r) = merged {
+        if let Some(r) = main {
             self.price_scale.apply_autoscale_range(Some(r), 0.01);
+        }
+        if let Some(r) = overlay {
+            // volume-style series grow from a zero baseline, so include 0 in the range
+            let r = r.merge(Some(&PriceRange::new(0.0, 0.0)));
+            self.overlay_scale.apply_autoscale_range(Some(r), 0.01);
+        }
+    }
+
+    /// The price scale a series maps to (bottom-band overlay scale for overlay series).
+    fn scale_for(&self, overlay: bool) -> &PriceScaleCore {
+        if overlay {
+            &self.overlay_scale
+        } else {
+            &self.price_scale
         }
     }
 
@@ -1089,17 +1137,19 @@ impl ChartInner {
 
     #[allow(clippy::too_many_arguments)]
     fn build_histogram_prims(&self, id: SeriesId, from: i64, to: i64, hpr: f64, vpr: f64, prims: &mut Vec<Prim>) {
+        let overlay = self.series.iter().find(|s| s.id == id).is_some_and(|s| s.overlay);
+        let scale = self.scale_for(overlay);
         let plot = self.data.plot(id);
         let idxs = plot.indices();
         let c = plot.column(PlotValueIndex::Close);
         // base = coordinate of price 0 (histogram grows from the bottom for volume-like data)
-        let base = self.price_scale.price_to_coordinate(0.0, 0.0);
+        let base = scale.price_to_coordinate(0.0, 0.0);
         let mut items = Vec::new();
         for r in plot.visible_rows(from, to) {
             let value = c[r];
             items.push(HistogramItem {
                 x: self.time_scale.index_to_coordinate(idxs[r]),
-                y: self.price_scale.price_to_coordinate(value, value),
+                y: scale.price_to_coordinate(value, value),
                 time: idxs[r],
                 color: HISTOGRAM_COLOR,
             });
