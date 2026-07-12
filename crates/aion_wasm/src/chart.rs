@@ -316,6 +316,34 @@ impl AionChart {
         self.gfx.config.width = bitmap_w;
         self.gfx.config.height = bitmap_h;
         self.gfx.surface.configure(&self.gfx.device, &self.gfx.config);
+        // Update geometry eagerly so fit_content/zoom/scroll called before the next render
+        // (and the price_axis_width getter) see the new pane size, not a stale one.
+        self.recompute_layout();
+    }
+
+    /// Negotiates the price-axis width against its labels and sets the time-scale width /
+    /// price-scale height accordingly. Idempotent; called on resize, data change, and render.
+    /// (The axis labels depend only on the price range, so one refinement pass converges.)
+    fn recompute_layout(&mut self) {
+        let pane_h = (self.css_height - TIME_AXIS_HEIGHT).max(1.0);
+        self.price_scale.set_height(pane_h);
+
+        let mut axis_w = self.compute_price_axis_width();
+        for _ in 0..2 {
+            let pane_w = (self.css_width - axis_w).max(1.0);
+            self.time_scale.set_width(pane_w);
+            if let Some((from, to)) = self.visible_data_range() {
+                self.autoscale(from, to);
+            }
+            let new_w = self.compute_price_axis_width();
+            if new_w == axis_w {
+                break;
+            }
+            axis_w = new_w;
+        }
+        self.pane_w = (self.css_width - axis_w).max(1.0);
+        self.pane_h = pane_h;
+        self.axis_w = axis_w;
     }
 
     // --- gestures ---
@@ -356,26 +384,9 @@ impl AionChart {
         let vpr = self.dpr;
 
         // ---- layout (price axis width negotiated against the price labels) ----
-        let pane_h = (self.css_height - TIME_AXIS_HEIGHT).max(1.0);
-        self.price_scale.set_height(pane_h);
-
-        let mut axis_w = self.compute_price_axis_width();
-        for _ in 0..2 {
-            let pane_w = (self.css_width - axis_w).max(1.0);
-            self.time_scale.set_width(pane_w);
-            if let Some((from, to)) = self.visible_data_range() {
-                self.autoscale(from, to);
-            }
-            let new_w = self.compute_price_axis_width();
-            if new_w == axis_w {
-                break;
-            }
-            axis_w = new_w;
-        }
-        let pane_w = (self.css_width - axis_w).max(1.0);
-        self.pane_w = pane_w;
-        self.pane_h = pane_h;
-        self.axis_w = axis_w;
+        self.recompute_layout();
+        let pane_w = self.pane_w;
+        let pane_h = self.pane_h;
 
         let pane_w_px = (pane_w * hpr).round() as u32;
         let pane_h_px = (pane_h * vpr).round() as u32;
@@ -458,6 +469,10 @@ impl AionChart {
         self.tick_marks.set_weights(&weights);
         self.time_scale.set_points_len(n);
         self.time_scale.set_base_index(self.data.base_index());
+        // keep geometry current so fit_content/zoom right after set_data use the real width
+        if self.css_width > 0.0 {
+            self.recompute_layout();
+        }
     }
 
     fn main_plot(&self) -> &PlotList {

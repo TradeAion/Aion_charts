@@ -151,11 +151,25 @@ overlay.addEventListener("mousemove", (e) => {
 overlay.addEventListener("mouseleave", () => { chart.clear_crosshair(); rerender(); });
 overlay.addEventListener("dblclick", () => { chart.fit_content(); rerender(); });
 
-new ResizeObserver(() => {
+function sync_size() {
   const { w, h, dpr } = apply_bitmap_size();
   chart.resize(w, h, dpr);
   rerender();
-}).observe(container);
+}
+
+// container size changes (layout, window resize)
+new ResizeObserver(sync_size).observe(container);
+
+// devicePixelRatio changes (moving between monitors, browser/OS zoom, switching
+// device emulation) do NOT fire ResizeObserver — watch them explicitly, re-arming
+// the media query each time since the dppx value itself changes.
+let last_dpr = 0;
+function watch_dpr() {
+  const dpr = window.devicePixelRatio || 1;
+  if (dpr !== last_dpr) { last_dpr = dpr; sync_size(); }
+  matchMedia(`(resolution: ${dpr}dppx)`).addEventListener("change", watch_dpr, { once: true });
+}
+watch_dpr();
 </script>
 </body>
 </html>
