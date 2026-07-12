@@ -3,31 +3,28 @@
 <head>
 <meta charset="utf-8" />
 <!-- Without this, mobile browsers lay the page out at a 980px virtual width and then
-     scale it down to the device, squishing the UI (tiny/cramped axis) and adding a
-     fractional CSS scale on top of the canvas bitmap (wicks fall between pixels and
-     vanish; pointer offsets land in the wrong place). user-scalable=no stops the
-     browser's own pinch-zoom from fighting the chart's zoom gesture. -->
+     scale it down to the device, squishing the UI and adding a fractional CSS scale on top
+     of the canvas bitmap. user-scalable=no stops native pinch-zoom fighting the chart. -->
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-<title>Aion Charts — Phase 0 demo</title>
+<title>Aion Charts — @aion/charts demo</title>
 <style>
   html, body { margin: 0; height: 100%; background: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif; }
   #wrap { display: flex; flex-direction: column; height: 100%; }
-  #bar { padding: 8px 12px; font-size: 13px; color: #191919; border-bottom: 1px solid #e0e3eb; display: flex; gap: 16px; align-items: center; }
+  #bar { padding: 8px 12px; font-size: 13px; color: #191919; border-bottom: 1px solid #e0e3eb; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  /* The library creates and manages the canvases inside this container. */
   #chart_container { flex: 1; position: relative; touch-action: none; overscroll-behavior: none; }
-  /* touch-action:none routes finger drags/pinches to our handlers instead of native scroll/zoom */
-  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; touch-action: none; }
   #status { color: #787b86; }
 </style>
 </head>
 <body>
 <div id="wrap">
   <div id="bar">
-    <strong style="background:#26a69a;color:#fff;padding:2px 6px;border-radius:3px">aion_charts BUILD&nbsp;B4</strong>
+    <strong style="background:#26a69a;color:#fff;padding:2px 6px;border-radius:3px">@aion/charts</strong>
     <span>wheel = zoom &middot; drag = pan &middot; double-click = fit</span>
-    <label><input type="radio" name="series" value="0" checked> candles</label>
-    <label><input type="radio" name="series" value="1"> bars</label>
-    <label><input type="radio" name="series" value="2"> line</label>
-    <label><input type="radio" name="series" value="3"> area</label>
+    <label><input type="radio" name="series" value="candlestick" checked> candles</label>
+    <label><input type="radio" name="series" value="bar"> bars</label>
+    <label><input type="radio" name="series" value="line"> line</label>
+    <label><input type="radio" name="series" value="area"> area</label>
     <label><input type="checkbox" id="sma_toggle"> SMA(20)</label>
     <label>crosshair
       <select id="cross_mode">
@@ -39,23 +36,19 @@
     </label>
     <span id="status"></span>
   </div>
-  <div id="chart_container">
-    <canvas id="pane"></canvas>
-    <canvas id="overlay"></canvas>
-  </div>
+  <div id="chart_container"></div>
 </div>
 <script type="module">
-import init, { create_chart } from "./pkg/aion_wasm.js";
+// The real public API — same package a downstream user would `npm install`.
+import { create_chart } from "./dist/aion_charts.js";
 
-// pane = WebGPU (candles/grid/series), overlay = Canvas2D (native axis text) stacked on top.
-const pane = document.getElementById("pane");
-const overlay = document.getElementById("overlay");
 const container = document.getElementById("chart_container");
 const status = document.getElementById("status");
 
-// deterministic random-walk OHLC data (hourly bars ending "now")
+// deterministic random-walk OHLC data (hourly bars ending "now"), as the array-of-objects the
+// public API accepts — the library packs it into typed arrays at the boundary.
 function generate_data(n) {
-  const times = new Float64Array(n), open = new Float64Array(n), high = new Float64Array(n), low = new Float64Array(n), close = new Float64Array(n);
+  const out = [];
   let seed = 42;
   const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
   let price = 100;
@@ -63,161 +56,53 @@ function generate_data(n) {
   const start = Math.floor(Date.now() / 1000 / hour) * hour - (n - 1) * hour;
   for (let i = 0; i < n; i++) {
     const o = price;
-    const drift = (rnd() - 0.5) * 2.4;
-    const c = Math.max(1, o + drift);
-    const hi = Math.max(o, c) + rnd() * 1.2;
-    const lo = Math.min(o, c) - rnd() * 1.2;
-    times[i] = start + i * hour;
-    open[i] = o; high[i] = hi; low[i] = lo; close[i] = c;
+    const c = Math.max(1, o + (rnd() - 0.5) * 2.4);
+    out.push({ time: start + i * hour, open: o, high: Math.max(o, c) + rnd() * 1.2, low: Math.min(o, c) - rnd() * 1.2, close: c });
     price = c;
   }
-  return { times, open, high, low, close };
+  return out;
 }
 
-await init();
-
-// Bootstrap size just so create_chart can configure the WebGPU surface; enable_auto_resize
-// below immediately re-sizes to the exact device-pixel box and owns sizing from then on.
-{
-  const r = container.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  for (const c of [pane, overlay]) { c.width = Math.max(1, Math.round(r.width * dpr)); c.height = Math.max(1, Math.round(r.height * dpr)); }
+function sma(data, period) {
+  const out = [];
+  let sum = 0;
+  for (let i = 0; i < data.length; i++) {
+    sum += data[i].close;
+    if (i >= period) sum -= data[i - period].close;
+    if (i >= period - 1) out.push({ time: data[i].time, value: sum / period });
+  }
+  return out;
 }
-const r0 = container.getBoundingClientRect();
-const dpr0 = window.devicePixelRatio || 1;
-const chart = await create_chart(pane, overlay, r0.width, r0.height, dpr0);
 
-// The engine now owns device-pixel-exact canvas sizing + re-render on any size/DPR change.
-chart.enable_auto_resize(container);
-
+const chart = await create_chart(container, { autoSize: true });
 window.__chart = chart; // debug/test handle
 
 const data = generate_data(1000);
-chart.set_data(data.times, data.open, data.high, data.low, data.close);
+const main = chart.add_series("candlestick");
+main.set_data(data);
+chart.time_scale().fit_content();
 
-// simple moving average overlay (a second series sharing the time axis + price scale)
-function sma(times, close, period) {
-  const n = close.length, t = [], o = [], h = [], l = [], c = [];
-  let sum = 0;
-  for (let i = 0; i < n; i++) {
-    sum += close[i];
-    if (i >= period) sum -= close[i - period];
-    if (i >= period - 1) { const v = sum / period; t.push(times[i]); o.push(v); h.push(v); l.push(v); c.push(v); }
-  }
-  return { t: new Float64Array(t), o: new Float64Array(o), h: new Float64Array(h), l: new Float64Array(l), c: new Float64Array(c) };
-}
-let sma_id = null;
-const sma_data = sma(data.times, data.close, 20);
+let sma_series = null;
+const sma_data = sma(data, 20);
 
-chart.render();
 status.textContent = `1000 bars · dpr ${(window.devicePixelRatio || 1).toFixed(3)}`;
 
 document.getElementById("sma_toggle").addEventListener("change", (e) => {
-  if (e.target.checked && sma_id === null) {
-    sma_id = chart.add_series(2); // line
-    chart.set_series_color(sma_id, 0xff, 0x98, 0x00); // orange
-    chart.set_series_data(sma_id, sma_data.t, sma_data.o, sma_data.h, sma_data.l, sma_data.c);
-  } else if (!e.target.checked && sma_id !== null) {
-    // no remove_series yet; set empty data to hide it
-    chart.set_series_data(sma_id, new Float64Array(), new Float64Array(), new Float64Array(), new Float64Array(), new Float64Array());
-    sma_id = null;
+  if (e.target.checked && sma_series === null) {
+    sma_series = chart.add_series("line", { color: "#ff9800" });
+    sma_series.set_data(sma_data);
+  } else if (!e.target.checked && sma_series !== null) {
+    sma_series.set_data([]); // no remove_series yet — hide by clearing
+    sma_series = null;
   }
-  rerender();
 });
 
 document.querySelectorAll('input[name="series"]').forEach((el) => {
-  el.addEventListener("change", () => { chart.set_series_type(Number(el.value)); rerender(); });
+  el.addEventListener("change", () => main.set_type(el.value));
 });
 document.getElementById("cross_mode").addEventListener("change", (e) => {
-  chart.set_crosshair_mode(Number(e.target.value)); rerender();
+  chart.apply_options({ crosshair: { mode: Number(e.target.value) } });
 });
-
-// Interactions never change the element size; the engine's own ResizeObserver (installed by
-// enable_auto_resize) keeps the bitmap in sync with the physical-pixel box, so this just repaints.
-const rerender = () => {
-  chart.render();
-  const dpr = pane.width / (parseFloat(pane.style.width) || pane.width);
-  status.textContent = `bitmap ${pane.width}x${pane.height} · dpr ${dpr.toFixed(3)} · sp ${chart.bar_spacing().toFixed(1)}`;
-};
-
-// overlay is the topmost element, so it receives the pointer events
-overlay.addEventListener("wheel", (e) => {
-  e.preventDefault();
-  // LWC wheel formula (RENDERING_SPEC.md §1.1)
-  const deltaY = -(e.deltaY / 100);
-  if (deltaY !== 0) {
-    const zoom_scale = Math.sign(deltaY) * Math.min(1, Math.abs(deltaY));
-    chart.zoom(e.offsetX, zoom_scale);
-    rerender();
-  }
-}, { passive: false });
-
-// Pointer Events unify mouse, touch and pen. One pointer = pan + crosshair; two
-// pointers = pinch-zoom around the gesture midpoint (converted to zoom notches).
-const pointers = new Map(); // pointerId -> {x, y}
-let dragging = false;
-let pinch_dist = 0; // last two-finger distance, in css px
-
-// event coords are already in the overlay's local (css) space; use offsetX where
-// available, else derive from the bounding rect (touch points don't set offsetX reliably).
-function local_xy(e) {
-  const r = overlay.getBoundingClientRect();
-  return { x: e.clientX - r.left, y: e.clientY - r.top };
-}
-
-overlay.addEventListener("pointerdown", (e) => {
-  overlay.setPointerCapture(e.pointerId);
-  const p = local_xy(e);
-  pointers.set(e.pointerId, p);
-  if (pointers.size === 1) {
-    dragging = true;
-    chart.scroll_start(p.x);
-  } else if (pointers.size === 2) {
-    dragging = false;
-    chart.scroll_end();
-    const [a, b] = [...pointers.values()];
-    pinch_dist = Math.hypot(a.x - b.x, a.y - b.y);
-  }
-});
-
-overlay.addEventListener("pointermove", (e) => {
-  const p = local_xy(e);
-  if (pointers.has(e.pointerId)) pointers.set(e.pointerId, p);
-
-  if (pointers.size >= 2) {
-    // pinch: change in finger distance drives zoom, centered on the midpoint
-    const [a, b] = [...pointers.values()];
-    const dist = Math.hypot(a.x - b.x, a.y - b.y);
-    const mid = (a.x + b.x) / 2;
-    if (pinch_dist > 0 && dist > 0) {
-      const zoom_scale = Math.max(-1, Math.min(1, (dist - pinch_dist) / 40));
-      if (zoom_scale !== 0) chart.zoom(mid, zoom_scale);
-    }
-    pinch_dist = dist;
-    rerender();
-    return;
-  }
-
-  if (dragging) chart.scroll_move(p.x);
-  chart.set_crosshair(p.x, p.y);
-  rerender();
-});
-
-function end_pointer(e) {
-  pointers.delete(e.pointerId);
-  if (pointers.size < 2) pinch_dist = 0;
-  if (pointers.size === 0) {
-    if (dragging) { dragging = false; chart.scroll_end(); }
-    chart.clear_crosshair();
-    rerender();
-  }
-}
-overlay.addEventListener("pointerup", end_pointer);
-overlay.addEventListener("pointercancel", end_pointer);
-overlay.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") end_pointer(e); });
-overlay.addEventListener("dblclick", () => { chart.fit_content(); rerender(); });
-
-// Sizing + resize-on-DPR-change is now owned by the engine (chart.enable_auto_resize above).
 </script>
 </body>
 </html>

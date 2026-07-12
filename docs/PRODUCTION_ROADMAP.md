@@ -147,3 +147,16 @@ Progress is appended here as phases land (newest last).
   background clear color now come from options. Verified in-browser: partial patches deep-merge
   (siblings survive, patches accumulate) and reach pixels (bg 94.8% red, blue grid lines present).
   15 new unit tests. Next: A1 (real TS façade), A5 (subscriptions).
+- 2026-07-12 — **A1 done** (real library façade). `packages/charts/src/index.ts` is now a typed
+  `@aion/charts` API over the wasm engine — no longer a stub: `create_chart(container, options?)`
+  → `Promise<chart_api>` (creates the two stacked canvases, installs the gesture recognizer,
+  applies options); `add_series(kind, options?)` → series handle (`set_data`/`update`/`set_type`/
+  `apply_options`, typed-array packing at the boundary); `time_scale()` (fit/visible-range get+set/
+  coord conversions); `price_to_coordinate`/`coordinate_to_price`; `apply_options`/`options`;
+  `resize`/`remove`. `autoSize` gates the ResizeObserver (LWC parity; off ⇒ manual sizing, keeps
+  the engine embeddable/testable). Build: `wasm-pack` → `packages/charts/pkg`, esbuild bundles a
+  self-contained ESM into `examples/web_demo/dist/`. The demo now consumes the published API only
+  (raw-wasm wiring + inline gestures removed). Verified in-browser: candles render via the façade
+  (LWC palette), overlay line series + `apply_options` deep-merge reach pixels, coordinate/range
+  APIs return correct values, full chart screenshot. tsc + wasm builds green.
+  Next: A5 (subscriptions — needs Rust→JS callback plumbing).
