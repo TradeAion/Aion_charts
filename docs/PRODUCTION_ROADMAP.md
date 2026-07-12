@@ -192,3 +192,9 @@ Progress is appended here as phases land (newest last).
   cleanly separated; single-pane rendering byte-unchanged; core 96 + render 31 tests green.
   Remaining B1 increments: per-pane price axes/labels, draggable separators (resize), façade
   `panes()`/`move_to_pane`, per-pane crosshair label.
+- 2026-07-12 — **B1 increment 2 done** (per-pane price axes). `draw_axes_2d` now iterates every
+  pane and draws its own price tick labels clipped to its band (scale coords are canvas-absolute);
+  `compute_price_axis_width` measures the widest label across all panes so a wide volume axis
+  doesn't clip. Verified in-browser: both the price band and the volume band render their own
+  right-axis labels (dark text present in each strip), no console errors. Remaining B1: draggable
+  separators (resize), façade `panes()`/`move_to_pane`, per-pane crosshair label.

@@ -1154,8 +1154,11 @@ impl ChartInner {
 
     fn compute_price_axis_width(&self) -> f64 {
         let mut max_text_w = 0f64;
-        for mark in self.price_scale().build_tick_marks(100, 0.0) {
-            max_text_w = max_text_w.max(self.measure(&self.price_formatter.format(mark.logical)));
+        // widest tick label across all panes' price scales (volume numbers can exceed price ones)
+        for pane in &self.panes {
+            for mark in pane.price_scale.build_tick_marks(100, 0.0) {
+                max_text_w = max_text_w.max(self.measure(&self.price_formatter.format(mark.logical)));
+            }
         }
         if let Some((_, y)) = self.crosshair {
             if !self.price_scale().is_empty() {
@@ -1447,13 +1450,23 @@ impl ChartInner {
             ctx.fill_rect(0.0, y, (pane_w * dpr).round(), (PANE_SEPARATOR * dpr).max(border_w));
         }
 
+        // price tick labels for every pane, each clipped to its own band (roadmap Phase B1). Scale
+        // coords are canvas-absolute, so a label just draws at its coord if it falls in the band.
         ctx.set_font(&font);
         ctx.set_text_baseline("middle");
         ctx.set_text_align("left");
         ctx.set_fill_style_str(TEXT_CSS);
         let text_x = (pane_w + AXIS_TICK_LENGTH + PRICE_PADDING_INNER) * dpr;
-        for mark in self.price_scale().build_tick_marks(100, 0.0) {
-            ctx.fill_text(&self.price_formatter.format(mark.logical), text_x, (mark.coord * dpr).round())?;
+        for pane in &self.panes {
+            let band_top = pane.top * dpr;
+            let band_bot = (pane.top + pane.height) * dpr;
+            for mark in pane.price_scale.build_tick_marks(100, 0.0) {
+                let y = (mark.coord * dpr).round();
+                if y < band_top - 0.5 || y > band_bot + 0.5 {
+                    continue;
+                }
+                ctx.fill_text(&self.price_formatter.format(mark.logical), text_x, y)?;
+            }
         }
 
         if let Some((from, to)) = visible {
