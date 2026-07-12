@@ -108,7 +108,7 @@ document.getElementById("sma_toggle").addEventListener("change", (e) => {
 
 document.getElementById("vol_toggle").addEventListener("change", (e) => {
   if (e.target.checked && vol_series === null) {
-    vol_series = chart.add_series("histogram", { overlay: true }); // bottom-band volume scale
+    vol_series = chart.add_series("histogram", { pane: 1, pane_stretch: 0.33 }); // separate volume pane (~3:1)
     vol_series.set_data(volume_data);
   } else if (!e.target.checked && vol_series !== null) {
     vol_series.set_data([]);

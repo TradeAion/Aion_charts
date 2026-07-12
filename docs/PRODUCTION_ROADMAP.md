@@ -180,3 +180,15 @@ Progress is appended here as phases land (newest last).
   byte-identical (top 125.74 / bottom 56.76 unchanged) while the histogram fills the bottom 20%
   band (47% non-white there vs 6% above). Next in B: multi-pane (B1) — separate panes/separators/
   resize/move_to_pane.
+- 2026-07-12 — **B1 increment 1 done** (multi-pane model + stacked layout). Introduced a `Pane`
+  (own price + overlay scale, stretch factor, slot top/height); `ChartInner.panes: Vec<Pane>`
+  replaces the single scale. Layout splits the content area by stretch factor (minus 1px
+  separators); each pane's scale uses the "absolute coordinate" trick (full content height + internal
+  margins position the band) so builders read `price_to_coordinate` as canvas-absolute Y with no
+  offset threading. Autoscale is per-pane; render emits one scissored `DrawGroup` per pane; series
+  carry a `pane_index`; separators drawn on the 2D overlay. New `set_series_pane(id, pane, stretch)`
+  → façade `add_series(kind, { pane, pane_stretch })`; demo volume moved to its own pane. Verified
+  in-browser: candles confined to the top pane (end ≈63%), volume in the bottom pane (start ≈76%),
+  cleanly separated; single-pane rendering byte-unchanged; core 96 + render 31 tests green.
+  Remaining B1 increments: per-pane price axes/labels, draggable separators (resize), façade
+  `panes()`/`move_to_pane`, per-pane crosshair label.

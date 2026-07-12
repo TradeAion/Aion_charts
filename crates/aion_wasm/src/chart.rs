@@ -127,9 +127,72 @@ struct SeriesEntry {
     kind: SeriesKind,
     /// Overrides the default line/area color when set (e.g. an SMA overlay).
     line_color: Color,
-    /// When true the series maps to the bottom-band overlay price scale (volume-style), excluded
-    /// from the main scale's autoscale so its magnitude never distorts the price axis.
+    /// When true the series maps to its pane's bottom-band overlay price scale (volume-style),
+    /// excluded from that pane's main autoscale so its magnitude never distorts the price axis.
     overlay: bool,
+    /// Which stacked pane this series lives in (0 = top/price pane).
+    pane_index: usize,
+}
+
+/// Height (css px) of the separator between stacked panes.
+const PANE_SEPARATOR: f64 = 1.0;
+/// Per-pane fractional price-scale padding (top/bottom of the pane's slot). Chosen to match the
+/// prior single-pane look (LWC default right-scale margins).
+const PANE_PAD_TOP: f64 = 0.2;
+const PANE_PAD_BOTTOM: f64 = 0.1;
+
+/// One vertically-stacked pane: its own price scale + a bottom-band overlay scale, sized to a slot
+/// of the content area each layout pass (roadmap Phase B1). Scales use the "absolute coordinate"
+/// convention — full content height + internal margins positioning the band — so builders read
+/// `price_to_coordinate` as a canvas-absolute Y with no per-pane offset.
+struct Pane {
+    price_scale: PriceScaleCore,
+    overlay_scale: PriceScaleCore,
+    stretch_factor: f64,
+    /// Overlay (volume) band as fractions of the pane slot: top leaves that fraction above.
+    overlay_top: f64,
+    overlay_bottom: f64,
+    /// css top / height of this pane's slot, set in `recompute_layout`.
+    top: f64,
+    height: f64,
+}
+
+impl Pane {
+    fn new() -> Self {
+        let scale = || {
+            PriceScaleCore::new(PriceScaleCoreOptions {
+                scale_margins: PriceScaleMargins { top: 0.0, bottom: 0.0 },
+                ..PriceScaleCoreOptions::default()
+            })
+        };
+        Pane {
+            price_scale: scale(),
+            overlay_scale: scale(),
+            stretch_factor: 1.0,
+            overlay_top: 0.8,
+            overlay_bottom: 0.0,
+            top: 0.0,
+            height: 0.0,
+        }
+    }
+
+    /// Position both scales' bands within `[top, top+height]` of a full-content-height canvas, so
+    /// `price_to_coordinate` yields canvas-absolute Y.
+    fn layout(&mut self, content_h: f64) {
+        self.price_scale.set_height(content_h);
+        self.overlay_scale.set_height(content_h);
+        let below = (content_h - self.top - self.height).max(0.0);
+        // main scale: padded band across the whole pane slot
+        self.price_scale.set_internal_margins(
+            self.top + PANE_PAD_TOP * self.height,
+            below + PANE_PAD_BOTTOM * self.height,
+        );
+        // overlay scale: band = the [overlay_top, 1-overlay_bottom] fraction of the pane slot
+        self.overlay_scale.set_internal_margins(
+            self.top + self.overlay_top * self.height,
+            below + self.overlay_bottom * self.height,
+        );
+    }
 }
 
 struct Gfx {
@@ -150,10 +213,9 @@ struct ChartInner {
     gfx: Gfx,
     axis_ctx: CanvasRenderingContext2d,
     time_scale: TimeScaleCore,
-    price_scale: PriceScaleCore,
-    /// Bottom-band scale for volume-style overlay series (roadmap Phase B2). Shares the pane with
-    /// the main scale but occupies only the bottom fraction set by its `scale_margins`.
-    overlay_scale: PriceScaleCore,
+    /// Vertically-stacked panes, each with its own price + overlay scale (roadmap Phase B1).
+    /// `panes[0]` is the top/price pane and owns the visible price axis.
+    panes: Vec<Pane>,
     price_formatter: PriceFormatter,
     data: DataLayer,
     series: Vec<SeriesEntry>,
@@ -313,15 +375,10 @@ pub async fn create_chart(
         },
         axis_ctx,
         time_scale: TimeScaleCore::new(TimeScaleOptions::default()),
-        price_scale: PriceScaleCore::new(PriceScaleCoreOptions::default()),
-        overlay_scale: PriceScaleCore::new(PriceScaleCoreOptions {
-            // pinned to the bottom 20% band by default (LWC volume convention)
-            scale_margins: PriceScaleMargins { top: 0.8, bottom: 0.0 },
-            ..PriceScaleCoreOptions::default()
-        }),
+        panes: vec![Pane::new()],
         price_formatter: PriceFormatter::default(),
         data,
-        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR, overlay: false }],
+        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR, overlay: false, pane_index: 0 }],
         tick_marks: TimeTickMarks::new(),
         options: ChartOptionsStore::new(),
         crosshair_mode: CrosshairMode::Magnet,
@@ -425,6 +482,13 @@ impl AionChart {
     /// margins (top/bottom of pane height). Call `render()` after (roadmap Phase B2).
     pub fn set_series_overlay(&mut self, id: u32, top: f64, bottom: f64) {
         self.inner.borrow_mut().set_series_overlay(id, top, bottom);
+    }
+
+    /// Move a series into stacked pane `pane_index` (0 = top/price pane), creating panes as needed;
+    /// `stretch_factor` sizes a newly-created pane relative to the others. Call `render()` after
+    /// (roadmap Phase B1).
+    pub fn set_series_pane(&mut self, id: u32, pane_index: usize, stretch_factor: f64) {
+        self.inner.borrow_mut().set_series_pane(id, pane_index, stretch_factor);
     }
 
     /// 0 = candlestick, 1 = OHLC bars, 2 = line, 3 = area, 4 = histogram (sets the main series).
@@ -539,7 +603,7 @@ impl ChartInner {
     /// Adds a series and returns its id. `kind`: 0 candles, 1 bars, 2 line, 3 area, 4 histogram.
     pub fn add_series(&mut self, kind: u8) -> u32 {
         let id = self.data.add_series();
-        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR, overlay: false });
+        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR, overlay: false, pane_index: 0 });
         id as u32
     }
 
@@ -604,15 +668,33 @@ impl ChartInner {
         }
     }
 
-    /// Move a series onto the bottom-band overlay price scale (volume-style) and set that scale's
-    /// margins as fractions of pane height: `top` leaves that fraction of the pane above the band,
-    /// `bottom` below it (e.g. top=0.8, bottom=0.0 ⇒ bottom 20%). Excludes the series from the
-    /// main price axis autoscale (roadmap Phase B2).
+    /// Move a series onto its pane's bottom-band overlay scale (volume-style) and set that band's
+    /// margins as fractions of the pane slot: `top` leaves that fraction above the band, `bottom`
+    /// below it (e.g. top=0.8, bottom=0.0 ⇒ bottom 20%). Excludes the series from the pane's main
+    /// autoscale (roadmap Phase B2).
     pub fn set_series_overlay(&mut self, id: u32, top: f64, bottom: f64) {
+        let mut pane_index = 0;
         if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
             s.overlay = true;
+            pane_index = s.pane_index;
         }
-        self.overlay_scale.set_scale_margins(top.clamp(0.0, 1.0), bottom.clamp(0.0, 1.0));
+        if let Some(p) = self.panes.get_mut(pane_index) {
+            p.overlay_top = top.clamp(0.0, 1.0);
+            p.overlay_bottom = bottom.clamp(0.0, 1.0);
+        }
+    }
+
+    /// Move a series into pane `pane_index`, creating panes (with the given stretch factor for a
+    /// newly-created last pane) as needed. Pane 0 is the top/price pane (roadmap Phase B1).
+    pub fn set_series_pane(&mut self, id: u32, pane_index: usize, stretch_factor: f64) {
+        while self.panes.len() <= pane_index {
+            let mut p = Pane::new();
+            p.stretch_factor = stretch_factor.max(0.01);
+            self.panes.push(p);
+        }
+        if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
+            s.pane_index = pane_index;
+        }
     }
 
     /// 0 = candlestick, 1 = OHLC bars, 2 = line, 3 = area, 4 = histogram (sets the main series).
@@ -674,9 +756,8 @@ impl ChartInner {
     /// price-scale height accordingly. Idempotent; called on resize, data change, and render.
     /// (The axis labels depend only on the price range, so one refinement pass converges.)
     fn recompute_layout(&mut self) {
-        let pane_h = (self.css_height - TIME_AXIS_HEIGHT).max(1.0);
-        self.price_scale.set_height(pane_h);
-        self.overlay_scale.set_height(pane_h);
+        let content_h = (self.css_height - TIME_AXIS_HEIGHT).max(1.0);
+        self.layout_panes(content_h);
 
         let mut axis_w = self.compute_price_axis_width();
         for _ in 0..2 {
@@ -692,8 +773,25 @@ impl ChartInner {
             axis_w = new_w;
         }
         self.pane_w = (self.css_width - axis_w).max(1.0);
-        self.pane_h = pane_h;
+        self.pane_h = content_h;
         self.axis_w = axis_w;
+    }
+
+    /// Split the content area into pane slots by stretch factor (minus separators) and position
+    /// each pane's scales into its slot.
+    fn layout_panes(&mut self, content_h: f64) {
+        let n = self.panes.len();
+        let sep_total = PANE_SEPARATOR * n.saturating_sub(1) as f64;
+        let avail = (content_h - sep_total).max(1.0);
+        let sum_stretch: f64 = self.panes.iter().map(|p| p.stretch_factor).sum::<f64>().max(1e-6);
+        let mut y = 0.0;
+        for pane in &mut self.panes {
+            let h = (avail * pane.stretch_factor / sum_stretch).max(1.0);
+            pane.top = y;
+            pane.height = h;
+            pane.layout(content_h);
+            y += h + PANE_SEPARATOR;
+        }
     }
 
     // --- gestures ---
@@ -736,18 +834,18 @@ impl ChartInner {
     /// Y (CSS px) for a price on the active price scale, or `None` if the scale has no range yet.
     /// In percentage/indexed modes the price is its own base value (as in the render path).
     pub fn price_to_coordinate(&self, price: f64) -> Option<f64> {
-        if self.price_scale.price_range().is_none() {
+        if self.price_scale().price_range().is_none() {
             return None;
         }
-        Some(self.price_scale.price_to_coordinate(price, price))
+        Some(self.price_scale().price_to_coordinate(price, price))
     }
 
     /// Price for a Y (CSS px), or `None` if the scale has no range yet.
     pub fn coordinate_to_price(&self, y_css: f64) -> Option<f64> {
-        if self.price_scale.price_range().is_none() {
+        if self.price_scale().price_range().is_none() {
             return None;
         }
-        Some(self.price_scale.coordinate_to_price(y_css, 0.0))
+        Some(self.price_scale().coordinate_to_price(y_css, 0.0))
     }
 
     /// X (CSS px) for a UTC-seconds timestamp that sits exactly on a data point, else `None`
@@ -874,7 +972,6 @@ impl ChartInner {
         let pane_h = self.pane_h;
 
         let pane_w_px = (pane_w * hpr).round() as u32;
-        let pane_h_px = (pane_h * vpr).round() as u32;
 
         // time tick marks: built once (needs &mut), shared by GPU grid + 2D labels
         let pixels_per_character = (FONT_SIZE + 4.0) * 5.0 / 8.0;
@@ -887,35 +984,53 @@ impl ChartInner {
             .map(|m| (m.index, m.weight))
             .collect();
 
-        // ---- GPU pane group (scissored) ----
-        let mut pane_group =
-            DrawGroup { scissor: Some([0, 0, pane_w_px, pane_h_px]), ..Default::default() };
-        let mut pane_prims: Vec<Prim> = Vec::new();
-
+        // ---- GPU: one scissored draw group per stacked pane ----
         let visible = self.visible_data_range();
-        if let Some((from, to)) = visible {
-            self.build_grid(&mut pane_prims, &time_marks, from, to, pane_w_px as i32, pane_h_px as i32, hpr, vpr);
+        // snapshots to avoid holding a self borrow across the per-pane builder calls
+        let panes_geom: Vec<(f64, f64)> = self.panes.iter().map(|p| (p.top, p.height)).collect();
+        let series: Vec<(SeriesId, SeriesKind, Color, usize, bool)> = self
+            .series
+            .iter()
+            .map(|s| (s.id, s.kind, s.line_color, s.pane_index.min(panes_geom.len() - 1), s.overlay))
+            .collect();
 
-            // draw each series (snapshot to avoid borrowing self.series during the calls)
-            let series: Vec<(SeriesId, SeriesKind, Color)> =
-                self.series.iter().map(|s| (s.id, s.kind, s.line_color)).collect();
-            for (id, kind, color) in series {
-                match kind {
-                    SeriesKind::Candlestick => self.build_candle_prims(id, from, to, hpr, vpr, &mut pane_prims),
-                    SeriesKind::Bar => self.build_bar_prims(id, from, to, hpr, vpr, &mut pane_prims),
-                    SeriesKind::Histogram => self.build_histogram_prims(id, from, to, hpr, vpr, &mut pane_prims),
-                    SeriesKind::Line | SeriesKind::Area => {
-                        self.build_line_prims(id, kind, color, from, to, pane_h, hpr, vpr, &mut pane_group)
+        let mut groups: Vec<DrawGroup> = Vec::with_capacity(panes_geom.len());
+        for (pi, (ptop, ph)) in panes_geom.iter().copied().enumerate() {
+            let band_top_px = (ptop * vpr).round() as i32;
+            let band_h_px = (ph * vpr).round() as i32;
+            let mut group = DrawGroup {
+                scissor: Some([0, band_top_px.max(0) as u32, pane_w_px, band_h_px.max(0) as u32]),
+                ..Default::default()
+            };
+            let mut prims: Vec<Prim> = Vec::new();
+
+            if let Some((from, to)) = visible {
+                self.build_grid(&mut prims, &time_marks, from, to, pane_w_px as i32, band_top_px, band_h_px, hpr, vpr, &self.panes[pi].price_scale);
+                for &(id, kind, color, spi, overlay) in &series {
+                    if spi != pi {
+                        continue;
+                    }
+                    let scale = if overlay { &self.panes[pi].overlay_scale } else { &self.panes[pi].price_scale };
+                    match kind {
+                        SeriesKind::Candlestick => self.build_candle_prims(id, from, to, hpr, vpr, &mut prims, scale),
+                        SeriesKind::Bar => self.build_bar_prims(id, from, to, hpr, vpr, &mut prims, scale),
+                        SeriesKind::Histogram => self.build_histogram_prims(id, from, to, hpr, vpr, &mut prims, scale),
+                        SeriesKind::Line | SeriesKind::Area => {
+                            self.build_line_prims(id, kind, color, from, to, ptop + ph, hpr, vpr, &mut group, scale)
+                        }
                     }
                 }
+                if pi == 0 {
+                    self.build_last_value_line(&mut prims, pane_w_px as i32, vpr);
+                }
             }
-            self.build_last_value_line(&mut pane_prims, pane_w_px as i32, vpr);
-        }
 
-        let mut crosshair_stroke: Vec<TriVertex> = Vec::new();
-        self.build_crosshair_lines(&mut pane_prims, &mut crosshair_stroke, pane_w_px as i32, pane_h_px as i32, pane_w, pane_h, hpr, vpr);
-        pane_group.stroke_tris.extend(crosshair_stroke);
-        prims_to_instances(&pane_prims, &mut pane_group.quads);
+            let mut crosshair_stroke: Vec<TriVertex> = Vec::new();
+            self.build_crosshair_lines(&mut prims, &mut crosshair_stroke, pane_w_px as i32, band_top_px, band_h_px, pane_w, pane_h, hpr, vpr, pi);
+            group.stroke_tris.extend(crosshair_stroke);
+            prims_to_instances(&prims, &mut group.quads);
+            groups.push(group);
+        }
 
         self.gfx.msaa.ensure(&self.gfx.device, self.gfx.config.format, self.gfx.config.width, self.gfx.config.height);
 
@@ -948,7 +1063,7 @@ impl ChartInner {
             &self.gfx.quad_renderer,
             &self.gfx.tex_renderer,
             &self.gfx.tri_renderer,
-            &[pane_group],
+            &groups,
         );
         frame.present();
 
@@ -989,14 +1104,16 @@ impl ChartInner {
         Some((from, to))
     }
 
-    /// Autoscale each price scale over its own series' visible min/max: the main (right) scale over
-    /// non-overlay series, and the overlay (volume) scale over overlay series. Splitting them keeps
-    /// a volume histogram's magnitude from distorting the price axis (roadmap Phase B2).
+    /// Autoscale every pane's price + overlay scale over just its own series' visible min/max.
+    /// Splitting per pane (and per overlay within a pane) keeps a volume histogram's magnitude from
+    /// distorting the price axis and lets each pane frame its indicator independently (Phase B1/B2).
     fn autoscale(&mut self, from: i64, to: i64) {
-        let entries: Vec<(SeriesId, bool)> = self.series.iter().map(|s| (s.id, s.overlay)).collect();
-        let mut main: Option<PriceRange> = None;
-        let mut overlay: Option<PriceRange> = None;
-        for (id, is_overlay) in entries {
+        let n = self.panes.len();
+        let entries: Vec<(SeriesId, usize, bool)> =
+            self.series.iter().map(|s| (s.id, s.pane_index.min(n - 1), s.overlay)).collect();
+        let mut mains: Vec<Option<PriceRange>> = vec![None; n];
+        let mut overlays: Vec<Option<PriceRange>> = vec![None; n];
+        for (id, pane_index, is_overlay) in entries {
             let Some(mm) = self
                 .data
                 .plot_mut(id)
@@ -1004,30 +1121,29 @@ impl ChartInner {
             else {
                 continue;
             };
-            let target = if is_overlay { &mut overlay } else { &mut main };
+            let slot = if is_overlay { &mut overlays[pane_index] } else { &mut mains[pane_index] };
             let r = PriceRange::new(mm.min, mm.max);
-            *target = Some(match target.take() {
+            *slot = Some(match slot.take() {
                 None => r,
                 Some(m) => m.merge(Some(&r)),
             });
         }
-        if let Some(r) = main {
-            self.price_scale.apply_autoscale_range(Some(r), 0.01);
-        }
-        if let Some(r) = overlay {
-            // volume-style series grow from a zero baseline, so include 0 in the range
-            let r = r.merge(Some(&PriceRange::new(0.0, 0.0)));
-            self.overlay_scale.apply_autoscale_range(Some(r), 0.01);
+        for (i, pane) in self.panes.iter_mut().enumerate() {
+            if let Some(r) = mains[i].take() {
+                pane.price_scale.apply_autoscale_range(Some(r), 0.01);
+            }
+            if let Some(r) = overlays[i].take() {
+                // volume-style series grow from a zero baseline, so include 0 in the range
+                let r = r.merge(Some(&PriceRange::new(0.0, 0.0)));
+                pane.overlay_scale.apply_autoscale_range(Some(r), 0.01);
+            }
         }
     }
 
-    /// The price scale a series maps to (bottom-band overlay scale for overlay series).
-    fn scale_for(&self, overlay: bool) -> &PriceScaleCore {
-        if overlay {
-            &self.overlay_scale
-        } else {
-            &self.price_scale
-        }
+    /// The main (right-axis) price scale — pane 0's. Used by the price axis, crosshair, last-value
+    /// line, and the public coordinate API.
+    fn price_scale(&self) -> &PriceScaleCore {
+        &self.panes[0].price_scale
     }
 
     fn measure(&self, text: &str) -> f64 {
@@ -1038,12 +1154,12 @@ impl ChartInner {
 
     fn compute_price_axis_width(&self) -> f64 {
         let mut max_text_w = 0f64;
-        for mark in self.price_scale.build_tick_marks(100, 0.0) {
+        for mark in self.price_scale().build_tick_marks(100, 0.0) {
             max_text_w = max_text_w.max(self.measure(&self.price_formatter.format(mark.logical)));
         }
         if let Some((_, y)) = self.crosshair {
-            if !self.price_scale.is_empty() {
-                let price = self.price_scale.coordinate_to_price(y, 0.0);
+            if !self.price_scale().is_empty() {
+                let price = self.price_scale().coordinate_to_price(y, 0.0);
                 max_text_w = max_text_w.max(self.measure(&self.price_formatter.format(price)));
             }
         }
@@ -1060,7 +1176,7 @@ impl ChartInner {
     // ---- GPU pane builders (each iterates its series' rows in the visible window) ----
 
     #[allow(clippy::too_many_arguments)]
-    fn build_grid(&self, prims: &mut Vec<Prim>, time_marks: &[(i64, u8)], from: i64, to: i64, pane_w_px: i32, pane_h_px: i32, hpr: f64, vpr: f64) {
+    fn build_grid(&self, prims: &mut Vec<Prim>, time_marks: &[(i64, u8)], from: i64, to: i64, pane_w_px: i32, band_top_px: i32, band_h_px: i32, hpr: f64, vpr: f64, scale: &PriceScaleCore) {
         let line_width = 1f64.max(hpr.floor()) as i32;
         let grid = self.opts().grid;
         let vert_color = Color::parse_css(&grid.vert_lines.color).unwrap_or(GRID_COLOR);
@@ -1071,11 +1187,12 @@ impl ChartInner {
                     continue;
                 }
                 let x = (self.time_scale.index_to_coordinate(index) * hpr).round() as i32;
-                prims.push(Prim::VLine { x, y0: -line_width, y1: pane_h_px + line_width, width: line_width, style: LineStyle::Solid, color: vert_color });
+                prims.push(Prim::VLine { x, y0: band_top_px - line_width, y1: band_top_px + band_h_px + line_width, width: line_width, style: LineStyle::Solid, color: vert_color });
             }
         }
         if grid.horz_lines.visible {
-            for mark in self.price_scale.build_tick_marks(100, 0.0) {
+            // scale coords are canvas-absolute; the pane's scissor clips ticks to its band.
+            for mark in scale.build_tick_marks(100, 0.0) {
                 let y = (mark.coord * vpr).round() as i32;
                 prims.push(Prim::HLine { y, x0: -line_width, x1: pane_w_px + line_width, width: line_width, style: LineStyle::Solid, color: horz_color });
             }
@@ -1083,7 +1200,7 @@ impl ChartInner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn build_candle_prims(&self, id: SeriesId, from: i64, to: i64, hpr: f64, vpr: f64, prims: &mut Vec<Prim>) {
+    fn build_candle_prims(&self, id: SeriesId, from: i64, to: i64, hpr: f64, vpr: f64, prims: &mut Vec<Prim>, scale: &PriceScaleCore) {
         let plot = self.data.plot(id);
         let idxs = plot.indices();
         let (o, h, l, c) = (
@@ -1098,10 +1215,10 @@ impl ChartInner {
             let color = if close >= open { UP_COLOR } else { DOWN_COLOR };
             items.push(CandleItem {
                 x: self.time_scale.index_to_coordinate(idxs[r]),
-                open_y: self.price_scale.price_to_coordinate(open, close),
-                high_y: self.price_scale.price_to_coordinate(high, close),
-                low_y: self.price_scale.price_to_coordinate(low, close),
-                close_y: self.price_scale.price_to_coordinate(close, close),
+                open_y: scale.price_to_coordinate(open, close),
+                high_y: scale.price_to_coordinate(high, close),
+                low_y: scale.price_to_coordinate(low, close),
+                close_y: scale.price_to_coordinate(close, close),
                 body_color: color,
                 border_color: color,
                 wick_color: color,
@@ -1111,7 +1228,7 @@ impl ChartInner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn build_bar_prims(&self, id: SeriesId, from: i64, to: i64, hpr: f64, vpr: f64, prims: &mut Vec<Prim>) {
+    fn build_bar_prims(&self, id: SeriesId, from: i64, to: i64, hpr: f64, vpr: f64, prims: &mut Vec<Prim>, scale: &PriceScaleCore) {
         let plot = self.data.plot(id);
         let idxs = plot.indices();
         let (o, h, l, c) = (
@@ -1125,10 +1242,10 @@ impl ChartInner {
             let (open, high, low, close) = (o[r], h[r], l[r], c[r]);
             items.push(BarItem {
                 x: self.time_scale.index_to_coordinate(idxs[r]),
-                open_y: self.price_scale.price_to_coordinate(open, close),
-                high_y: self.price_scale.price_to_coordinate(high, close),
-                low_y: self.price_scale.price_to_coordinate(low, close),
-                close_y: self.price_scale.price_to_coordinate(close, close),
+                open_y: scale.price_to_coordinate(open, close),
+                high_y: scale.price_to_coordinate(high, close),
+                low_y: scale.price_to_coordinate(low, close),
+                close_y: scale.price_to_coordinate(close, close),
                 color: if close >= open { UP_COLOR } else { DOWN_COLOR },
             });
         }
@@ -1136,9 +1253,7 @@ impl ChartInner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn build_histogram_prims(&self, id: SeriesId, from: i64, to: i64, hpr: f64, vpr: f64, prims: &mut Vec<Prim>) {
-        let overlay = self.series.iter().find(|s| s.id == id).is_some_and(|s| s.overlay);
-        let scale = self.scale_for(overlay);
+    fn build_histogram_prims(&self, id: SeriesId, from: i64, to: i64, hpr: f64, vpr: f64, prims: &mut Vec<Prim>, scale: &PriceScaleCore) {
         let plot = self.data.plot(id);
         let idxs = plot.indices();
         let c = plot.column(PlotValueIndex::Close);
@@ -1158,14 +1273,14 @@ impl ChartInner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn build_line_prims(&self, id: SeriesId, kind: SeriesKind, color: Color, from: i64, to: i64, pane_h: f64, hpr: f64, vpr: f64, group: &mut DrawGroup) {
+    fn build_line_prims(&self, id: SeriesId, kind: SeriesKind, color: Color, from: i64, to: i64, band_bottom: f64, hpr: f64, vpr: f64, group: &mut DrawGroup, scale: &PriceScaleCore) {
         let plot = self.data.plot(id);
         let idxs = plot.indices();
         let c = plot.column(PlotValueIndex::Close);
         let mut points: Vec<LinePoint> = Vec::new();
         for r in plot.visible_rows(from, to) {
             let close = c[r];
-            points.push(LinePoint { x: self.time_scale.index_to_coordinate(idxs[r]), y: self.price_scale.price_to_coordinate(close, close) });
+            points.push(LinePoint { x: self.time_scale.index_to_coordinate(idxs[r]), y: scale.price_to_coordinate(close, close) });
         }
 
         let params = LineParams { horizontal_pixel_ratio: hpr, vertical_pixel_ratio: vpr, line_width: DEFAULT_LINE_WIDTH, line_type: LineType::Simple };
@@ -1180,7 +1295,7 @@ impl ChartInner {
 
         if kind == SeriesKind::Area {
             let mut area = AreaMesh::default();
-            build_area_fill(&points, pane_h, AREA_TOP_COLOR, AREA_BOTTOM_COLOR, &params, &mut area);
+            build_area_fill(&points, band_bottom, AREA_TOP_COLOR, AREA_BOTTOM_COLOR, &params, &mut area);
             group.fill_tris.extend(area.vertices.iter().map(mesh_vertex));
         }
         let mut stroke = StrokeMesh::default();
@@ -1190,12 +1305,12 @@ impl ChartInner {
 
     /// Dashed line at the main series' last close (priceLineSource LastBar).
     fn build_last_value_line(&self, prims: &mut Vec<Prim>, pane_w_px: i32, vpr: f64) {
-        if self.main_plot().is_empty() || self.price_scale.is_empty() {
+        if self.main_plot().is_empty() || self.price_scale().is_empty() {
             return;
         }
         let last = self.main_plot().size() - 1;
         let close = self.main_plot().value_at(last, PlotValueIndex::Close);
-        let y = self.price_scale.price_to_coordinate(close, close);
+        let y = self.price_scale().price_to_coordinate(close, close);
         let width = 1f64.max(vpr.floor()) as i32;
         prims.push(Prim::HLine { y: (y * vpr).round() as i32, x0: 0, x1: pane_w_px, width, style: LineStyle::Dashed, color: self.last_value_color() });
     }
@@ -1215,7 +1330,7 @@ impl ChartInner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn build_crosshair_lines(&self, prims: &mut Vec<Prim>, group_stroke: &mut Vec<TriVertex>, pane_w_px: i32, pane_h_px: i32, pane_w: f64, pane_h: f64, hpr: f64, vpr: f64) {
+    fn build_crosshair_lines(&self, prims: &mut Vec<Prim>, group_stroke: &mut Vec<TriVertex>, pane_w_px: i32, band_top_px: i32, band_h_px: i32, pane_w: f64, pane_h: f64, hpr: f64, vpr: f64, pane_index: usize) {
         let Some((x_css, y_css)) = self.crosshair else { return };
         if self.main_plot().is_empty() || self.time_scale.is_empty() {
             return;
@@ -1225,15 +1340,21 @@ impl ChartInner {
         }
 
         let snapped_x = self.snapped_crosshair_x(x_css);
-        let (_price, snap_y) = self.crosshair_snap(x_css, y_css);
         let line_width = 1f64.max(hpr.floor()) as i32;
 
         let ch = self.opts().crosshair;
         let vert_color = Color::parse_css(&ch.vert_line.color).unwrap_or(CROSSHAIR_COLOR);
         let horz_color = Color::parse_css(&ch.horz_line.color).unwrap_or(CROSSHAIR_COLOR);
+        // vertical line runs through every pane (its band; scissor clips it)
         if ch.vert_line.visible {
-            prims.push(Prim::VLine { x: (snapped_x * hpr).round() as i32, y0: 0, y1: pane_h_px, width: line_width, style: LineStyle::LargeDashed, color: vert_color });
+            prims.push(Prim::VLine { x: (snapped_x * hpr).round() as i32, y0: band_top_px, y1: band_top_px + band_h_px, width: line_width, style: LineStyle::LargeDashed, color: vert_color });
         }
+
+        // horizontal line + marker only in the price pane (pane 0) for now
+        if pane_index != 0 {
+            return;
+        }
+        let (_price, snap_y) = self.crosshair_snap(x_css, y_css);
         if ch.horz_line.visible {
             prims.push(Prim::HLine { y: (snap_y * vpr).round() as i32, x0: 0, x1: pane_w_px, width: line_width, style: LineStyle::LargeDashed, color: horz_color });
         }
@@ -1244,7 +1365,7 @@ impl ChartInner {
             if let Some(row) = self.main_plot().search(index, aion_core::model::plot_list::MismatchDirection::None) {
                 let close = self.main_plot().value_at(row, PlotValueIndex::Close);
                 let cx = (self.time_scale.index_to_coordinate(index) * hpr) as f32;
-                let cy = (self.price_scale.price_to_coordinate(close, close) * vpr) as f32;
+                let cy = (self.price_scale().price_to_coordinate(close, close) * vpr) as f32;
                 let fill = if self.series[0].kind == SeriesKind::Area { AREA_LINE_COLOR } else { LINE_COLOR };
                 let outer_r = ((CROSSHAIR_MARKER_RADIUS + CROSSHAIR_MARKER_BORDER_WIDTH) * vpr) as f32;
                 let inner_r = (CROSSHAIR_MARKER_RADIUS * vpr) as f32;
@@ -1277,12 +1398,12 @@ impl ChartInner {
         let close = row.map(|r| plot.value_at(r, PlotValueIndex::Close));
 
         let Some(close) = close else {
-            return (self.price_scale.coordinate_to_price(y_css, 0.0), y_css);
+            return (self.price_scale().coordinate_to_price(y_css, 0.0), y_css);
         };
 
         let price = match self.crosshair_mode {
             CrosshairMode::Normal | CrosshairMode::Hidden => {
-                return (self.price_scale.coordinate_to_price(y_css, close), y_css)
+                return (self.price_scale().coordinate_to_price(y_css, close), y_css)
             }
             CrosshairMode::Magnet => close,
             CrosshairMode::MagnetOhlc => {
@@ -1291,15 +1412,15 @@ impl ChartInner {
                 let high = plot.value_at(row, PlotValueIndex::High);
                 let low = plot.value_at(row, PlotValueIndex::Low);
                 let candidates = [
-                    (open, self.price_scale.price_to_coordinate(open, open)),
-                    (high, self.price_scale.price_to_coordinate(high, high)),
-                    (low, self.price_scale.price_to_coordinate(low, low)),
-                    (close, self.price_scale.price_to_coordinate(close, close)),
+                    (open, self.price_scale().price_to_coordinate(open, open)),
+                    (high, self.price_scale().price_to_coordinate(high, high)),
+                    (low, self.price_scale().price_to_coordinate(low, low)),
+                    (close, self.price_scale().price_to_coordinate(close, close)),
                 ];
                 magnet_snap(y_css, &candidates).unwrap_or(close)
             }
         };
-        (price, self.price_scale.price_to_coordinate(price, price))
+        (price, self.price_scale().price_to_coordinate(price, price))
     }
 
     // ---- Canvas2D axis overlay ----
@@ -1320,12 +1441,18 @@ impl ChartInner {
         ctx.fill_rect((pane_w * dpr).round(), 0.0, border_w, (pane_h * dpr).round());
         ctx.fill_rect(0.0, (pane_h * dpr).round(), bitmap_w, border_w);
 
+        // separators between stacked panes (roadmap Phase B1): a border line at each pane boundary
+        for pane in self.panes.iter().skip(1) {
+            let y = ((pane.top - PANE_SEPARATOR) * dpr).round();
+            ctx.fill_rect(0.0, y, (pane_w * dpr).round(), (PANE_SEPARATOR * dpr).max(border_w));
+        }
+
         ctx.set_font(&font);
         ctx.set_text_baseline("middle");
         ctx.set_text_align("left");
         ctx.set_fill_style_str(TEXT_CSS);
         let text_x = (pane_w + AXIS_TICK_LENGTH + PRICE_PADDING_INNER) * dpr;
-        for mark in self.price_scale.build_tick_marks(100, 0.0) {
+        for mark in self.price_scale().build_tick_marks(100, 0.0) {
             ctx.fill_text(&self.price_formatter.format(mark.logical), text_x, (mark.coord * dpr).round())?;
         }
 
@@ -1352,12 +1479,12 @@ impl ChartInner {
     }
 
     fn draw_last_value_label_2d(&self, pane_w: f64, pane_h: f64, dpr: f64) -> Result<(), JsValue> {
-        if self.main_plot().is_empty() || self.price_scale.is_empty() {
+        if self.main_plot().is_empty() || self.price_scale().is_empty() {
             return Ok(());
         }
         let last = self.main_plot().size() - 1;
         let close = self.main_plot().value_at(last, PlotValueIndex::Close);
-        let y = self.price_scale.price_to_coordinate(close, close);
+        let y = self.price_scale().price_to_coordinate(close, close);
         if y < 0.0 || y > pane_h {
             return Ok(());
         }
@@ -1392,7 +1519,7 @@ impl ChartInner {
         ctx.set_font(font);
         ctx.set_text_baseline("middle");
 
-        if y_css <= pane_h && !self.price_scale.is_empty() {
+        if y_css <= pane_h && !self.price_scale().is_empty() {
             let (price, snap_y) = self.crosshair_snap(x_css, y_css);
             let label = self.price_formatter.format(price);
             let text_w = self.measure(&label);

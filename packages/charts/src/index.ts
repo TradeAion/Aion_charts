@@ -93,6 +93,10 @@ export interface series_options {
   overlay: boolean;
   /** Overlay band as fractions of pane height (default `{ top: 0.8, bottom: 0 }` ⇒ bottom fifth). */
   scale_margins: { top: number; bottom: number };
+  /** Stacked pane index (0 = top/price pane). A new pane is created on demand (roadmap Phase B1). */
+  pane: number;
+  /** Relative height of a newly-created pane (default 1; the price pane is 3). */
+  pane_stretch: number;
 }
 
 const KIND_TO_U8: Record<series_kind, number> = {
@@ -259,6 +263,9 @@ class series_impl implements series_api {
       if (rgb) {
         this.chart.wasm.set_series_color(this.id, rgb[0], rgb[1], rgb[2]);
       }
+    }
+    if (options.pane !== undefined && options.pane > 0) {
+      this.chart.wasm.set_series_pane(this.id, options.pane, options.pane_stretch ?? 1);
     }
     if (options.overlay) {
       const m = options.scale_margins ?? { top: 0.8, bottom: 0 };
