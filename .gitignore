@@ -13,3 +13,6 @@ pkg/
 # editor/os noise
 .DS_Store
 Thumbs.db
+
+# local Claude Code config (per-machine dev-server launch settings)
+.claude/
