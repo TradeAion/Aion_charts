@@ -252,6 +252,74 @@ pub fn build_area_fill(
     }
 }
 
+/// Builds a **baseline** series: a line whose portions above `baseline_y` (media px) use
+/// `top_line`/`top_fill` and portions below use `bottom_line`/`bottom_fill`, with an area fill to
+/// the baseline. Segments crossing the baseline are split at the crossing so the color flips
+/// exactly there (port of `baseline-renderer-*.ts`, RENDERING_SPEC.md §5). Smaller y = higher
+/// price = "above".
+#[allow(clippy::too_many_arguments)]
+pub fn build_baseline(
+    points: &[LinePoint],
+    baseline_y: f64,
+    top_line: Color,
+    bottom_line: Color,
+    top_fill: Color,
+    bottom_fill: Color,
+    params: &LineParams,
+    stroke: &mut StrokeMesh,
+    fill: &mut AreaMesh,
+) {
+    let expanded = expand_line(points, params.line_type);
+    let pts = &expanded[..];
+    if pts.len() < 2 {
+        return;
+    }
+    let hpr = params.horizontal_pixel_ratio;
+    let vpr = params.vertical_pixel_ratio;
+    let half = (params.line_width * vpr / 2.0) as f32;
+    let base_b = (baseline_y * vpr) as f32;
+
+    // split segment (a,b) at the baseline crossing into 1 or 2 sub-segments in media coords
+    let split = |a: LinePoint, b: LinePoint| -> Vec<(LinePoint, LinePoint)> {
+        let above_a = a.y < baseline_y;
+        let above_b = b.y < baseline_y;
+        if above_a == above_b || (b.y - a.y).abs() < 1e-9 {
+            vec![(a, b)]
+        } else {
+            let t = (baseline_y - a.y) / (b.y - a.y);
+            let c = LinePoint { x: a.x + (b.x - a.x) * t, y: baseline_y };
+            vec![(a, c), (c, b)]
+        }
+    };
+
+    for i in 0..pts.len() - 1 {
+        for (s0, s1) in split(pts[i], pts[i + 1]) {
+            let above = ((s0.y + s1.y) / 2.0) < baseline_y;
+            let lc = color_to_rgba(if above { top_line } else { bottom_line });
+            let fc = color_to_rgba(if above { top_fill } else { bottom_fill });
+            let a = [(s0.x * hpr) as f32, (s0.y * vpr) as f32];
+            let b = [(s1.x * hpr) as f32, (s1.y * vpr) as f32];
+
+            // fill between the sub-segment and the baseline
+            let av = LineVertex { x: a[0], y: a[1], color: fc };
+            let bv = LineVertex { x: b[0], y: b[1], color: fc };
+            let ab = LineVertex { x: a[0], y: base_b, color: fc };
+            let bb = LineVertex { x: b[0], y: base_b, color: fc };
+            fill.vertices.extend([av, bv, bb, av, bb, ab]);
+
+            // stroke the sub-segment
+            let dx = b[0] - a[0];
+            let dy = b[1] - a[1];
+            let len = (dx * dx + dy * dy).sqrt();
+            if len >= 1e-6 {
+                let nx = -dy / len * half;
+                let ny = dx / len * half;
+                stroke.push_quad([a[0] + nx, a[1] + ny], [b[0] + nx, b[1] + ny], [b[0] - nx, b[1] - ny], [a[0] - nx, a[1] - ny], lc);
+            }
+        }
+    }
+}
+
 /// Tessellates a filled disc (triangle fan) at `center` with `radius`, all in bitmap px.
 /// Used for the crosshair marker on line/area series (RENDERING_SPEC.md §8).
 pub fn build_disc(center: [f32; 2], radius: f32, color: Color, out: &mut Vec<LineVertex>) {
@@ -316,6 +384,30 @@ mod tests {
         assert_eq!((out[0].x, out[0].y), (0.0, 0.0));
         assert_eq!((out[CURVE_SEGMENTS].x, out[CURVE_SEGMENTS].y), (10.0, 10.0));
         assert_eq!((out[2 * CURVE_SEGMENTS].x, out[2 * CURVE_SEGMENTS].y), (20.0, 0.0));
+    }
+
+    #[test]
+    fn baseline_splits_at_crossing() {
+        // a below-baseline point to an above-baseline point crosses baseline_y=10 once.
+        // Same-side pair => 1 sub-segment (2 tris fill); crossing pair => 2 sub-segments.
+        let crossing = [LinePoint { x: 0.0, y: 20.0 }, LinePoint { x: 10.0, y: 0.0 }];
+        let same = [LinePoint { x: 0.0, y: 5.0 }, LinePoint { x: 10.0, y: 2.0 }];
+        let (tl, bl) = (Color::rgb(0, 200, 0), Color::rgb(200, 0, 0));
+        let (tf, bf) = (Color::rgba(0, 200, 0, 40), Color::rgba(200, 0, 0, 40));
+
+        let mut s1 = StrokeMesh::default();
+        let mut f1 = AreaMesh::default();
+        build_baseline(&crossing, 10.0, tl, bl, tf, bf, &params(1.0, 2.0), &mut s1, &mut f1);
+        // two sub-segments => 2 stroke quads (12 verts) and 2 fill quads (12 verts)
+        assert_eq!(s1.vertices.len(), 12);
+        assert_eq!(f1.vertices.len(), 12);
+
+        let mut s2 = StrokeMesh::default();
+        let mut f2 = AreaMesh::default();
+        build_baseline(&same, 10.0, tl, bl, tf, bf, &params(1.0, 2.0), &mut s2, &mut f2);
+        // one sub-segment => 1 quad each
+        assert_eq!(s2.vertices.len(), 6);
+        assert_eq!(f2.vertices.len(), 6);
     }
 
     #[test]

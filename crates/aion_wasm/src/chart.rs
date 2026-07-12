@@ -41,7 +41,8 @@ use aion_render::color::Color;
 use aion_render::draw_list::{LineStyle, LineType, Prim};
 use aion_render::histogram::{build_histogram, HistogramItem, HistogramParams};
 use aion_render::line::{
-    build_area_fill, build_disc, build_line_stroke, AreaMesh, LineParams, LinePoint, StrokeMesh,
+    build_area_fill, build_baseline, build_disc, build_line_stroke, AreaMesh, LineParams, LinePoint,
+    StrokeMesh,
 };
 use aion_render_wgpu::{
     prims_to_instances, render_frame, DrawGroup, LabelAtlas, MsaaTarget, QuadRenderer,
@@ -66,6 +67,12 @@ const AREA_LINE_COLOR: Color = Color::rgb(0x33, 0xd7, 0x78);
 const AREA_TOP_COLOR: Color = Color::rgba(0x2e, 0xdc, 0x87, 102); // rgba(46,220,135,0.4)
 const AREA_BOTTOM_COLOR: Color = Color::rgba(0x28, 0xdd, 0x64, 0); // rgba(40,221,100,0)
 const HISTOGRAM_COLOR: Color = Color::rgba(0x26, 0xa6, 0x9a, 0x80);
+
+// Baseline series defaults (baseline-series.ts): teal above, red below, translucent fills.
+const BASELINE_TOP_LINE: Color = Color::rgb(0x26, 0xa6, 0x9a);
+const BASELINE_BOTTOM_LINE: Color = Color::rgb(0xef, 0x53, 0x50);
+const BASELINE_TOP_FILL: Color = Color::rgba(0x26, 0xa6, 0x9a, 0x48);
+const BASELINE_BOTTOM_FILL: Color = Color::rgba(0xef, 0x53, 0x50, 0x48);
 const DEFAULT_LINE_WIDTH: f64 = 3.0;
 
 // Crosshair marker (line/area) — line-series.ts defaults.
@@ -99,6 +106,7 @@ enum SeriesKind {
     Line,
     Area,
     Histogram,
+    Baseline,
 }
 
 impl SeriesKind {
@@ -108,6 +116,7 @@ impl SeriesKind {
             2 => SeriesKind::Line,
             3 => SeriesKind::Area,
             4 => SeriesKind::Histogram,
+            5 => SeriesKind::Baseline,
             _ => SeriesKind::Candlestick,
         }
     }
@@ -136,6 +145,8 @@ struct SeriesEntry {
     line_type: LineType,
     /// Draw a filled disc at each data point (when bars are spaced enough) on line/area series.
     point_markers: bool,
+    /// Baseline price for a Baseline series; `None` = auto (midpoint of the visible range).
+    baseline: Option<f64>,
 }
 
 /// Height (css px) of the separator between stacked panes.
@@ -382,7 +393,7 @@ pub async fn create_chart(
         panes: vec![Pane::new()],
         price_formatter: PriceFormatter::default(),
         data,
-        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false }],
+        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false, baseline: None }],
         tick_marks: TimeTickMarks::new(),
         options: ChartOptionsStore::new(),
         crosshair_mode: CrosshairMode::Magnet,
@@ -491,6 +502,11 @@ impl AionChart {
     /// Toggle per-point disc markers on a line/area series. Call `render()` after (Phase B3).
     pub fn set_series_point_markers(&mut self, id: u32, visible: bool) {
         self.inner.borrow_mut().set_series_point_markers(id, visible);
+    }
+
+    /// Set a Baseline series' baseline price (`NaN` = auto). Call `render()` after (Phase B3).
+    pub fn set_series_baseline(&mut self, id: u32, price: f64) {
+        self.inner.borrow_mut().set_series_baseline(id, price);
     }
 
     /// Move a series to the bottom-band overlay (volume) price scale with the given fractional
@@ -631,7 +647,7 @@ impl ChartInner {
     /// Adds a series and returns its id. `kind`: 0 candles, 1 bars, 2 line, 3 area, 4 histogram.
     pub fn add_series(&mut self, kind: u8) -> u32 {
         let id = self.data.add_series();
-        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false });
+        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false, baseline: None });
         id as u32
     }
 
@@ -712,6 +728,13 @@ impl ChartInner {
     pub fn set_series_point_markers(&mut self, id: u32, visible: bool) {
         if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
             s.point_markers = visible;
+        }
+    }
+
+    /// Set a Baseline series' baseline price. `NaN` resets to auto (visible-range midpoint).
+    pub fn set_series_baseline(&mut self, id: u32, price: f64) {
+        if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
+            s.baseline = if price.is_finite() { Some(price) } else { None };
         }
     }
 
@@ -1092,6 +1115,7 @@ impl ChartInner {
                         SeriesKind::Candlestick => self.build_candle_prims(id, from, to, hpr, vpr, &mut prims, scale),
                         SeriesKind::Bar => self.build_bar_prims(id, from, to, hpr, vpr, &mut prims, scale),
                         SeriesKind::Histogram => self.build_histogram_prims(id, from, to, hpr, vpr, &mut prims, scale),
+                        SeriesKind::Baseline => self.build_baseline_prims(id, line_type, from, to, hpr, vpr, &mut group, scale),
                         SeriesKind::Line | SeriesKind::Area => {
                             self.build_line_prims(id, kind, color, line_type, markers, from, to, ptop + ph, hpr, vpr, &mut group, scale)
                         }
@@ -1396,6 +1420,42 @@ impl ChartInner {
                 }
             }
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_baseline_prims(&self, id: SeriesId, line_type: LineType, from: i64, to: i64, hpr: f64, vpr: f64, group: &mut DrawGroup, scale: &PriceScaleCore) {
+        let plot = self.data.plot(id);
+        let idxs = plot.indices();
+        let c = plot.column(PlotValueIndex::Close);
+        let rows: Vec<usize> = plot.visible_rows(from, to).collect();
+        if rows.is_empty() {
+            return;
+        }
+        // baseline price: the series' set value, else the midpoint of the visible min/max
+        let baseline_price = self
+            .series
+            .iter()
+            .find(|s| s.id == id)
+            .and_then(|s| s.baseline)
+            .unwrap_or_else(|| {
+                let (mut mn, mut mx) = (f64::INFINITY, f64::NEG_INFINITY);
+                for &r in &rows {
+                    mn = mn.min(c[r]);
+                    mx = mx.max(c[r]);
+                }
+                (mn + mx) / 2.0
+            });
+        let baseline_y = scale.price_to_coordinate(baseline_price, baseline_price);
+        let points: Vec<LinePoint> = rows
+            .iter()
+            .map(|&r| LinePoint { x: self.time_scale.index_to_coordinate(idxs[r]), y: scale.price_to_coordinate(c[r], c[r]) })
+            .collect();
+        let params = LineParams { horizontal_pixel_ratio: hpr, vertical_pixel_ratio: vpr, line_width: DEFAULT_LINE_WIDTH, line_type };
+        let mut stroke = StrokeMesh::default();
+        let mut fill = AreaMesh::default();
+        build_baseline(&points, baseline_y, BASELINE_TOP_LINE, BASELINE_BOTTOM_LINE, BASELINE_TOP_FILL, BASELINE_BOTTOM_FILL, &params, &mut stroke, &mut fill);
+        group.fill_tris.extend(fill.vertices.iter().map(mesh_vertex));
+        group.stroke_tris.extend(stroke.vertices.iter().map(mesh_vertex));
     }
 
     /// Dashed line at the main series' last close (priceLineSource LastBar).

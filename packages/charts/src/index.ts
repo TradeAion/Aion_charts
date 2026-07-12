@@ -20,7 +20,7 @@ import init, { create_chart as wasm_create_chart, AionChart } from "../pkg/aion_
 // ---------------------------------------------------------------------------------------------
 
 /** A series kind. Maps to the engine's numeric kind at the boundary. */
-export type series_kind = "candlestick" | "bar" | "line" | "area" | "histogram";
+export type series_kind = "candlestick" | "bar" | "line" | "area" | "histogram" | "baseline";
 
 /** OHLC bar for candlestick/bar series. `time` is UTC seconds. */
 export interface ohlc_data {
@@ -101,6 +101,8 @@ export interface series_options {
   line_type: "simple" | "stepped" | "curved";
   /** Draw a disc at each data point (shown when bars are spaced enough), roadmap Phase B3. */
   point_markers: boolean;
+  /** Baseline price for a baseline series (omit for auto = visible-range midpoint). */
+  baseline_value: number;
 }
 
 const LINE_TYPE_TO_U8: Record<NonNullable<series_options["line_type"]>, number> = {
@@ -115,6 +117,7 @@ const KIND_TO_U8: Record<series_kind, number> = {
   line: 2,
   area: 3,
   histogram: 4,
+  baseline: 5,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -284,6 +287,9 @@ class series_impl implements series_api {
     }
     if (options.point_markers !== undefined) {
       this.chart.wasm.set_series_point_markers(this.id, options.point_markers);
+    }
+    if (options.baseline_value !== undefined) {
+      this.chart.wasm.set_series_baseline(this.id, options.baseline_value);
     }
     if (options.overlay) {
       const m = options.scale_margins ?? { top: 0.8, bottom: 0 };

@@ -227,3 +227,11 @@ Progress is appended here as phases land (newest last).
   threshold behavior. `set_series_point_markers(id, bool)` → façade `add_series(kind, {
   point_markers: true })`. Verified in-browser: zoomed in (bar spacing 46) markers add 358 px;
   zoomed out (0.75) they add 0 (hidden). Remaining B3: baseline series, last-price animation.
+- 2026-07-12 — **B3 increment 3 done** (baseline series). `aion_render::line::build_baseline`
+  strokes+fills a line split at a baseline y, splitting each crossing segment so the color flips
+  exactly at the baseline (teal/fill above, red/fill below). New `SeriesKind::Baseline` (kind 5);
+  baseline price defaults to the visible-range midpoint or `set_series_baseline(id, price)`. Façade
+  `add_series("baseline", { baseline_value? })`. 1 new renderer test (render 35). Verified
+  in-browser: both line colors (teal 2604 px / red 2500) and both area fills render, teal correctly
+  above red. Remaining B3: last-price animation (needs an rAF animation loop — deferred). **B3 core
+  (line types, markers, baseline) done.** Next: B4 (series markers, price-lines API).
