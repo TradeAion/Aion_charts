@@ -131,3 +131,11 @@ less perfect engine you can `npm install` and configure. Therefore:
 Progress is appended here as phases land (newest last).
 
 - 2026-07-12 — Roadmap authored. Beginning Phase A.
+- 2026-07-12 — **A3 done.** `aion_core::model::data_validation` (sanitize_ohlc / sanitize_point:
+  repair-and-report — drop non-finite/out-of-range, stable-sort, dedupe last-wins, error only on
+  length mismatch). Wired into wasm `set_series_data` / `update_bar`; malformed feeds warn + render
+  instead of panicking. 11 unit tests.
+- 2026-07-12 — **A4 done.** Coordinate & logical-range API on the wasm surface:
+  `price_to_coordinate` / `coordinate_to_price`, `time_to_coordinate` / `coordinate_to_time`,
+  `visible_logical_range` + setter, `visible_time_range` + setter. Verified in-browser: price/time
+  roundtrips exact, off-chart queries return `undefined`, setters apply.

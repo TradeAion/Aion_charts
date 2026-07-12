@@ -29,6 +29,8 @@ use aion_core::model::data_validation::{sanitize_ohlc, sanitize_point};
 use aion_core::model::magnet::{magnet_snap, CrosshairMode};
 use aion_core::model::plot_list::{PlotList, PlotValueIndex};
 use aion_core::model::price_range::PriceRange;
+use aion_core::model::range::{LogicalRange, StrictRange};
+use aion_core::TimePointIndex;
 use aion_core::scale::price_scale_core::{PriceScaleCore, PriceScaleCoreOptions};
 use aion_core::scale::time_scale_core::{TimeScaleCore, TimeScaleOptions};
 use aion_core::scale::time_tick_marks::{fill_weights_for_points, TimeTickMarks};
@@ -441,6 +443,41 @@ impl AionChart {
         self.inner.borrow().price_axis_width()
     }
 
+    // --- coordinate & logical-range API (roadmap Phase A4) ---
+
+    /// Y (CSS px) for a price, or `undefined` if the price scale has no range yet.
+    pub fn price_to_coordinate(&self, price: f64) -> Option<f64> {
+        self.inner.borrow().price_to_coordinate(price)
+    }
+    /// Price for a Y (CSS px), or `undefined` if the price scale has no range yet.
+    pub fn coordinate_to_price(&self, y_css: f64) -> Option<f64> {
+        self.inner.borrow().coordinate_to_price(y_css)
+    }
+    /// X (CSS px) for a UTC-seconds timestamp on a data point, else `undefined`.
+    pub fn time_to_coordinate(&self, time: f64) -> Option<f64> {
+        self.inner.borrow().time_to_coordinate(time)
+    }
+    /// UTC seconds of the data point nearest X (CSS px), or `undefined` off-chart.
+    pub fn coordinate_to_time(&self, x_css: f64) -> Option<f64> {
+        self.inner.borrow().coordinate_to_time(x_css)
+    }
+    /// Visible window in logical (bar) units as a `[from, to]` Float64Array (empty if no data).
+    pub fn visible_logical_range(&self) -> Vec<f64> {
+        self.inner.borrow().visible_logical_range()
+    }
+    /// Set the visible window in logical (bar) units; call `render()` after.
+    pub fn set_visible_logical_range(&mut self, from: f64, to: f64) {
+        self.inner.borrow_mut().set_visible_logical_range(from, to);
+    }
+    /// Visible window as a `[from_time, to_time]` Float64Array of UTC seconds (empty if no data).
+    pub fn visible_time_range(&self) -> Vec<f64> {
+        self.inner.borrow().visible_time_range()
+    }
+    /// Set the visible window to bracket `[from_time, to_time]` UTC seconds; call `render()` after.
+    pub fn set_visible_time_range(&mut self, from_time: f64, to_time: f64) {
+        self.inner.borrow_mut().set_visible_time_range(from_time, to_time);
+    }
+
     pub fn render(&mut self) -> Result<(), JsValue> {
         self.inner.borrow_mut().render()
     }
@@ -602,6 +639,104 @@ impl ChartInner {
     }
     pub fn price_axis_width(&self) -> f64 {
         self.axis_w
+    }
+
+    // --- coordinate & logical-range API (roadmap Phase A4) ---
+    //
+    // Reflects the state of the last render (scale height/width, price range). All coordinates
+    // are media (CSS) pixels relative to the pane origin, matching the pointer coords JS passes
+    // to `set_crosshair`. `None`/empty means the query falls off the chart or there is no data.
+
+    /// Y (CSS px) for a price on the active price scale, or `None` if the scale has no range yet.
+    /// In percentage/indexed modes the price is its own base value (as in the render path).
+    pub fn price_to_coordinate(&self, price: f64) -> Option<f64> {
+        if self.price_scale.price_range().is_none() {
+            return None;
+        }
+        Some(self.price_scale.price_to_coordinate(price, price))
+    }
+
+    /// Price for a Y (CSS px), or `None` if the scale has no range yet.
+    pub fn coordinate_to_price(&self, y_css: f64) -> Option<f64> {
+        if self.price_scale.price_range().is_none() {
+            return None;
+        }
+        Some(self.price_scale.coordinate_to_price(y_css, 0.0))
+    }
+
+    /// X (CSS px) for a UTC-seconds timestamp that sits exactly on a data point, else `None`
+    /// (mirrors LWC `timeToCoordinate`, which does not snap to the nearest bar).
+    pub fn time_to_coordinate(&self, time: f64) -> Option<f64> {
+        let t = time as i64;
+        let idx = self.data.merged_times().binary_search(&t).ok()?;
+        Some(self.time_scale.index_to_coordinate(idx as TimePointIndex))
+    }
+
+    /// UTC-seconds timestamp of the data point nearest to X (CSS px), or `None` if X maps outside
+    /// the data range (mirrors LWC `coordinateToTime`).
+    pub fn coordinate_to_time(&self, x_css: f64) -> Option<f64> {
+        let times = self.data.merged_times();
+        if times.is_empty() {
+            return None;
+        }
+        let idx = self.time_scale.coordinate_to_index(x_css);
+        if idx < 0 || idx as usize >= times.len() {
+            return None;
+        }
+        Some(times[idx as usize] as f64)
+    }
+
+    /// Visible window in logical (bar) units as `[from, to]`, or empty when there is no data.
+    pub fn visible_logical_range(&self) -> Vec<f64> {
+        match self.time_scale.visible_logical_range() {
+            Some(r) => vec![r.left(), r.right()],
+            None => Vec::new(),
+        }
+    }
+
+    /// Set the visible window in logical (bar) units. No-op if `from > to`. Call `render()` after.
+    pub fn set_visible_logical_range(&mut self, from: f64, to: f64) {
+        if from <= to {
+            self.time_scale.set_logical_range(LogicalRange::new(from, to));
+        }
+    }
+
+    /// Visible window as `[from_time, to_time]` UTC seconds (data points nearest each edge), or
+    /// empty when there is no data.
+    pub fn visible_time_range(&self) -> Vec<f64> {
+        let times = self.data.merged_times();
+        let Some(r) = self.time_scale.visible_strict_range() else { return Vec::new() };
+        if times.is_empty() {
+            return Vec::new();
+        }
+        let last = times.len() as i64 - 1;
+        let l = r.left().clamp(0, last) as usize;
+        let rr = r.right().clamp(0, last) as usize;
+        vec![times[l] as f64, times[rr] as f64]
+    }
+
+    /// Set the visible window to span the data points bracketing `[from_time, to_time]` (UTC
+    /// seconds). No-op if the times are reversed or there is no data. Call `render()` after.
+    pub fn set_visible_time_range(&mut self, from_time: f64, to_time: f64) {
+        if from_time > to_time {
+            return;
+        }
+        let times = self.data.merged_times();
+        if times.is_empty() {
+            return;
+        }
+        // nearest bracketing indices: first point >= from, last point <= to
+        let left = times.partition_point(|&t| (t as f64) < from_time);
+        let right = times.partition_point(|&t| (t as f64) <= to_time);
+        if right == 0 || left >= times.len() {
+            return; // window lies entirely outside the data
+        }
+        let last = times.len() - 1;
+        let l = left.min(last) as i64;
+        let r = (right - 1).min(last) as i64;
+        if l <= r {
+            self.time_scale.set_visible_range(StrictRange::new(l, r), false);
+        }
     }
 
     // --- rendering ---
