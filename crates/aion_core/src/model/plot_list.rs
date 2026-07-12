@@ -152,6 +152,12 @@ impl PlotList {
         self.values[plot as usize][row]
     }
 
+    /// Row offsets `[start, end)` whose merged index lies in the inclusive range `[from, to]`.
+    /// Used to slice a (possibly sparse) series to the visible window for rendering.
+    pub fn visible_rows(&self, from: TimePointIndex, to: TimePointIndex) -> std::ops::Range<usize> {
+        self.lowerbound(from)..self.upperbound(to)
+    }
+
     /// Min/max over the time-point index range `[start, end]` (inclusive, like the strict
     /// visible range), merged over `plots`. Port of `minMaxOnRangeCached`.
     pub fn min_max_on_range_cached(

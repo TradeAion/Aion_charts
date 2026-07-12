@@ -21,6 +21,7 @@
     <label><input type="radio" name="series" value="1"> bars</label>
     <label><input type="radio" name="series" value="2"> line</label>
     <label><input type="radio" name="series" value="3"> area</label>
+    <label><input type="checkbox" id="sma_toggle"> SMA(20)</label>
     <label>crosshair
       <select id="cross_mode">
         <option value="1" selected>magnet</option>
@@ -87,8 +88,36 @@ window.__chart = chart; // debug/test handle
 
 const data = generate_data(1000);
 chart.set_data(data.times, data.open, data.high, data.low, data.close);
+
+// simple moving average overlay (a second series sharing the time axis + price scale)
+function sma(times, close, period) {
+  const n = close.length, t = [], o = [], h = [], l = [], c = [];
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    sum += close[i];
+    if (i >= period) sum -= close[i - period];
+    if (i >= period - 1) { const v = sum / period; t.push(times[i]); o.push(v); h.push(v); l.push(v); c.push(v); }
+  }
+  return { t: new Float64Array(t), o: new Float64Array(o), h: new Float64Array(h), l: new Float64Array(l), c: new Float64Array(c) };
+}
+let sma_id = null;
+const sma_data = sma(data.times, data.close, 20);
+
 chart.render();
 status.textContent = `1000 bars · dpr ${dpr}`;
+
+document.getElementById("sma_toggle").addEventListener("change", (e) => {
+  if (e.target.checked && sma_id === null) {
+    sma_id = chart.add_series(2); // line
+    chart.set_series_color(sma_id, 0xff, 0x98, 0x00); // orange
+    chart.set_series_data(sma_id, sma_data.t, sma_data.o, sma_data.h, sma_data.l, sma_data.c);
+  } else if (!e.target.checked && sma_id !== null) {
+    // no remove_series yet; set empty data to hide it
+    chart.set_series_data(sma_id, new Float64Array(), new Float64Array(), new Float64Array(), new Float64Array(), new Float64Array());
+    sma_id = null;
+  }
+  rerender();
+});
 
 document.querySelectorAll('input[name="series"]').forEach((el) => {
   el.addEventListener("change", () => { chart.set_series_type(Number(el.value)); rerender(); });
