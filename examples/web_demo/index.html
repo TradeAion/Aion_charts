@@ -53,33 +53,50 @@ const overlay = document.getElementById("overlay");
 const container = document.getElementById("chart_container");
 const status = document.getElementById("status");
 
-function css_size() {
-  // getBoundingClientRect returns the ACTUAL displayed size in CSS px, so
-  // bitmap = css * dpr can never end up scaled by the browser (which would make
-  // text tiny / labels cramped). More reliable than clientWidth/Height.
+// Does the browser expose devicePixelContentBoxSize? (Chromium, Firefox, Safari 16.4+)
+const HAS_DPCB =
+  typeof ResizeObserverEntry !== "undefined" &&
+  "devicePixelContentBoxSize" in ResizeObserverEntry.prototype;
+
+// The crisp-rendering crux (same technique lightweight-charts uses via fancy-canvas'
+// `device-pixel-content-box`). `Math.round(cssSize * window.devicePixelRatio)` is only an
+// APPROXIMATION of how many physical pixels the element covers: devicePixelRatio is a
+// single rounded scalar and the element's own box is sub-pixel-positioned by layout. At a
+// fractional ratio (e.g. 150% scaling -> 1.5) the approximation is off by a fraction of a
+// pixel, so the backing store no longer maps 1:1 to physical pixels and the compositor
+// resamples the (perfectly crisp) bitmap -> soft, "thicker" 1px wicks. devicePixelContentBoxSize
+// is the browser reporting the EXACT integer physical-pixel extent of the content box, which
+// gives a guaranteed 1:1 mapping at any ratio. `entry` is a ResizeObserverEntry when the call
+// comes from the observer; null on the initial synchronous measure (falls back to the approx).
+function measure(entry) {
   const r = container.getBoundingClientRect();
-  return { w: Math.max(1, r.width), h: Math.max(1, r.height), dpr: window.devicePixelRatio || 1 };
-}
-
-// Sets both the bitmap (backing store) and the CSS box, pinning the CSS box to
-// bitmap/dpr so the backing store maps 1:1 onto physical device pixels. With a plain
-// width:100% box the displayed size can be fractional (safe-area insets, browser
-// chrome, flex rounding), so bitmap/box != exactly dpr and the browser resamples the
-// crisp bitmap — which on hi-dpi reads as soft, "thicker" 1px wicks. Returns the
-// snapped CSS size to hand to the engine (its media space then matches the box).
-function set_size(bw, bh, dpr) {
-  for (const c of [pane, overlay]) {
-    c.width = bw;
-    c.height = bh;
-    c.style.width = bw / dpr + "px";
-    c.style.height = bh / dpr + "px";
+  const cssW = Math.max(1, r.width), cssH = Math.max(1, r.height);
+  let bw, bh;
+  const dpcb = entry && entry.devicePixelContentBoxSize && entry.devicePixelContentBoxSize[0];
+  if (dpcb) {
+    bw = Math.max(1, dpcb.inlineSize);
+    bh = Math.max(1, dpcb.blockSize);
+  } else {
+    const dpr = window.devicePixelRatio || 1;
+    bw = Math.max(1, Math.round(cssW * dpr));
+    bh = Math.max(1, Math.round(cssH * dpr));
   }
-  return { w: bw / dpr, h: bh / dpr, dpr };
+  // Exact effective ratio. Passing this as dpr makes the engine's internal bitmap
+  // (round(css * dpr)) equal (bw, bh), so surface, canvas and physical pixels all agree.
+  const dpr = bw / cssW;
+  return { cssW, cssH, dpr, bw, bh };
 }
 
-function apply_bitmap_size() {
-  const { w, h, dpr } = css_size();
-  return set_size(Math.max(1, Math.round(w * dpr)), Math.max(1, Math.round(h * dpr)), dpr);
+// Applies a measurement: bitmap = exact device pixels, CSS box = the real displayed size
+// (so the canvas still fills the container and the bitmap composites 1:1 to the glass).
+function apply_size(m) {
+  for (const c of [pane, overlay]) {
+    c.width = m.bw;
+    c.height = m.bh;
+    c.style.width = m.cssW + "px";
+    c.style.height = m.cssH + "px";
+  }
+  cur = m;
 }
 
 // deterministic random-walk OHLC data (hourly bars ending "now")
@@ -104,8 +121,9 @@ function generate_data(n) {
 }
 
 await init();
-const { w, h, dpr } = apply_bitmap_size();
-const chart = await create_chart(pane, overlay, w, h, dpr);
+let cur = measure(null); // latest applied measurement (set by apply_size)
+apply_size(cur);
+const chart = await create_chart(pane, overlay, cur.cssW, cur.cssH, cur.dpr);
 
 window.__chart = chart; // debug/test handle
 
@@ -127,7 +145,7 @@ let sma_id = null;
 const sma_data = sma(data.times, data.close, 20);
 
 chart.render();
-status.textContent = `1000 bars · dpr ${dpr}`;
+status.textContent = `1000 bars · dpr ${cur.dpr}`;
 
 document.getElementById("sma_toggle").addEventListener("change", (e) => {
   if (e.target.checked && sma_id === null) {
@@ -149,24 +167,11 @@ document.getElementById("cross_mode").addEventListener("change", (e) => {
   chart.set_crosshair_mode(Number(e.target.value)); rerender();
 });
 
-// Guarantee the canvas bitmap always equals displayed-size * dpr. Any drift (toolbar
-// height change, monitor/device switch, dpr change) is corrected here before rendering,
-// so the browser never rescales the canvas (which shrinks text and crams axis labels).
-function ensure_sized() {
-  const { w, h, dpr } = css_size();
-  const bw = Math.max(1, Math.round(w * dpr)), bh = Math.max(1, Math.round(h * dpr));
-  if (pane.width !== bw || pane.height !== bh) {
-    const s = set_size(bw, bh, dpr);
-    chart.resize(s.w, s.h, dpr);
-    return true;
-  }
-  return false;
-}
+// Interactions never change the element size, and the ResizeObserver below keeps the
+// bitmap in sync with the physical-pixel box, so rerender just repaints.
 const rerender = () => {
-  ensure_sized();
   chart.render();
-  const s = css_size();
-  status.textContent = `css ${Math.round(s.w)}x${Math.round(s.h)} · bitmap ${pane.width}x${pane.height} · dpr ${s.dpr.toFixed(2)} · sp ${chart.bar_spacing().toFixed(1)}`;
+  status.textContent = `css ${Math.round(cur.cssW)}x${Math.round(cur.cssH)} · bitmap ${pane.width}x${pane.height} · dpr ${cur.dpr.toFixed(3)} · sp ${chart.bar_spacing().toFixed(1)}`;
 };
 
 // overlay is the topmost element, so it receives the pointer events
@@ -246,25 +251,30 @@ overlay.addEventListener("pointercancel", end_pointer);
 overlay.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") end_pointer(e); });
 overlay.addEventListener("dblclick", () => { chart.fit_content(); rerender(); });
 
-function sync_size() {
-  const { w, h, dpr } = apply_bitmap_size();
-  chart.resize(w, h, dpr);
+function sync_size(entry) {
+  const m = measure(entry);
+  apply_size(m);
+  chart.resize(m.cssW, m.cssH, m.dpr);
   rerender();
 }
 
-// container size changes (layout, window resize)
-new ResizeObserver(sync_size).observe(container);
-
-// devicePixelRatio changes (moving between monitors, browser/OS zoom, switching
-// device emulation) do NOT fire ResizeObserver — watch them explicitly, re-arming
-// the media query each time since the dppx value itself changes.
-let last_dpr = 0;
-function watch_dpr() {
-  const dpr = window.devicePixelRatio || 1;
-  if (dpr !== last_dpr) { last_dpr = dpr; sync_size(); }
-  matchMedia(`(resolution: ${dpr}dppx)`).addEventListener("change", watch_dpr, { once: true });
+// Observing the device-pixel-content-box makes the observer fire on BOTH css-size and
+// physical-pixel changes — including devicePixelRatio changes (monitor switch, OS/browser
+// zoom, device emulation) — so it doubles as the dpr watcher when supported.
+const ro = new ResizeObserver((entries) => sync_size(entries[0]));
+if (HAS_DPCB) {
+  ro.observe(container, { box: "device-pixel-content-box" });
+} else {
+  // Fallback: plain observer for size, plus an explicit media-query watch for dpr changes
+  // (which don't fire a content-box observer), re-armed each time since the dppx value shifts.
+  ro.observe(container);
+  let last_dpr = 0;
+  (function watch_dpr() {
+    const dpr = window.devicePixelRatio || 1;
+    if (dpr !== last_dpr) { last_dpr = dpr; sync_size(null); }
+    matchMedia(`(resolution: ${dpr}dppx)`).addEventListener("change", watch_dpr, { once: true });
+  })();
 }
-watch_dpr();
 </script>
 </body>
 </html>
