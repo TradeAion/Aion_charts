@@ -97,7 +97,15 @@ export interface series_options {
   pane: number;
   /** Relative height of a newly-created pane (default 1; the price pane is 3). */
   pane_stretch: number;
+  /** Line/area join type (roadmap Phase B3). */
+  line_type: "simple" | "stepped" | "curved";
 }
+
+const LINE_TYPE_TO_U8: Record<NonNullable<series_options["line_type"]>, number> = {
+  simple: 0,
+  stepped: 1,
+  curved: 2,
+};
 
 const KIND_TO_U8: Record<series_kind, number> = {
   candlestick: 0,
@@ -268,6 +276,9 @@ class series_impl implements series_api {
     }
     if (options.pane !== undefined && options.pane > 0) {
       this.chart.wasm.set_series_pane(this.id, options.pane, options.pane_stretch ?? 1);
+    }
+    if (options.line_type !== undefined) {
+      this.chart.wasm.set_series_line_type(this.id, LINE_TYPE_TO_U8[options.line_type]);
     }
     if (options.overlay) {
       const m = options.scale_margins ?? { top: 0.8, bottom: 0 };

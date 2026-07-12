@@ -75,6 +75,61 @@ impl StrokeMesh {
     }
 }
 
+/// Number of straight segments a curved interval is tessellated into (RENDERING_SPEC.md §5).
+const CURVE_SEGMENTS: usize = 16;
+
+/// Catmull-Rom interpolation of one scalar channel at parameter `t` (0..1).
+fn catmull_rom(p0: f64, p1: f64, p2: f64, p3: f64, t: f64) -> f64 {
+    let t2 = t * t;
+    let t3 = t2 * t;
+    0.5 * ((2.0 * p1)
+        + (-p0 + p2) * t
+        + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+        + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3)
+}
+
+/// Expand a polyline according to its [`LineType`]: `Simple` is unchanged; `WithSteps` inserts a
+/// horizontal-then-vertical corner at each interval (the value holds until the next point, as in
+/// lightweight-charts); `Curved` tessellates a Catmull-Rom spline through the points.
+pub fn expand_line(points: &[LinePoint], line_type: LineType) -> Vec<LinePoint> {
+    match line_type {
+        LineType::Simple => points.to_vec(),
+        LineType::WithSteps => {
+            let mut out = Vec::with_capacity(points.len() * 2);
+            for (i, p) in points.iter().enumerate() {
+                if i > 0 {
+                    // step corner: horizontal to this x at the previous y, then drop to this point
+                    out.push(LinePoint { x: p.x, y: points[i - 1].y });
+                }
+                out.push(*p);
+            }
+            out
+        }
+        LineType::Curved => {
+            if points.len() < 3 {
+                return points.to_vec();
+            }
+            let n = points.len();
+            let mut out = Vec::with_capacity((n - 1) * CURVE_SEGMENTS + 1);
+            out.push(points[0]);
+            for i in 0..n - 1 {
+                let p0 = points[i.saturating_sub(1)];
+                let p1 = points[i];
+                let p2 = points[i + 1];
+                let p3 = points[(i + 2).min(n - 1)];
+                for s in 1..=CURVE_SEGMENTS {
+                    let t = s as f64 / CURVE_SEGMENTS as f64;
+                    out.push(LinePoint {
+                        x: catmull_rom(p0.x, p1.x, p2.x, p3.x, t),
+                        y: catmull_rom(p0.y, p1.y, p2.y, p3.y, t),
+                    });
+                }
+            }
+            out
+        }
+    }
+}
+
 /// Builds a stroke mesh over `points` (single color). `visible_range` is `[from, to)` row
 /// offsets. Returns triangles in bitmap space.
 pub fn build_line_stroke(
@@ -83,6 +138,8 @@ pub fn build_line_stroke(
     params: &LineParams,
     out: &mut StrokeMesh,
 ) {
+    let expanded = expand_line(points, params.line_type);
+    let points = &expanded[..];
     if points.len() < 2 {
         // single point: LWC draws a short horizontal segment of barWidth; skip until we
         // carry barWidth here (area/line with 1 visible point is a rare edge).
@@ -117,7 +174,6 @@ pub fn build_line_stroke(
             out.push_round_join(a, half, rgba);
         }
     }
-    let _ = params.line_type; // Simple only for now
 }
 
 fn self_push_segment(out: &mut StrokeMesh, a: [f32; 2], b: [f32; 2], nx: f32, ny: f32, rgba: [f32; 4]) {
@@ -151,6 +207,8 @@ pub fn build_area_fill(
     params: &LineParams,
     out: &mut AreaMesh,
 ) {
+    let expanded = expand_line(points, params.line_type);
+    let points = &expanded[..];
     if points.len() < 2 {
         return;
     }
@@ -223,6 +281,41 @@ mod tests {
             line_width: w,
             line_type: LineType::Simple,
         }
+    }
+
+    #[test]
+    fn expand_simple_is_identity() {
+        let pts = [LinePoint { x: 0.0, y: 1.0 }, LinePoint { x: 1.0, y: 2.0 }];
+        let out = expand_line(&pts, LineType::Simple);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[1].x, 1.0);
+        assert_eq!(out[1].y, 2.0);
+    }
+
+    #[test]
+    fn expand_steps_inserts_corner_at_previous_y() {
+        // two points -> point, step-corner, point = 3 vertices; corner at (x1, y0)
+        let pts = [LinePoint { x: 0.0, y: 10.0 }, LinePoint { x: 5.0, y: 20.0 }];
+        let out = expand_line(&pts, LineType::WithSteps);
+        assert_eq!(out.len(), 3);
+        assert_eq!((out[1].x, out[1].y), (5.0, 10.0)); // horizontal then vertical
+        assert_eq!((out[2].x, out[2].y), (5.0, 20.0));
+    }
+
+    #[test]
+    fn expand_curved_densifies_and_passes_through_points() {
+        let pts = [
+            LinePoint { x: 0.0, y: 0.0 },
+            LinePoint { x: 10.0, y: 10.0 },
+            LinePoint { x: 20.0, y: 0.0 },
+        ];
+        let out = expand_line(&pts, LineType::Curved);
+        // (n-1)*SEG + 1 vertices
+        assert_eq!(out.len(), (3 - 1) * CURVE_SEGMENTS + 1);
+        // curve interpolates through the original knots
+        assert_eq!((out[0].x, out[0].y), (0.0, 0.0));
+        assert_eq!((out[CURVE_SEGMENTS].x, out[CURVE_SEGMENTS].y), (10.0, 10.0));
+        assert_eq!((out[2 * CURVE_SEGMENTS].x, out[2 * CURVE_SEGMENTS].y), (20.0, 0.0));
     }
 
     #[test]

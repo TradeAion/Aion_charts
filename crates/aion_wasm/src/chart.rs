@@ -132,6 +132,8 @@ struct SeriesEntry {
     overlay: bool,
     /// Which stacked pane this series lives in (0 = top/price pane).
     pane_index: usize,
+    /// How a line/area series is joined between points (Simple / WithSteps / Curved).
+    line_type: LineType,
 }
 
 /// Height (css px) of the separator between stacked panes.
@@ -378,7 +380,7 @@ pub async fn create_chart(
         panes: vec![Pane::new()],
         price_formatter: PriceFormatter::default(),
         data,
-        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR, overlay: false, pane_index: 0 }],
+        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple }],
         tick_marks: TimeTickMarks::new(),
         options: ChartOptionsStore::new(),
         crosshair_mode: CrosshairMode::Magnet,
@@ -476,6 +478,12 @@ impl AionChart {
     /// Sets a series' line/area color (overrides the kind default).
     pub fn set_series_color(&mut self, id: u32, r: u8, g: u8, b: u8) {
         self.inner.borrow_mut().set_series_color(id, r, g, b);
+    }
+
+    /// Set a line/area series' join type: 0 = simple, 1 = stepped, 2 = curved. Call `render()`
+    /// after (roadmap Phase B3).
+    pub fn set_series_line_type(&mut self, id: u32, line_type: u8) {
+        self.inner.borrow_mut().set_series_line_type(id, line_type);
     }
 
     /// Move a series to the bottom-band overlay (volume) price scale with the given fractional
@@ -616,7 +624,7 @@ impl ChartInner {
     /// Adds a series and returns its id. `kind`: 0 candles, 1 bars, 2 line, 3 area, 4 histogram.
     pub fn add_series(&mut self, kind: u8) -> u32 {
         let id = self.data.add_series();
-        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR, overlay: false, pane_index: 0 });
+        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple });
         id as u32
     }
 
@@ -678,6 +686,18 @@ impl ChartInner {
     pub fn set_series_color(&mut self, id: u32, r: u8, g: u8, b: u8) {
         if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
             s.line_color = Color::rgb(r, g, b);
+        }
+    }
+
+    /// Set a line/area series' join type: 0 = simple, 1 = stepped, 2 = curved (roadmap Phase B3).
+    pub fn set_series_line_type(&mut self, id: u32, line_type: u8) {
+        let lt = match line_type {
+            1 => LineType::WithSteps,
+            2 => LineType::Curved,
+            _ => LineType::Simple,
+        };
+        if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
+            s.line_type = lt;
         }
     }
 
@@ -1031,10 +1051,10 @@ impl ChartInner {
         let visible = self.visible_data_range();
         // snapshots to avoid holding a self borrow across the per-pane builder calls
         let panes_geom: Vec<(f64, f64)> = self.panes.iter().map(|p| (p.top, p.height)).collect();
-        let series: Vec<(SeriesId, SeriesKind, Color, usize, bool)> = self
+        let series: Vec<(SeriesId, SeriesKind, Color, usize, bool, LineType)> = self
             .series
             .iter()
-            .map(|s| (s.id, s.kind, s.line_color, s.pane_index.min(panes_geom.len() - 1), s.overlay))
+            .map(|s| (s.id, s.kind, s.line_color, s.pane_index.min(panes_geom.len() - 1), s.overlay, s.line_type))
             .collect();
 
         let mut groups: Vec<DrawGroup> = Vec::with_capacity(panes_geom.len());
@@ -1049,7 +1069,7 @@ impl ChartInner {
 
             if let Some((from, to)) = visible {
                 self.build_grid(&mut prims, &time_marks, from, to, pane_w_px as i32, band_top_px, band_h_px, hpr, vpr, &self.panes[pi].price_scale);
-                for &(id, kind, color, spi, overlay) in &series {
+                for &(id, kind, color, spi, overlay, line_type) in &series {
                     if spi != pi {
                         continue;
                     }
@@ -1059,7 +1079,7 @@ impl ChartInner {
                         SeriesKind::Bar => self.build_bar_prims(id, from, to, hpr, vpr, &mut prims, scale),
                         SeriesKind::Histogram => self.build_histogram_prims(id, from, to, hpr, vpr, &mut prims, scale),
                         SeriesKind::Line | SeriesKind::Area => {
-                            self.build_line_prims(id, kind, color, from, to, ptop + ph, hpr, vpr, &mut group, scale)
+                            self.build_line_prims(id, kind, color, line_type, from, to, ptop + ph, hpr, vpr, &mut group, scale)
                         }
                     }
                 }
@@ -1319,7 +1339,7 @@ impl ChartInner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn build_line_prims(&self, id: SeriesId, kind: SeriesKind, color: Color, from: i64, to: i64, band_bottom: f64, hpr: f64, vpr: f64, group: &mut DrawGroup, scale: &PriceScaleCore) {
+    fn build_line_prims(&self, id: SeriesId, kind: SeriesKind, color: Color, line_type: LineType, from: i64, to: i64, band_bottom: f64, hpr: f64, vpr: f64, group: &mut DrawGroup, scale: &PriceScaleCore) {
         let plot = self.data.plot(id);
         let idxs = plot.indices();
         let c = plot.column(PlotValueIndex::Close);
@@ -1329,7 +1349,7 @@ impl ChartInner {
             points.push(LinePoint { x: self.time_scale.index_to_coordinate(idxs[r]), y: scale.price_to_coordinate(close, close) });
         }
 
-        let params = LineParams { horizontal_pixel_ratio: hpr, vertical_pixel_ratio: vpr, line_width: DEFAULT_LINE_WIDTH, line_type: LineType::Simple };
+        let params = LineParams { horizontal_pixel_ratio: hpr, vertical_pixel_ratio: vpr, line_width: DEFAULT_LINE_WIDTH, line_type };
         // default line color per kind unless overridden (line_color != LINE_COLOR sentinel)
         let line_color = if color != LINE_COLOR {
             color

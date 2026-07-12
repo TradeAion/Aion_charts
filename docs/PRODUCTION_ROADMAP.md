@@ -214,3 +214,11 @@ Progress is appended here as phases land (newest last).
   per-pane axes, draggable resize, per-pane crosshair). Optional later: a richer `panes()` handle
   API. Next: B3 (baseline/step/curved line types, point markers, last-price animation) + B4
   (series markers, price-lines API).
+- 2026-07-12 — **B3 increment 1 done** (step & curved line types). `aion_render::line::expand_line`
+  transforms a polyline by `LineType`: `WithSteps` inserts a horizontal-then-vertical corner per
+  interval; `Curved` tessellates a Catmull-Rom spline (16 segs/interval) through the knots. Applied
+  in both `build_line_stroke` and `build_area_fill`. Series carry a `line_type`;
+  `set_series_line_type(id, 0|1|2)` → façade `add_series(kind, { line_type: 'simple'|'stepped'|
+  'curved' })`. 3 new renderer unit tests (render 34). Verified in-browser: at ~30 visible bars the
+  three types render distinct geometry (simple 2680 px, stepped 3354, curved 2734). Remaining B3:
+  baseline series, point markers, last-price animation.
