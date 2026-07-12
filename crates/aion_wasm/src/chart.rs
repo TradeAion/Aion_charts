@@ -122,6 +122,28 @@ impl SeriesKind {
     }
 }
 
+fn line_style_from_u8(style: u8) -> LineStyle {
+    match style {
+        1 => LineStyle::Dotted,
+        2 => LineStyle::Dashed,
+        3 => LineStyle::LargeDashed,
+        4 => LineStyle::SparseDotted,
+        _ => LineStyle::Solid,
+    }
+}
+
+/// A user-created horizontal price line on a series (roadmap Phase B4): a styled line at a fixed
+/// price plus a colored axis label. Mirrors lightweight-charts `createPriceLine`.
+#[derive(Clone)]
+struct PriceLine {
+    id: u32,
+    price: f64,
+    color: Color,
+    width: i32,
+    style: LineStyle,
+    title: String,
+}
+
 fn crosshair_mode_from_u8(mode: u8) -> CrosshairMode {
     match mode {
         crosshair_mode::NORMAL => CrosshairMode::Normal,
@@ -149,6 +171,8 @@ struct SeriesEntry {
     baseline: Option<f64>,
     /// Pulse an expanding ring at the last value (driven by the host's animation clock).
     last_price_animation: bool,
+    /// User-created horizontal price lines on this series (roadmap Phase B4).
+    price_lines: Vec<PriceLine>,
 }
 
 /// Height (css px) of the separator between stacked panes.
@@ -244,6 +268,8 @@ struct ChartInner {
     /// Host animation clock (ms), set each frame by the shell's rAF loop; drives the last-price
     /// pulse (roadmap Phase B3).
     animation_time: f64,
+    /// Monotonic id source for user-created price lines (roadmap Phase B4).
+    next_price_line_id: u32,
     time_visible: bool,
     css_width: f64,
     css_height: f64,
@@ -398,11 +424,12 @@ pub async fn create_chart(
         panes: vec![Pane::new()],
         price_formatter: PriceFormatter::default(),
         data,
-        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false, baseline: None, last_price_animation: false }],
+        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false, baseline: None, last_price_animation: false, price_lines: Vec::new() }],
         tick_marks: TimeTickMarks::new(),
         options: ChartOptionsStore::new(),
         crosshair_mode: CrosshairMode::Magnet,
         animation_time: 0.0,
+        next_price_line_id: 1,
         time_visible: true,
         css_width,
         css_height,
@@ -518,6 +545,17 @@ impl AionChart {
     /// Toggle the pulsing last-price ring on a series (roadmap Phase B3).
     pub fn set_series_last_price_animation(&mut self, id: u32, enabled: bool) {
         self.inner.borrow_mut().set_series_last_price_animation(id, enabled);
+    }
+
+    /// Add a horizontal price line to a series; returns its id. `style`: 0 solid, 1 dotted, 2
+    /// dashed, 3 large-dashed, 4 sparse-dotted. Call `render()` after (roadmap Phase B4).
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_price_line(&mut self, series_id: u32, price: f64, r: u8, g: u8, b: u8, width: u32, style: u8, title: &str) -> u32 {
+        self.inner.borrow_mut().create_price_line(series_id, price, r, g, b, width, style, title)
+    }
+    /// Remove a price line by id. Call `render()` after (roadmap Phase B4).
+    pub fn remove_price_line(&mut self, id: u32) {
+        self.inner.borrow_mut().remove_price_line(id);
     }
     /// Whether any series wants the last-price pulse (host uses this to run/stop its rAF loop).
     pub fn wants_animation(&self) -> bool {
@@ -666,7 +704,7 @@ impl ChartInner {
     /// Adds a series and returns its id. `kind`: 0 candles, 1 bars, 2 line, 3 area, 4 histogram.
     pub fn add_series(&mut self, kind: u8) -> u32 {
         let id = self.data.add_series();
-        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false, baseline: None, last_price_animation: false });
+        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false, baseline: None, last_price_animation: false, price_lines: Vec::new() });
         id as u32
     }
 
@@ -754,6 +792,31 @@ impl ChartInner {
     pub fn set_series_baseline(&mut self, id: u32, price: f64) {
         if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
             s.baseline = if price.is_finite() { Some(price) } else { None };
+        }
+    }
+
+    /// Add a horizontal price line to a series; returns its id (roadmap Phase B4).
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_price_line(&mut self, series_id: u32, price: f64, r: u8, g: u8, b: u8, width: u32, style: u8, title: &str) -> u32 {
+        let id = self.next_price_line_id;
+        self.next_price_line_id += 1;
+        if let Some(s) = self.series.iter_mut().find(|s| s.id == series_id as SeriesId) {
+            s.price_lines.push(PriceLine {
+                id,
+                price,
+                color: Color::rgb(r, g, b),
+                width: width.max(1) as i32,
+                style: line_style_from_u8(style),
+                title: title.to_string(),
+            });
+        }
+        id
+    }
+
+    /// Remove a price line by id (from whichever series holds it).
+    pub fn remove_price_line(&mut self, id: u32) {
+        for s in &mut self.series {
+            s.price_lines.retain(|pl| pl.id != id);
         }
     }
 
@@ -1157,6 +1220,7 @@ impl ChartInner {
                         }
                     }
                 }
+                self.build_price_lines(pi, &mut prims, pane_w_px as i32, vpr);
                 if pi == 0 {
                     self.build_last_value_line(&mut prims, pane_w_px as i32, vpr);
                     self.build_last_price_pulse(&mut group, hpr, vpr);
@@ -1495,6 +1559,25 @@ impl ChartInner {
         group.stroke_tris.extend(stroke.vertices.iter().map(mesh_vertex));
     }
 
+    /// Horizontal price lines for every series in `pane_index`, each on its series' scale.
+    fn build_price_lines(&self, pane_index: usize, prims: &mut Vec<Prim>, pane_w_px: i32, vpr: f64) {
+        let pane = &self.panes[pane_index];
+        let min_w = 1f64.max(vpr.floor()) as i32;
+        for s in &self.series {
+            if s.pane_index.min(self.panes.len() - 1) != pane_index || s.price_lines.is_empty() {
+                continue;
+            }
+            let scale = if s.overlay { &pane.overlay_scale } else { &pane.price_scale };
+            if scale.is_empty() {
+                continue;
+            }
+            for pl in &s.price_lines {
+                let y = (scale.price_to_coordinate(pl.price, pl.price) * vpr).round() as i32;
+                prims.push(Prim::HLine { y, x0: 0, x1: pane_w_px, width: pl.width.max(min_w), style: pl.style, color: pl.color });
+            }
+        }
+    }
+
     /// Pulsing ring at the main series' last value (roadmap Phase B3). An expanding, fading disc
     /// under a solid center dot, cycling on the host animation clock (LWC ~2600 ms period).
     fn build_last_price_pulse(&self, group: &mut DrawGroup, hpr: f64, vpr: f64) {
@@ -1707,8 +1790,49 @@ impl ChartInner {
             }
         }
 
+        self.draw_price_line_labels_2d(pane_w, dpr)?;
         self.draw_last_value_label_2d(pane_w, pane_h, dpr)?;
         self.draw_crosshair_labels_2d(pane_w, pane_h, dpr, &font)?;
+        Ok(())
+    }
+
+    /// Colored axis labels for every series' price lines (roadmap Phase B4). Uses the price value
+    /// (or the line's title, when set) on a filled box in the line's color, like the last-value tag.
+    fn draw_price_line_labels_2d(&self, pane_w: f64, dpr: f64) -> Result<(), JsValue> {
+        let ctx = &self.axis_ctx;
+        ctx.set_font(&format!("{}px {FONT_FAMILY}", FONT_SIZE * dpr));
+        ctx.set_text_baseline("middle");
+        for (pi, pane) in self.panes.iter().enumerate() {
+            let band_top = pane.top * dpr;
+            let band_bot = (pane.top + pane.height) * dpr;
+            for s in &self.series {
+                if s.pane_index.min(self.panes.len() - 1) != pi {
+                    continue;
+                }
+                let scale = if s.overlay { &pane.overlay_scale } else { &pane.price_scale };
+                if scale.is_empty() {
+                    continue;
+                }
+                for pl in &s.price_lines {
+                    let y = scale.price_to_coordinate(pl.price, pl.price) * dpr;
+                    if y < band_top || y > band_bot {
+                        continue;
+                    }
+                    let label = if pl.title.is_empty() { self.price_formatter.format(pl.price) } else { pl.title.clone() };
+                    let text_w = self.measure(&label);
+                    let box_h = ((FONT_SIZE + PRICE_LABEL_PADDING_TB * 2.0) * dpr).round();
+                    let box_w = ((AXIS_BORDER_SIZE + PRICE_PADDING_INNER + PRICE_PADDING_OUTER + AXIS_TICK_LENGTH + text_w) * dpr).round();
+                    let box_x = (pane_w * dpr).round();
+                    let box_y = (y.round() - box_h / 2.0).round();
+                    ctx.set_fill_style_str(&pl.color.to_hex());
+                    ctx.fill_rect(box_x, box_y, box_w, box_h);
+                    ctx.set_text_align("left");
+                    ctx.set_fill_style_str(&pl.color.contrast_text().to_hex());
+                    let text_x = (pane_w + AXIS_TICK_LENGTH + PRICE_PADDING_INNER) * dpr;
+                    ctx.fill_text(&label, text_x, y.round())?;
+                }
+            }
+        }
         Ok(())
     }
 

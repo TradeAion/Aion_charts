@@ -243,3 +243,11 @@ Progress is appended here as phases land (newest last).
   (+8 px at phase 0 → +103 at phase 0.5 → +8 faded at phase 0.98). B3 fully done: line types, point
   markers, baseline series, last-price animation. Next: **B4** — series markers (arrows/circles) +
   per-series price-lines API.
+- 2026-07-12 — **B4 increment 1 done** (per-series price lines). `series.create_price_line({ price,
+  color, line_width, line_style, title })` → a handle with `.remove()`. Engine: per-series
+  `Vec<PriceLine>`, `create_price_line`/`remove_price_line`; rendered as an HLine on the series'
+  scale in its pane (`build_price_lines`) plus a colored axis label clipped to the pane band
+  (`draw_price_line_labels_2d`). Verified in-browser: line (468 px) + axis label (435 px) render on
+  the correct row; `handle.remove()` clears both. (Debugging note: manual `resize()` while
+  `autoSize` is on desyncs the pane/overlay canvas sizes — verify without calling resize.) Next in
+  B4: series markers (arrows/circles/squares above/below bars).

@@ -113,6 +113,32 @@ const LINE_TYPE_TO_U8: Record<NonNullable<series_options["line_type"]>, number> 
   curved: 2,
 };
 
+/** Style of a price line / crosshair line. */
+export type line_style = "solid" | "dotted" | "dashed" | "large_dashed" | "sparse_dotted";
+const LINE_STYLE_TO_U8: Record<line_style, number> = {
+  solid: 0,
+  dotted: 1,
+  dashed: 2,
+  large_dashed: 3,
+  sparse_dotted: 4,
+};
+
+/** Options for {@link series_api.create_price_line}. */
+export interface price_line_options {
+  price: number;
+  color?: string;
+  line_width?: number;
+  line_style?: line_style;
+  /** Axis label text; defaults to the formatted price. */
+  title?: string;
+}
+
+/** A handle to a created price line. */
+export interface price_line_api {
+  remove(): void;
+  readonly id: number;
+}
+
 const KIND_TO_U8: Record<series_kind, number> = {
   candlestick: 0,
   bar: 1,
@@ -138,6 +164,8 @@ export interface series_api {
   set_type(kind: series_kind): void;
   /** Move this series into stacked pane `pane_index` (0 = price pane), creating it if needed. */
   move_to_pane(pane_index: number, stretch?: number): void;
+  /** Add a horizontal price line on this series; returns a handle with `.remove()`. */
+  create_price_line(options: price_line_options): price_line_api;
   /** The engine-side series id. */
   readonly id: number;
 }
@@ -316,6 +344,30 @@ class series_impl implements series_api {
   move_to_pane(pane_index: number, stretch = 1): void {
     this.chart.wasm.set_series_pane(this.id, pane_index, stretch);
     this.chart.repaint();
+  }
+
+  create_price_line(options: price_line_options): price_line_api {
+    const rgb = parse_rgb(options.color ?? "#2196f3") ?? [0x21, 0x96, 0xf3];
+    const style = LINE_STYLE_TO_U8[options.line_style ?? "solid"];
+    const id = this.chart.wasm.create_price_line(
+      this.id,
+      options.price,
+      rgb[0],
+      rgb[1],
+      rgb[2],
+      options.line_width ?? 1,
+      style,
+      options.title ?? "",
+    );
+    this.chart.repaint();
+    const chart = this.chart;
+    return {
+      id,
+      remove() {
+        chart.wasm.remove_price_line(id);
+        chart.repaint();
+      },
+    };
   }
 }
 
