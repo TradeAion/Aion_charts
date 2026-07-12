@@ -53,52 +53,6 @@ const overlay = document.getElementById("overlay");
 const container = document.getElementById("chart_container");
 const status = document.getElementById("status");
 
-// Does the browser expose devicePixelContentBoxSize? (Chromium, Firefox, Safari 16.4+)
-const HAS_DPCB =
-  typeof ResizeObserverEntry !== "undefined" &&
-  "devicePixelContentBoxSize" in ResizeObserverEntry.prototype;
-
-// The crisp-rendering crux (same technique lightweight-charts uses via fancy-canvas'
-// `device-pixel-content-box`). `Math.round(cssSize * window.devicePixelRatio)` is only an
-// APPROXIMATION of how many physical pixels the element covers: devicePixelRatio is a
-// single rounded scalar and the element's own box is sub-pixel-positioned by layout. At a
-// fractional ratio (e.g. 150% scaling -> 1.5) the approximation is off by a fraction of a
-// pixel, so the backing store no longer maps 1:1 to physical pixels and the compositor
-// resamples the (perfectly crisp) bitmap -> soft, "thicker" 1px wicks. devicePixelContentBoxSize
-// is the browser reporting the EXACT integer physical-pixel extent of the content box, which
-// gives a guaranteed 1:1 mapping at any ratio. `entry` is a ResizeObserverEntry when the call
-// comes from the observer; null on the initial synchronous measure (falls back to the approx).
-function measure(entry) {
-  const r = container.getBoundingClientRect();
-  const cssW = Math.max(1, r.width), cssH = Math.max(1, r.height);
-  let bw, bh;
-  const dpcb = entry && entry.devicePixelContentBoxSize && entry.devicePixelContentBoxSize[0];
-  if (dpcb) {
-    bw = Math.max(1, dpcb.inlineSize);
-    bh = Math.max(1, dpcb.blockSize);
-  } else {
-    const dpr = window.devicePixelRatio || 1;
-    bw = Math.max(1, Math.round(cssW * dpr));
-    bh = Math.max(1, Math.round(cssH * dpr));
-  }
-  // Exact effective ratio. Passing this as dpr makes the engine's internal bitmap
-  // (round(css * dpr)) equal (bw, bh), so surface, canvas and physical pixels all agree.
-  const dpr = bw / cssW;
-  return { cssW, cssH, dpr, bw, bh };
-}
-
-// Applies a measurement: bitmap = exact device pixels, CSS box = the real displayed size
-// (so the canvas still fills the container and the bitmap composites 1:1 to the glass).
-function apply_size(m) {
-  for (const c of [pane, overlay]) {
-    c.width = m.bw;
-    c.height = m.bh;
-    c.style.width = m.cssW + "px";
-    c.style.height = m.cssH + "px";
-  }
-  cur = m;
-}
-
 // deterministic random-walk OHLC data (hourly bars ending "now")
 function generate_data(n) {
   const times = new Float64Array(n), open = new Float64Array(n), high = new Float64Array(n), low = new Float64Array(n), close = new Float64Array(n);
@@ -121,9 +75,20 @@ function generate_data(n) {
 }
 
 await init();
-let cur = measure(null); // latest applied measurement (set by apply_size)
-apply_size(cur);
-const chart = await create_chart(pane, overlay, cur.cssW, cur.cssH, cur.dpr);
+
+// Bootstrap size just so create_chart can configure the WebGPU surface; enable_auto_resize
+// below immediately re-sizes to the exact device-pixel box and owns sizing from then on.
+{
+  const r = container.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  for (const c of [pane, overlay]) { c.width = Math.max(1, Math.round(r.width * dpr)); c.height = Math.max(1, Math.round(r.height * dpr)); }
+}
+const r0 = container.getBoundingClientRect();
+const dpr0 = window.devicePixelRatio || 1;
+const chart = await create_chart(pane, overlay, r0.width, r0.height, dpr0);
+
+// The engine now owns device-pixel-exact canvas sizing + re-render on any size/DPR change.
+chart.enable_auto_resize(container);
 
 window.__chart = chart; // debug/test handle
 
@@ -145,7 +110,7 @@ let sma_id = null;
 const sma_data = sma(data.times, data.close, 20);
 
 chart.render();
-status.textContent = `1000 bars · dpr ${cur.dpr}`;
+status.textContent = `1000 bars · dpr ${(window.devicePixelRatio || 1).toFixed(3)}`;
 
 document.getElementById("sma_toggle").addEventListener("change", (e) => {
   if (e.target.checked && sma_id === null) {
@@ -167,11 +132,12 @@ document.getElementById("cross_mode").addEventListener("change", (e) => {
   chart.set_crosshair_mode(Number(e.target.value)); rerender();
 });
 
-// Interactions never change the element size, and the ResizeObserver below keeps the
-// bitmap in sync with the physical-pixel box, so rerender just repaints.
+// Interactions never change the element size; the engine's own ResizeObserver (installed by
+// enable_auto_resize) keeps the bitmap in sync with the physical-pixel box, so this just repaints.
 const rerender = () => {
   chart.render();
-  status.textContent = `css ${Math.round(cur.cssW)}x${Math.round(cur.cssH)} · bitmap ${pane.width}x${pane.height} · dpr ${cur.dpr.toFixed(3)} · sp ${chart.bar_spacing().toFixed(1)}`;
+  const dpr = pane.width / (parseFloat(pane.style.width) || pane.width);
+  status.textContent = `bitmap ${pane.width}x${pane.height} · dpr ${dpr.toFixed(3)} · sp ${chart.bar_spacing().toFixed(1)}`;
 };
 
 // overlay is the topmost element, so it receives the pointer events
@@ -251,30 +217,7 @@ overlay.addEventListener("pointercancel", end_pointer);
 overlay.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") end_pointer(e); });
 overlay.addEventListener("dblclick", () => { chart.fit_content(); rerender(); });
 
-function sync_size(entry) {
-  const m = measure(entry);
-  apply_size(m);
-  chart.resize(m.cssW, m.cssH, m.dpr);
-  rerender();
-}
-
-// Observing the device-pixel-content-box makes the observer fire on BOTH css-size and
-// physical-pixel changes — including devicePixelRatio changes (monitor switch, OS/browser
-// zoom, device emulation) — so it doubles as the dpr watcher when supported.
-const ro = new ResizeObserver((entries) => sync_size(entries[0]));
-if (HAS_DPCB) {
-  ro.observe(container, { box: "device-pixel-content-box" });
-} else {
-  // Fallback: plain observer for size, plus an explicit media-query watch for dpr changes
-  // (which don't fire a content-box observer), re-armed each time since the dppx value shifts.
-  ro.observe(container);
-  let last_dpr = 0;
-  (function watch_dpr() {
-    const dpr = window.devicePixelRatio || 1;
-    if (dpr !== last_dpr) { last_dpr = dpr; sync_size(null); }
-    matchMedia(`(resolution: ${dpr}dppx)`).addEventListener("change", watch_dpr, { once: true });
-  })();
-}
+// Sizing + resize-on-DPR-change is now owned by the engine (chart.enable_auto_resize above).
 </script>
 </body>
 </html>

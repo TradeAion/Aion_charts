@@ -13,6 +13,9 @@
 //! Multiple series share one time axis via [`DataLayer`] (the merged time-point list). Each
 //! series maps its data onto merged indices; a series absent at an index is whitespace there.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::CanvasRenderingContext2d;
@@ -127,8 +130,7 @@ struct Gfx {
     tex_renderer: TexQuadRenderer,
 }
 
-#[wasm_bindgen]
-pub struct AionChart {
+struct ChartInner {
     gfx: Gfx,
     axis_ctx: CanvasRenderingContext2d,
     time_scale: TimeScaleCore,
@@ -148,8 +150,76 @@ pub struct AionChart {
     axis_w: f64,
 }
 
+/// Keeps the `ResizeObserver` and its callback alive for the chart's lifetime.
+struct ResizeBinding {
+    observer: web_sys::ResizeObserver,
+    _callback: Closure<dyn FnMut(js_sys::Array)>,
+}
+
+impl Drop for ResizeBinding {
+    fn drop(&mut self) {
+        self.observer.disconnect();
+    }
+}
+
+/// The chart handle exported to JS. Wraps [`ChartInner`] in `Rc<RefCell<..>>` so an
+/// engine-owned `ResizeObserver` callback can mutate it, and holds the canvas elements so
+/// the engine can size their backing stores itself. Public methods delegate to the inner.
+#[wasm_bindgen]
+pub struct AionChart {
+    inner: Rc<RefCell<ChartInner>>,
+    pane: web_sys::HtmlCanvasElement,
+    overlay: web_sys::HtmlCanvasElement,
+    _resize: Option<ResizeBinding>,
+}
+
+/// Reads the exact physical-pixel size of a `ResizeObserverEntry`'s device-pixel content box.
+/// This is the crisp-rendering crux: `round(cssSize * devicePixelRatio)` only approximates the
+/// element's true physical footprint, so at fractional ratios (e.g. 150% scaling) the backing
+/// store no longer maps 1:1 to device pixels and the compositor resamples the bitmap — soft,
+/// "thicker" 1px wicks. `devicePixelContentBoxSize` is the exact integer count. Returns `None`
+/// when the browser lacks the API (Safari < 16.4), so the caller can fall back to the approx.
+fn device_pixel_box(entry: &web_sys::ResizeObserverEntry) -> Option<(f64, f64)> {
+    let arr = entry.device_pixel_content_box_size();
+    let first = arr.get(0);
+    if first.is_undefined() {
+        return None;
+    }
+    let size = first.dyn_into::<web_sys::ResizeObserverSize>().ok()?;
+    Some((size.inline_size(), size.block_size()))
+}
+
+/// Sizes both canvases to `(bw, bh)` device pixels while pinning their CSS box to the real
+/// displayed size, then resizes + repaints the engine. Shared by the initial bind and every
+/// observer callback.
+fn apply_device_size(
+    inner: &Rc<RefCell<ChartInner>>,
+    pane: &web_sys::HtmlCanvasElement,
+    overlay: &web_sys::HtmlCanvasElement,
+    css_w: f64,
+    css_h: f64,
+    bw: f64,
+    bh: f64,
+) {
+    let (bw_u, bh_u) = (bw.max(1.0) as u32, bh.max(1.0) as u32);
+    for c in [pane, overlay] {
+        c.set_width(bw_u);
+        c.set_height(bh_u);
+        let style = c.style();
+        let _ = style.set_property("width", &format!("{css_w}px"));
+        let _ = style.set_property("height", &format!("{css_h}px"));
+    }
+    // Exact effective ratio -> the engine's internal round(css*dpr) lands back on (bw, bh),
+    // so surface, canvas backing store and physical pixels all agree.
+    let dpr = bw / css_w.max(1.0);
+    let mut c = inner.borrow_mut();
+    c.resize(css_w.max(1.0), css_h.max(1.0), dpr);
+    let _ = c.render();
+}
+
 /// Creates a chart bound to `pane_canvas` (WebGPU) and `overlay_canvas` (Canvas2D). Both must
 /// be full chart size with bitmap size = css size * dpr, already set by the caller.
+/// Call [`AionChart::enable_auto_resize`] to have the engine own sizing from then on.
 #[wasm_bindgen]
 pub async fn create_chart(
     pane_canvas: web_sys::HtmlCanvasElement,
@@ -159,6 +229,11 @@ pub async fn create_chart(
     dpr: f64,
 ) -> Result<AionChart, JsValue> {
     console_error_panic_hook::set_once();
+
+    // Keep handles to both canvas elements so the engine can own device-pixel resizing
+    // (create_surface takes the pane canvas by value; the clone is just a JS reference).
+    let pane_el = pane_canvas.clone();
+    let overlay_el = overlay_canvas.clone();
 
     let axis_ctx = overlay_canvas
         .get_context("2d")?
@@ -202,7 +277,7 @@ pub async fn create_chart(
     let mut data = DataLayer::new();
     let main = data.add_series();
 
-    Ok(AionChart {
+    let inner = ChartInner {
         gfx: Gfx {
             device,
             queue,
@@ -230,11 +305,147 @@ pub async fn create_chart(
         pane_w: css_width,
         pane_h: css_height,
         axis_w: 0.0,
+    };
+
+    Ok(AionChart {
+        inner: Rc::new(RefCell::new(inner)),
+        pane: pane_el,
+        overlay: overlay_el,
+        _resize: None,
     })
 }
 
+/// Public JS surface. Sizing is engine-owned once [`enable_auto_resize`] is called; the rest
+/// delegate straight through to the inner chart.
 #[wasm_bindgen]
 impl AionChart {
+    /// Binds the engine to `container`, sizing both canvases to the container's exact
+    /// device-pixel content box (crisp at any devicePixelRatio, fractional included) and
+    /// re-rendering on every size/DPR change. After this, the embedder never sizes canvases.
+    pub fn enable_auto_resize(&mut self, container: web_sys::HtmlElement) -> Result<(), JsValue> {
+        let inner = self.inner.clone();
+        let pane = self.pane.clone();
+        let overlay = self.overlay.clone();
+        let container_cb = container.clone();
+
+        let callback = Closure::wrap(Box::new(move |entries: js_sys::Array| {
+            let rect = container_cb.get_bounding_client_rect();
+            let (css_w, css_h) = (rect.width().max(1.0), rect.height().max(1.0));
+            // Prefer the exact device-pixel content box; fall back to round(css*dpr).
+            let device = entries
+                .get(0)
+                .dyn_into::<web_sys::ResizeObserverEntry>()
+                .ok()
+                .and_then(|e| device_pixel_box(&e));
+            let (bw, bh) = device.unwrap_or_else(|| {
+                let dpr = web_sys::window().map(|w| w.device_pixel_ratio()).unwrap_or(1.0);
+                ((css_w * dpr).round(), (css_h * dpr).round())
+            });
+            apply_device_size(&inner, &pane, &overlay, css_w, css_h, bw, bh);
+        }) as Box<dyn FnMut(js_sys::Array)>);
+
+        let observer = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref())?;
+        // Observe the device-pixel-content-box so the callback also fires on DPR changes.
+        let opts = web_sys::ResizeObserverOptions::new();
+        opts.set_box(web_sys::ResizeObserverBoxOptions::DevicePixelContentBox);
+        observer.observe_with_options(&container, &opts);
+
+        // Size once now so the first paint is correct even before the observer first fires.
+        let rect = container.get_bounding_client_rect();
+        let (css_w, css_h) = (rect.width().max(1.0), rect.height().max(1.0));
+        let dpr = web_sys::window().map(|w| w.device_pixel_ratio()).unwrap_or(1.0);
+        apply_device_size(
+            &self.inner,
+            &self.pane,
+            &self.overlay,
+            css_w,
+            css_h,
+            (css_w * dpr).round(),
+            (css_h * dpr).round(),
+        );
+
+        self._resize = Some(ResizeBinding { observer, _callback: callback });
+        Ok(())
+    }
+
+    /// Adds a series and returns its id. `kind`: 0 candles, 1 bars, 2 line, 3 area, 4 histogram.
+    pub fn add_series(&mut self, kind: u8) -> u32 {
+        self.inner.borrow_mut().add_series(kind)
+    }
+
+    /// Sets the main series' data (series 0). `times` are ascending UTC seconds.
+    pub fn set_data(&mut self, times: &[f64], open: &[f64], high: &[f64], low: &[f64], close: &[f64]) {
+        self.inner.borrow_mut().set_data(times, open, high, low, close);
+    }
+
+    /// Sets a series' data by id.
+    pub fn set_series_data(&mut self, id: u32, times: &[f64], open: &[f64], high: &[f64], low: &[f64], close: &[f64]) {
+        self.inner.borrow_mut().set_series_data(id, times, open, high, low, close);
+    }
+
+    /// Streaming update of the main series (append new time or replace last).
+    pub fn update_bar(&mut self, time: f64, open: f64, high: f64, low: f64, close: f64) {
+        self.inner.borrow_mut().update_bar(time, open, high, low, close);
+    }
+
+    /// Sets a series' line/area color (overrides the kind default).
+    pub fn set_series_color(&mut self, id: u32, r: u8, g: u8, b: u8) {
+        self.inner.borrow_mut().set_series_color(id, r, g, b);
+    }
+
+    /// 0 = candlestick, 1 = OHLC bars, 2 = line, 3 = area, 4 = histogram (sets the main series).
+    pub fn set_series_type(&mut self, kind: u8) {
+        self.inner.borrow_mut().set_series_type(kind);
+    }
+
+    pub fn set_time_visible(&mut self, visible: bool) {
+        self.inner.borrow_mut().set_time_visible(visible);
+    }
+
+    /// 0 = normal, 1 = magnet (LWC default), 2 = hidden, 3 = magnet OHLC.
+    pub fn set_crosshair_mode(&mut self, mode: u8) {
+        self.inner.borrow_mut().set_crosshair_mode(mode);
+    }
+
+    /// Manual resize (still available for embedders not using `enable_auto_resize`, and for tests).
+    pub fn resize(&mut self, css_width: f64, css_height: f64, dpr: f64) {
+        self.inner.borrow_mut().resize(css_width, css_height, dpr);
+    }
+
+    pub fn zoom(&mut self, x_css: f64, scale: f64) {
+        self.inner.borrow_mut().zoom(x_css, scale);
+    }
+    pub fn scroll_start(&mut self, x_css: f64) {
+        self.inner.borrow_mut().scroll_start(x_css);
+    }
+    pub fn scroll_move(&mut self, x_css: f64) {
+        self.inner.borrow_mut().scroll_move(x_css);
+    }
+    pub fn scroll_end(&mut self) {
+        self.inner.borrow_mut().scroll_end();
+    }
+    pub fn fit_content(&mut self) {
+        self.inner.borrow_mut().fit_content();
+    }
+    pub fn set_crosshair(&mut self, x_css: f64, y_css: f64) {
+        self.inner.borrow_mut().set_crosshair(x_css, y_css);
+    }
+    pub fn clear_crosshair(&mut self) {
+        self.inner.borrow_mut().clear_crosshair();
+    }
+    pub fn bar_spacing(&self) -> f64 {
+        self.inner.borrow().bar_spacing()
+    }
+    pub fn price_axis_width(&self) -> f64 {
+        self.inner.borrow().price_axis_width()
+    }
+
+    pub fn render(&mut self) -> Result<(), JsValue> {
+        self.inner.borrow_mut().render()
+    }
+}
+
+impl ChartInner {
     /// Adds a series and returns its id. `kind`: 0 candles, 1 bars, 2 line, 3 area, 4 histogram.
     pub fn add_series(&mut self, kind: u8) -> u32 {
         let id = self.data.add_series();
