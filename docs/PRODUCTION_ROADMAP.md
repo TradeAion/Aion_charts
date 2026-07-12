@@ -205,3 +205,12 @@ Progress is appended here as phases land (newest last).
   `series.move_to_pane(index)`. `setPointerCapture` now guarded. Verified in-browser: dragging the
   separator up 40px / down 60px moves it exactly 40 / 60 px; cursor feedback works; no errors.
   Remaining B1: façade `panes()` handle surface, per-pane crosshair price label.
+- 2026-07-12 — **B1 increment 4 done** (per-pane crosshair). Horizontal crosshair line + price
+  axis label now follow the cursor into whichever pane it's over, using that pane's scale (price
+  pane magnet-snaps to its series; indicator panes read the raw cursor y via
+  `coordinate_to_price`); marker stays on the price pane. Added `pane_at_y(y)`. Verified
+  in-browser: cursor in the volume pane (frac 0.81, below the 0.70 separator) draws a full-width
+  horizontal line at 0.81; no errors. **B1 core is functionally complete** (stacked panes,
+  per-pane axes, draggable resize, per-pane crosshair). Optional later: a richer `panes()` handle
+  API. Next: B3 (baseline/step/curved line types, point markers, last-price animation) + B4
+  (series markers, price-lines API).

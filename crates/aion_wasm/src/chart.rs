@@ -1396,17 +1396,18 @@ impl ChartInner {
             prims.push(Prim::VLine { x: (snapped_x * hpr).round() as i32, y0: band_top_px, y1: band_top_px + band_h_px, width: line_width, style: LineStyle::LargeDashed, color: vert_color });
         }
 
-        // horizontal line + marker only in the price pane (pane 0) for now
-        if pane_index != 0 {
+        // horizontal line only in the pane the cursor is over; the price pane (0) magnet-snaps to
+        // the series, other panes follow the raw cursor y (roadmap Phase B1).
+        if self.pane_at_y(y_css) != Some(pane_index) {
             return;
         }
-        let (_price, snap_y) = self.crosshair_snap(x_css, y_css);
+        let snap_y = if pane_index == 0 { self.crosshair_snap(x_css, y_css).1 } else { y_css };
         if ch.horz_line.visible {
             prims.push(Prim::HLine { y: (snap_y * vpr).round() as i32, x0: 0, x1: pane_w_px, width: line_width, style: LineStyle::LargeDashed, color: horz_color });
         }
 
-        // crosshair marker on line/area main series
-        if matches!(self.series[0].kind, SeriesKind::Line | SeriesKind::Area) {
+        // crosshair marker on line/area main series (price pane only)
+        if pane_index == 0 && matches!(self.series[0].kind, SeriesKind::Line | SeriesKind::Area) {
             let index = self.snapped_crosshair_index(x_css);
             if let Some(row) = self.main_plot().search(index, aion_core::model::plot_list::MismatchDirection::None) {
                 let close = self.main_plot().value_at(row, PlotValueIndex::Close);
@@ -1421,6 +1422,11 @@ impl ChartInner {
                 group_stroke.extend(disc.iter().map(mesh_vertex));
             }
         }
+    }
+
+    /// Index of the pane whose vertical band contains css-y `y`, if any.
+    fn pane_at_y(&self, y: f64) -> Option<usize> {
+        self.panes.iter().position(|p| y >= p.top && y <= p.top + p.height)
     }
 
     fn snapped_crosshair_index(&self, x_css: f64) -> i64 {
@@ -1575,8 +1581,16 @@ impl ChartInner {
         ctx.set_font(font);
         ctx.set_text_baseline("middle");
 
-        if y_css <= pane_h && !self.price_scale().is_empty() {
-            let (price, snap_y) = self.crosshair_snap(x_css, y_css);
+        // price label for the pane under the cursor, using that pane's scale (roadmap Phase B1).
+        // The price pane (0) magnet-snaps to its series; other panes read the raw cursor y.
+        if let Some(pi) = self.pane_at_y(y_css).filter(|_| y_css <= pane_h) {
+            let scale = &self.panes[pi].price_scale;
+            if !scale.is_empty() {
+            let (price, snap_y) = if pi == 0 {
+                self.crosshair_snap(x_css, y_css)
+            } else {
+                (scale.coordinate_to_price(y_css, 0.0), y_css)
+            };
             let label = self.price_formatter.format(price);
             let text_w = self.measure(&label);
             let box_h = ((FONT_SIZE + PRICE_LABEL_PADDING_TB * 2.0) * dpr).round();
@@ -1589,6 +1603,7 @@ impl ChartInner {
             ctx.set_fill_style_str(WHITE_CSS);
             let text_x = (pane_w + AXIS_TICK_LENGTH + PRICE_PADDING_INNER) * dpr;
             ctx.fill_text(&label, text_x, (snap_y * dpr).round())?;
+            }
         }
 
         if x_css <= pane_w {
