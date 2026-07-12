@@ -61,13 +61,25 @@ function css_size() {
   return { w: Math.max(1, r.width), h: Math.max(1, r.height), dpr: window.devicePixelRatio || 1 };
 }
 
+// Sets both the bitmap (backing store) and the CSS box, pinning the CSS box to
+// bitmap/dpr so the backing store maps 1:1 onto physical device pixels. With a plain
+// width:100% box the displayed size can be fractional (safe-area insets, browser
+// chrome, flex rounding), so bitmap/box != exactly dpr and the browser resamples the
+// crisp bitmap — which on hi-dpi reads as soft, "thicker" 1px wicks. Returns the
+// snapped CSS size to hand to the engine (its media space then matches the box).
+function set_size(bw, bh, dpr) {
+  for (const c of [pane, overlay]) {
+    c.width = bw;
+    c.height = bh;
+    c.style.width = bw / dpr + "px";
+    c.style.height = bh / dpr + "px";
+  }
+  return { w: bw / dpr, h: bh / dpr, dpr };
+}
+
 function apply_bitmap_size() {
   const { w, h, dpr } = css_size();
-  for (const c of [pane, overlay]) {
-    c.width = Math.max(1, Math.round(w * dpr));
-    c.height = Math.max(1, Math.round(h * dpr));
-  }
-  return { w, h, dpr };
+  return set_size(Math.max(1, Math.round(w * dpr)), Math.max(1, Math.round(h * dpr)), dpr);
 }
 
 // deterministic random-walk OHLC data (hourly bars ending "now")
@@ -144,8 +156,8 @@ function ensure_sized() {
   const { w, h, dpr } = css_size();
   const bw = Math.max(1, Math.round(w * dpr)), bh = Math.max(1, Math.round(h * dpr));
   if (pane.width !== bw || pane.height !== bh) {
-    for (const c of [pane, overlay]) { c.width = bw; c.height = bh; }
-    chart.resize(w, h, dpr);
+    const s = set_size(bw, bh, dpr);
+    chart.resize(s.w, s.h, dpr);
     return true;
   }
   return false;
