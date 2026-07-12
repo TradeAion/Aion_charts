@@ -25,6 +25,7 @@ use aion_core::format::time_formatter::{
     format_crosshair_time, format_tick_label, weight_to_tick_mark_type,
 };
 use aion_core::model::data_layer::{DataLayer, SeriesId};
+use aion_core::model::data_validation::{sanitize_ohlc, sanitize_point};
 use aion_core::model::magnet::{magnet_snap, CrosshairMode};
 use aion_core::model::plot_list::{PlotList, PlotValueIndex};
 use aion_core::model::price_range::PriceRange;
@@ -469,26 +470,41 @@ impl ChartInner {
         low: &[f64],
         close: &[f64],
     ) {
-        let n = times.len();
-        assert!(
-            n == open.len() && n == high.len() && n == low.len() && n == close.len(),
-            "time/OHLC arrays must have equal length"
-        );
-        self.data.set_data(
-            id as SeriesId,
-            times.iter().map(|&t| t as i64).collect(),
-            open.to_vec(),
-            high.to_vec(),
-            low.to_vec(),
-            close.to_vec(),
-        );
+        // Repair messy feed data (out-of-order, duplicate times, NaN/Inf, length mismatch) at the
+        // boundary so the DataLayer's ascending-unique-finite contract always holds — a malformed
+        // feed yields a warning and a rendered chart, never a wasm panic (roadmap Phase A3).
+        let s = match sanitize_ohlc(times, open, high, low, close) {
+            Ok(s) => s,
+            Err(e) => {
+                web_sys::console::warn_1(&format!("aion: set_series_data rejected — {e}").into());
+                return;
+            }
+        };
+        if !s.report.is_clean() {
+            web_sys::console::warn_1(
+                &format!(
+                    "aion: set_series_data sanitized data — accepted {}, dropped {} invalid, {} duplicate{}",
+                    s.report.accepted,
+                    s.report.dropped_invalid,
+                    s.report.dropped_duplicate,
+                    if s.report.reordered { ", reordered" } else { "" },
+                )
+                .into(),
+            );
+        }
+        self.data.set_data(id as SeriesId, s.times, s.open, s.high, s.low, s.close);
         self.on_time_points_changed();
     }
 
     /// Streaming update of the main series (append new time or replace last).
     pub fn update_bar(&mut self, time: f64, open: f64, high: f64, low: f64, close: f64) {
         let id = self.series[0].id;
-        self.data.update(id, time as i64, [open, high, low, close]);
+        // Drop a bad tick rather than corrupting the series (roadmap Phase A3).
+        let Some((t, values)) = sanitize_point(time, [open, high, low, close]) else {
+            web_sys::console::warn_1(&"aion: update_bar dropped a non-finite point".into());
+            return;
+        };
+        self.data.update(id, t, values);
         self.on_time_points_changed();
     }
 
