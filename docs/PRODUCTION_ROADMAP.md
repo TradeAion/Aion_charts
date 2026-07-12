@@ -139,3 +139,11 @@ Progress is appended here as phases land (newest last).
   `price_to_coordinate` / `coordinate_to_price`, `time_to_coordinate` / `coordinate_to_time`,
   `visible_logical_range` + setter, `visible_time_range` + setter. Verified in-browser: price/time
   roundtrips exact, off-chart queries return `undefined`, setters apply.
+- 2026-07-12 — **A2 done** (options system). `aion_core::options`: serde-backed structs with
+  LWC-matching defaults (layout/grid/crosshair) + `ChartOptionsStore` doing LWC `merge`-semantics
+  deep-merge (nested objects merge key-by-key; scalars/arrays/null replace). `aion_render::Color`
+  gained `#rgb`/`#rgba` shorthand + `rgb()/rgba()` parsing. Wired `apply_options` / `options_json`
+  into the wasm chart; grid colors+visibility, crosshair line colors+visibility, and the
+  background clear color now come from options. Verified in-browser: partial patches deep-merge
+  (siblings survive, patches accumulate) and reach pixels (bg 94.8% red, blue grid lines present).
+  15 new unit tests. Next: A1 (real TS façade), A5 (subscriptions).

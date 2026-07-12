@@ -30,6 +30,7 @@ use aion_core::model::magnet::{magnet_snap, CrosshairMode};
 use aion_core::model::plot_list::{PlotList, PlotValueIndex};
 use aion_core::model::price_range::PriceRange;
 use aion_core::model::range::{LogicalRange, StrictRange};
+use aion_core::options::{crosshair_mode, ChartOptions, ChartOptionsStore};
 use aion_core::TimePointIndex;
 use aion_core::scale::price_scale_core::{PriceScaleCore, PriceScaleCoreOptions};
 use aion_core::scale::time_scale_core::{TimeScaleCore, TimeScaleOptions};
@@ -112,6 +113,15 @@ impl SeriesKind {
     }
 }
 
+fn crosshair_mode_from_u8(mode: u8) -> CrosshairMode {
+    match mode {
+        crosshair_mode::NORMAL => CrosshairMode::Normal,
+        crosshair_mode::HIDDEN => CrosshairMode::Hidden,
+        crosshair_mode::MAGNET_OHLC => CrosshairMode::MagnetOhlc,
+        _ => CrosshairMode::Magnet,
+    }
+}
+
 struct SeriesEntry {
     id: SeriesId,
     kind: SeriesKind,
@@ -142,6 +152,9 @@ struct ChartInner {
     data: DataLayer,
     series: Vec<SeriesEntry>,
     tick_marks: TimeTickMarks,
+    /// Accumulated chart options (deep-merged across `apply_options`); drives grid/crosshair/
+    /// background colors in the render path (roadmap Phase A2).
+    options: ChartOptionsStore,
     crosshair_mode: CrosshairMode,
     time_visible: bool,
     css_width: f64,
@@ -299,6 +312,7 @@ pub async fn create_chart(
         data,
         series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR }],
         tick_marks: TimeTickMarks::new(),
+        options: ChartOptionsStore::new(),
         crosshair_mode: CrosshairMode::Magnet,
         time_visible: true,
         css_width,
@@ -408,6 +422,18 @@ impl AionChart {
     /// 0 = normal, 1 = magnet (LWC default), 2 = hidden, 3 = magnet OHLC.
     pub fn set_crosshair_mode(&mut self, mode: u8) {
         self.inner.borrow_mut().set_crosshair_mode(mode);
+    }
+
+    /// Deep-merge a JSON options patch (LWC `applyOptions` semantics) — e.g.
+    /// `{"grid":{"vertLines":{"color":"#334"}},"layout":{"background":{"color":"#111"}}}`.
+    /// Malformed JSON is ignored with a console warning. Call `render()` after (roadmap Phase A2).
+    pub fn apply_options(&mut self, patch_json: &str) {
+        self.inner.borrow_mut().apply_options(patch_json);
+    }
+
+    /// Current (deep-merged) chart options as a JSON string.
+    pub fn options_json(&self) -> String {
+        self.inner.borrow().options_json()
     }
 
     /// Manual resize (still available for embedders not using `enable_auto_resize`, and for tests).
@@ -563,12 +589,34 @@ impl ChartInner {
 
     /// 0 = normal, 1 = magnet (LWC default), 2 = hidden, 3 = magnet OHLC.
     pub fn set_crosshair_mode(&mut self, mode: u8) {
-        self.crosshair_mode = match mode {
-            0 => CrosshairMode::Normal,
-            2 => CrosshairMode::Hidden,
-            3 => CrosshairMode::MagnetOhlc,
-            _ => CrosshairMode::Magnet,
-        };
+        self.crosshair_mode = crosshair_mode_from_u8(mode);
+        // keep the options store consistent so `options()` reflects it
+        self.options.apply(&aion_core::options::patch(
+            "crosshair",
+            serde_json::json!({ "mode": mode }),
+        ));
+    }
+
+    /// Deep-merge a JSON options patch and apply the runtime-affecting fields (crosshair mode).
+    /// Colors (grid/crosshair/background) are read from the store during `render`. Call `render()`
+    /// after to repaint (roadmap Phase A2).
+    pub fn apply_options(&mut self, patch_json: &str) {
+        if let Err(e) = self.options.apply_str(patch_json) {
+            web_sys::console::warn_1(&format!("aion: apply_options ignored malformed patch — {e}").into());
+            return;
+        }
+        // Re-derive runtime state that isn't read straight from the store each frame.
+        self.crosshair_mode = crosshair_mode_from_u8(self.options.get().crosshair.mode);
+    }
+
+    /// Current options as a JSON string (round-trips the deep-merged state back to JS).
+    pub fn options_json(&self) -> String {
+        self.options.value().to_string()
+    }
+
+    /// Typed snapshot of the current options for the render path.
+    fn opts(&self) -> ChartOptions {
+        self.options.get()
     }
 
     pub fn resize(&mut self, css_width: f64, css_height: f64, dpr: f64) {
@@ -803,6 +851,17 @@ impl ChartInner {
             .map_err(|e| JsValue::from_str(&format!("get_current_texture failed: {e}")))?;
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+        // Background clear color from layout.background (roadmap Phase A2). For the non-sRGB
+        // surface, a CSS byte maps straight to the 0..1 channel (no gamma conversion), matching
+        // how the premultiplied quad colors are written.
+        let bg = Color::parse_css(&self.opts().layout.background.color).unwrap_or(Color::rgb(0xff, 0xff, 0xff));
+        let bg_clear = wgpu::Color {
+            r: bg.r() as f64 / 255.0,
+            g: bg.g() as f64 / 255.0,
+            b: bg.b() as f64 / 255.0,
+            a: 1.0,
+        };
+
         render_frame(
             &self.gfx.device,
             &self.gfx.queue,
@@ -810,7 +869,7 @@ impl ChartInner {
             &view,
             self.gfx.config.width,
             self.gfx.config.height,
-            wgpu::Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
+            bg_clear,
             &self.gfx.quad_renderer,
             &self.gfx.tex_renderer,
             &self.gfx.tri_renderer,
@@ -909,16 +968,23 @@ impl ChartInner {
     #[allow(clippy::too_many_arguments)]
     fn build_grid(&self, prims: &mut Vec<Prim>, time_marks: &[(i64, u8)], from: i64, to: i64, pane_w_px: i32, pane_h_px: i32, hpr: f64, vpr: f64) {
         let line_width = 1f64.max(hpr.floor()) as i32;
-        for &(index, _weight) in time_marks {
-            if index < from || index > to {
-                continue;
+        let grid = self.opts().grid;
+        let vert_color = Color::parse_css(&grid.vert_lines.color).unwrap_or(GRID_COLOR);
+        let horz_color = Color::parse_css(&grid.horz_lines.color).unwrap_or(GRID_COLOR);
+        if grid.vert_lines.visible {
+            for &(index, _weight) in time_marks {
+                if index < from || index > to {
+                    continue;
+                }
+                let x = (self.time_scale.index_to_coordinate(index) * hpr).round() as i32;
+                prims.push(Prim::VLine { x, y0: -line_width, y1: pane_h_px + line_width, width: line_width, style: LineStyle::Solid, color: vert_color });
             }
-            let x = (self.time_scale.index_to_coordinate(index) * hpr).round() as i32;
-            prims.push(Prim::VLine { x, y0: -line_width, y1: pane_h_px + line_width, width: line_width, style: LineStyle::Solid, color: GRID_COLOR });
         }
-        for mark in self.price_scale.build_tick_marks(100, 0.0) {
-            let y = (mark.coord * vpr).round() as i32;
-            prims.push(Prim::HLine { y, x0: -line_width, x1: pane_w_px + line_width, width: line_width, style: LineStyle::Solid, color: GRID_COLOR });
+        if grid.horz_lines.visible {
+            for mark in self.price_scale.build_tick_marks(100, 0.0) {
+                let y = (mark.coord * vpr).round() as i32;
+                prims.push(Prim::HLine { y, x0: -line_width, x1: pane_w_px + line_width, width: line_width, style: LineStyle::Solid, color: horz_color });
+            }
         }
     }
 
@@ -1066,8 +1132,15 @@ impl ChartInner {
         let (_price, snap_y) = self.crosshair_snap(x_css, y_css);
         let line_width = 1f64.max(hpr.floor()) as i32;
 
-        prims.push(Prim::VLine { x: (snapped_x * hpr).round() as i32, y0: 0, y1: pane_h_px, width: line_width, style: LineStyle::LargeDashed, color: CROSSHAIR_COLOR });
-        prims.push(Prim::HLine { y: (snap_y * vpr).round() as i32, x0: 0, x1: pane_w_px, width: line_width, style: LineStyle::LargeDashed, color: CROSSHAIR_COLOR });
+        let ch = self.opts().crosshair;
+        let vert_color = Color::parse_css(&ch.vert_line.color).unwrap_or(CROSSHAIR_COLOR);
+        let horz_color = Color::parse_css(&ch.horz_line.color).unwrap_or(CROSSHAIR_COLOR);
+        if ch.vert_line.visible {
+            prims.push(Prim::VLine { x: (snapped_x * hpr).round() as i32, y0: 0, y1: pane_h_px, width: line_width, style: LineStyle::LargeDashed, color: vert_color });
+        }
+        if ch.horz_line.visible {
+            prims.push(Prim::HLine { y: (snap_y * vpr).round() as i32, x0: 0, x1: pane_w_px, width: line_width, style: LineStyle::LargeDashed, color: horz_color });
+        }
 
         // crosshair marker on line/area main series
         if matches!(self.series[0].kind, SeriesKind::Line | SeriesKind::Area) {

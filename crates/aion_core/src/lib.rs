@@ -8,6 +8,7 @@
 pub mod format;
 pub mod helpers;
 pub mod model;
+pub mod options;
 pub mod scale;
 
 /// Media-space (CSS px) coordinate. Bitmap conversion happens at encode time only.

@@ -1,0 +1,375 @@
+//! Chart option structs, LWC-matching defaults, and `apply_options` deep-merge (roadmap Phase A2).
+//!
+//! lightweight-charts exposes deeply-nested option objects and an `applyOptions(partial)` that
+//! **deep-merges** a partial patch into the current options (`helpers/merge.ts`): nested objects
+//! are merged key-by-key so an update to `grid.vertLines.color` leaves every sibling untouched,
+//! while scalars and arrays replace wholesale. We reproduce that contract exactly.
+//!
+//! Rather than hand-roll a merge per struct, options are held as a canonical `serde_json::Value`
+//! seeded from the typed defaults; a patch (also JSON, straight from the JS boundary) is
+//! deep-merged into it, and typed views are produced by deserializing on demand. This mirrors
+//! LWC's runtime object merge 1:1 and makes partial updates and round-tripping free.
+//!
+//! Colors are kept as CSS strings (as in LWC); the render layer parses them. `LineStyle` is the
+//! numeric wire form LWC uses (0 Solid, 1 Dotted, 2 Dashed, 3 LargeDashed, 4 SparseDotted).
+//!
+//! Scope note: this covers the chart-level visual groups (layout, grid, crosshair) plus the
+//! top-level flags. Time-scale and price-scale options currently live in their own core structs
+//! (`TimeScaleOptions`, `PriceScaleCoreOptions`) and will be folded into this store in a later
+//! Phase B pass; per-series options land with the series work.
+
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+
+/// LWC `LineStyle` (`renderers/draw-line.ts`), numeric wire form.
+pub mod line_style {
+    pub const SOLID: u8 = 0;
+    pub const DOTTED: u8 = 1;
+    pub const DASHED: u8 = 2;
+    pub const LARGE_DASHED: u8 = 3;
+    pub const SPARSE_DOTTED: u8 = 4;
+}
+
+/// LWC `CrosshairMode` (`model/crosshair.ts`), numeric wire form.
+pub mod crosshair_mode {
+    pub const NORMAL: u8 = 0;
+    pub const MAGNET: u8 = 1;
+    pub const HIDDEN: u8 = 2;
+    pub const MAGNET_OHLC: u8 = 3;
+}
+
+fn white() -> String {
+    "#FFFFFF".into()
+}
+fn text_color() -> String {
+    "#191919".into()
+}
+fn grid_color() -> String {
+    "#D6DCDE".into()
+}
+fn crosshair_color() -> String {
+    "#9598A1".into()
+}
+fn crosshair_label_bg() -> String {
+    "#131722".into()
+}
+fn default_font_family() -> String {
+    // `helpers/make-font.ts` defaultFontFamily.
+    "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif".into()
+}
+
+/// `layout.background` — solid only for now (LWC also has a vertical gradient variant).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BackgroundOptions {
+    /// `"solid"` | `"gradient"` (only solid is honored by the renderer today).
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub color: String,
+    #[serde(rename = "topColor")]
+    pub top_color: String,
+    #[serde(rename = "bottomColor")]
+    pub bottom_color: String,
+}
+
+impl Default for BackgroundOptions {
+    fn default() -> Self {
+        Self {
+            kind: "solid".into(),
+            color: white(),
+            top_color: white(),
+            bottom_color: white(),
+        }
+    }
+}
+
+/// `layout` — background, text, font (`api/options/layout-options-defaults.ts`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LayoutOptions {
+    pub background: BackgroundOptions,
+    #[serde(rename = "textColor")]
+    pub text_color: String,
+    #[serde(rename = "fontSize")]
+    pub font_size: f64,
+    #[serde(rename = "fontFamily")]
+    pub font_family: String,
+    #[serde(rename = "attributionLogo")]
+    pub attribution_logo: bool,
+}
+
+impl Default for LayoutOptions {
+    fn default() -> Self {
+        Self {
+            background: BackgroundOptions::default(),
+            text_color: text_color(),
+            font_size: 12.0,
+            font_family: default_font_family(),
+            attribution_logo: true,
+        }
+    }
+}
+
+/// A single family of grid lines (`api/options/grid-options-defaults.ts`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GridLineOptions {
+    pub color: String,
+    /// [`line_style`] value.
+    pub style: u8,
+    pub visible: bool,
+}
+
+impl Default for GridLineOptions {
+    fn default() -> Self {
+        Self { color: grid_color(), style: line_style::SOLID, visible: true }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GridOptions {
+    #[serde(rename = "vertLines")]
+    pub vert_lines: GridLineOptions,
+    #[serde(rename = "horzLines")]
+    pub horz_lines: GridLineOptions,
+}
+
+impl Default for GridOptions {
+    fn default() -> Self {
+        Self { vert_lines: GridLineOptions::default(), horz_lines: GridLineOptions::default() }
+    }
+}
+
+/// One crosshair line (`api/options/crosshair-options-defaults.ts`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CrosshairLineOptions {
+    pub color: String,
+    pub width: f64,
+    /// [`line_style`] value (default LargeDashed).
+    pub style: u8,
+    pub visible: bool,
+    #[serde(rename = "labelVisible")]
+    pub label_visible: bool,
+    #[serde(rename = "labelBackgroundColor")]
+    pub label_background_color: String,
+}
+
+impl Default for CrosshairLineOptions {
+    fn default() -> Self {
+        Self {
+            color: crosshair_color(),
+            width: 1.0,
+            style: line_style::LARGE_DASHED,
+            visible: true,
+            label_visible: true,
+            label_background_color: crosshair_label_bg(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CrosshairOptions {
+    #[serde(rename = "vertLine")]
+    pub vert_line: CrosshairLineOptions,
+    #[serde(rename = "horzLine")]
+    pub horz_line: CrosshairLineOptions,
+    /// [`crosshair_mode`] value (default Magnet).
+    pub mode: u8,
+}
+
+impl Default for CrosshairOptions {
+    fn default() -> Self {
+        Self {
+            vert_line: CrosshairLineOptions::default(),
+            horz_line: CrosshairLineOptions::default(),
+            mode: crosshair_mode::MAGNET,
+        }
+    }
+}
+
+/// Chart-level options (`api/options/chart-options-defaults.ts`, visual subset).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ChartOptions {
+    pub layout: LayoutOptions,
+    pub grid: GridOptions,
+    pub crosshair: CrosshairOptions,
+    #[serde(rename = "autoSize")]
+    pub auto_size: bool,
+    #[serde(rename = "hoveredSeriesOnTop")]
+    pub hovered_series_on_top: bool,
+}
+
+impl Default for ChartOptions {
+    fn default() -> Self {
+        Self {
+            layout: LayoutOptions::default(),
+            grid: GridOptions::default(),
+            crosshair: CrosshairOptions::default(),
+            auto_size: false,
+            hovered_series_on_top: true,
+        }
+    }
+}
+
+/// Recursively deep-merge `patch` into `dst`, matching LWC `helpers/merge.ts`: when both sides of
+/// a key are JSON objects, merge them key-by-key; otherwise `patch` replaces `dst` wholesale
+/// (scalars, arrays, and null all overwrite). A `null` in `patch` explicitly sets the key to null.
+pub fn deep_merge(dst: &mut Value, patch: &Value) {
+    match (dst, patch) {
+        (Value::Object(d), Value::Object(p)) => {
+            for (k, pv) in p {
+                match d.get_mut(k) {
+                    Some(dv) if dv.is_object() && pv.is_object() => deep_merge(dv, pv),
+                    _ => {
+                        d.insert(k.clone(), pv.clone());
+                    }
+                }
+            }
+        }
+        (d, p) => *d = p.clone(),
+    }
+}
+
+/// Accumulates chart options across successive `apply_options` calls. Holds the full options as a
+/// canonical JSON value so every patch deep-merges into the live state (not back into defaults).
+#[derive(Clone, Debug)]
+pub struct ChartOptionsStore {
+    value: Value,
+}
+
+impl Default for ChartOptionsStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ChartOptionsStore {
+    /// Start from the LWC-matching defaults.
+    pub fn new() -> Self {
+        Self { value: serde_json::to_value(ChartOptions::default()).expect("options serialize") }
+    }
+
+    /// Deep-merge a JSON patch object into the current options. A non-object patch is ignored
+    /// (options are always an object at the root).
+    pub fn apply(&mut self, patch: &Value) {
+        if patch.is_object() {
+            deep_merge(&mut self.value, patch);
+        }
+    }
+
+    /// Deep-merge a JSON patch string (as it arrives from the JS boundary). Returns the parse
+    /// error for a malformed patch; on error the current options are left unchanged.
+    pub fn apply_str(&mut self, patch: &str) -> Result<(), serde_json::Error> {
+        let patch: Value = serde_json::from_str(patch)?;
+        self.apply(&patch);
+        Ok(())
+    }
+
+    /// Typed view of the current options.
+    pub fn get(&self) -> ChartOptions {
+        serde_json::from_value(self.value.clone()).unwrap_or_default()
+    }
+
+    /// The raw merged JSON (for round-tripping back to JS via `options()`).
+    pub fn value(&self) -> &Value {
+        &self.value
+    }
+}
+
+/// Convenience: build a one-key patch object `{ key: value }` for tests/host glue.
+pub fn patch(key: &str, value: Value) -> Value {
+    let mut m = Map::new();
+    m.insert(key.into(), value);
+    Value::Object(m)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn defaults_match_lwc() {
+        let o = ChartOptions::default();
+        assert_eq!(o.layout.background.color, "#FFFFFF");
+        assert_eq!(o.layout.text_color, "#191919");
+        assert_eq!(o.layout.font_size, 12.0);
+        assert_eq!(o.grid.vert_lines.color, "#D6DCDE");
+        assert_eq!(o.grid.horz_lines.style, line_style::SOLID);
+        assert_eq!(o.crosshair.mode, crosshair_mode::MAGNET);
+        assert_eq!(o.crosshair.vert_line.style, line_style::LARGE_DASHED);
+        assert_eq!(o.crosshair.horz_line.label_background_color, "#131722");
+        assert!(o.hovered_series_on_top);
+        assert!(!o.auto_size);
+    }
+
+    #[test]
+    fn deep_merge_overrides_nested_leaf_only() {
+        let mut store = ChartOptionsStore::new();
+        store.apply(&json!({ "grid": { "vertLines": { "color": "#000000" } } }));
+        let o = store.get();
+        // the targeted leaf changed...
+        assert_eq!(o.grid.vert_lines.color, "#000000");
+        // ...siblings within the same object survived...
+        assert_eq!(o.grid.vert_lines.style, line_style::SOLID);
+        assert!(o.grid.vert_lines.visible);
+        // ...and the neighbouring family is untouched.
+        assert_eq!(o.grid.horz_lines.color, "#D6DCDE");
+    }
+
+    #[test]
+    fn successive_applies_accumulate() {
+        let mut store = ChartOptionsStore::new();
+        store.apply(&json!({ "grid": { "vertLines": { "color": "#111111" } } }));
+        store.apply(&json!({ "crosshair": { "mode": crosshair_mode::NORMAL } }));
+        let o = store.get();
+        // first patch persists through the second
+        assert_eq!(o.grid.vert_lines.color, "#111111");
+        assert_eq!(o.crosshair.mode, crosshair_mode::NORMAL);
+        // and unrelated defaults remain
+        assert_eq!(o.layout.background.color, "#FFFFFF");
+    }
+
+    #[test]
+    fn scalar_and_bool_replace() {
+        let mut store = ChartOptionsStore::new();
+        store.apply(&json!({ "layout": { "fontSize": 16, "attributionLogo": false } }));
+        let o = store.get();
+        assert_eq!(o.layout.font_size, 16.0);
+        assert!(!o.layout.attribution_logo);
+    }
+
+    #[test]
+    fn apply_str_parses_and_merges() {
+        let mut store = ChartOptionsStore::new();
+        store.apply_str(r##"{ "layout": { "background": { "color": "#0d0d0d" } } }"##).unwrap();
+        assert_eq!(store.get().layout.background.color, "#0d0d0d");
+    }
+
+    #[test]
+    fn apply_str_rejects_malformed_without_mutating() {
+        let mut store = ChartOptionsStore::new();
+        let before = store.get();
+        assert!(store.apply_str("{ not valid json ").is_err());
+        assert_eq!(store.get(), before);
+    }
+
+    #[test]
+    fn unknown_keys_are_ignored_on_read() {
+        // A patch with keys we don't model must not break deserialization of the ones we do.
+        let mut store = ChartOptionsStore::new();
+        store.apply(&json!({ "grid": { "vertLines": { "color": "#abcabc" } }, "somethingNew": 42 }));
+        assert_eq!(store.get().grid.vert_lines.color, "#abcabc");
+    }
+
+    #[test]
+    fn deep_merge_null_overwrites() {
+        let mut v = json!({ "a": { "b": 1 } });
+        deep_merge(&mut v, &json!({ "a": { "b": null } }));
+        assert_eq!(v, json!({ "a": { "b": null } }));
+    }
+}

@@ -12,10 +12,23 @@ impl Color {
         Self::rgba(r, g, b, 0xFF)
     }
 
-    /// Parses "#RRGGBB" or "#RRGGBBAA".
+    /// Parses "#RGB", "#RGBA", "#RRGGBB", or "#RRGGBBAA".
     pub fn from_hex(s: &str) -> Option<Self> {
         let s = s.strip_prefix('#')?;
         match s.len() {
+            // shorthand: each nibble is doubled (#abc -> #aabbcc)
+            3 | 4 => {
+                let mut out: u32 = 0;
+                for (i, c) in s.chars().enumerate() {
+                    let n = c.to_digit(16)?;
+                    let byte = (n * 17) as u32; // 0xN -> 0xNN
+                    out |= byte << (8 * (3 - i));
+                }
+                if s.len() == 3 {
+                    out |= 0xFF; // opaque
+                }
+                Some(Color(out))
+            }
             6 => {
                 let v = u32::from_str_radix(s, 16).ok()?;
                 Some(Color((v << 8) | 0xFF))
@@ -23,6 +36,32 @@ impl Color {
             8 => u32::from_str_radix(s, 16).ok().map(Color),
             _ => None,
         }
+    }
+
+    /// Parses a CSS color string: hex (`#rgb`/`#rgba`/`#rrggbb`/`#rrggbbaa`) or the functional
+    /// `rgb(r, g, b)` / `rgba(r, g, b, a)` forms (r/g/b are 0–255 integers, a is 0–1 float).
+    /// Whitespace-tolerant; returns `None` for anything unrecognized (named colors, hsl, etc.).
+    pub fn parse_css(s: &str) -> Option<Self> {
+        let s = s.trim();
+        if s.starts_with('#') {
+            return Self::from_hex(s);
+        }
+        let lower = s.to_ascii_lowercase();
+        let inner = lower.strip_prefix("rgba(").or_else(|| lower.strip_prefix("rgb("))?;
+        let inner = inner.strip_suffix(')')?;
+        let mut parts = inner.split(',').map(str::trim);
+        let r: f64 = parts.next()?.parse().ok()?;
+        let g: f64 = parts.next()?.parse().ok()?;
+        let b: f64 = parts.next()?.parse().ok()?;
+        let a: f64 = match parts.next() {
+            Some(a) => a.parse().ok()?,
+            None => 1.0,
+        };
+        if parts.next().is_some() {
+            return None; // too many components
+        }
+        let clamp8 = |v: f64| v.round().clamp(0.0, 255.0) as u8;
+        Some(Color::rgba(clamp8(r), clamp8(g), clamp8(b), clamp8(a * 255.0)))
     }
 
     pub const fn r(&self) -> u8 {
@@ -68,6 +107,28 @@ mod tests {
         assert_eq!(Color::from_hex("#26a69a"), Some(Color::rgb(0x26, 0xa6, 0x9a)));
         assert_eq!(Color::from_hex("#26a69a80"), Some(Color::rgba(0x26, 0xa6, 0x9a, 0x80)));
         assert_eq!(Color::from_hex("oops"), None);
+    }
+
+    #[test]
+    fn hex_shorthand() {
+        assert_eq!(Color::from_hex("#abc"), Some(Color::rgb(0xaa, 0xbb, 0xcc)));
+        assert_eq!(Color::from_hex("#f00"), Some(Color::rgb(0xff, 0x00, 0x00)));
+        // #RGBA -> alpha nibble doubled
+        assert_eq!(Color::from_hex("#0f08"), Some(Color::rgba(0x00, 0xff, 0x00, 0x88)));
+    }
+
+    #[test]
+    fn css_functional_parsing() {
+        assert_eq!(Color::parse_css("rgb(38, 166, 154)"), Some(Color::rgb(0x26, 0xa6, 0x9a)));
+        assert_eq!(Color::parse_css("rgba(38,166,154,1)"), Some(Color::rgb(0x26, 0xa6, 0x9a)));
+        // half alpha rounds to 128
+        assert_eq!(Color::parse_css("rgba(0, 0, 0, 0.5)"), Some(Color::rgba(0, 0, 0, 128)));
+        // hex still works through parse_css
+        assert_eq!(Color::parse_css("  #FFFFFF "), Some(Color::rgb(0xff, 0xff, 0xff)));
+        // unsupported forms
+        assert_eq!(Color::parse_css("red"), None);
+        assert_eq!(Color::parse_css("rgb(1,2)"), None);
+        assert_eq!(Color::parse_css("rgb(1,2,3,4,5)"), None);
     }
 
     #[test]
