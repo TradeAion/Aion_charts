@@ -160,3 +160,14 @@ Progress is appended here as phases land (newest last).
   (LWC palette), overlay line series + `apply_options` deep-merge reach pixels, coordinate/range
   APIs return correct values, full chart screenshot. tsc + wasm builds green.
   Next: A5 (subscriptions — needs Rust→JS callback plumbing).
+- 2026-07-12 — **A5 done → Phase A COMPLETE.** Subscriptions: `subscribe_crosshair_move` /
+  `subscribe_click` (+ unsubscribe) delivering `mouse_event_params { time, logical, point,
+  series_data }`. Engine gained `hover_data(x)` (per-series OHLC at the hovered bar, flat
+  `[id,o,h,l,c,…]`) and `coordinate_to_logical(x)`; the façade owns the callback registry, builds
+  params, and fires from the gesture recognizer (move → crosshair, pointer-leave → empty params,
+  click). Demo grew a live OHLC legend driven by the subscription. Verified in-browser: move/leave/
+  click all fire with correct time, logical (bar 539), point, and full OHLC series_data; legend
+  reads "O 95.13 H 96.47 L 94.92 C 95.77" on hover.
+
+  **Phase A (the library shell) is done: installable, configurable, safe against bad data, with
+  coordinate + subscription APIs.** Next up: Phase B — multi-pane + overlay/volume price scales.

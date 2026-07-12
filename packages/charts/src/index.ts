@@ -51,6 +51,20 @@ export interface time_range {
   to: number;
 }
 
+/** Parameters delivered to crosshair-move and click subscribers (mirrors LWC `MouseEventParams`). */
+export interface mouse_event_params {
+  /** UTC seconds of the bar under the cursor, or `null` off the data. */
+  time: number | null;
+  /** Float logical (bar) index under the cursor, or `null` when there is no data. */
+  logical: number | null;
+  /** Cursor position in CSS px relative to the pane, or `null` when the cursor left the chart. */
+  point: { x: number; y: number } | null;
+  /** Per-series value at the hovered bar, keyed by the series handle. */
+  series_data: Map<series_api, ohlc_data | single_value_data>;
+}
+
+export type mouse_event_handler = (params: mouse_event_params) => void;
+
 /** Deeply-partial chart options; forwarded to the engine and deep-merged there (LWC semantics). */
 export type deep_partial<T> = { [K in keyof T]?: deep_partial<T[K]> };
 
@@ -118,6 +132,12 @@ export interface chart_api {
   time_scale(): time_scale_api;
   price_to_coordinate(price: number): number | null;
   coordinate_to_price(y: number): number | null;
+  /** Fire on every crosshair move (and once with `point: null` when the cursor leaves). */
+  subscribe_crosshair_move(handler: mouse_event_handler): void;
+  unsubscribe_crosshair_move(handler: mouse_event_handler): void;
+  /** Fire on a click/tap inside the pane. */
+  subscribe_click(handler: mouse_event_handler): void;
+  unsubscribe_click(handler: mouse_event_handler): void;
   /** Manually set the CSS size (and optional devicePixelRatio). Ignored while `autoSize` is on. */
   resize(width: number, height: number, dpr?: number): void;
   /** Force a repaint. Normally unnecessary — mutating calls repaint themselves. */
@@ -199,6 +219,7 @@ function parse_rgb(css: string): [number, number, number] | null {
 class series_impl implements series_api {
   constructor(
     readonly id: number,
+    readonly kind: series_kind,
     private readonly chart: chart_impl,
   ) {}
 
@@ -281,6 +302,9 @@ class chart_impl implements chart_api {
   private observer: ResizeObserver | null = null;
   private detach_gestures: (() => void) | null = null;
   private removed = false;
+  private readonly series_by_id = new Map<number, series_impl>();
+  private readonly crosshair_subs = new Set<mouse_event_handler>();
+  private readonly click_subs = new Set<mouse_event_handler>();
 
   constructor(
     readonly wasm: AionChart,
@@ -313,11 +337,65 @@ class chart_impl implements chart_api {
     } else {
       id = this.wasm.add_series(KIND_TO_U8[kind]);
     }
-    const series = new series_impl(id, this);
+    const series = new series_impl(id, kind, this);
+    this.series_by_id.set(id, series);
     if (options) {
       series.apply_options(options);
     }
     return series;
+  }
+
+  subscribe_crosshair_move(handler: mouse_event_handler): void {
+    this.crosshair_subs.add(handler);
+  }
+  unsubscribe_crosshair_move(handler: mouse_event_handler): void {
+    this.crosshair_subs.delete(handler);
+  }
+  subscribe_click(handler: mouse_event_handler): void {
+    this.click_subs.add(handler);
+  }
+  unsubscribe_click(handler: mouse_event_handler): void {
+    this.click_subs.delete(handler);
+  }
+
+  /** Build event params for a cursor at (x, y) in pane CSS px. */
+  private build_params(x: number, y: number): mouse_event_params {
+    const time = undef_to_null(this.wasm.coordinate_to_time(x));
+    const logical = undef_to_null(this.wasm.coordinate_to_logical(x));
+    const flat = this.wasm.hover_data(x); // groups of [id, o, h, l, c]
+    const series_data = new Map<series_api, ohlc_data | single_value_data>();
+    const t = time ?? 0;
+    for (let i = 0; i + 4 < flat.length; i += 5) {
+      const s = this.series_by_id.get(flat[i]!);
+      if (!s) continue;
+      const [o, h, l, c] = [flat[i + 1]!, flat[i + 2]!, flat[i + 3]!, flat[i + 4]!];
+      series_data.set(
+        s,
+        s.kind === "candlestick" || s.kind === "bar"
+          ? { time: t, open: o, high: h, low: l, close: c }
+          : { time: t, value: c },
+      );
+    }
+    return { time, logical, point: { x, y }, series_data };
+  }
+
+  /** Emit a crosshair-move event (called by the gesture recognizer). */
+  emit_crosshair(x: number, y: number): void {
+    if (this.crosshair_subs.size === 0) return;
+    const params = this.build_params(x, y);
+    for (const h of this.crosshair_subs) h(params);
+  }
+  /** Emit the "cursor left the chart" crosshair event (empty params). */
+  emit_crosshair_left(): void {
+    if (this.crosshair_subs.size === 0) return;
+    const params: mouse_event_params = { time: null, logical: null, point: null, series_data: new Map() };
+    for (const h of this.crosshair_subs) h(params);
+  }
+  /** Emit a click event (called by the gesture recognizer). */
+  emit_click(x: number, y: number): void {
+    if (this.click_subs.size === 0) return;
+    const params = this.build_params(x, y);
+    for (const h of this.click_subs) h(params);
   }
 
   apply_options(options: deep_partial<chart_options>): void {
@@ -420,6 +498,7 @@ function install_gestures(chart: chart_impl): () => void {
     if (dragging) wasm.scroll_move(p.x);
     wasm.set_crosshair(p.x, p.y);
     chart.repaint();
+    chart.emit_crosshair(p.x, p.y);
   };
   const end_pointer = (e: PointerEvent) => {
     pointers.delete(e.pointerId);
@@ -431,11 +510,16 @@ function install_gestures(chart: chart_impl): () => void {
       }
       wasm.clear_crosshair();
       chart.repaint();
+      chart.emit_crosshair_left();
     }
   };
   const on_dblclick = () => {
     wasm.fit_content();
     chart.repaint();
+  };
+  const on_click = (e: MouseEvent) => {
+    const r = overlay.getBoundingClientRect();
+    chart.emit_click(e.clientX - r.left, e.clientY - r.top);
   };
   const on_leave = (e: PointerEvent) => {
     if (e.pointerType === "mouse") end_pointer(e);
@@ -448,6 +532,7 @@ function install_gestures(chart: chart_impl): () => void {
   overlay.addEventListener("pointercancel", end_pointer);
   overlay.addEventListener("pointerleave", on_leave);
   overlay.addEventListener("dblclick", on_dblclick);
+  overlay.addEventListener("click", on_click);
 
   return () => {
     overlay.removeEventListener("wheel", on_wheel);
@@ -457,6 +542,7 @@ function install_gestures(chart: chart_impl): () => void {
     overlay.removeEventListener("pointercancel", end_pointer);
     overlay.removeEventListener("pointerleave", on_leave);
     overlay.removeEventListener("dblclick", on_dblclick);
+    overlay.removeEventListener("click", on_click);
   };
 }
 

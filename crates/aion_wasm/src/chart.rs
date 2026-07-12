@@ -487,6 +487,15 @@ impl AionChart {
     pub fn coordinate_to_time(&self, x_css: f64) -> Option<f64> {
         self.inner.borrow().coordinate_to_time(x_css)
     }
+    /// Float logical (bar) index under X (CSS px), or `undefined` if there is no data.
+    pub fn coordinate_to_logical(&self, x_css: f64) -> Option<f64> {
+        self.inner.borrow().coordinate_to_logical(x_css)
+    }
+    /// Per-series OHLC at the bar under X (CSS px) as a flat `[id, o, h, l, c, ...]` Float64Array
+    /// (see the inner method); empty off-chart. Backs crosshair/click `seriesData`.
+    pub fn hover_data(&self, x_css: f64) -> Vec<f64> {
+        self.inner.borrow().hover_data(x_css)
+    }
     /// Visible window in logical (bar) units as a `[from, to]` Float64Array (empty if no data).
     pub fn visible_logical_range(&self) -> Vec<f64> {
         self.inner.borrow().visible_logical_range()
@@ -732,6 +741,43 @@ impl ChartInner {
             return None;
         }
         Some(times[idx as usize] as f64)
+    }
+
+    /// Float logical (bar) index under an X coordinate, or `None` when there is no data. May be
+    /// negative or beyond the last bar (positions off the ends), matching LWC's `Logical`.
+    pub fn coordinate_to_logical(&self, x_css: f64) -> Option<f64> {
+        if self.data.merged_times().is_empty() {
+            return None;
+        }
+        Some(self.time_scale.coordinate_to_float_index(x_css))
+    }
+
+    /// Per-series values at the bar under an X coordinate, flattened as groups of five:
+    /// `[series_id, open, high, low, close, ...]`. Only series that actually have a point at that
+    /// bar are included (single-value series report the value in all four slots). Empty when the
+    /// cursor is off the data. Backs the façade's `seriesData` map for crosshair/click events.
+    pub fn hover_data(&self, x_css: f64) -> Vec<f64> {
+        use aion_core::model::plot_list::MismatchDirection;
+        let n = self.data.merged_times().len() as i64;
+        if n == 0 {
+            return Vec::new();
+        }
+        let index = self.time_scale.coordinate_to_index(x_css);
+        if index < 0 || index >= n {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for s in &self.series {
+            let plot = self.data.plot(s.id);
+            if let Some(row) = plot.search(index, MismatchDirection::None) {
+                out.push(s.id as f64);
+                out.push(plot.value_at(row, PlotValueIndex::Open));
+                out.push(plot.value_at(row, PlotValueIndex::High));
+                out.push(plot.value_at(row, PlotValueIndex::Low));
+                out.push(plot.value_at(row, PlotValueIndex::Close));
+            }
+        }
+        out
     }
 
     /// Visible window in logical (bar) units as `[from, to]`, or empty when there is no data.
