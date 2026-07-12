@@ -47,7 +47,11 @@ const container = document.getElementById("chart_container");
 const status = document.getElementById("status");
 
 function css_size() {
-  return { w: container.clientWidth, h: container.clientHeight, dpr: window.devicePixelRatio || 1 };
+  // getBoundingClientRect returns the ACTUAL displayed size in CSS px, so
+  // bitmap = css * dpr can never end up scaled by the browser (which would make
+  // text tiny / labels cramped). More reliable than clientWidth/Height.
+  const r = container.getBoundingClientRect();
+  return { w: Math.max(1, r.width), h: Math.max(1, r.height), dpr: window.devicePixelRatio || 1 };
 }
 
 function apply_bitmap_size() {
@@ -126,7 +130,7 @@ document.getElementById("cross_mode").addEventListener("change", (e) => {
   chart.set_crosshair_mode(Number(e.target.value)); rerender();
 });
 
-const rerender = () => { chart.render(); status.textContent = `1000 bars · dpr ${css_size().dpr} · spacing ${chart.bar_spacing().toFixed(2)}px`; };
+const rerender = () => { chart.render(); const s = css_size(); status.textContent = `css ${Math.round(s.w)}x${Math.round(s.h)} · bitmap ${pane.width}x${pane.height} · dpr ${s.dpr.toFixed(2)} · spacing ${chart.bar_spacing().toFixed(1)}px`; };
 
 // overlay is the topmost element, so it receives the pointer events
 overlay.addEventListener("wheel", (e) => {
