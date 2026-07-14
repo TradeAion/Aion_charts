@@ -251,3 +251,17 @@ Progress is appended here as phases land (newest last).
   the correct row; `handle.remove()` clears both. (Debugging note: manual `resize()` while
   `autoSize` is on desyncs the pane/overlay canvas sizes — verify without calling resize.) Next in
   B4: series markers (arrows/circles/squares above/below bars).
+- 2026-07-14 — **B4 increment 2 done → B4 & Phase B COMPLETE.** Per-bar series markers
+  (`series.set_markers([{ time, position, shape, color, text }])`): position `above|below|inBar`,
+  shape `circle|square|arrowUp|arrowDown`. Engine holds a `Vec<Marker>` per series; `build_markers`
+  places each on its series' scale/pane (above the high − gap, below the low + gap, or in-bar mid),
+  gated to the visible index range, emitting filled triangles (disc/square/arrow) into the pane's
+  MSAA tri group. Boundary is a JSON array (`set_series_markers`); the façade `JSON.stringify`s it
+  (added `serde` derive to `aion_wasm`). Verified in-browser: all four shapes render at the correct
+  positions/colors (pink circle above, green square below, blue arrowUp above, orange arrowDown
+  below, purple in-bar), `set_markers([])` clears them, no console errors. (Marker `text` label is
+  carried but not yet drawn — deferred to a later 2D-overlay increment.)
+  **Phase B (core feature parity) is done: multi-pane, overlay/volume scales, full series set +
+  line types/markers/baseline/animation, price lines, and series markers.** Next: Phase C
+  (platform — primitives, JS plugin recorder, watermark) or Phase D (hardening — goldens, Canvas2D
+  fallback), which the roadmap says can run in parallel.

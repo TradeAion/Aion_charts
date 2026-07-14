@@ -86,6 +86,8 @@ const data = generate_data(1000);
 const main = chart.add_series("candlestick");
 main.set_data(data);
 chart.time_scale().fit_content();
+window.__main = main; // debug/test handle
+window.__data = data;
 
 let sma_series = null;
 const sma_data = sma(data, 20);

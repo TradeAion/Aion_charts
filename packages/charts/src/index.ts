@@ -139,6 +139,20 @@ export interface price_line_api {
   readonly id: number;
 }
 
+/** A per-bar marker on a series (roadmap Phase B4). Mirrors lightweight-charts `SeriesMarker`. */
+export interface series_marker {
+  /** Bar time (must match a data point's time). */
+  time: number;
+  /** Placement relative to the bar. Default `"above"`. */
+  position?: "above" | "below" | "inBar";
+  /** Marker shape. Default `"circle"`. */
+  shape?: "circle" | "square" | "arrowUp" | "arrowDown";
+  /** Fill color (any CSS color the engine parses). Default series color. */
+  color?: string;
+  /** Optional label (reserved; rendered in a later increment). */
+  text?: string;
+}
+
 const KIND_TO_U8: Record<series_kind, number> = {
   candlestick: 0,
   bar: 1,
@@ -166,6 +180,8 @@ export interface series_api {
   move_to_pane(pane_index: number, stretch?: number): void;
   /** Add a horizontal price line on this series; returns a handle with `.remove()`. */
   create_price_line(options: price_line_options): price_line_api;
+  /** Replace this series' per-bar markers (pass `[]` to clear). Roadmap Phase B4. */
+  set_markers(markers: readonly series_marker[]): void;
   /** The engine-side series id. */
   readonly id: number;
 }
@@ -368,6 +384,11 @@ class series_impl implements series_api {
         chart.repaint();
       },
     };
+  }
+
+  set_markers(markers: readonly series_marker[]): void {
+    this.chart.wasm.set_series_markers(this.id, JSON.stringify(markers));
+    this.chart.repaint();
   }
 }
 

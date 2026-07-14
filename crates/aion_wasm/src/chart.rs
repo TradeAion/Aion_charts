@@ -42,7 +42,7 @@ use aion_render::draw_list::{LineStyle, LineType, Prim};
 use aion_render::histogram::{build_histogram, HistogramItem, HistogramParams};
 use aion_render::line::{
     build_area_fill, build_baseline, build_disc, build_line_stroke, AreaMesh, LineParams, LinePoint,
-    StrokeMesh,
+    LineVertex, StrokeMesh,
 };
 use aion_render_wgpu::{
     prims_to_instances, render_frame, DrawGroup, LabelAtlas, MsaaTarget, QuadRenderer,
@@ -132,6 +132,47 @@ fn line_style_from_u8(style: u8) -> LineStyle {
     }
 }
 
+/// Marker placement relative to its bar.
+mod marker_pos {
+    pub const ABOVE: u8 = 0;
+    pub const BELOW: u8 = 1;
+    pub const IN_BAR: u8 = 2;
+}
+/// Marker shape.
+mod marker_shape {
+    pub const CIRCLE: u8 = 0;
+    pub const SQUARE: u8 = 1;
+    pub const ARROW_UP: u8 = 2;
+    pub const ARROW_DOWN: u8 = 3;
+}
+
+/// A per-bar annotation on a series (roadmap Phase B4): a colored shape above/below/in the bar,
+/// with optional text. Mirrors lightweight-charts `setMarkers`.
+#[derive(Clone)]
+struct Marker {
+    time: i64,
+    position: u8,
+    shape: u8,
+    color: Color,
+    /// Optional label; rendered on the 2D overlay (a later increment).
+    #[allow(dead_code)]
+    text: String,
+}
+
+/// JSON shape accepted from the JS boundary for `set_series_markers`.
+#[derive(serde::Deserialize)]
+struct MarkerInput {
+    time: f64,
+    #[serde(default)]
+    position: String,
+    #[serde(default)]
+    shape: String,
+    #[serde(default)]
+    color: String,
+    #[serde(default)]
+    text: String,
+}
+
 /// A user-created horizontal price line on a series (roadmap Phase B4): a styled line at a fixed
 /// price plus a colored axis label. Mirrors lightweight-charts `createPriceLine`.
 #[derive(Clone)]
@@ -173,6 +214,8 @@ struct SeriesEntry {
     last_price_animation: bool,
     /// User-created horizontal price lines on this series (roadmap Phase B4).
     price_lines: Vec<PriceLine>,
+    /// Per-bar markers on this series (roadmap Phase B4).
+    markers: Vec<Marker>,
 }
 
 /// Height (css px) of the separator between stacked panes.
@@ -424,7 +467,7 @@ pub async fn create_chart(
         panes: vec![Pane::new()],
         price_formatter: PriceFormatter::default(),
         data,
-        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false, baseline: None, last_price_animation: false, price_lines: Vec::new() }],
+        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false, baseline: None, last_price_animation: false, price_lines: Vec::new(), markers: Vec::new() }],
         tick_marks: TimeTickMarks::new(),
         options: ChartOptionsStore::new(),
         crosshair_mode: CrosshairMode::Magnet,
@@ -556,6 +599,11 @@ impl AionChart {
     /// Remove a price line by id. Call `render()` after (roadmap Phase B4).
     pub fn remove_price_line(&mut self, id: u32) {
         self.inner.borrow_mut().remove_price_line(id);
+    }
+
+    /// Replace a series' markers from a JSON array. Call `render()` after (roadmap Phase B4).
+    pub fn set_series_markers(&mut self, series_id: u32, json: &str) {
+        self.inner.borrow_mut().set_series_markers(series_id, json);
     }
     /// Whether any series wants the last-price pulse (host uses this to run/stop its rAF loop).
     pub fn wants_animation(&self) -> bool {
@@ -704,7 +752,7 @@ impl ChartInner {
     /// Adds a series and returns its id. `kind`: 0 candles, 1 bars, 2 line, 3 area, 4 histogram.
     pub fn add_series(&mut self, kind: u8) -> u32 {
         let id = self.data.add_series();
-        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false, baseline: None, last_price_animation: false, price_lines: Vec::new() });
+        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false, baseline: None, last_price_animation: false, price_lines: Vec::new(), markers: Vec::new() });
         id as u32
     }
 
@@ -817,6 +865,34 @@ impl ChartInner {
     pub fn remove_price_line(&mut self, id: u32) {
         for s in &mut self.series {
             s.price_lines.retain(|pl| pl.id != id);
+        }
+    }
+
+    /// Replace a series' markers from a JSON array `[{time, position, shape, color, text}]`
+    /// (position: above|below|inBar; shape: circle|square|arrowUp|arrowDown). Roadmap Phase B4.
+    pub fn set_series_markers(&mut self, series_id: u32, json: &str) {
+        let inputs: Vec<MarkerInput> = serde_json::from_str(json).unwrap_or_default();
+        let markers: Vec<Marker> = inputs
+            .into_iter()
+            .map(|m| Marker {
+                time: m.time as i64,
+                position: match m.position.as_str() {
+                    "below" | "belowBar" => marker_pos::BELOW,
+                    "inBar" | "in" => marker_pos::IN_BAR,
+                    _ => marker_pos::ABOVE,
+                },
+                shape: match m.shape.as_str() {
+                    "square" => marker_shape::SQUARE,
+                    "arrowUp" | "arrow_up" => marker_shape::ARROW_UP,
+                    "arrowDown" | "arrow_down" => marker_shape::ARROW_DOWN,
+                    _ => marker_shape::CIRCLE,
+                },
+                color: Color::parse_css(&m.color).unwrap_or(Color::rgb(0x21, 0x96, 0xf3)),
+                text: m.text,
+            })
+            .collect();
+        if let Some(s) = self.series.iter_mut().find(|s| s.id == series_id as SeriesId) {
+            s.markers = markers;
         }
     }
 
@@ -1221,6 +1297,7 @@ impl ChartInner {
                     }
                 }
                 self.build_price_lines(pi, &mut prims, pane_w_px as i32, vpr);
+                self.build_markers(pi, &mut group, from, to, hpr, vpr);
                 if pi == 0 {
                     self.build_last_value_line(&mut prims, pane_w_px as i32, vpr);
                     self.build_last_price_pulse(&mut group, hpr, vpr);
@@ -1557,6 +1634,49 @@ impl ChartInner {
         build_baseline(&points, baseline_y, BASELINE_TOP_LINE, BASELINE_BOTTOM_LINE, BASELINE_TOP_FILL, BASELINE_BOTTOM_FILL, &params, &mut stroke, &mut fill);
         group.fill_tris.extend(fill.vertices.iter().map(mesh_vertex));
         group.stroke_tris.extend(stroke.vertices.iter().map(mesh_vertex));
+    }
+
+    /// Series markers (shapes above/below/in bars) for every series in `pane_index` (roadmap B4).
+    #[allow(clippy::too_many_arguments)]
+    fn build_markers(&self, pane_index: usize, group: &mut DrawGroup, from: i64, to: i64, hpr: f64, vpr: f64) {
+        let pane = &self.panes[pane_index];
+        let times = self.data.merged_times();
+        let size = 6.0 * vpr as f32;
+        let gap = 4.0 * vpr as f32;
+        for s in &self.series {
+            if s.pane_index.min(self.panes.len() - 1) != pane_index || s.markers.is_empty() {
+                continue;
+            }
+            let scale = if s.overlay { &pane.overlay_scale } else { &pane.price_scale };
+            if scale.is_empty() {
+                continue;
+            }
+            let plot = self.data.plot(s.id);
+            for m in &s.markers {
+                let Ok(pos) = times.binary_search(&m.time) else { continue };
+                let idx = pos as i64;
+                if idx < from || idx > to {
+                    continue;
+                }
+                let Some(row) = plot.search(idx, aion_core::model::plot_list::MismatchDirection::None) else { continue };
+                let high = plot.value_at(row, PlotValueIndex::High);
+                let low = plot.value_at(row, PlotValueIndex::Low);
+                let x = (self.time_scale.index_to_coordinate(idx) * hpr) as f32;
+                let y = match m.position {
+                    marker_pos::ABOVE => (scale.price_to_coordinate(high, high) * vpr) as f32 - size - gap,
+                    marker_pos::BELOW => (scale.price_to_coordinate(low, low) * vpr) as f32 + size + gap,
+                    _ => (scale.price_to_coordinate((high + low) / 2.0, high) * vpr) as f32,
+                };
+                let mut tris: Vec<LineVertex> = Vec::new();
+                match m.shape {
+                    marker_shape::SQUARE => push_square([x, y], size, m.color, &mut tris),
+                    marker_shape::ARROW_UP => push_arrow([x, y], size, m.color, true, &mut tris),
+                    marker_shape::ARROW_DOWN => push_arrow([x, y], size, m.color, false, &mut tris),
+                    _ => build_disc([x, y], size, m.color, &mut tris),
+                }
+                group.stroke_tris.extend(tris.iter().map(mesh_vertex));
+            }
+        }
     }
 
     /// Horizontal price lines for every series in `pane_index`, each on its series' scale.
@@ -1925,4 +2045,32 @@ impl ChartInner {
 
 fn mesh_vertex(v: &aion_render::line::LineVertex) -> TriVertex {
     TriVertex { pos: [v.x, v.y], color: v.color }
+}
+
+fn marker_rgba(c: Color) -> [f32; 4] {
+    [c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0, c.a() as f32 / 255.0]
+}
+
+/// Two triangles forming a filled square centered at `center` with half-extent `half`.
+fn push_square(center: [f32; 2], half: f32, color: Color, out: &mut Vec<LineVertex>) {
+    let col = marker_rgba(color);
+    let v = |x: f32, y: f32| LineVertex { x, y, color: col };
+    let (l, r, t, b) = (center[0] - half, center[0] + half, center[1] - half, center[1] + half);
+    out.push(v(l, t));
+    out.push(v(r, t));
+    out.push(v(r, b));
+    out.push(v(l, t));
+    out.push(v(r, b));
+    out.push(v(l, b));
+}
+
+/// A filled triangular arrow centered at `center`, pointing up (`up`) or down.
+fn push_arrow(center: [f32; 2], size: f32, color: Color, up: bool, out: &mut Vec<LineVertex>) {
+    let col = marker_rgba(color);
+    let v = |x: f32, y: f32| LineVertex { x, y, color: col };
+    let dir = if up { -1.0 } else { 1.0 };
+    // apex, then the two base corners
+    out.push(v(center[0], center[1] + dir * size));
+    out.push(v(center[0] - size, center[1] - dir * size));
+    out.push(v(center[0] + size, center[1] - dir * size));
 }
