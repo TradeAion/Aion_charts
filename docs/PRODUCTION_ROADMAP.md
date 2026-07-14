@@ -265,3 +265,13 @@ Progress is appended here as phases land (newest last).
   line types/markers/baseline/animation, price lines, and series markers.** Next: Phase C
   (platform — primitives, JS plugin recorder, watermark) or Phase D (hardening — goldens, Canvas2D
   fallback), which the roadmap says can run in parallel.
+- 2026-07-14 — **Phase B polish: per-series streaming `update()`.** `series.update()` previously
+  no-op'd with a warning for any non-primary series (only the main series streamed); the data layer
+  already supported per-series `update(id, …)`, so the gap was purely the wasm/façade wiring. Added
+  `update_series_bar(series_id, o,h,l,c)` to the wasm surface (main `update_bar` now delegates to it
+  with id 0; unknown ids warn instead of corrupting the data layer), and the façade routes
+  `series.update()` through it. Now overlays/indicators/volume can stream live. Verified via the
+  coordinate/range API (screenshot capture was wedged in the preview pane this session, unrelated to
+  the change): replace-last drives autoscale (price 130 → y≈108.8, was y≈196.6 for 100); appending a
+  new max time grows the merged set by exactly one (visible `to` 999→1000, `fit_content` spans it,
+  new time maps to a real on-canvas x). tsc + wasm builds green.

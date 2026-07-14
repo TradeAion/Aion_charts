@@ -564,6 +564,11 @@ impl AionChart {
         self.inner.borrow_mut().update_bar(time, open, high, low, close);
     }
 
+    /// Streaming update of an arbitrary series by id (append new time or replace last).
+    pub fn update_series_bar(&mut self, series_id: u32, time: f64, open: f64, high: f64, low: f64, close: f64) {
+        self.inner.borrow_mut().update_series_bar(series_id, time, open, high, low, close);
+    }
+
     /// Sets a series' line/area color (overrides the kind default).
     pub fn set_series_color(&mut self, id: u32, r: u8, g: u8, b: u8) {
         self.inner.borrow_mut().set_series_color(id, r, g, b);
@@ -800,13 +805,23 @@ impl ChartInner {
 
     /// Streaming update of the main series (append new time or replace last).
     pub fn update_bar(&mut self, time: f64, open: f64, high: f64, low: f64, close: f64) {
-        let id = self.series[0].id;
+        let id = self.series[0].id as u32;
+        self.update_series_bar(id, time, open, high, low, close);
+    }
+
+    /// Streaming update of the series with `series_id` (append a new time or replace the last).
+    pub fn update_series_bar(&mut self, series_id: u32, time: f64, open: f64, high: f64, low: f64, close: f64) {
+        // Ignore updates to an unknown series rather than corrupting the data layer.
+        if !self.series.iter().any(|s| s.id == series_id as SeriesId) {
+            web_sys::console::warn_1(&"aion: update_bar for unknown series id".into());
+            return;
+        }
         // Drop a bad tick rather than corrupting the series (roadmap Phase A3).
         let Some((t, values)) = sanitize_point(time, [open, high, low, close]) else {
             web_sys::console::warn_1(&"aion: update_bar dropped a non-finite point".into());
             return;
         };
-        self.data.update(id, t, values);
+        self.data.update(series_id as SeriesId, t, values);
         self.on_time_points_changed();
     }
 

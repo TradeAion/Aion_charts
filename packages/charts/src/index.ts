@@ -307,14 +307,8 @@ class series_impl implements series_api {
     const h = "value" in point ? point.value : point.high;
     const l = "value" in point ? point.value : point.low;
     const c = "value" in point ? point.value : point.close;
-    // update_bar targets the main series (id 0); series-scoped update lands with the Phase B work.
-    if (this.id === 0) {
-      this.chart.wasm.update_bar(point.time, o, h, l, c);
-    } else {
-      // fall back to a data replace path is not available; append via a one-row set is wrong, so
-      // for overlays require set_data for now. Document limitation rather than silently corrupt.
-      console.warn("aion: series.update() currently supports the primary series only");
-    }
+    // Series-scoped streaming: append a new time point or replace the last on this series.
+    this.chart.wasm.update_series_bar(this.id, point.time, o, h, l, c);
     this.chart.repaint();
   }
 
