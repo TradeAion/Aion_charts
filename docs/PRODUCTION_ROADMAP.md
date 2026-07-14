@@ -322,3 +322,13 @@ Progress is appended here as phases land (newest last).
   PNG — inspected directly and correct. Workspace now 144 tests green (core 96, render 45,
   native 3). Next: wire a golden-diff harness (render LWC reference PNGs, compare per-pixel with
   rect-exact / AA-tolerant thresholds), and the web-sys `Canvas2d` target for in-browser fallback.
+- 2026-07-14 — **Phase D1: golden-image regression harness.** `diff_pixmaps(a, b, tolerance)`
+  reports differing-pixel count / max channel delta / fraction; the reference scene moved into
+  `aion_native::scene::demo_scene()` so the example renderer and the harness render byte-identical
+  output. A committed golden PNG (`tests/goldens/scene.png`) plus an integration test
+  (`tests/golden.rs`) that re-renders and asserts <0.1% drift (per-channel tolerance 2, so a
+  tiny-skia patch bump won't spuriously fail), with a negative-control test proving the diff
+  actually detects a changed scene. Regenerate deliberately via the `scene` example. This is the
+  regression net the roadmap wants across A–C; LWC-reference PNGs drop in as more goldens once a
+  headless-Chromium pipeline exists. Workspace 146 tests green (native 3 unit + 2 golden). Next:
+  web-sys `Canvas2d` target + WebGPU-absent fallback wiring in `aion_wasm`.

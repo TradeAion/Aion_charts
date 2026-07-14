@@ -6,6 +6,8 @@
 //! calls for: golden-image tests (compare against lightweight-charts reference PNGs) and
 //! server-side chart rendering, all off-GPU.
 
+pub mod scene;
+
 use aion_render::canvas2d::{execute, Canvas2d, Viewport};
 use aion_render::color::Color;
 use aion_render::draw_list::Prim;
@@ -191,6 +193,62 @@ pub fn render_prims(
     let mut canvas = TinySkiaCanvas::new(width, height, background);
     execute(prims, points, &mut canvas, Viewport { width: width as f32, height: height as f32 });
     canvas
+}
+
+/// Result of comparing two rasterized images pixel-by-pixel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DiffStats {
+    /// Pixels whose per-channel delta exceeded `tolerance`.
+    pub differing_pixels: u32,
+    /// Largest single-channel absolute delta seen anywhere.
+    pub max_channel_delta: u8,
+    /// Total pixels compared.
+    pub total_pixels: u32,
+}
+
+impl DiffStats {
+    /// Fraction of pixels that differed beyond tolerance (0.0–1.0).
+    pub fn fraction(&self) -> f64 {
+        if self.total_pixels == 0 {
+            0.0
+        } else {
+            self.differing_pixels as f64 / self.total_pixels as f64
+        }
+    }
+}
+
+/// Per-pixel diff of two same-size PNGs (straight RGBA). A pixel counts as differing when any
+/// channel differs by more than `tolerance` (allowing small AA/text wobble, per the roadmap).
+/// Returns `None` on a size mismatch.
+pub fn diff_pixmaps(a: &Pixmap, b: &Pixmap, tolerance: u8) -> Option<DiffStats> {
+    if a.width() != b.width() || a.height() != b.height() {
+        return None;
+    }
+    let (pa, pb) = (a.data(), b.data());
+    let total = a.width() * a.height();
+    let mut differing = 0u32;
+    let mut max_delta = 0u8;
+    for i in 0..total as usize {
+        let mut over = false;
+        for c in 0..4 {
+            let da = pa[i * 4 + c];
+            let db = pb[i * 4 + c];
+            let delta = da.abs_diff(db);
+            max_delta = max_delta.max(delta);
+            if delta > tolerance {
+                over = true;
+            }
+        }
+        if over {
+            differing += 1;
+        }
+    }
+    Some(DiffStats { differing_pixels: differing, max_channel_delta: max_delta, total_pixels: total })
+}
+
+/// Load a PNG file into a `Pixmap`.
+pub fn load_png(path: &str) -> Result<Pixmap, String> {
+    Pixmap::load_png(path).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
