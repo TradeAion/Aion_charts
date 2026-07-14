@@ -297,3 +297,16 @@ Progress is appended here as phases land (newest last).
   clustered at x≈108/232/348 — matching the expected label centers 116/232/348 — and drop to 0
   after `set_markers([])`. No console errors. **Series markers are now feature-complete (shapes +
   text); Phase B and its polish pass are done.**
+- 2026-07-14 — **Phase D2 begun: Canvas2D executor for the Prim IR** (`aion_render::canvas2d`). A
+  pure, gpu/dom-free translator from the `Prim` draw-list IR into `CanvasRenderingContext2D`-style
+  calls, issued against an abstract `Canvas2d` target trait (concrete web-sys + native impls land
+  later — browsers without WebGPU, and the golden/SSR render path). The crisp-rect subset
+  (`Rect`/`RectFrame`/`HLine`/`VLine`) reuses the exact integer + dash math of the wgpu quad
+  executor so the two backends agree pixel-for-pixel on rects; `Polyline` (with step/curve
+  expansion via `expand_line` + dash reset), `AreaFill` (path closed down to base with a vertical
+  gradient), `Circle`, `RoundRect`, and `Background` map onto native path/gradient calls; `Text` is
+  reserved (drawn by the 2D text path, not this executor). 8 unit tests via a recording target
+  assert the emitted command stream for every prim (render crate 37→45 tests). Next D2 increments:
+  concrete web-sys target in `aion_wasm` behind a WebGPU-absent fallback, and refactoring the live
+  line/area/marker builders to emit the high-level `Polyline`/`AreaFill`/`Circle` prims (they
+  currently tessellate straight to wgpu tri-meshes) so the fallback can render them too.
