@@ -24,6 +24,7 @@ web-sys = { version = "0.3", features = [
     "Element",
     "Window",
     "CanvasRenderingContext2d",
+    "CanvasGradient",
     "CssStyleDeclaration",
     "DomRect",
     "TextMetrics",

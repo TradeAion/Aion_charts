@@ -332,3 +332,15 @@ Progress is appended here as phases land (newest last).
   regression net the roadmap wants across A–C; LWC-reference PNGs drop in as more goldens once a
   headless-Chromium pipeline exists. Workspace 146 tests green (native 3 unit + 2 golden). Next:
   web-sys `Canvas2d` target + WebGPU-absent fallback wiring in `aion_wasm`.
+- 2026-07-14 — **Phase D2 increment 3: web-sys `Canvas2d` target (`aion_wasm::canvas2d_target`).**
+  `WasmCanvas2d` implements the executor's `Canvas2d` trait over a real `CanvasRenderingContext2d`
+  (solid + `createLinearGradient` fills preserving alpha via `rgba()`, dashed strokes via
+  `setLineDash`, arcs, paths) — the in-browser fallback backend for machines without WebGPU. Added
+  the `CanvasGradient` web-sys feature. An exported `render_prim_smoke_2d(canvas)` runs the executor
+  against a 2D canvas so it can be verified without WebGPU. Verified in-browser via `getImageData`:
+  a rect reads pure red, a circle center pure blue (its bbox corner stays background — round),
+  a polyline reads its green, and the background gradient reads near-white at top → light-blue at
+  bottom. Every prim type drives the real 2D canvas correctly. Next (the larger step): detect
+  WebGPU absence in the shell and route the chart's frame through this target, which needs the live
+  line/area/marker builders to emit high-level `Polyline`/`AreaFill`/`Circle` prims (they currently
+  tessellate straight to wgpu tri-meshes).
