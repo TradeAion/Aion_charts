@@ -288,3 +288,12 @@ Progress is appended here as phases land (newest last).
   pane model, consistent with drag. No console errors.
   **Phase B polish remaining:** marker `text` labels on the 2D overlay (a visual increment — best
   done once the preview pane's screenshot capture recovers).
+- 2026-07-14 — **Phase B polish: marker text labels (completes the markers feature).**
+  `draw_marker_labels_2d` renders each marker's `text` on the Canvas2D overlay, centered on the
+  marker's x and placed clear of the shape (above above-markers, below below-markers), in the
+  marker color, clipped to the pane band and visible index range. Verified by reading the overlay
+  canvas pixels directly (it's a 2D context, so `getImageData` works even with the WebGPU-pane
+  screenshot capture still wedged this session): 3 `"BUY"` labels produce 942 marker-color pixels
+  clustered at x≈108/232/348 — matching the expected label centers 116/232/348 — and drop to 0
+  after `set_markers([])`. No console errors. **Series markers are now feature-complete (shapes +
+  text); Phase B and its polish pass are done.**

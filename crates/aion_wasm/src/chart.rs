@@ -1981,8 +1981,68 @@ impl ChartInner {
         }
 
         self.draw_price_line_labels_2d(pane_w, dpr)?;
+        self.draw_marker_labels_2d(visible, pane_w, dpr)?;
         self.draw_last_value_label_2d(pane_w, pane_h, dpr)?;
         self.draw_crosshair_labels_2d(pane_w, pane_h, dpr, &font)?;
+        Ok(())
+    }
+
+    /// Text labels for series markers, drawn on the 2D overlay just outside each marker shape
+    /// (above above-markers, below below-markers). Positions mirror `build_markers`. Roadmap B4.
+    fn draw_marker_labels_2d(&self, visible: Option<(i64, i64)>, pane_w: f64, dpr: f64) -> Result<(), JsValue> {
+        let Some((from, to)) = visible else { return Ok(()) };
+        const MARKER_SIZE: f64 = 6.0;
+        const MARKER_GAP: f64 = 4.0;
+        let ctx = &self.axis_ctx;
+        ctx.set_font(&format!("{}px {FONT_FAMILY}", FONT_SIZE * dpr));
+        ctx.set_text_baseline("middle");
+        ctx.set_text_align("center");
+        let times = self.data.merged_times();
+        for (pi, pane) in self.panes.iter().enumerate() {
+            let (band_top, band_bot) = (pane.top, pane.top + pane.height);
+            for s in &self.series {
+                if s.pane_index.min(self.panes.len() - 1) != pi {
+                    continue;
+                }
+                let scale = if s.overlay { &pane.overlay_scale } else { &pane.price_scale };
+                if scale.is_empty() {
+                    continue;
+                }
+                let plot = self.data.plot(s.id);
+                for m in &s.markers {
+                    if m.text.is_empty() {
+                        continue;
+                    }
+                    let Ok(pos) = times.binary_search(&m.time) else { continue };
+                    let idx = pos as i64;
+                    if idx < from || idx > to {
+                        continue;
+                    }
+                    let Some(row) = plot.search(idx, aion_core::model::plot_list::MismatchDirection::None) else { continue };
+                    let high = plot.value_at(row, PlotValueIndex::High);
+                    let low = plot.value_at(row, PlotValueIndex::Low);
+                    let x = self.time_scale.index_to_coordinate(idx);
+                    if x < 0.0 || x > pane_w {
+                        continue;
+                    }
+                    // shape center y (css), then place the label clear of the shape
+                    let text_y = match m.position {
+                        marker_pos::BELOW => {
+                            scale.price_to_coordinate(low, low) + 2.0 * MARKER_SIZE + MARKER_GAP + FONT_SIZE / 2.0 + 2.0
+                        }
+                        marker_pos::ABOVE => {
+                            scale.price_to_coordinate(high, high) - 2.0 * MARKER_SIZE - MARKER_GAP - FONT_SIZE / 2.0 - 2.0
+                        }
+                        _ => scale.price_to_coordinate((high + low) / 2.0, high) - 2.0 * MARKER_SIZE - FONT_SIZE / 2.0 - 2.0,
+                    };
+                    if text_y < band_top || text_y > band_bot {
+                        continue;
+                    }
+                    ctx.set_fill_style_str(&m.color.to_hex());
+                    ctx.fill_text(&m.text, (x * dpr).round(), (text_y * dpr).round())?;
+                }
+            }
+        }
         Ok(())
     }
 
