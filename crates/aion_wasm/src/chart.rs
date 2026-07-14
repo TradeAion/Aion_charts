@@ -644,6 +644,22 @@ impl AionChart {
     pub fn drag_pane_separator(&mut self, i: usize, delta_css: f64) {
         self.inner.borrow_mut().drag_pane_separator(i, delta_css);
     }
+    /// CSS height of pane `i` from the last layout pass (0 if out of range).
+    pub fn pane_height(&self, i: usize) -> f64 {
+        self.inner.borrow().pane_height(i)
+    }
+    /// Relative stretch factor of pane `i` (1 if out of range).
+    pub fn pane_stretch(&self, i: usize) -> f64 {
+        self.inner.borrow().pane_stretch(i)
+    }
+    /// Set pane `i`'s stretch factor (relative height weight). Call `render()` after.
+    pub fn set_pane_stretch(&mut self, i: usize, factor: f64) {
+        self.inner.borrow_mut().set_pane_stretch(i, factor);
+    }
+    /// Resize pane `i` to `height_css` px, taking the difference from its neighbour. Render after.
+    pub fn set_pane_height(&mut self, i: usize, height_css: f64) {
+        self.inner.borrow_mut().set_pane_height(i, height_css);
+    }
 
     /// 0 = candlestick, 1 = OHLC bars, 2 = line, 3 = area, 4 = histogram (sets the main series).
     pub fn set_series_type(&mut self, kind: u8) {
@@ -985,6 +1001,45 @@ impl ChartInner {
         let actual = new_top - top;
         self.panes[i].stretch_factor = new_top;
         self.panes[i + 1].stretch_factor = bot - actual;
+    }
+
+    /// CSS height of pane `i` from the last layout pass.
+    pub fn pane_height(&self, i: usize) -> f64 {
+        self.panes.get(i).map(|p| p.height).unwrap_or(0.0)
+    }
+
+    /// Relative stretch factor of pane `i`.
+    pub fn pane_stretch(&self, i: usize) -> f64 {
+        self.panes.get(i).map(|p| p.stretch_factor).unwrap_or(1.0)
+    }
+
+    /// Set pane `i`'s stretch factor (its share of the content height relative to the others).
+    pub fn set_pane_stretch(&mut self, i: usize, factor: f64) {
+        if let Some(p) = self.panes.get_mut(i) {
+            p.stretch_factor = factor.max(0.01);
+            if self.css_width > 0.0 {
+                self.recompute_layout();
+            }
+        }
+    }
+
+    /// Resize pane `i` to `height_css`, absorbing the delta from its neighbour below (or above for
+    /// the last pane) — the same freeze-and-redistribute behavior as dragging its separator.
+    pub fn set_pane_height(&mut self, i: usize, height_css: f64) {
+        if i >= self.panes.len() {
+            return;
+        }
+        let current = self.panes[i].height;
+        let delta = height_css - current;
+        if i + 1 < self.panes.len() {
+            self.drag_pane_separator(i, delta);
+        } else if i > 0 {
+            // last pane: move the separator above it the other way to grow/shrink it
+            self.drag_pane_separator(i - 1, -delta);
+        }
+        if self.css_width > 0.0 {
+            self.recompute_layout();
+        }
     }
 
     /// 0 = candlestick, 1 = OHLC bars, 2 = line, 3 = area, 4 = histogram (sets the main series).

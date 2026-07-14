@@ -275,3 +275,16 @@ Progress is appended here as phases land (newest last).
   the change): replace-last drives autoscale (price 130 → y≈108.8, was y≈196.6 for 100); appending a
   new max time grows the merged set by exactly one (visible `to` 999→1000, `fit_content` spans it,
   new time maps to a real on-canvas x). tsc + wasm builds green.
+- 2026-07-14 — **Phase B polish: `chart.panes()` handle API (LWC `IPaneApi` parity).** `chart.panes()`
+  now returns a `pane_api[]` (one per stacked pane), each with `pane_index()`, `get_height()`,
+  `set_height(px)`, `get_stretch_factor()`, `set_stretch_factor(n)`. Engine gained
+  `pane_height`/`pane_stretch` getters and `set_pane_stretch`/`set_pane_height` (the latter reuses
+  the separator-drag freeze-and-redistribute so a resize absorbs its delta from the neighbour).
+  Verified via the API (no screenshots — capture wedged this session): `panes()` grows 1→2 when a
+  volume pane is added; stretch 1:0.5 → heights 364:182; `set_height(300)` moves pane 0 to 300 and
+  its neighbour 182→245 (separator 365→301); `set_stretch_factor(3)` from equal panes gives a clean
+  2.99≈3 height ratio. Note: `set_height` freezes heights into stretch factors (same as dragging a
+  separator), so a later `set_stretch_factor` is relative to those frozen values — inherent to the
+  pane model, consistent with drag. No console errors.
+  **Phase B polish remaining:** marker `text` labels on the 2D overlay (a visual increment — best
+  done once the preview pane's screenshot capture recovers).

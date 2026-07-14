@@ -198,11 +198,27 @@ export interface time_scale_api {
 }
 
 /** The chart. Create with {@link create_chart}. */
+/** A stacked pane (roadmap Phase B1). Mirrors lightweight-charts `IPaneApi`. */
+export interface pane_api {
+  /** This pane's index (0 = top/price pane). */
+  pane_index(): number;
+  /** Current CSS height in px (from the last layout pass). */
+  get_height(): number;
+  /** Resize this pane to `height` CSS px, absorbing the delta from its neighbour. */
+  set_height(height: number): void;
+  /** This pane's relative stretch factor (height weight). */
+  get_stretch_factor(): number;
+  /** Set this pane's relative stretch factor. */
+  set_stretch_factor(factor: number): void;
+}
+
 export interface chart_api {
   add_series(kind: series_kind, options?: Partial<series_options>): series_api;
   apply_options(options: deep_partial<chart_options>): void;
   options(): unknown;
   time_scale(): time_scale_api;
+  /** The stacked panes, top to bottom (roadmap Phase B1). At least one always exists. */
+  panes(): pane_api[];
   price_to_coordinate(price: number): number | null;
   coordinate_to_price(y: number): number | null;
   /** Fire on every crosshair move (and once with `point: null` when the cursor leaves). */
@@ -417,6 +433,28 @@ class time_scale_impl implements time_scale_api {
   }
 }
 
+class pane_impl implements pane_api {
+  constructor(private readonly chart: chart_impl, private readonly index: number) {}
+
+  pane_index(): number {
+    return this.index;
+  }
+  get_height(): number {
+    return this.chart.wasm.pane_height(this.index);
+  }
+  set_height(height: number): void {
+    this.chart.wasm.set_pane_height(this.index, height);
+    this.chart.repaint();
+  }
+  get_stretch_factor(): number {
+    return this.chart.wasm.pane_stretch(this.index);
+  }
+  set_stretch_factor(factor: number): void {
+    this.chart.wasm.set_pane_stretch(this.index, factor);
+    this.chart.repaint();
+  }
+}
+
 class chart_impl implements chart_api {
   private next_extra_series = false;
   private readonly ts = new time_scale_impl(this);
@@ -560,6 +598,15 @@ class chart_impl implements chart_api {
 
   time_scale(): time_scale_api {
     return this.ts;
+  }
+
+  panes(): pane_api[] {
+    const n = this.wasm.pane_count();
+    const out: pane_api[] = [];
+    for (let i = 0; i < n; i++) {
+      out.push(new pane_impl(this, i));
+    }
+    return out;
   }
 
   price_to_coordinate(price: number): number | null {
