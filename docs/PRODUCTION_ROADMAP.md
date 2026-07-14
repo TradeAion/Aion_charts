@@ -310,3 +310,15 @@ Progress is appended here as phases land (newest last).
   concrete web-sys target in `aion_wasm` behind a WebGPU-absent fallback, and refactoring the live
   line/area/marker builders to emit the high-level `Polyline`/`AreaFill`/`Circle` prims (they
   currently tessellate straight to wgpu tri-meshes) so the fallback can render them too.
+- 2026-07-14 — **Phase D2 increment 2 + D1 groundwork: native `aion_native` rasterizer target.**
+  New `aion_native` crate implements the `Canvas2d` trait on `tiny_skia` (pure-Rust CPU rasterizer,
+  no system deps): solid + vertical-gradient fills, path stroke with dash, arc tessellation, PNG
+  encode, and straight-RGBA pixel readout. `render_prims(w,h,bg,prims,points)` rasterizes a prim
+  layer to a `Pixmap`. This is the off-GPU deterministic render path the roadmap wants — the
+  foundation for golden-image tests (D1) and server-side PNGs (D2). Verified two ways: 3 pixel-
+  assertion unit tests (rect fill, circle center vs corner, gradient top-vs-bottom), and an
+  `examples/scene.rs` that renders a full chart-like scene (background gradient + grid + 6
+  candlesticks with wicks/bodies + area fill + polyline + dashed price line + circle marker) to a
+  PNG — inspected directly and correct. Workspace now 144 tests green (core 96, render 45,
+  native 3). Next: wire a golden-diff harness (render LWC reference PNGs, compare per-pixel with
+  rect-exact / AA-tolerant thresholds), and the web-sys `Canvas2d` target for in-browser fallback.

@@ -5,6 +5,7 @@ members = [
     "crates/aion_render",
     "crates/aion_render_wgpu",
     "crates/aion_wasm",
+    "crates/aion_native",
 ]
 
 [workspace.package]

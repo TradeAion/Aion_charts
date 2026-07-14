@@ -1,0 +1,10 @@
+[package]
+name = "aion_native"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native rasterizer target for the Prim IR: tiny-skia backend for golden-image tests and server-side PNG rendering"
+
+[dependencies]
+aion_render = { path = "../aion_render" }
+tiny-skia = "0.11"
