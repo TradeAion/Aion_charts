@@ -38,15 +38,14 @@ use aion_core::scale::time_tick_marks::{fill_weights_for_points, TimeTickMarks};
 use aion_render::bars::{build_bars, BarItem, BarsParams};
 use aion_render::candles::{build_candles, CandleItem, CandlesParams};
 use aion_render::color::Color;
-use aion_render::draw_list::{LineStyle, LineType, Prim};
+use aion_render::draw_list::{Gradient, LineStyle, LineType, Prim};
 use aion_render::histogram::{build_histogram, HistogramItem, HistogramParams};
 use aion_render::line::{
-    build_area_fill, build_baseline, build_disc, build_line_stroke, AreaMesh, LineParams, LinePoint,
-    LineVertex, StrokeMesh,
+    build_baseline, build_disc, AreaMesh, LineParams, LinePoint, LineVertex, StrokeMesh,
 };
 use aion_render_wgpu::{
-    prims_to_instances, render_frame, DrawGroup, LabelAtlas, MsaaTarget, QuadRenderer,
-    TexQuadRenderer, TriRenderer, TriVertex, SAMPLE_COUNT,
+    geom_prims_to_tris, prims_to_instances, render_frame, DrawGroup, LabelAtlas, MsaaTarget,
+    QuadRenderer, TexQuadRenderer, TriRenderer, TriVertex, SAMPLE_COUNT,
 };
 
 // lightweight-charts default palette (RENDERING_SPEC.md §2.5, §7, §8, §15)
@@ -1348,6 +1347,8 @@ impl ChartInner {
                 ..Default::default()
             };
             let mut prims: Vec<Prim> = Vec::new();
+            // Shared device-space point pool for this pane's Polyline/AreaFill/Circle prims.
+            let mut points: Vec<[f32; 2]> = Vec::new();
 
             if let Some((from, to)) = visible {
                 self.build_grid(&mut prims, &time_marks, from, to, pane_w_px as i32, band_top_px, band_h_px, hpr, vpr, &self.panes[pi].price_scale);
@@ -1362,7 +1363,7 @@ impl ChartInner {
                         SeriesKind::Histogram => self.build_histogram_prims(id, from, to, hpr, vpr, &mut prims, scale),
                         SeriesKind::Baseline => self.build_baseline_prims(id, line_type, from, to, hpr, vpr, &mut group, scale),
                         SeriesKind::Line | SeriesKind::Area => {
-                            self.build_line_prims(id, kind, color, line_type, markers, from, to, ptop + ph, hpr, vpr, &mut group, scale)
+                            self.build_line_prims(id, kind, color, line_type, markers, from, to, ptop + ph, hpr, vpr, &mut prims, &mut points, scale)
                         }
                     }
                 }
@@ -1376,6 +1377,10 @@ impl ChartInner {
 
             let mut crosshair_stroke: Vec<TriVertex> = Vec::new();
             self.build_crosshair_lines(&mut prims, &mut crosshair_stroke, pane_w_px as i32, band_top_px, band_h_px, pane_w, pane_h, hpr, vpr, pi);
+            // Tessellate the geometry prims (line/area/markers) into this group's tri meshes, then
+            // the crisp-rect prims into quads. Both come from the one `prims` list that the Canvas2D
+            // fallback also consumes.
+            geom_prims_to_tris(&prims, &points, &mut group.fill_tris, &mut group.stroke_tris);
             group.stroke_tris.extend(crosshair_stroke);
             prims_to_instances(&prims, &mut group.quads);
             groups.push(group);
@@ -1625,17 +1630,28 @@ impl ChartInner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn build_line_prims(&self, id: SeriesId, kind: SeriesKind, color: Color, line_type: LineType, point_markers: bool, from: i64, to: i64, band_bottom: f64, hpr: f64, vpr: f64, group: &mut DrawGroup, scale: &PriceScaleCore) {
+    /// Emits a line/area series as high-level geometry prims (`AreaFill` + `Polyline` + `Circle`
+    /// markers) into the pane's `prims` list, pushing device-space points into the shared `points`
+    /// pool. Both backends consume this: the wgpu path tessellates via `geom_prims_to_tris`, the
+    /// Canvas2D fallback via the executor (roadmap Phase D2). Coordinates are pre-multiplied by the
+    /// pixel ratios so the pool is device-space.
+    #[allow(clippy::too_many_arguments)]
+    fn build_line_prims(&self, id: SeriesId, kind: SeriesKind, color: Color, line_type: LineType, point_markers: bool, from: i64, to: i64, band_bottom: f64, hpr: f64, vpr: f64, prims: &mut Vec<Prim>, points: &mut Vec<[f32; 2]>, scale: &PriceScaleCore) {
         let plot = self.data.plot(id);
         let idxs = plot.indices();
         let c = plot.column(PlotValueIndex::Close);
-        let mut points: Vec<LinePoint> = Vec::new();
+        let first_point = points.len() as u32;
         for r in plot.visible_rows(from, to) {
             let close = c[r];
-            points.push(LinePoint { x: self.time_scale.index_to_coordinate(idxs[r]), y: scale.price_to_coordinate(close, close) });
+            let x = self.time_scale.index_to_coordinate(idxs[r]) * hpr;
+            let y = scale.price_to_coordinate(close, close) * vpr;
+            points.push([x as f32, y as f32]);
+        }
+        let point_count = points.len() as u32 - first_point;
+        if point_count == 0 {
+            return;
         }
 
-        let params = LineParams { horizontal_pixel_ratio: hpr, vertical_pixel_ratio: vpr, line_width: DEFAULT_LINE_WIDTH, line_type };
         // default line color per kind unless overridden (line_color != LINE_COLOR sentinel)
         let line_color = if color != LINE_COLOR {
             color
@@ -1646,13 +1662,22 @@ impl ChartInner {
         };
 
         if kind == SeriesKind::Area {
-            let mut area = AreaMesh::default();
-            build_area_fill(&points, band_bottom, AREA_TOP_COLOR, AREA_BOTTOM_COLOR, &params, &mut area);
-            group.fill_tris.extend(area.vertices.iter().map(mesh_vertex));
+            prims.push(Prim::AreaFill {
+                first_point,
+                point_count,
+                base_y: (band_bottom * vpr) as f32,
+                line_type,
+                gradient: Gradient { top: AREA_TOP_COLOR, bottom: AREA_BOTTOM_COLOR },
+            });
         }
-        let mut stroke = StrokeMesh::default();
-        build_line_stroke(&points, line_color, &params, &mut stroke);
-        group.stroke_tris.extend(stroke.vertices.iter().map(mesh_vertex));
+        prims.push(Prim::Polyline {
+            first_point,
+            point_count,
+            width: (DEFAULT_LINE_WIDTH * vpr) as f32,
+            style: LineStyle::Solid,
+            line_type,
+            color: line_color,
+        });
 
         // point markers on data points, only when bars are spaced enough that discs don't merge
         // (mirrors LWC, which hides them below a bar-spacing threshold). RENDERING_SPEC.md §5.
@@ -1660,11 +1685,9 @@ impl ChartInner {
             let radius = (DEFAULT_LINE_WIDTH + 1.0).max(3.0);
             if self.time_scale.bar_spacing() >= 2.0 * radius + 2.0 {
                 let r = (radius * vpr) as f32;
-                for p in &points {
-                    let center = [(p.x * hpr) as f32, (p.y * vpr) as f32];
-                    let mut disc = Vec::new();
-                    build_disc(center, r, line_color, &mut disc);
-                    group.stroke_tris.extend(disc.iter().map(mesh_vertex));
+                for i in first_point..first_point + point_count {
+                    let p = points[i as usize];
+                    prims.push(Prim::Circle { cx: p[0], cy: p[1], radius: r, fill: line_color, stroke_width: 0.0, stroke: line_color });
                 }
             }
         }

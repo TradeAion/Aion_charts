@@ -53,6 +53,7 @@ pub fn demo_scene() -> Scene {
         first_point: 0,
         point_count: count,
         base_y: 260.0,
+        line_type: LineType::Simple,
         gradient: Gradient { top: Color::rgba(0x21, 0x96, 0xf3, 0x80), bottom: Color::rgba(0x21, 0x96, 0xf3, 0x08) },
     });
     prims.push(Prim::Polyline {

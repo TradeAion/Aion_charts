@@ -160,15 +160,16 @@ pub fn execute(prims: &[Prim], points: &[[f32; 2]], target: &mut impl Canvas2d, 
                 target.stroke();
                 target.set_line_dash(&[]);
             }
-            Prim::AreaFill { first_point, point_count, base_y, gradient } => {
+            Prim::AreaFill { first_point, point_count, base_y, line_type, gradient } => {
                 let pts = pool_slice(points, *first_point, *point_count);
                 if pts.len() < 2 {
                     continue;
                 }
-                let (y_top, first_x, last_x) = area_extent(&pts, *base_y);
+                let expanded = expand_line(&pts, *line_type);
+                let (y_top, first_x, last_x) = area_extent(&expanded, *base_y);
                 target.set_fill_vgradient(y_top, *base_y, gradient.top, gradient.bottom);
                 target.begin_path();
-                trace_polyline(target, &pts, LineType::Simple);
+                trace_polyline(target, &pts, *line_type);
                 target.line_to(last_x, *base_y);
                 target.line_to(first_x, *base_y);
                 target.close_path();
@@ -378,7 +379,7 @@ mod tests {
         let points = [[0.0f32, 10.0], [20.0, 4.0]];
         let g = Gradient { top: Color::rgb(0, 0, 0xFF), bottom: Color::rgba(0, 0, 0xFF, 0) };
         let ops = run(
-            &[Prim::AreaFill { first_point: 0, point_count: 2, base_y: 40.0, gradient: g }],
+            &[Prim::AreaFill { first_point: 0, point_count: 2, base_y: 40.0, line_type: LineType::Simple, gradient: g }],
             &points,
         );
         // y_top is the min point y (4); gradient spans 4..40

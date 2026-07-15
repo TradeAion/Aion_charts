@@ -344,3 +344,21 @@ Progress is appended here as phases land (newest last).
   WebGPU absence in the shell and route the chart's frame through this target, which needs the live
   line/area/marker builders to emit high-level `Polyline`/`AreaFill`/`Circle` prims (they currently
   tessellate straight to wgpu tri-meshes).
+- 2026-07-15 — **Phase D2 increment 4: unify line/area geometry into the Prim IR.** The live
+  line/area builder (`build_line_prims`) now emits high-level `AreaFill` + `Polyline` + `Circle`
+  (point-marker) prims into the pane's shared `prims` list, pushing **device-space** points into a
+  per-pane pool — instead of tessellating straight to wgpu tri-meshes. A new
+  `aion_render_wgpu::geom_prims_to_tris` walks those prims and tessellates them back into the tri
+  buffers for the GPU (reusing the same `build_area_fill`/`build_line_stroke`/`build_disc` helpers
+  with identity pixel ratios, since the pool is already scaled — so wgpu output is byte-identical).
+  Both backends now consume one prim list: the Canvas2D fallback executor already renders
+  `Polyline`/`AreaFill`/`Circle`, so line/area series are now expressible off-GPU. `Prim::AreaFill`
+  gained a `line_type` field so stepped/curved areas trace the same edge on both backends (the 2D
+  executor previously hardcoded `Simple`, a latent mismatch — now fixed). Verified: workspace 154
+  tests green (render 45, wgpu 4→8 with 4 new `tri_executor` tests, native golden unchanged — the
+  `line_type: Simple` default is a no-op for the committed scene); in-browser the area series
+  (green gradient fill + stroke) and the SMA line series render correctly through the new
+  prim→tessellation path with no console errors. **Remaining before the fallback can render a full
+  frame:** baseline series, series-markers (square/arrow shapes), and the last-price pulse still
+  tessellate straight to tris (not yet prim-expressible); then the larger step — make `Gfx` optional
+  and route the frame through `WasmCanvas2d` when WebGPU is absent.

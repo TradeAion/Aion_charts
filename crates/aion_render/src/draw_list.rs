@@ -70,7 +70,8 @@ pub enum Prim {
         color: Color,
     },
     /// Fill between polyline and a horizontal base with a vertical gradient.
-    AreaFill { first_point: u32, point_count: u32, base_y: f32, gradient: Gradient },
+    /// `line_type` matches the companion `Polyline` so stepped/curved areas trace the same edge.
+    AreaFill { first_point: u32, point_count: u32, base_y: f32, line_type: LineType, gradient: Gradient },
     RoundRect {
         x: f32,
         y: f32,
