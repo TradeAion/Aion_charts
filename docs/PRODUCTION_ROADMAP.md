@@ -362,3 +362,28 @@ Progress is appended here as phases land (newest last).
   frame:** baseline series, series-markers (square/arrow shapes), and the last-price pulse still
   tessellate straight to tris (not yet prim-expressible); then the larger step — make `Gfx` optional
   and route the frame through `WasmCanvas2d` when WebGPU is absent.
+- 2026-07-16 — **Rendering-correctness pass + demo styling controls.** Three fixes from a visual
+  review, plus the styling surface to keep testing them:
+  1. **Grid layering bug.** Grid lines are `HLine`/`VLine` → quads, but the wgpu frame draws all
+     tris (area fills / line strokes) *before* the quad bucket — so the grid painted *over* line and
+     area series (and visually chopped up the stroke, reading as "not smoothed"). Added a
+     `DrawGroup.under_quads` bucket drawn first (before fills/strokes); grid now builds into its own
+     `grid_prims` list routed there, so it sits under the series like LWC. Verified in-browser: 0
+     gray grid pixels on top of the area fill, grid still visible above it.
+  2. **TradingView-style volume.** The demo showed volume in a separate pane with a divider and a
+     single (green) color. Reworked to an **overlay** on the price pane's bottom band (existing B2
+     scale-margins path, no separator) colored **green/red per bar** by the main series' up/down
+     direction. New engine flag `histogram_updown` (`set_series_histogram_updown`) colors each
+     histogram bar `VOLUME_UP/DOWN` by looking up the main plot's open/close at that index. Verified:
+     teal 3008 / red 3007 across the visible band (≈50/50, matching the data).
+  3. **Per-series style is now configurable** (was hardcoded). `SeriesEntry` carries optional
+     `up_color`/`down_color` (candlestick/bar bodies), `line_width` (line/area stroke),
+     `area_top_color`/`area_bottom_color` (fill gradient). New wasm setters + façade
+     `series_options` fields (`up_color`, `down_color`, `line_width`, `area_top_color`,
+     `area_bottom_color`, `histogram_updown`), color values passed as CSS strings so alpha survives.
+     The render loop snapshots resolved styling into a `RenderSeries` struct (replacing the ad-hoc
+     tuple) so the builders read per-series colors/width. Verified: candle up→purple / down→orange
+     reach pixels (1361 / 1269 bodies); SMA line width dropped to 2 and is slider-adjustable.
+  4. **Demo styling panel:** grid on/off, candle up/down color pickers, line color + width slider,
+     area fill color, plus a `baseline` series radio — the controls contextually show/hide per
+     series kind, so every style path is exercisable. Workspace 154 tests green; tsc clean.

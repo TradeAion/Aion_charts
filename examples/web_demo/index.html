@@ -10,7 +10,13 @@
 <style>
   html, body { margin: 0; height: 100%; background: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif; }
   #wrap { display: flex; flex-direction: column; height: 100%; }
-  #bar { padding: 8px 12px; font-size: 13px; color: #191919; border-bottom: 1px solid #e0e3eb; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  #bar { padding: 8px 12px; font-size: 13px; color: #191919; border-bottom: 1px solid #e0e3eb; display: flex; gap: 14px 18px; align-items: center; flex-wrap: wrap; }
+  #bar .group { display: flex; gap: 8px; align-items: center; padding-right: 14px; border-right: 1px solid #e0e3eb; }
+  #bar .group:last-child { border-right: none; }
+  #bar label { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }
+  #bar input[type="color"] { width: 24px; height: 20px; padding: 0; border: 1px solid #d0d3da; border-radius: 3px; background: none; cursor: pointer; }
+  #bar input[type="range"] { width: 72px; vertical-align: middle; }
+  #bar .brand { background:#26a69a; color:#fff; padding:2px 6px; border-radius:3px; font-weight: bold; }
   /* The library creates and manages the canvases inside this container. */
   #chart_container { flex: 1; position: relative; touch-action: none; overscroll-behavior: none; }
   #status { color: #787b86; }
@@ -23,22 +29,53 @@
 <body>
 <div id="wrap">
   <div id="bar">
-    <strong style="background:#26a69a;color:#fff;padding:2px 6px;border-radius:3px">@aion/charts</strong>
-    <span>wheel = zoom &middot; drag = pan &middot; double-click = fit</span>
-    <label><input type="radio" name="series" value="candlestick" checked> candles</label>
-    <label><input type="radio" name="series" value="bar"> bars</label>
-    <label><input type="radio" name="series" value="line"> line</label>
-    <label><input type="radio" name="series" value="area"> area</label>
-    <label><input type="checkbox" id="sma_toggle"> SMA(20)</label>
-    <label><input type="checkbox" id="vol_toggle"> volume</label>
-    <label>crosshair
-      <select id="cross_mode">
-        <option value="1" selected>magnet</option>
-        <option value="0">normal</option>
-        <option value="3">magnet OHLC</option>
-        <option value="2">hidden</option>
-      </select>
-    </label>
+    <span class="brand">@aion/charts</span>
+
+    <div class="group" id="type_group">
+      <label><input type="radio" name="series" value="candlestick" checked> candles</label>
+      <label><input type="radio" name="series" value="bar"> bars</label>
+      <label><input type="radio" name="series" value="line"> line</label>
+      <label><input type="radio" name="series" value="area"> area</label>
+      <label><input type="radio" name="series" value="baseline"> baseline</label>
+    </div>
+
+    <div class="group">
+      <label><input type="checkbox" id="grid_toggle" checked> grid</label>
+    </div>
+
+    <!-- candle/bar colors -->
+    <div class="group" id="candle_style">
+      <label>up <input type="color" id="up_color" value="#26a69a"></label>
+      <label>down <input type="color" id="down_color" value="#ef5350"></label>
+    </div>
+
+    <!-- line/area stroke -->
+    <div class="group" id="line_style" hidden>
+      <label>color <input type="color" id="line_color" value="#2196f3"></label>
+      <label>width <input type="range" id="line_width" min="1" max="8" step="1" value="3"><span id="line_width_val">3</span></label>
+    </div>
+
+    <!-- area fill -->
+    <div class="group" id="area_style" hidden>
+      <label>fill <input type="color" id="area_top" value="#2edc87"></label>
+    </div>
+
+    <div class="group">
+      <label><input type="checkbox" id="sma_toggle"> SMA(20)</label>
+      <label><input type="checkbox" id="vol_toggle"> volume</label>
+    </div>
+
+    <div class="group">
+      <label>crosshair
+        <select id="cross_mode">
+          <option value="1" selected>magnet</option>
+          <option value="0">normal</option>
+          <option value="3">magnet OHLC</option>
+          <option value="2">hidden</option>
+        </select>
+      </label>
+    </div>
+
     <span id="status"></span>
   </div>
   <div id="chart_container"><div id="legend">O — H — L — C —</div></div>
@@ -92,15 +129,53 @@ window.__data = data;
 let sma_series = null;
 const sma_data = sma(data, 20);
 
-// volume: single-value histogram on the bottom-band overlay price scale
-const volume_data = data.map((d, i) => ({ time: d.time, value: Math.round(500 + (i % 37) * 90 + Math.abs(d.close - d.open) * 4000) }));
+// volume: single-value histogram on the SAME pane, pinned to the bottom band via the overlay
+// price scale (TradingView-style — no separate pane / divider), colored green/red by bar direction.
+const volume_data = data.map((d) => ({ time: d.time, value: Math.round(500 + Math.abs(d.close - d.open) * 4000 + 300) }));
 let vol_series = null;
 
 status.textContent = `1000 bars · dpr ${(window.devicePixelRatio || 1).toFixed(3)}`;
 
+// ---- styling controls ----------------------------------------------------------------------
+// Show only the style group(s) relevant to the current series kind.
+function sync_style_visibility(kind) {
+  document.getElementById("candle_style").hidden = !(kind === "candlestick" || kind === "bar");
+  document.getElementById("line_style").hidden = !(kind === "line" || kind === "area" || kind === "baseline");
+  document.getElementById("area_style").hidden = kind !== "area";
+}
+
+// Re-apply the current control values to the main series (used after a type change).
+function apply_main_style() {
+  main.apply_options({
+    up_color: document.getElementById("up_color").value,
+    down_color: document.getElementById("down_color").value,
+    color: document.getElementById("line_color").value,
+    line_width: Number(document.getElementById("line_width").value),
+    area_top_color: document.getElementById("area_top").value,
+    // fade the fill to fully-transparent at the base (standard area look)
+    area_bottom_color: document.getElementById("area_top").value + "00",
+  });
+}
+
+document.getElementById("grid_toggle").addEventListener("change", (e) => {
+  const visible = e.target.checked;
+  chart.apply_options({ grid: { vertLines: { visible }, horzLines: { visible } } });
+});
+
+document.getElementById("up_color").addEventListener("input", () => main.apply_options({ up_color: document.getElementById("up_color").value }));
+document.getElementById("down_color").addEventListener("input", () => main.apply_options({ down_color: document.getElementById("down_color").value }));
+document.getElementById("line_color").addEventListener("input", () => main.apply_options({ color: document.getElementById("line_color").value }));
+document.getElementById("line_width").addEventListener("input", (e) => {
+  document.getElementById("line_width_val").textContent = e.target.value;
+  main.apply_options({ line_width: Number(e.target.value) });
+});
+document.getElementById("area_top").addEventListener("input", (e) => {
+  main.apply_options({ area_top_color: e.target.value, area_bottom_color: e.target.value + "00" });
+});
+
 document.getElementById("sma_toggle").addEventListener("change", (e) => {
   if (e.target.checked && sma_series === null) {
-    sma_series = chart.add_series("line", { color: "#ff9800" });
+    sma_series = chart.add_series("line", { color: "#ff9800", line_width: 2 });
     sma_series.set_data(sma_data);
   } else if (!e.target.checked && sma_series !== null) {
     sma_series.set_data([]); // no remove_series yet — hide by clearing
@@ -110,7 +185,8 @@ document.getElementById("sma_toggle").addEventListener("change", (e) => {
 
 document.getElementById("vol_toggle").addEventListener("change", (e) => {
   if (e.target.checked && vol_series === null) {
-    vol_series = chart.add_series("histogram", { pane: 1, pane_stretch: 0.33 }); // separate volume pane (~3:1)
+    // overlay on the price pane's bottom band; green/red by the main series' up/down direction.
+    vol_series = chart.add_series("histogram", { overlay: true, scale_margins: { top: 0.82, bottom: 0 }, histogram_updown: true });
     vol_series.set_data(volume_data);
   } else if (!e.target.checked && vol_series !== null) {
     vol_series.set_data([]);
@@ -119,11 +195,16 @@ document.getElementById("vol_toggle").addEventListener("change", (e) => {
 });
 
 document.querySelectorAll('input[name="series"]').forEach((el) => {
-  el.addEventListener("change", () => main.set_type(el.value));
+  el.addEventListener("change", () => {
+    main.set_type(el.value);
+    sync_style_visibility(el.value);
+    apply_main_style();
+  });
 });
 document.getElementById("cross_mode").addEventListener("change", (e) => {
   chart.apply_options({ crosshair: { mode: Number(e.target.value) } });
 });
+sync_style_visibility("candlestick");
 
 // crosshair-move subscription → OHLC legend (the public event API)
 const legend = document.getElementById("legend");

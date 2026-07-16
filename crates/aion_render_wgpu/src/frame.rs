@@ -18,10 +18,15 @@ pub const SAMPLE_COUNT: u32 = 4;
 pub struct DrawGroup {
     /// x, y, w, h in bitmap px; None = full target.
     pub scissor: Option<[u32; 4]>,
-    /// Drawn first (area fills, below strokes).
+    /// Background rects drawn *below* the series (grid lines). Kept separate from `quads` because
+    /// the fixed bucket order draws all tris (area fills / line strokes) between them and the
+    /// foreground quads — so grid must live in its own under-layer or it paints over line/area.
+    pub under_quads: Vec<QuadInstance>,
+    /// Drawn after the under-layer (area fills, below strokes).
     pub fill_tris: Vec<TriVertex>,
     /// Drawn after fills (line strokes).
     pub stroke_tris: Vec<TriVertex>,
+    /// Foreground rects drawn *above* the series (candles, price lines, last-value, crosshair).
     pub quads: Vec<QuadInstance>,
     pub tex_quads: Vec<TexQuadInstance>,
 }
@@ -62,6 +67,7 @@ impl MsaaTarget {
 }
 
 struct GroupBuffers {
+    under_quad: Option<(wgpu::Buffer, u32)>,
     fill: Option<(wgpu::Buffer, u32)>,
     stroke: Option<(wgpu::Buffer, u32)>,
     quad: Option<(wgpu::Buffer, u32)>,
@@ -98,6 +104,8 @@ pub fn render_frame(
     let buffers: Vec<GroupBuffers> = groups
         .iter()
         .map(|g| GroupBuffers {
+            under_quad: (!g.under_quads.is_empty())
+                .then(|| (vbuf(bytemuck::cast_slice(&g.under_quads), "under_quads"), g.under_quads.len() as u32)),
             fill: (!g.fill_tris.is_empty())
                 .then(|| (vbuf(bytemuck::cast_slice(&g.fill_tris), "fill"), g.fill_tris.len() as u32)),
             stroke: (!g.stroke_tris.is_empty())
@@ -142,6 +150,9 @@ pub fn render_frame(
             }
             pass.set_scissor_rect(sx, sy, sw, sh);
 
+            if let Some((b, n)) = &bufs.under_quad {
+                quad.draw(&mut pass, b, *n);
+            }
             if let Some((b, n)) = &bufs.fill {
                 tri.draw(&mut pass, b, *n);
             }

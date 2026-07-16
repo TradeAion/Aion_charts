@@ -86,6 +86,21 @@ export interface chart_options {
 export interface series_options {
   /** Overrides the kind default color (line/area/histogram). */
   color: string;
+  /** Candlestick/bar up (close ≥ open) body color. Any CSS color the engine parses. */
+  up_color: string;
+  /** Candlestick/bar down (close < open) body color. */
+  down_color: string;
+  /** Line/area stroke width in css px (default 3). */
+  line_width: number;
+  /** Area fill color at the line (top of the gradient). */
+  area_top_color: string;
+  /** Area fill color at the base (bottom of the gradient; usually fully transparent). */
+  area_bottom_color: string;
+  /**
+   * Histogram only: color each bar by the main price series' up/down direction at that time
+   * (translucent green/red), matching TradingView-style volume. Default false (solid `color`).
+   */
+  histogram_updown: boolean;
   /**
    * Place the series on the bottom-band overlay price scale (volume-style): its magnitude is
    * excluded from the main price axis autoscale. Mirrors LWC's `priceScaleId: ''` + scaleMargins.
@@ -334,6 +349,19 @@ class series_impl implements series_api {
       if (rgb) {
         this.chart.wasm.set_series_color(this.id, rgb[0], rgb[1], rgb[2]);
       }
+    }
+    if (options.up_color !== undefined || options.down_color !== undefined) {
+      // CSS strings passed through so the engine keeps alpha; empty = leave unchanged.
+      this.chart.wasm.set_series_updown_colors(this.id, options.up_color ?? "", options.down_color ?? "");
+    }
+    if (options.line_width !== undefined) {
+      this.chart.wasm.set_series_line_width(this.id, options.line_width);
+    }
+    if (options.area_top_color !== undefined || options.area_bottom_color !== undefined) {
+      this.chart.wasm.set_series_area_colors(this.id, options.area_top_color ?? "", options.area_bottom_color ?? "");
+    }
+    if (options.histogram_updown !== undefined) {
+      this.chart.wasm.set_series_histogram_updown(this.id, options.histogram_updown);
     }
     if (options.pane !== undefined && options.pane > 0) {
       this.chart.wasm.set_series_pane(this.id, options.pane, options.pane_stretch ?? 1);

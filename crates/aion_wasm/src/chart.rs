@@ -66,6 +66,9 @@ const AREA_LINE_COLOR: Color = Color::rgb(0x33, 0xd7, 0x78);
 const AREA_TOP_COLOR: Color = Color::rgba(0x2e, 0xdc, 0x87, 102); // rgba(46,220,135,0.4)
 const AREA_BOTTOM_COLOR: Color = Color::rgba(0x28, 0xdd, 0x64, 0); // rgba(40,221,100,0)
 const HISTOGRAM_COLOR: Color = Color::rgba(0x26, 0xa6, 0x9a, 0x80);
+// TradingView-style volume: translucent green on up bars, red on down bars.
+const VOLUME_UP_COLOR: Color = Color::rgba(0x26, 0xa6, 0x9a, 0x80);
+const VOLUME_DOWN_COLOR: Color = Color::rgba(0xef, 0x53, 0x50, 0x80);
 
 // Baseline series defaults (baseline-series.ts): teal above, red below, translucent fills.
 const BASELINE_TOP_LINE: Color = Color::rgb(0x26, 0xa6, 0x9a);
@@ -198,6 +201,17 @@ struct SeriesEntry {
     kind: SeriesKind,
     /// Overrides the default line/area color when set (e.g. an SMA overlay).
     line_color: Color,
+    /// Up/down body colors for candlestick/bar series (`None` = LWC default green/red).
+    up_color: Option<Color>,
+    down_color: Option<Color>,
+    /// Stroke width (css px) for line/area series (`None` = [`DEFAULT_LINE_WIDTH`]).
+    line_width: Option<f64>,
+    /// Area-fill gradient overrides (top at the line, bottom at the base); `None` = kind default.
+    area_top_color: Option<Color>,
+    area_bottom_color: Option<Color>,
+    /// Histogram: color each bar by the main price series' up/down direction at that index
+    /// (TradingView-style volume). `None`/false = the series' solid color.
+    histogram_updown: bool,
     /// When true the series maps to its pane's bottom-band overlay price scale (volume-style),
     /// excluded from that pane's main autoscale so its magnitude never distorts the price axis.
     overlay: bool,
@@ -215,6 +229,49 @@ struct SeriesEntry {
     price_lines: Vec<PriceLine>,
     /// Per-bar markers on this series (roadmap Phase B4).
     markers: Vec<Marker>,
+}
+
+/// Per-series render parameters snapshotted each frame (colors/widths resolved against defaults),
+/// so the builders don't hold a `self.series` borrow across the per-pane loop.
+struct RenderSeries {
+    id: SeriesId,
+    kind: SeriesKind,
+    line_color: Color,
+    up_color: Color,
+    down_color: Color,
+    line_width: f64,
+    area_top: Color,
+    area_bottom: Color,
+    histogram_updown: bool,
+    pane_index: usize,
+    overlay: bool,
+    line_type: LineType,
+    point_markers: bool,
+}
+
+impl SeriesEntry {
+    /// A series with LWC-default styling; overrides are applied later via `apply_options`.
+    fn new(id: SeriesId, kind: SeriesKind) -> Self {
+        SeriesEntry {
+            id,
+            kind,
+            line_color: LINE_COLOR,
+            up_color: None,
+            down_color: None,
+            line_width: None,
+            area_top_color: None,
+            area_bottom_color: None,
+            histogram_updown: false,
+            overlay: false,
+            pane_index: 0,
+            line_type: LineType::Simple,
+            point_markers: false,
+            baseline: None,
+            last_price_animation: false,
+            price_lines: Vec::new(),
+            markers: Vec::new(),
+        }
+    }
 }
 
 /// Height (css px) of the separator between stacked panes.
@@ -466,7 +523,7 @@ pub async fn create_chart(
         panes: vec![Pane::new()],
         price_formatter: PriceFormatter::default(),
         data,
-        series: vec![SeriesEntry { id: main, kind: SeriesKind::Candlestick, line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false, baseline: None, last_price_animation: false, price_lines: Vec::new(), markers: Vec::new() }],
+        series: vec![SeriesEntry::new(main, SeriesKind::Candlestick)],
         tick_marks: TimeTickMarks::new(),
         options: ChartOptionsStore::new(),
         crosshair_mode: CrosshairMode::Magnet,
@@ -571,6 +628,27 @@ impl AionChart {
     /// Sets a series' line/area color (overrides the kind default).
     pub fn set_series_color(&mut self, id: u32, r: u8, g: u8, b: u8) {
         self.inner.borrow_mut().set_series_color(id, r, g, b);
+    }
+
+    /// Set candlestick/bar up & down body colors as CSS strings (empty string = keep default).
+    pub fn set_series_updown_colors(&mut self, id: u32, up: &str, down: &str) {
+        self.inner.borrow_mut().set_series_updown_colors(id, up, down);
+    }
+
+    /// Set a line/area series' stroke width (css px).
+    pub fn set_series_line_width(&mut self, id: u32, width: f64) {
+        self.inner.borrow_mut().set_series_line_width(id, width);
+    }
+
+    /// Set an area series' fill gradient colors (top at the line, bottom at the base; CSS strings).
+    pub fn set_series_area_colors(&mut self, id: u32, top: &str, bottom: &str) {
+        self.inner.borrow_mut().set_series_area_colors(id, top, bottom);
+    }
+
+    /// Color a histogram (volume) by the main price series' up/down direction per bar
+    /// (TradingView-style volume).
+    pub fn set_series_histogram_updown(&mut self, id: u32, enabled: bool) {
+        self.inner.borrow_mut().set_series_histogram_updown(id, enabled);
     }
 
     /// Set a line/area series' join type: 0 = simple, 1 = stepped, 2 = curved. Call `render()`
@@ -772,7 +850,7 @@ impl ChartInner {
     /// Adds a series and returns its id. `kind`: 0 candles, 1 bars, 2 line, 3 area, 4 histogram.
     pub fn add_series(&mut self, kind: u8) -> u32 {
         let id = self.data.add_series();
-        self.series.push(SeriesEntry { id, kind: SeriesKind::from_u8(kind), line_color: LINE_COLOR, overlay: false, pane_index: 0, line_type: LineType::Simple, point_markers: false, baseline: None, last_price_animation: false, price_lines: Vec::new(), markers: Vec::new() });
+        self.series.push(SeriesEntry::new(id, SeriesKind::from_u8(kind)));
         id as u32
     }
 
@@ -844,6 +922,46 @@ impl ChartInner {
     pub fn set_series_color(&mut self, id: u32, r: u8, g: u8, b: u8) {
         if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
             s.line_color = Color::rgb(r, g, b);
+        }
+    }
+
+    /// Set candlestick/bar up & down body colors (CSS strings; empty/unparseable = keep default).
+    pub fn set_series_updown_colors(&mut self, id: u32, up: &str, down: &str) {
+        if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
+            if let Some(c) = Color::parse_css(up) {
+                s.up_color = Some(c);
+            }
+            if let Some(c) = Color::parse_css(down) {
+                s.down_color = Some(c);
+            }
+        }
+    }
+
+    /// Set a line/area series' stroke width (css px; non-positive ignored).
+    pub fn set_series_line_width(&mut self, id: u32, width: f64) {
+        if width > 0.0 {
+            if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
+                s.line_width = Some(width);
+            }
+        }
+    }
+
+    /// Set an area series' fill gradient colors (top at the line, bottom at the base; CSS strings).
+    pub fn set_series_area_colors(&mut self, id: u32, top: &str, bottom: &str) {
+        if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
+            if let Some(c) = Color::parse_css(top) {
+                s.area_top_color = Some(c);
+            }
+            if let Some(c) = Color::parse_css(bottom) {
+                s.area_bottom_color = Some(c);
+            }
+        }
+    }
+
+    /// Color a histogram by the main price series' up/down direction per bar (TradingView volume).
+    pub fn set_series_histogram_updown(&mut self, id: u32, enabled: bool) {
+        if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
+            s.histogram_updown = enabled;
         }
     }
 
@@ -1332,10 +1450,24 @@ impl ChartInner {
         let visible = self.visible_data_range();
         // snapshots to avoid holding a self borrow across the per-pane builder calls
         let panes_geom: Vec<(f64, f64)> = self.panes.iter().map(|p| (p.top, p.height)).collect();
-        let series: Vec<(SeriesId, SeriesKind, Color, usize, bool, LineType, bool)> = self
+        let series: Vec<RenderSeries> = self
             .series
             .iter()
-            .map(|s| (s.id, s.kind, s.line_color, s.pane_index.min(panes_geom.len() - 1), s.overlay, s.line_type, s.point_markers))
+            .map(|s| RenderSeries {
+                id: s.id,
+                kind: s.kind,
+                line_color: s.line_color,
+                up_color: s.up_color.unwrap_or(UP_COLOR),
+                down_color: s.down_color.unwrap_or(DOWN_COLOR),
+                line_width: s.line_width.unwrap_or(DEFAULT_LINE_WIDTH),
+                area_top: s.area_top_color.unwrap_or(AREA_TOP_COLOR),
+                area_bottom: s.area_bottom_color.unwrap_or(AREA_BOTTOM_COLOR),
+                histogram_updown: s.histogram_updown,
+                pane_index: s.pane_index.min(panes_geom.len() - 1),
+                overlay: s.overlay,
+                line_type: s.line_type,
+                point_markers: s.point_markers,
+            })
             .collect();
 
         let mut groups: Vec<DrawGroup> = Vec::with_capacity(panes_geom.len());
@@ -1347,23 +1479,27 @@ impl ChartInner {
                 ..Default::default()
             };
             let mut prims: Vec<Prim> = Vec::new();
+            // Grid prims live in their own list so the wgpu path can put them in the under-layer
+            // (drawn below the series tris); otherwise grid quads paint over line/area (LWC draws
+            // grid first, under everything). The Canvas2D fallback keeps them first in its list.
+            let mut grid_prims: Vec<Prim> = Vec::new();
             // Shared device-space point pool for this pane's Polyline/AreaFill/Circle prims.
             let mut points: Vec<[f32; 2]> = Vec::new();
 
             if let Some((from, to)) = visible {
-                self.build_grid(&mut prims, &time_marks, from, to, pane_w_px as i32, band_top_px, band_h_px, hpr, vpr, &self.panes[pi].price_scale);
-                for &(id, kind, color, spi, overlay, line_type, markers) in &series {
-                    if spi != pi {
+                self.build_grid(&mut grid_prims, &time_marks, from, to, pane_w_px as i32, band_top_px, band_h_px, hpr, vpr, &self.panes[pi].price_scale);
+                for rs in &series {
+                    if rs.pane_index != pi {
                         continue;
                     }
-                    let scale = if overlay { &self.panes[pi].overlay_scale } else { &self.panes[pi].price_scale };
-                    match kind {
-                        SeriesKind::Candlestick => self.build_candle_prims(id, from, to, hpr, vpr, &mut prims, scale),
-                        SeriesKind::Bar => self.build_bar_prims(id, from, to, hpr, vpr, &mut prims, scale),
-                        SeriesKind::Histogram => self.build_histogram_prims(id, from, to, hpr, vpr, &mut prims, scale),
-                        SeriesKind::Baseline => self.build_baseline_prims(id, line_type, from, to, hpr, vpr, &mut group, scale),
+                    let scale = if rs.overlay { &self.panes[pi].overlay_scale } else { &self.panes[pi].price_scale };
+                    match rs.kind {
+                        SeriesKind::Candlestick => self.build_candle_prims(rs.id, from, to, hpr, vpr, rs.up_color, rs.down_color, &mut prims, scale),
+                        SeriesKind::Bar => self.build_bar_prims(rs.id, from, to, hpr, vpr, rs.up_color, rs.down_color, &mut prims, scale),
+                        SeriesKind::Histogram => self.build_histogram_prims(rs.id, from, to, hpr, vpr, rs, &mut prims, scale),
+                        SeriesKind::Baseline => self.build_baseline_prims(rs.id, rs.line_type, from, to, hpr, vpr, &mut group, scale),
                         SeriesKind::Line | SeriesKind::Area => {
-                            self.build_line_prims(id, kind, color, line_type, markers, from, to, ptop + ph, hpr, vpr, &mut prims, &mut points, scale)
+                            self.build_line_prims(rs, from, to, ptop + ph, hpr, vpr, &mut prims, &mut points, scale)
                         }
                     }
                 }
@@ -1382,6 +1518,7 @@ impl ChartInner {
             // fallback also consumes.
             geom_prims_to_tris(&prims, &points, &mut group.fill_tris, &mut group.stroke_tris);
             group.stroke_tris.extend(crosshair_stroke);
+            prims_to_instances(&grid_prims, &mut group.under_quads);
             prims_to_instances(&prims, &mut group.quads);
             groups.push(group);
         }
@@ -1557,7 +1694,7 @@ impl ChartInner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn build_candle_prims(&self, id: SeriesId, from: i64, to: i64, hpr: f64, vpr: f64, prims: &mut Vec<Prim>, scale: &PriceScaleCore) {
+    fn build_candle_prims(&self, id: SeriesId, from: i64, to: i64, hpr: f64, vpr: f64, up_color: Color, down_color: Color, prims: &mut Vec<Prim>, scale: &PriceScaleCore) {
         let plot = self.data.plot(id);
         let idxs = plot.indices();
         let (o, h, l, c) = (
@@ -1569,7 +1706,7 @@ impl ChartInner {
         let mut items = Vec::new();
         for r in plot.visible_rows(from, to) {
             let (open, high, low, close) = (o[r], h[r], l[r], c[r]);
-            let color = if close >= open { UP_COLOR } else { DOWN_COLOR };
+            let color = if close >= open { up_color } else { down_color };
             items.push(CandleItem {
                 x: self.time_scale.index_to_coordinate(idxs[r]),
                 open_y: scale.price_to_coordinate(open, close),
@@ -1585,7 +1722,7 @@ impl ChartInner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn build_bar_prims(&self, id: SeriesId, from: i64, to: i64, hpr: f64, vpr: f64, prims: &mut Vec<Prim>, scale: &PriceScaleCore) {
+    fn build_bar_prims(&self, id: SeriesId, from: i64, to: i64, hpr: f64, vpr: f64, up_color: Color, down_color: Color, prims: &mut Vec<Prim>, scale: &PriceScaleCore) {
         let plot = self.data.plot(id);
         let idxs = plot.indices();
         let (o, h, l, c) = (
@@ -1603,27 +1740,40 @@ impl ChartInner {
                 high_y: scale.price_to_coordinate(high, close),
                 low_y: scale.price_to_coordinate(low, close),
                 close_y: scale.price_to_coordinate(close, close),
-                color: if close >= open { UP_COLOR } else { DOWN_COLOR },
+                color: if close >= open { up_color } else { down_color },
             });
         }
         build_bars(&items, &BarsParams { bar_spacing: self.time_scale.bar_spacing(), horizontal_pixel_ratio: hpr, vertical_pixel_ratio: vpr, open_visible: true, thin_bars: true }, prims);
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn build_histogram_prims(&self, id: SeriesId, from: i64, to: i64, hpr: f64, vpr: f64, prims: &mut Vec<Prim>, scale: &PriceScaleCore) {
+    fn build_histogram_prims(&self, id: SeriesId, from: i64, to: i64, hpr: f64, vpr: f64, rs: &RenderSeries, prims: &mut Vec<Prim>, scale: &PriceScaleCore) {
         let plot = self.data.plot(id);
         let idxs = plot.indices();
         let c = plot.column(PlotValueIndex::Close);
         // base = coordinate of price 0 (histogram grows from the bottom for volume-like data)
         let base = scale.price_to_coordinate(0.0, 0.0);
+        // Solid fill: the series color override if set, else the histogram default.
+        let solid = if rs.line_color != LINE_COLOR { rs.line_color } else { HISTOGRAM_COLOR };
+        // TradingView-style volume colors the bar by the main price series' up/down at that index.
+        let main_plot = rs.histogram_updown.then(|| self.main_plot());
+        let (up, down) = (VOLUME_UP_COLOR, VOLUME_DOWN_COLOR);
         let mut items = Vec::new();
         for r in plot.visible_rows(from, to) {
             let value = c[r];
+            let color = match main_plot {
+                Some(mp) => match mp.search(idxs[r], aion_core::model::plot_list::MismatchDirection::None) {
+                    Some(row) if mp.value_at(row, PlotValueIndex::Close) >= mp.value_at(row, PlotValueIndex::Open) => up,
+                    Some(_) => down,
+                    None => solid,
+                },
+                None => solid,
+            };
             items.push(HistogramItem {
                 x: self.time_scale.index_to_coordinate(idxs[r]),
                 y: scale.price_to_coordinate(value, value),
                 time: idxs[r],
-                color: HISTOGRAM_COLOR,
+                color,
             });
         }
         build_histogram(&items, &HistogramParams { bar_spacing: self.time_scale.bar_spacing(), horizontal_pixel_ratio: hpr, vertical_pixel_ratio: vpr, histogram_base: base }, prims);
@@ -1635,9 +1785,8 @@ impl ChartInner {
     /// pool. Both backends consume this: the wgpu path tessellates via `geom_prims_to_tris`, the
     /// Canvas2D fallback via the executor (roadmap Phase D2). Coordinates are pre-multiplied by the
     /// pixel ratios so the pool is device-space.
-    #[allow(clippy::too_many_arguments)]
-    fn build_line_prims(&self, id: SeriesId, kind: SeriesKind, color: Color, line_type: LineType, point_markers: bool, from: i64, to: i64, band_bottom: f64, hpr: f64, vpr: f64, prims: &mut Vec<Prim>, points: &mut Vec<[f32; 2]>, scale: &PriceScaleCore) {
-        let plot = self.data.plot(id);
+    fn build_line_prims(&self, rs: &RenderSeries, from: i64, to: i64, band_bottom: f64, hpr: f64, vpr: f64, prims: &mut Vec<Prim>, points: &mut Vec<[f32; 2]>, scale: &PriceScaleCore) {
+        let plot = self.data.plot(rs.id);
         let idxs = plot.indices();
         let c = plot.column(PlotValueIndex::Close);
         let first_point = points.len() as u32;
@@ -1653,36 +1802,37 @@ impl ChartInner {
         }
 
         // default line color per kind unless overridden (line_color != LINE_COLOR sentinel)
-        let line_color = if color != LINE_COLOR {
-            color
-        } else if kind == SeriesKind::Area {
+        let line_color = if rs.line_color != LINE_COLOR {
+            rs.line_color
+        } else if rs.kind == SeriesKind::Area {
             AREA_LINE_COLOR
         } else {
             LINE_COLOR
         };
+        let line_width = rs.line_width;
 
-        if kind == SeriesKind::Area {
+        if rs.kind == SeriesKind::Area {
             prims.push(Prim::AreaFill {
                 first_point,
                 point_count,
                 base_y: (band_bottom * vpr) as f32,
-                line_type,
-                gradient: Gradient { top: AREA_TOP_COLOR, bottom: AREA_BOTTOM_COLOR },
+                line_type: rs.line_type,
+                gradient: Gradient { top: rs.area_top, bottom: rs.area_bottom },
             });
         }
         prims.push(Prim::Polyline {
             first_point,
             point_count,
-            width: (DEFAULT_LINE_WIDTH * vpr) as f32,
+            width: (line_width * vpr) as f32,
             style: LineStyle::Solid,
-            line_type,
+            line_type: rs.line_type,
             color: line_color,
         });
 
         // point markers on data points, only when bars are spaced enough that discs don't merge
         // (mirrors LWC, which hides them below a bar-spacing threshold). RENDERING_SPEC.md §5.
-        if point_markers {
-            let radius = (DEFAULT_LINE_WIDTH + 1.0).max(3.0);
+        if rs.point_markers {
+            let radius = (line_width + 1.0).max(3.0);
             if self.time_scale.bar_spacing() >= 2.0 * radius + 2.0 {
                 let r = (radius * vpr) as f32;
                 for i in first_point..first_point + point_count {
