@@ -61,6 +61,7 @@ lightweight-charts' camelCase.
 aion_charts/
 ├─ crates/
 │  ├─ aion_core/          # platform-free chart model (no wasm, no gpu deps)
+│  ├─ aion_indicators/    # pure Rust SMA/EMA/Bollinger producers
 │  ├─ aion_engine/        # headless chart coordinator + backend-neutral frame production
 │  │  ├─ src/
 │  │  │  ├─ model/        # chart, pane, series, time_scale, price_scale, crosshair, magnet,
@@ -270,11 +271,12 @@ Three tiers, mirroring LWC's proven design (spec §16, LWC `plugins/`):
 3. **Drawings/tools layer (future)** — built on tier 1 with serialized state, hit-testing from the
    pane hit-test machinery, magnet integration.
 
-### 6.4 Indicator/compute layer (future-proofing)
+### 6.4 Indicator/compute layer
 
-Keep the engine data-in/draw-out. Indicators are producers that own output series — same model as
-LWC's `indicator-examples`. Rust-side compute API later (`aion-indicators` crate) with the same
-series primitives; nothing in the core needs to know.
+Keep the engine data-in/draw-out. Indicators are producers that own output series — the same model
+as LWC's `indicator-examples`. `aion_indicators` contains pure SMA, EMA, and Bollinger functions;
+`ChartEngine` binds their outputs to ordinary line series and recomputes them on source updates.
+The core does not know indicator formulas, and the browser does not calculate chart data.
 
 ### 6.5 Multi-chart & layouts
 
@@ -300,7 +302,10 @@ Targets (mid-range laptop, 4k-wide chart):
 Mechanisms:
 
 - Visible-range slicing before any per-bar work (LWC does this; keep it).
-- SoA + no per-frame allocation: draw lists and tessellation buffers are pooled and reused;
+- Streaming updates append time-point weights incrementally; full tick-weight rebuilds are reserved
+  for initial loads or historical/middle edits.
+- SoA + retained frame allocation: `ChartEngine::build_frame_into` and the WASM GPU groups pool
+  pane primitives and tessellation buffers across repaints;
   instance buffers are persistently mapped (write-through ring buffer).
 - Coordinate conversion is a tight SIMD-friendly loop (`indexesToCoordinates`,
   `barPricesToCoordinates` are branch-free affine transforms — spec §1).
@@ -353,9 +358,11 @@ time tick marks (weights) for vertical grid. Then first goldens.
 Text architecture decision (2026-07): axes render on a **stacked Canvas2D overlay**, not the
 GPU — mirroring LWC's per-cell canvas layout. The pane is one WebGPU canvas when available and
 falls back to the same frame executed on a Canvas2D context; a second
-full-size Canvas2D canvas sits exactly on top, transparent except over the axis strips, and
-Rust draws all axis chrome/labels to it via web-sys `fillText`/`fillRect`. This gives native,
-premium axis text (the product goal) while all layout/format logic stays in Rust. The GPU
+full-size Canvas2D canvas sits exactly on top, transparent except over the axis strips. The
+headless engine now emits an `AxisFrame` containing label content, placement, separators, and
+label boxes; the browser supplies only font measurement and executes `fillText`/`fillRect`.
+This gives native, premium axis text (the product goal) while all chart layout/format decisions
+stay in Rust. The GPU
 label atlas + textured-quad pipeline are kept, constructed-but-idle, reserved for future
 *in-pane* text (legend, watermark, series markers) — a canvas is `webgpu` XOR `2d`, so
 anything inside the GPU pane still needs the atlas. Tradeoff accepted: the native/`takeScreenshot`/

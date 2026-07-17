@@ -106,18 +106,8 @@ function generate_data(n) {
   return out;
 }
 
-function sma(data, period) {
-  const out = [];
-  let sum = 0;
-  for (let i = 0; i < data.length; i++) {
-    sum += data[i].close;
-    if (i >= period) sum -= data[i - period].close;
-    if (i >= period - 1) out.push({ time: data[i].time, value: sum / period });
-  }
-  return out;
-}
-
-const chart = await create_chart(container, { autoSize: true });
+const requested_backend = new URLSearchParams(location.search).get("backend");
+const chart = await create_chart(container, { autoSize: true, backend: requested_backend === "canvas2d" ? "canvas2d" : "auto" });
 window.__chart = chart; // debug/test handle
 
 const data = generate_data(1000);
@@ -127,8 +117,8 @@ chart.time_scale().fit_content();
 window.__main = main; // debug/test handle
 window.__data = data;
 
-let sma_series = null;
-const sma_data = sma(data, 20);
+// The indicator is produced by Rust and owned by the same engine as the candle series.
+const sma_series = chart.add_sma(main, 20, { color: "#ff9800", line_width: 2, visible: false });
 
 // volume: single-value histogram on the SAME pane, pinned to the bottom band via the overlay
 // price scale (TradingView-style — no separate pane / divider), colored green/red by bar direction.
@@ -175,13 +165,7 @@ document.getElementById("area_top").addEventListener("input", (e) => {
 });
 
 document.getElementById("sma_toggle").addEventListener("change", (e) => {
-  if (e.target.checked && sma_series === null) {
-    sma_series = chart.add_series("line", { color: "#ff9800", line_width: 2 });
-    sma_series.set_data(sma_data);
-  } else if (!e.target.checked && sma_series !== null) {
-    sma_series.set_data([]); // no remove_series yet — hide by clearing
-    sma_series = null;
-  }
+  sma_series.apply_options({ visible: e.target.checked });
 });
 
 document.getElementById("vol_toggle").addEventListener("change", (e) => {

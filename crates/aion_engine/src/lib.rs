@@ -6,7 +6,7 @@
 //! migrated here incrementally from `aion_wasm`.
 
 mod frame;
-pub use frame::{ChartFrame, FramePane};
+pub use frame::{AxisFrame, AxisLabel, AxisTextAlign, ChartFrame, FramePane};
 
 use aion_core::format::price_formatter::PriceFormatter;
 use aion_core::model::data_layer::{DataLayer, SeriesId};
@@ -20,6 +20,22 @@ use aion_core::scale::time_scale_core::{TimeScaleCore, TimeScaleOptions};
 use aion_core::scale::time_tick_marks::TimeTickMarks;
 use aion_render::color::Color;
 use aion_render::draw_list::{LineStyle, LineType};
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum IndicatorKind {
+    Sma { period: usize },
+    Ema { period: usize },
+    Bollinger { period: usize, deviation: f64 },
+}
+
+#[derive(Clone, Debug)]
+struct IndicatorBinding {
+    source: SeriesId,
+    kind: IndicatorKind,
+    outputs: Vec<SeriesId>,
+    last_source_len: usize,
+    last_source_time: Option<i64>,
+}
 
 const DEFAULT_LINE_COLOR: Color = Color::rgb(0x21, 0x96, 0xf3);
 
@@ -102,6 +118,7 @@ pub struct SeriesEntry {
     pub pane_index: usize,
     pub line_type: LineType,
     pub point_markers: bool,
+    pub visible: bool,
     pub baseline: Option<f64>,
     pub last_price_animation: bool,
     pub price_lines: Vec<PriceLine>,
@@ -124,6 +141,7 @@ impl SeriesEntry {
             pane_index: 0,
             line_type: LineType::Simple,
             point_markers: false,
+            visible: true,
             baseline: None,
             last_price_animation: false,
             price_lines: Vec::new(),
@@ -209,6 +227,9 @@ pub struct ChartEngine {
     pub pane_w: f64,
     pub pane_h: f64,
     pub axis_w: f64,
+    indicators: Vec<IndicatorBinding>,
+    synced_points_len: usize,
+    synced_last_time: Option<i64>,
 }
 
 impl ChartEngine {
@@ -234,6 +255,9 @@ impl ChartEngine {
             pane_w: css_width,
             pane_h: css_height,
             axis_w: 0.0,
+            indicators: Vec::new(),
+            synced_points_len: 0,
+            synced_last_time: None,
         }
     }
 
@@ -244,11 +268,45 @@ impl ChartEngine {
         id
     }
 
+    /// Toggle a series without destroying its data or indicator binding.
+    pub fn set_series_visible(&mut self, id: SeriesId, visible: bool) {
+        if let Some(series) = self.series.iter_mut().find(|series| series.id == id) {
+            series.visible = visible;
+        }
+    }
+
+    /// Add a Rust-native simple moving-average producer. The returned line series is owned by the
+    /// engine and is recomputed whenever its source series changes.
+    pub fn add_sma(&mut self, source: SeriesId, period: usize) -> Option<SeriesId> {
+        self.add_indicator(source, IndicatorKind::Sma { period }, 1).into_iter().next()
+    }
+
+    /// Add a Rust-native exponential moving-average producer.
+    pub fn add_ema(&mut self, source: SeriesId, period: usize) -> Option<SeriesId> {
+        self.add_indicator(source, IndicatorKind::Ema { period }, 1).into_iter().next()
+    }
+
+    /// Add upper, middle, and lower Bollinger-band line series in that order.
+    pub fn add_bollinger(&mut self, source: SeriesId, period: usize, deviation: f64) -> Vec<SeriesId> {
+        self.add_indicator(source, IndicatorKind::Bollinger { period, deviation }, 3)
+    }
+
+    fn add_indicator(&mut self, source: SeriesId, kind: IndicatorKind, outputs: usize) -> Vec<SeriesId> {
+        if source >= self.series.len() || outputs == 0 || matches!(&kind, IndicatorKind::Sma { period: 0 } | IndicatorKind::Ema { period: 0 } | IndicatorKind::Bollinger { period: 0, .. }) {
+            return Vec::new();
+        }
+        let ids = (0..outputs).map(|_| self.add_series(SeriesKind::Line)).collect::<Vec<_>>();
+        self.indicators.push(IndicatorBinding { source, kind, outputs: ids.clone(), last_source_len: 0, last_source_time: None });
+        self.recompute_indicators();
+        ids
+    }
+
     /// Apply one streaming OHLC update after validating its time and values.
     pub fn update_series_bar(&mut self, id: SeriesId, time: f64, values: [f64; 4]) -> bool {
         let Some((time, values)) = sanitize_point(time, values) else { return false };
         self.data.update(id, time, values);
         self.sync_time_points();
+        self.update_indicators_after_source_update(id, time);
         true
     }
 
@@ -274,6 +332,7 @@ impl ChartEngine {
             sanitized.close,
         );
         self.sync_time_points();
+        self.recompute_indicators();
         Ok(report)
     }
 
@@ -290,6 +349,7 @@ impl ChartEngine {
     ) {
         self.data.set_data(id, times, open, high, low, close);
         self.sync_time_points();
+        self.recompute_indicators();
     }
 
     /// Fit the horizontal scale to the current union of series timestamps.
@@ -315,12 +375,144 @@ impl ChartEngine {
 
     fn sync_time_points(&mut self) {
         let times = self.data.merged_times();
-        let mut weights = vec![0u8; times.len()];
-        aion_core::scale::time_tick_marks::fill_weights_for_points(times, &mut weights, 0);
-        self.tick_marks.set_weights(&weights);
+        let appended = times.len() == self.synced_points_len + 1
+            && !times.is_empty()
+            && times.last().copied() > self.synced_last_time;
+        if appended {
+            let mut weights = vec![0u8; times.len()];
+            aion_core::scale::time_tick_marks::fill_weights_for_points(times, &mut weights, self.synced_points_len);
+            self.tick_marks.append_weights(self.synced_points_len, &weights);
+        } else if times.len() != self.synced_points_len {
+            let mut weights = vec![0u8; times.len()];
+            aion_core::scale::time_tick_marks::fill_weights_for_points(times, &mut weights, 0);
+            self.tick_marks.set_weights(&weights);
+        }
+        self.synced_points_len = times.len();
+        self.synced_last_time = times.last().copied();
         self.time_scale.set_points_len(times.len());
         self.time_scale.set_base_index(self.data.base_index());
     }
+
+    fn recompute_indicators(&mut self) {
+        for index in 0..self.indicators.len() {
+            let binding = self.indicators[index].clone();
+            let Some((times, values)) = self.data.series_data(binding.source) else { continue };
+            let times = times.to_vec();
+            let close = values[3].to_vec();
+            match binding.kind {
+                IndicatorKind::Sma { period } => {
+                    let values = aion_indicators::sma(&close, period);
+                    self.install_indicator_output(binding.outputs[0], &times, &values);
+                }
+                IndicatorKind::Ema { period } => {
+                    let values = aion_indicators::ema(&close, period);
+                    self.install_indicator_output(binding.outputs[0], &times, &values);
+                }
+                IndicatorKind::Bollinger { period, deviation } => {
+                    let values = aion_indicators::bollinger(&close, period, deviation);
+                    let mut upper = Vec::with_capacity(values.len());
+                    let mut middle = Vec::with_capacity(values.len());
+                    let mut lower = Vec::with_capacity(values.len());
+                    for point in values {
+                        upper.push(point.upper);
+                        middle.push(point.middle);
+                        lower.push(point.lower);
+                    }
+                    self.install_indicator_output(binding.outputs[0], &times, &upper);
+                    self.install_indicator_output(binding.outputs[1], &times, &middle);
+                    self.install_indicator_output(binding.outputs[2], &times, &lower);
+                }
+            }
+            self.indicators[index].last_source_len = times.len();
+            self.indicators[index].last_source_time = times.last().copied();
+        }
+        self.sync_time_points();
+    }
+
+    fn update_indicators_after_source_update(&mut self, source: SeriesId, time: i64) {
+        for index in 0..self.indicators.len() {
+            if self.indicators[index].source != source { continue; }
+            let binding = self.indicators[index].clone();
+            let Some((times, values)) = self.data.series_data(source) else { continue };
+            let times = times.to_vec();
+            let close = values[3].to_vec();
+            let tail_update = binding.last_source_len > 0
+                && binding.last_source_time.map(|last| time >= last).unwrap_or(false)
+                && (times.len() == binding.last_source_len || times.len() == binding.last_source_len + 1);
+            if !tail_update {
+                self.recompute_indicators();
+                return;
+            }
+            match binding.kind {
+                IndicatorKind::Sma { period } => {
+                    if let Some(value) = rolling_mean(&close, period) {
+                        self.data.update(binding.outputs[0], time, [value; 4]);
+                    }
+                }
+                IndicatorKind::Ema { period } => {
+                    if let Some(value) = rolling_ema_tail(&close, period, &self.data, binding.outputs[0], times.len() == binding.last_source_len + 1) {
+                        self.data.update(binding.outputs[0], time, [value; 4]);
+                    }
+                }
+                IndicatorKind::Bollinger { period, deviation } => {
+                    if let Some((upper, middle, lower)) = rolling_bollinger(&close, period, deviation) {
+                        self.data.update(binding.outputs[0], time, [upper; 4]);
+                        self.data.update(binding.outputs[1], time, [middle; 4]);
+                        self.data.update(binding.outputs[2], time, [lower; 4]);
+                    }
+                }
+            }
+            self.indicators[index].last_source_len = times.len();
+            self.indicators[index].last_source_time = Some(time);
+        }
+        self.sync_time_points();
+    }
+
+    fn install_indicator_output(&mut self, id: SeriesId, times: &[i64], values: &[Option<f64>]) {
+        let mut out_times = Vec::new();
+        let mut out_values = Vec::new();
+        for (&time, value) in times.iter().zip(values) {
+            if let Some(value) = value {
+                out_times.push(time);
+                out_values.push(*value);
+            }
+        }
+        self.data.set_data(
+            id,
+            out_times,
+            out_values.clone(),
+            out_values.clone(),
+            out_values.clone(),
+            out_values,
+        );
+    }
+}
+
+fn rolling_mean(values: &[f64], period: usize) -> Option<f64> {
+    (period > 0 && values.len() >= period).then(|| values[values.len() - period..].iter().sum::<f64>() / period as f64)
+}
+
+fn rolling_bollinger(values: &[f64], period: usize, deviation: f64) -> Option<(f64, f64, f64)> {
+    let window = (period > 0 && values.len() >= period).then(|| &values[values.len() - period..])?;
+    let middle = window.iter().sum::<f64>() / period as f64;
+    let spread = (window.iter().map(|v| (v - middle).powi(2)).sum::<f64>() / period as f64).sqrt() * deviation.max(0.0);
+    Some((middle + spread, middle, middle - spread))
+}
+
+fn rolling_ema_tail(values: &[f64], period: usize, data: &DataLayer, output: SeriesId, appended: bool) -> Option<f64> {
+    if period == 0 || values.len() < period { return None; }
+    if values.len() == period { return rolling_mean(values, period); }
+    let previous = data.series_data(output)?;
+    let output_values = previous.1[3];
+    let previous_ema = if appended {
+        output_values.last().copied()?
+    } else if output_values.len() >= 2 {
+        output_values[output_values.len() - 2]
+    } else {
+        return rolling_mean(&values[..values.len() - 1], period);
+    };
+    let alpha = 2.0 / (period as f64 + 1.0);
+    Some(alpha * values[values.len() - 1] + (1.0 - alpha) * previous_ema)
 }
 
 #[cfg(test)]
@@ -424,5 +616,73 @@ mod tests {
             execute(&pane.main, &pane.points, &mut canvas, Viewport { width: 800.0, height: 500.0 });
         }
         assert!(canvas.calls > 0, "the shared frame must be executable by a Canvas2D backend");
+    }
+
+    #[test]
+    fn indicators_are_engine_owned_series() {
+        let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+        chart
+            .set_series_data(
+                0,
+                &[1.0, 2.0, 3.0, 4.0],
+                &[1.0, 2.0, 3.0, 4.0],
+                &[1.0, 2.0, 3.0, 4.0],
+                &[1.0, 2.0, 3.0, 4.0],
+                &[1.0, 2.0, 3.0, 4.0],
+            )
+            .unwrap();
+        let sma = chart.add_sma(0, 2).expect("valid indicator");
+        let rows = chart.data.series_data(sma).unwrap();
+        assert_eq!(rows.0, &[2, 3, 4]);
+        assert_eq!(rows.1[3], &[1.5, 2.5, 3.5]);
+
+        chart.update_series_bar(0, 4.0, [4.0, 5.0, 3.0, 5.0]);
+        let rows = chart.data.series_data(sma).unwrap();
+        assert_eq!(rows.1[3], &[1.5, 2.5, 4.0]);
+
+        let ema = chart.add_ema(0, 2).expect("valid indicator");
+        let initial_ema = chart.data.series_data(ema).unwrap().1[3];
+        assert_eq!(initial_ema.len(), 3);
+        assert!((initial_ema[2] - 4.166666666666667).abs() < 1e-12);
+        chart.update_series_bar(0, 5.0, [5.0, 6.0, 4.0, 6.0]);
+        let ema_rows = chart.data.series_data(ema).unwrap();
+        assert!((ema_rows.1[3].last().copied().unwrap() - 5.388888888888889).abs() < 1e-12);
+    }
+
+    #[test]
+    fn bollinger_creates_three_output_series() {
+        let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+        chart
+            .set_series_data(0, &[1.0, 2.0, 3.0], &[1.0, 2.0, 3.0], &[1.0, 2.0, 3.0], &[1.0, 2.0, 3.0], &[1.0, 2.0, 3.0])
+            .unwrap();
+        let ids = chart.add_bollinger(0, 3, 2.0);
+        assert_eq!(ids.len(), 3);
+        assert!(chart.data.series_data(ids[0]).unwrap().1[3][0] > 3.0);
+        assert_eq!(chart.data.series_data(ids[1]).unwrap().1[3], &[2.0]);
+    }
+
+    #[test]
+    fn retained_frame_reuses_pane_buffers() {
+        let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+        chart.set_series_data(0, &[1.0, 2.0, 3.0], &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], &[0.0, 1.0, 2.0], &[1.5, 2.5, 3.5]).unwrap();
+        chart.time_scale.set_width(800.0);
+        chart.fit_content();
+        let mut frame = ChartFrame::default();
+        chart.build_frame_into(&mut frame);
+        let first_capacity = frame.panes[0].main.capacity();
+        chart.crosshair = Some((300.0, 100.0));
+        chart.build_frame_into(&mut frame);
+        assert!(frame.panes[0].main.capacity() >= first_capacity);
+    }
+
+    #[test]
+    fn axis_frame_owns_label_content_and_positions() {
+        let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+        chart.set_series_data(0, &[1.0, 2.0], &[10.0, 11.0], &[11.0, 12.0], &[9.0, 10.0], &[10.0, 11.0]).unwrap();
+        chart.time_scale.set_width(760.0);
+        chart.fit_content();
+        let axes = chart.build_axis_frame(80.0, |text| text.len() as f64);
+        assert!(!axes.labels.is_empty());
+        assert!(axes.labels.iter().any(|label| label.text.contains("11")));
     }
 }

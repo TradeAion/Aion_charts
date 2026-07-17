@@ -81,6 +81,8 @@ export interface chart_options {
   /** Install a ResizeObserver so the chart tracks its container's size. Default `false` (LWC parity). */
   autoSize: boolean;
   hoveredSeriesOnTop: boolean;
+  /** Backend override for capability testing; defaults to automatic WebGPU → Canvas2D fallback. */
+  backend: "auto" | "canvas2d";
 }
 
 /** Options accepted when adding a series. */
@@ -121,6 +123,8 @@ export interface series_options {
   baseline_value: number;
   /** Pulse an expanding ring at the last value (drives an rAF loop), roadmap Phase B3. */
   last_price_animation: boolean;
+  /** Keep the series in the engine while toggling its visibility. */
+  visible: boolean;
 }
 
 const LINE_TYPE_TO_U8: Record<NonNullable<series_options["line_type"]>, number> = {
@@ -230,6 +234,12 @@ export interface pane_api {
 
 export interface chart_api {
   add_series(kind: series_kind, options?: Partial<series_options>): series_api;
+  /** Add a Rust-native simple moving-average line derived from an existing series. */
+  add_sma(source: series_api, period: number, options?: Partial<series_options>): series_api;
+  /** Add a Rust-native exponential moving-average line derived from an existing series. */
+  add_ema(source: series_api, period: number, options?: Partial<series_options>): series_api;
+  /** Add upper, middle, and lower Rust-native Bollinger-band lines. */
+  add_bollinger(source: series_api, period: number, deviation?: number, options?: Partial<series_options>): [series_api, series_api, series_api];
   apply_options(options: deep_partial<chart_options>): void;
   options(): unknown;
   time_scale(): time_scale_api;
@@ -330,7 +340,7 @@ class series_impl implements series_api {
 
   set_data(data: readonly series_data[]): void {
     const p = pack(data);
-    this.chart.wasm.set_series_data(this.id, p.times, p.open, p.high, p.low, p.close);
+    this.chart.wasm.set_series_data_typed(this.id, p.times, p.open, p.high, p.low, p.close);
     this.chart.repaint();
   }
 
@@ -350,6 +360,9 @@ class series_impl implements series_api {
       if (rgb) {
         this.chart.wasm.set_series_color(this.id, rgb[0], rgb[1], rgb[2]);
       }
+    }
+    if (options.visible !== undefined) {
+      this.chart.wasm.set_series_visible(this.id, options.visible);
     }
     if (options.up_color !== undefined || options.down_color !== undefined) {
       // CSS strings passed through so the engine keeps alpha; empty = leave unchanged.
@@ -561,6 +574,28 @@ class chart_impl implements chart_api {
       series.apply_options(options);
     }
     return series;
+  }
+
+  private indicator_series(id: number, options?: Partial<series_options>): series_api {
+    if (id === 0xffffffff) throw new Error("aion: invalid indicator configuration");
+    const series = new series_impl(id, "line", this);
+    this.series_by_id.set(id, series);
+    if (options) series.apply_options(options);
+    return series;
+  }
+
+  add_sma(source: series_api, period: number, options?: Partial<series_options>): series_api {
+    return this.indicator_series(this.wasm.add_sma(source.id, Math.max(1, Math.floor(period))), options);
+  }
+
+  add_ema(source: series_api, period: number, options?: Partial<series_options>): series_api {
+    return this.indicator_series(this.wasm.add_ema(source.id, Math.max(1, Math.floor(period))), options);
+  }
+
+  add_bollinger(source: series_api, period: number, deviation = 2, options?: Partial<series_options>): [series_api, series_api, series_api] {
+    const ids = this.wasm.add_bollinger(source.id, Math.max(1, Math.floor(period)), deviation);
+    if (ids.length !== 3) throw new Error("aion: invalid Bollinger configuration");
+    return [this.indicator_series(ids[0]!, options), this.indicator_series(ids[1]!, options), this.indicator_series(ids[2]!, options)];
   }
 
   subscribe_crosshair_move(handler: mouse_event_handler): void {
@@ -859,7 +894,7 @@ export async function create_chart(
     c.height = Math.max(1, Math.round(css_h * dpr));
   }
 
-  const wasm = await wasm_create_chart(pane, overlay, css_w, css_h, dpr);
+  const wasm = await wasm_create_chart(pane, overlay, css_w, css_h, dpr, options?.backend === "canvas2d");
   if (options) {
     wasm.apply_options(JSON.stringify(options));
   }

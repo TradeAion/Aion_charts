@@ -59,6 +59,12 @@ impl DataLayer {
         &mut self.series[id].plot
     }
 
+    /// Raw series columns for platform-independent derived-data producers.
+    pub fn series_data(&self, id: SeriesId) -> Option<(&[i64], [&[f64]; 4])> {
+        let s = self.series.get(id)?;
+        Some((&s.times, [&s.values[0], &s.values[1], &s.values[2], &s.values[3]]))
+    }
+
     /// Merged index of the last point that has data (the time-scale base index), or None.
     pub fn base_index(&self) -> Option<TimePointIndex> {
         if self.merged_times.is_empty() {

@@ -21,8 +21,13 @@ name = "aion_engine"
 version = "0.1.0"
 dependencies = [
  "aion_core",
+ "aion_indicators",
  "aion_render",
 ]
+
+[[package]]
+name = "aion_indicators"
+version = "0.1.0"
 
 [[package]]
 name = "aion_native"

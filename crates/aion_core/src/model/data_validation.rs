@@ -148,6 +148,43 @@ pub fn sanitize_ohlc(
     Ok(out)
 }
 
+/// Owned-input variant used by typed-array hosts. Clean integer-timestamp feeds take ownership of
+/// their columns without the intermediate row matrix; malformed or fractional feeds fall back to
+/// the fully repairing sanitizer. This keeps the common ingestion path to one JS→WASM copy.
+pub fn sanitize_ohlc_owned(
+    times: Vec<f64>,
+    open: Vec<f64>,
+    high: Vec<f64>,
+    low: Vec<f64>,
+    close: Vec<f64>,
+) -> Result<SanitizedOhlc, ValidationError> {
+    let n = times.len();
+    if open.len() != n || high.len() != n || low.len() != n || close.len() != n {
+        return Err(ValidationError::LengthMismatch {
+            times: n,
+            open: open.len(),
+            high: high.len(),
+            low: low.len(),
+            close: close.len(),
+        });
+    }
+    let clean = times.windows(2).all(|w| w[0].is_finite() && w[0].fract() == 0.0 && w[0] < w[1])
+        && times.last().map(|t| t.is_finite() && t.fract() == 0.0).unwrap_or(true)
+        && open.iter().chain(&high).chain(&low).chain(&close).copied().all(safe);
+    if clean {
+        let accepted = times.len();
+        return Ok(SanitizedOhlc {
+            times: times.into_iter().map(|t| t as i64).collect(),
+            open,
+            high,
+            low,
+            close,
+            report: ValidationReport { accepted, ..ValidationReport::default() },
+        });
+    }
+    sanitize_ohlc(&times, &open, &high, &low, &close)
+}
+
 /// Sanitize a single streaming point. Returns `None` (with no effect on the chart) when the point
 /// is non-finite or out of range, so a bad tick is dropped instead of corrupting the series.
 pub fn sanitize_point(time: f64, values: [f64; 4]) -> Option<(i64, [f64; 4])> {
@@ -256,5 +293,12 @@ mod tests {
         assert!(sanitize_point(f64::NAN, [1.0, 1.0, 1.0, 1.0]).is_none());
         assert!(sanitize_point(1.0, [1.0, f64::INFINITY, 1.0, 1.0]).is_none());
         assert_eq!(sanitize_point(1.5, [1.0, 2.0, 0.5, 1.5]), Some((1, [1.0, 2.0, 0.5, 1.5])));
+    }
+
+    #[test]
+    fn owned_clean_input_avoids_repair_path() {
+        let s = sanitize_ohlc_owned(vec![1.0, 2.0], vec![1.0, 2.0], vec![2.0, 3.0], vec![0.0, 1.0], vec![1.5, 2.5]).unwrap();
+        assert!(s.report.is_clean());
+        assert_eq!(s.times, [1, 2]);
     }
 }

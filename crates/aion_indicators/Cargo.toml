@@ -1,0 +1,8 @@
+[package]
+name = "aion_indicators"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pure Rust technical-indicator producers for Aion Charts"
+
+[dependencies]

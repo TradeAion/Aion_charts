@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/aion_core",
+    "crates/aion_indicators",
     "crates/aion_engine",
     "crates/aion_render",
     "crates/aion_render_wgpu",

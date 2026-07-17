@@ -19,21 +19,20 @@ use std::rc::Rc;
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use js_sys::Float64Array;
 use web_sys::CanvasRenderingContext2d;
 
-use aion_core::format::time_formatter::{
-    format_crosshair_time, format_tick_label, weight_to_tick_mark_type,
-};
 use aion_core::model::data_layer::SeriesId;
 use aion_core::model::data_validation::sanitize_ohlc;
-use aion_core::model::magnet::{magnet_snap, CrosshairMode};
+use aion_core::model::magnet::CrosshairMode;
 use aion_core::model::plot_list::{PlotList, PlotValueIndex};
 use aion_core::model::range::{LogicalRange, StrictRange};
 use aion_core::options::{crosshair_mode, ChartOptions};
 use aion_core::TimePointIndex;
 use aion_core::scale::price_scale_core::PriceScaleCore;
 use aion_engine::{
-    line_style_from_u8, marker_pos, marker_shape, ChartEngine, Marker, Pane, PriceLine, SeriesKind,
+    line_style_from_u8, marker_pos, marker_shape, AxisFrame, AxisTextAlign, ChartEngine, Marker,
+    Pane, PriceLine, SeriesKind,
 };
 use aion_render::canvas2d::{execute as execute_canvas2d, Canvas2d, Viewport as CanvasViewport};
 use aion_render::color::Color;
@@ -44,19 +43,8 @@ use aion_render_wgpu::{
 };
 
 // lightweight-charts default palette (RENDERING_SPEC.md §2.5, §7, §8, §15)
-const UP_COLOR: Color = Color::rgb(0x26, 0xa6, 0x9a);
-const DOWN_COLOR: Color = Color::rgb(0xef, 0x53, 0x50);
-
 // Axis palette (as CSS color strings for the 2D overlay)
 const BORDER_CSS: &str = "#2B2B43";
-const LABEL_BG_CSS: &str = "#131722";
-const TEXT_CSS: &str = "#191919";
-const WHITE_CSS: &str = "#FFFFFF";
-
-// Line/Area series defaults (line-series.ts / area-series.ts)
-const LINE_COLOR: Color = Color::rgb(0x21, 0x96, 0xf3);
-const AREA_LINE_COLOR: Color = Color::rgb(0x33, 0xd7, 0x78);
-const HISTOGRAM_COLOR: Color = Color::rgba(0x26, 0xa6, 0x9a, 0x80);
 // TradingView-style volume: translucent green on up bars, red on down bars.
 
 
@@ -74,10 +62,6 @@ const PRICE_PADDING_INNER: f64 = 5.0;
 const PRICE_PADDING_OUTER: f64 = 5.0;
 const PRICE_LABEL_OFFSET: f64 = 5.0;
 const PRICE_DEFAULT_TEXT_WIDTH: f64 = 34.0;
-const PRICE_LABEL_PADDING_TB: f64 = 2.5;
-const TIME_PADDING_TOP: f64 = 3.0;
-const TIME_PADDING_BOTTOM: f64 = 3.0;
-const TIME_PADDING_HORZ: f64 = 9.0;
 const TICK_MARK_MAX_CHARS: f64 = 8.0;
 const TIME_AXIS_HEIGHT: f64 = 28.0;
 
@@ -128,6 +112,9 @@ struct ChartInner {
     bitmap_w: u32,
     bitmap_h: u32,
     engine: ChartEngine,
+    frame: aion_engine::ChartFrame,
+    axis_frame: AxisFrame,
+    gpu_groups: Vec<DrawGroup>,
 }
 impl std::ops::Deref for ChartInner {
     type Target = ChartEngine;
@@ -221,6 +208,7 @@ pub async fn create_chart(
     css_width: f64,
     css_height: f64,
     dpr: f64,
+    force_canvas2d: bool,
 ) -> Result<AionChart, JsValue> {
     console_error_panic_hook::set_once();
 
@@ -236,9 +224,16 @@ pub async fn create_chart(
 
     let bitmap_w = (css_width * dpr).round().max(1.0) as u32;
     let bitmap_h = (css_height * dpr).round().max(1.0) as u32;
-    let (gfx, pane_ctx) = match try_create_gfx(pane_canvas, css_width, css_height, dpr).await {
-        Ok(gfx) => (Some(gfx), None),
-        Err(error) => {
+    let (gfx, pane_ctx) = if force_canvas2d {
+        let pane_ctx = pane_el
+            .get_context("2d")?
+            .ok_or_else(|| JsValue::from_str("no 2d pane context"))?
+            .dyn_into::<CanvasRenderingContext2d>()?;
+        (None, Some(pane_ctx))
+    } else {
+        match try_create_gfx(pane_canvas, css_width, css_height, dpr).await {
+            Ok(gfx) => (Some(gfx), None),
+            Err(error) => {
             web_sys::console::warn_1(
                 &format!("aion: WebGPU unavailable; using Canvas2D fallback ({error:?})").into(),
             );
@@ -246,7 +241,8 @@ pub async fn create_chart(
                 .get_context("2d")?
                 .ok_or_else(|| JsValue::from_str("no 2d pane context"))?
                 .dyn_into::<CanvasRenderingContext2d>()?;
-            (None, Some(pane_ctx))
+                (None, Some(pane_ctx))
+            }
         }
     };
 
@@ -257,6 +253,9 @@ pub async fn create_chart(
         bitmap_w,
         bitmap_h,
         engine: ChartEngine::new(css_width, css_height, dpr),
+        frame: aion_engine::ChartFrame::default(),
+        axis_frame: AxisFrame::default(),
+        gpu_groups: Vec::new(),
     };
 
     Ok(AionChart {
@@ -325,6 +324,21 @@ impl AionChart {
         self.inner.borrow_mut().add_series(kind)
     }
 
+    /// Add a Rust-native simple moving-average line derived from `source_id`.
+    pub fn add_sma(&mut self, source_id: u32, period: u32) -> u32 {
+        self.inner.borrow_mut().add_sma(source_id, period)
+    }
+
+    /// Add a Rust-native exponential moving-average line derived from `source_id`.
+    pub fn add_ema(&mut self, source_id: u32, period: u32) -> u32 {
+        self.inner.borrow_mut().add_ema(source_id, period)
+    }
+
+    /// Add upper, middle, and lower Bollinger-band lines. Returns an empty array for invalid input.
+    pub fn add_bollinger(&mut self, source_id: u32, period: u32, deviation: f64) -> Vec<u32> {
+        self.inner.borrow_mut().add_bollinger(source_id, period, deviation)
+    }
+
     /// Sets the main series' data (series 0). `times` are ascending UTC seconds.
     pub fn set_data(&mut self, times: &[f64], open: &[f64], high: &[f64], low: &[f64], close: &[f64]) {
         self.inner.borrow_mut().set_data(times, open, high, low, close);
@@ -333,6 +347,12 @@ impl AionChart {
     /// Sets a series' data by id.
     pub fn set_series_data(&mut self, id: u32, times: &[f64], open: &[f64], high: &[f64], low: &[f64], close: &[f64]) {
         self.inner.borrow_mut().set_series_data(id, times, open, high, low, close);
+    }
+
+    /// Typed-array ingestion path: wasm-bindgen passes the JS views as externrefs and the engine
+    /// takes one owned copy, avoiding the temporary slice copy generated for `&[f64]` methods.
+    pub fn set_series_data_typed(&mut self, id: u32, times: &Float64Array, open: &Float64Array, high: &Float64Array, low: &Float64Array, close: &Float64Array) {
+        self.inner.borrow_mut().set_series_data_typed(id, times, open, high, low, close);
     }
 
     /// Streaming update of the main series (append new time or replace last).
@@ -348,6 +368,11 @@ impl AionChart {
     /// Sets a series' line/area color (overrides the kind default).
     pub fn set_series_color(&mut self, id: u32, r: u8, g: u8, b: u8) {
         self.inner.borrow_mut().set_series_color(id, r, g, b);
+    }
+
+    /// Toggle a series while preserving its data and derived-indicator binding.
+    pub fn set_series_visible(&mut self, id: u32, visible: bool) {
+        self.inner.borrow_mut().set_series_visible(id, visible);
     }
 
     /// Set candlestick/bar up & down body colors as CSS strings (empty string = keep default).
@@ -573,6 +598,22 @@ impl ChartInner {
         id as u32
     }
 
+    pub fn add_sma(&mut self, source_id: u32, period: u32) -> u32 {
+        self.engine.add_sma(source_id as SeriesId, period as usize).map(|id| id as u32).unwrap_or(u32::MAX)
+    }
+
+    pub fn add_ema(&mut self, source_id: u32, period: u32) -> u32 {
+        self.engine.add_ema(source_id as SeriesId, period as usize).map(|id| id as u32).unwrap_or(u32::MAX)
+    }
+
+    pub fn add_bollinger(&mut self, source_id: u32, period: u32, deviation: f64) -> Vec<u32> {
+        self.engine
+            .add_bollinger(source_id as SeriesId, period as usize, deviation)
+            .into_iter()
+            .map(|id| id as u32)
+            .collect()
+    }
+
     /// Sets the main series' data (series 0). `times` are ascending UTC seconds.
     pub fn set_data(&mut self, times: &[f64], open: &[f64], high: &[f64], low: &[f64], close: &[f64]) {
         let id = self.series[0].id;
@@ -614,6 +655,22 @@ impl ChartInner {
         self.engine.install_series_data(id as SeriesId, s.times, s.open, s.high, s.low, s.close);
     }
 
+    pub fn set_series_data_typed(&mut self, id: u32, times: &Float64Array, open: &Float64Array, high: &Float64Array, low: &Float64Array, close: &Float64Array) {
+        let s = match aion_core::model::data_validation::sanitize_ohlc_owned(
+            times.to_vec(), open.to_vec(), high.to_vec(), low.to_vec(), close.to_vec(),
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                web_sys::console::warn_1(&format!("aion: set_series_data rejected — {e}").into());
+                return;
+            }
+        };
+        if !s.report.is_clean() {
+            web_sys::console::warn_1(&format!("aion: set_series_data sanitized data — accepted {}, dropped {} invalid, {} duplicate{}", s.report.accepted, s.report.dropped_invalid, s.report.dropped_duplicate, if s.report.reordered { ", reordered" } else { "" }).into());
+        }
+        self.engine.install_series_data(id as SeriesId, s.times, s.open, s.high, s.low, s.close);
+    }
+
     /// Streaming update of the main series (append new time or replace last).
     pub fn update_bar(&mut self, time: f64, open: f64, high: f64, low: f64, close: f64) {
         let id = self.series[0].id as u32;
@@ -639,6 +696,10 @@ impl ChartInner {
         if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
             s.line_color = Color::rgb(r, g, b);
         }
+    }
+
+    pub fn set_series_visible(&mut self, id: u32, visible: bool) {
+        self.engine.set_series_visible(id as SeriesId, visible);
     }
 
     /// Set candlestick/bar up & down body colors (CSS strings; empty/unparseable = keep default).
@@ -1132,39 +1193,33 @@ impl ChartInner {
         // time tick marks: built once (needs &mut), shared by GPU grid + 2D labels
         let pixels_per_character = (FONT_SIZE + 4.0) * 5.0 / 8.0;
         let max_label_width = pixels_per_character * TICK_MARK_MAX_CHARS;
-        let spacing = self.time_scale.bar_spacing();
-        let time_marks: Vec<(i64, u8)> = self
-            .tick_marks
-            .build(spacing, max_label_width)
-            .iter()
-            .map(|m| (m.index, m.weight))
-            .collect();
+        let axis_ctx = &self.axis_ctx;
+        let dpr = self.dpr;
+        self.axis_frame = self.engine.build_axis_frame(max_label_width, |text| measure_text_ctx(axis_ctx, dpr, text));
 
         // ---- GPU: one scissored draw group per stacked pane ----
-        let visible = self.visible_data_range();
         // The headless engine owns chart geometry. The WASM host only adds browser-adapter
         // concerns such as crosshair interaction and text labels.
-        let engine_frame = self.engine.build_frame();
+        self.engine.build_frame_into(&mut self.frame);
+        let engine_frame = &self.frame;
         let groups = if self.gfx.is_some() {
-            let mut groups: Vec<DrawGroup> = Vec::with_capacity(engine_frame.panes.len());
-            for pane_frame in &engine_frame.panes {
-                let mut group = DrawGroup {
-                    scissor: Some(pane_frame.scissor),
-                    ..Default::default()
-                };
-                let prims = pane_frame.main.clone();
-                let grid_prims = pane_frame.under.clone();
-                let points = pane_frame.points.clone();
-
+            self.gpu_groups.resize_with(engine_frame.panes.len(), DrawGroup::default);
+            self.gpu_groups.truncate(engine_frame.panes.len());
+            for (group, pane_frame) in self.gpu_groups.iter_mut().zip(&engine_frame.panes) {
+                group.scissor = Some(pane_frame.scissor);
+                group.under_quads.clear();
+                group.fill_tris.clear();
+                group.stroke_tris.clear();
+                group.quads.clear();
+                group.tex_quads.clear();
                 // Convert the shared frame only at the WebGPU backend boundary.
-                geom_prims_to_tris(&prims, &points, &mut group.fill_tris, &mut group.stroke_tris);
-                prims_to_instances(&grid_prims, &mut group.under_quads);
-                prims_to_instances(&prims, &mut group.quads);
-                groups.push(group);
+                geom_prims_to_tris(&pane_frame.main, &pane_frame.points, &mut group.fill_tris, &mut group.stroke_tris);
+                prims_to_instances(&pane_frame.under, &mut group.under_quads);
+                prims_to_instances(&pane_frame.main, &mut group.quads);
             }
-            groups
+            &self.gpu_groups[..]
         } else {
-            Vec::new()
+            &[] as &[DrawGroup]
         };
 
         let bg = Color::parse_css(&self.opts().layout.background.color)
@@ -1195,14 +1250,14 @@ impl ChartInner {
                 &gfx.quad_renderer,
                 &gfx.tex_renderer,
                 &gfx.tri_renderer,
-                &groups,
+                groups,
             );
             frame.present();
         } else {
             self.render_canvas2d(&engine_frame)?;
         }
 
-        self.draw_axes_2d(visible, &time_marks)?;
+        self.draw_axes_2d(&self.axis_frame)?;
         Ok(())
     }
 
@@ -1210,20 +1265,6 @@ impl ChartInner {
 
     fn main_plot(&self) -> &PlotList {
         self.data.plot(self.series[0].id)
-    }
-
-    fn visible_data_range(&self) -> Option<(i64, i64)> {
-        let n = self.data.merged_times().len() as i64;
-        if n == 0 || self.time_scale.is_empty() {
-            return None;
-        }
-        let range = self.time_scale.visible_strict_range()?;
-        let from = range.left().max(0);
-        let to = range.right().min(n - 1);
-        if from > to {
-            return None;
-        }
-        Some((from, to))
     }
 
     /// Autoscale every pane's price + overlay scale over just its own series' visible min/max.
@@ -1263,74 +1304,9 @@ impl ChartInner {
         w + (w as i64 % 2) as f64
     }
 
-    fn last_value_color(&self) -> Color {
-        match self.series[0].kind {
-            SeriesKind::Line => LINE_COLOR,
-            SeriesKind::Area => AREA_LINE_COLOR,
-            SeriesKind::Histogram => HISTOGRAM_COLOR,
-            _ => {
-                let last = self.main_plot().size() - 1;
-                let open = self.main_plot().value_at(last, PlotValueIndex::Open);
-                let close = self.main_plot().value_at(last, PlotValueIndex::Close);
-                if close >= open { UP_COLOR } else { DOWN_COLOR }
-            }
-        }
-    }
-
-    /// Index of the pane whose vertical band contains css-y `y`, if any.
-    fn pane_at_y(&self, y: f64) -> Option<usize> {
-        self.panes.iter().position(|p| y >= p.top && y <= p.top + p.height)
-    }
-
-    fn snapped_crosshair_index(&self, x_css: f64) -> i64 {
-        let mut index = self.time_scale.coordinate_to_index(x_css);
-        if let Some(range) = self.time_scale.visible_strict_range() {
-            index = index.clamp(range.left(), range.right());
-        }
-        let n = self.data.merged_times().len() as i64;
-        index.clamp(0, (n - 1).max(0))
-    }
-
-    fn snapped_crosshair_x(&self, x_css: f64) -> f64 {
-        self.time_scale.index_to_coordinate(self.snapped_crosshair_index(x_css))
-    }
-
-    /// Magnet-snapped crosshair price + pane y (main series). RENDERING_SPEC.md §8.
-    fn crosshair_snap(&self, x_css: f64, y_css: f64) -> (f64, f64) {
-        let index = self.snapped_crosshair_index(x_css);
-        let plot = self.main_plot();
-        let row = plot.search(index, aion_core::model::plot_list::MismatchDirection::NearestLeft);
-        let close = row.map(|r| plot.value_at(r, PlotValueIndex::Close));
-
-        let Some(close) = close else {
-            return (self.price_scale().coordinate_to_price(y_css, 0.0), y_css);
-        };
-
-        let price = match self.crosshair_mode {
-            CrosshairMode::Normal | CrosshairMode::Hidden => {
-                return (self.price_scale().coordinate_to_price(y_css, close), y_css)
-            }
-            CrosshairMode::Magnet => close,
-            CrosshairMode::MagnetOhlc => {
-                let row = row.expect("close present");
-                let open = plot.value_at(row, PlotValueIndex::Open);
-                let high = plot.value_at(row, PlotValueIndex::High);
-                let low = plot.value_at(row, PlotValueIndex::Low);
-                let candidates = [
-                    (open, self.price_scale().price_to_coordinate(open, open)),
-                    (high, self.price_scale().price_to_coordinate(high, high)),
-                    (low, self.price_scale().price_to_coordinate(low, low)),
-                    (close, self.price_scale().price_to_coordinate(close, close)),
-                ];
-                magnet_snap(y_css, &candidates).unwrap_or(close)
-            }
-        };
-        (price, self.price_scale().price_to_coordinate(price, price))
-    }
-
     // ---- Canvas2D axis overlay ----
 
-    fn draw_axes_2d(&self, visible: Option<(i64, i64)>, time_marks: &[(i64, u8)]) -> Result<(), JsValue> {
+    fn draw_axes_2d(&self, axis_frame: &AxisFrame) -> Result<(), JsValue> {
         let ctx = &self.axis_ctx;
         let dpr = self.dpr;
         let bitmap_w = self.bitmap_w as f64;
@@ -1347,235 +1323,27 @@ impl ChartInner {
         ctx.fill_rect(0.0, (pane_h * dpr).round(), bitmap_w, border_w);
 
         // separators between stacked panes (roadmap Phase B1): a border line at each pane boundary
-        for pane in self.panes.iter().skip(1) {
-            let y = ((pane.top - PANE_SEPARATOR) * dpr).round();
+        for separator in &axis_frame.separators {
+            let y = (separator * dpr).round();
             ctx.fill_rect(0.0, y, (pane_w * dpr).round(), (PANE_SEPARATOR * dpr).max(border_w));
         }
 
-        // price tick labels for every pane, each clipped to its own band (roadmap Phase B1). Scale
-        // coords are canvas-absolute, so a label just draws at its coord if it falls in the band.
-        ctx.set_font(&font);
-        ctx.set_text_baseline("middle");
-        ctx.set_text_align("left");
-        ctx.set_fill_style_str(TEXT_CSS);
-        let text_x = (pane_w + AXIS_TICK_LENGTH + PRICE_PADDING_INNER) * dpr;
-        for pane in &self.panes {
-            let band_top = pane.top * dpr;
-            let band_bot = (pane.top + pane.height) * dpr;
-            for mark in pane.price_scale.build_tick_marks(100, 0.0) {
-                let y = (mark.coord * dpr).round();
-                if y < band_top - 0.5 || y > band_bot + 0.5 {
-                    continue;
-                }
-                ctx.fill_text(&self.price_formatter.format(mark.logical), text_x, y)?;
-            }
-        }
-
-        if let Some((from, to)) = visible {
-            ctx.set_text_align("center");
-            ctx.set_fill_style_str(TEXT_CSS);
-            let y_center = pane_h + AXIS_BORDER_SIZE + AXIS_TICK_LENGTH + TIME_PADDING_TOP + FONT_SIZE / 2.0;
-            let times = self.data.merged_times();
-            for &(index, weight) in time_marks {
-                if index < from || index > to {
-                    continue;
-                }
-                let ts = times[index as usize];
-                let mark_type = weight_to_tick_mark_type(weight, self.time_visible, false);
-                let label = format_tick_label(ts, mark_type);
-                let x_center = self.time_scale.index_to_coordinate(index);
-                ctx.fill_text(&label, (x_center * dpr).round(), (y_center * dpr).round())?;
-            }
-        }
-
-        self.draw_price_line_labels_2d(pane_w, dpr)?;
-        self.draw_marker_labels_2d(visible, pane_w, dpr)?;
-        self.draw_last_value_label_2d(pane_w, pane_h, dpr)?;
-        self.draw_crosshair_labels_2d(pane_w, pane_h, dpr, &font)?;
+        self.draw_axis_labels(axis_frame, &font, dpr)?;
         Ok(())
     }
 
-    /// Text labels for series markers, drawn on the 2D overlay just outside each marker shape
-    /// (above above-markers, below below-markers). Positions mirror `build_markers`. Roadmap B4.
-    fn draw_marker_labels_2d(&self, visible: Option<(i64, i64)>, pane_w: f64, dpr: f64) -> Result<(), JsValue> {
-        let Some((from, to)) = visible else { return Ok(()) };
-        const MARKER_SIZE: f64 = 6.0;
-        const MARKER_GAP: f64 = 4.0;
-        let ctx = &self.axis_ctx;
-        ctx.set_font(&format!("{}px {FONT_FAMILY}", FONT_SIZE * dpr));
-        ctx.set_text_baseline("middle");
-        ctx.set_text_align("center");
-        let times = self.data.merged_times();
-        for (pi, pane) in self.panes.iter().enumerate() {
-            let (band_top, band_bot) = (pane.top, pane.top + pane.height);
-            for s in &self.series {
-                if s.pane_index.min(self.panes.len() - 1) != pi {
-                    continue;
-                }
-                let scale = if s.overlay { &pane.overlay_scale } else { &pane.price_scale };
-                if scale.is_empty() {
-                    continue;
-                }
-                let plot = self.data.plot(s.id);
-                for m in &s.markers {
-                    if m.text.is_empty() {
-                        continue;
-                    }
-                    let Ok(pos) = times.binary_search(&m.time) else { continue };
-                    let idx = pos as i64;
-                    if idx < from || idx > to {
-                        continue;
-                    }
-                    let Some(row) = plot.search(idx, aion_core::model::plot_list::MismatchDirection::None) else { continue };
-                    let high = plot.value_at(row, PlotValueIndex::High);
-                    let low = plot.value_at(row, PlotValueIndex::Low);
-                    let x = self.time_scale.index_to_coordinate(idx);
-                    if x < 0.0 || x > pane_w {
-                        continue;
-                    }
-                    // shape center y (css), then place the label clear of the shape
-                    let text_y = match m.position {
-                        marker_pos::BELOW => {
-                            scale.price_to_coordinate(low, low) + 2.0 * MARKER_SIZE + MARKER_GAP + FONT_SIZE / 2.0 + 2.0
-                        }
-                        marker_pos::ABOVE => {
-                            scale.price_to_coordinate(high, high) - 2.0 * MARKER_SIZE - MARKER_GAP - FONT_SIZE / 2.0 - 2.0
-                        }
-                        _ => scale.price_to_coordinate((high + low) / 2.0, high) - 2.0 * MARKER_SIZE - FONT_SIZE / 2.0 - 2.0,
-                    };
-                    if text_y < band_top || text_y > band_bot {
-                        continue;
-                    }
-                    ctx.set_fill_style_str(&m.color.to_hex());
-                    ctx.fill_text(&m.text, (x * dpr).round(), (text_y * dpr).round())?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Colored axis labels for every series' price lines (roadmap Phase B4). Uses the price value
-    /// (or the line's title, when set) on a filled box in the line's color, like the last-value tag.
-    fn draw_price_line_labels_2d(&self, pane_w: f64, dpr: f64) -> Result<(), JsValue> {
-        let ctx = &self.axis_ctx;
-        ctx.set_font(&format!("{}px {FONT_FAMILY}", FONT_SIZE * dpr));
-        ctx.set_text_baseline("middle");
-        for (pi, pane) in self.panes.iter().enumerate() {
-            let band_top = pane.top * dpr;
-            let band_bot = (pane.top + pane.height) * dpr;
-            for s in &self.series {
-                if s.pane_index.min(self.panes.len() - 1) != pi {
-                    continue;
-                }
-                let scale = if s.overlay { &pane.overlay_scale } else { &pane.price_scale };
-                if scale.is_empty() {
-                    continue;
-                }
-                for pl in &s.price_lines {
-                    let y = scale.price_to_coordinate(pl.price, pl.price) * dpr;
-                    if y < band_top || y > band_bot {
-                        continue;
-                    }
-                    let label = if pl.title.is_empty() { self.price_formatter.format(pl.price) } else { pl.title.clone() };
-                    let text_w = self.measure(&label);
-                    let box_h = ((FONT_SIZE + PRICE_LABEL_PADDING_TB * 2.0) * dpr).round();
-                    let box_w = ((AXIS_BORDER_SIZE + PRICE_PADDING_INNER + PRICE_PADDING_OUTER + AXIS_TICK_LENGTH + text_w) * dpr).round();
-                    let box_x = (pane_w * dpr).round();
-                    let box_y = (y.round() - box_h / 2.0).round();
-                    ctx.set_fill_style_str(&pl.color.to_hex());
-                    ctx.fill_rect(box_x, box_y, box_w, box_h);
-                    ctx.set_text_align("left");
-                    ctx.set_fill_style_str(&pl.color.contrast_text().to_hex());
-                    let text_x = (pane_w + AXIS_TICK_LENGTH + PRICE_PADDING_INNER) * dpr;
-                    ctx.fill_text(&label, text_x, y.round())?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn draw_last_value_label_2d(&self, pane_w: f64, pane_h: f64, dpr: f64) -> Result<(), JsValue> {
-        if self.main_plot().is_empty() || self.price_scale().is_empty() {
-            return Ok(());
-        }
-        let last = self.main_plot().size() - 1;
-        let close = self.main_plot().value_at(last, PlotValueIndex::Close);
-        let y = self.price_scale().price_to_coordinate(close, close);
-        if y < 0.0 || y > pane_h {
-            return Ok(());
-        }
-
-        let ctx = &self.axis_ctx;
-        ctx.set_font(&format!("{}px {FONT_FAMILY}", FONT_SIZE * dpr));
-        let color = self.last_value_color();
-        let label = self.price_formatter.format(close);
-        let text_w = self.measure(&label);
-
-        let box_h = ((FONT_SIZE + PRICE_LABEL_PADDING_TB * 2.0) * dpr).round();
-        let box_w = ((AXIS_BORDER_SIZE + PRICE_PADDING_INNER + PRICE_PADDING_OUTER + AXIS_TICK_LENGTH + text_w) * dpr).round();
-        let box_x = (pane_w * dpr).round();
-        let box_y = ((y * dpr).round() - box_h / 2.0).round();
-
-        ctx.set_fill_style_str(&color.to_hex());
-        ctx.fill_rect(box_x, box_y, box_w, box_h);
-        ctx.set_text_align("left");
-        ctx.set_text_baseline("middle");
-        ctx.set_fill_style_str(&color.contrast_text().to_hex());
-        let text_x = (pane_w + AXIS_TICK_LENGTH + PRICE_PADDING_INNER) * dpr;
-        ctx.fill_text(&label, text_x, (y * dpr).round())?;
-        Ok(())
-    }
-
-    fn draw_crosshair_labels_2d(&self, pane_w: f64, pane_h: f64, dpr: f64, font: &str) -> Result<(), JsValue> {
-        let Some((x_css, y_css)) = self.crosshair else { return Ok(()) };
-        if self.main_plot().is_empty() || self.time_scale.is_empty() || self.crosshair_mode == CrosshairMode::Hidden {
-            return Ok(());
-        }
+    fn draw_axis_labels(&self, axis_frame: &AxisFrame, font: &str, dpr: f64) -> Result<(), JsValue> {
         let ctx = &self.axis_ctx;
         ctx.set_font(font);
         ctx.set_text_baseline("middle");
-
-        // price label for the pane under the cursor, using that pane's scale (roadmap Phase B1).
-        // The price pane (0) magnet-snaps to its series; other panes read the raw cursor y.
-        if let Some(pi) = self.pane_at_y(y_css).filter(|_| y_css <= pane_h) {
-            let scale = &self.panes[pi].price_scale;
-            if !scale.is_empty() {
-            let (price, snap_y) = if pi == 0 {
-                self.crosshair_snap(x_css, y_css)
-            } else {
-                (scale.coordinate_to_price(y_css, 0.0), y_css)
-            };
-            let label = self.price_formatter.format(price);
-            let text_w = self.measure(&label);
-            let box_h = ((FONT_SIZE + PRICE_LABEL_PADDING_TB * 2.0) * dpr).round();
-            let box_w = ((AXIS_BORDER_SIZE + PRICE_PADDING_INNER + PRICE_PADDING_OUTER + AXIS_TICK_LENGTH + text_w) * dpr).round();
-            let box_x = (pane_w * dpr).round();
-            let box_y = ((snap_y * dpr).round() - box_h / 2.0).round();
-            ctx.set_fill_style_str(LABEL_BG_CSS);
-            ctx.fill_rect(box_x, box_y, box_w, box_h);
-            ctx.set_text_align("left");
-            ctx.set_fill_style_str(WHITE_CSS);
-            let text_x = (pane_w + AXIS_TICK_LENGTH + PRICE_PADDING_INNER) * dpr;
-            ctx.fill_text(&label, text_x, (snap_y * dpr).round())?;
+        for label in &axis_frame.labels {
+            if let Some((x, y, w, h, color)) = label.background {
+                ctx.set_fill_style_str(&color.to_hex());
+                ctx.fill_rect((x * dpr).round(), (y * dpr).round(), (w * dpr).round(), (h * dpr).round());
             }
-        }
-
-        if x_css <= pane_w {
-            let index = self.snapped_crosshair_index(x_css);
-            let ts = self.data.merged_times()[index as usize];
-            let label = format_crosshair_time(ts, self.time_visible, false);
-            let text_w = self.measure(&label);
-            let box_w = ((text_w + TIME_PADDING_HORZ * 2.0) * dpr).round();
-            let box_h = ((FONT_SIZE + TIME_PADDING_TOP + TIME_PADDING_BOTTOM) * dpr).round();
-            let snapped_x = self.snapped_crosshair_x(x_css);
-            let bitmap_w = self.bitmap_w as f64;
-            let box_x = ((snapped_x * dpr).round() - box_w / 2.0).clamp(0.0, bitmap_w - box_w);
-            let box_y = (pane_h * dpr).round() + 1f64.max(dpr.floor());
-            ctx.set_fill_style_str(LABEL_BG_CSS);
-            ctx.fill_rect(box_x, box_y, box_w, box_h);
-            ctx.set_text_align("center");
-            ctx.set_fill_style_str(WHITE_CSS);
-            ctx.fill_text(&label, box_x + box_w / 2.0, box_y + box_h / 2.0)?;
+            ctx.set_text_align(match label.align { AxisTextAlign::Left => "left", AxisTextAlign::Center => "center" });
+            ctx.set_fill_style_str(&label.color.to_hex());
+            ctx.fill_text(&label.text, (label.x * dpr).round(), (label.y * dpr).round())?;
         }
         Ok(())
     }
@@ -1603,6 +1371,11 @@ impl ChartInner {
         }
         Ok(())
     }
+}
+
+fn measure_text_ctx(ctx: &CanvasRenderingContext2d, dpr: f64, text: &str) -> f64 {
+    ctx.set_font(&format!("{}px {FONT_FAMILY}", FONT_SIZE * dpr));
+    ctx.measure_text(text).map(|m| m.width()).unwrap_or(0.0) / dpr
 }
 
 /// Attempt to initialize WebGPU. A failure is recoverable because the same chart frame can be

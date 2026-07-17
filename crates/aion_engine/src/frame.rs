@@ -3,7 +3,8 @@
 //! This is intentionally independent of WebGPU, Canvas2D, and DOM types. Hosts may convert the
 //! returned primitives into any raster backend, or inspect them in tests.
 
-use aion_core::model::magnet::magnet_snap;
+use aion_core::format::time_formatter::{format_crosshair_time, format_tick_label, weight_to_tick_mark_type};
+use aion_core::model::magnet::{magnet_snap, CrosshairMode};
 use aion_core::model::plot_list::{MismatchDirection, PlotValueIndex};
 use aion_core::model::price_range::PriceRange;
 use aion_render::bars::{build_bars, BarItem, BarsParams};
@@ -12,7 +13,7 @@ use aion_render::color::Color;
 use aion_render::draw_list::{Gradient, LineStyle, LineType, Prim};
 use aion_render::histogram::{build_histogram, HistogramItem, HistogramParams};
 
-use crate::{ChartEngine, SeriesKind};
+use crate::{ChartEngine, SeriesKind, PANE_SEPARATOR};
 
 const UP: Color = Color::rgb(0x26, 0xa6, 0x9a);
 const DOWN: Color = Color::rgb(0xef, 0x53, 0x50);
@@ -52,6 +53,28 @@ pub struct ChartFrame {
     pub panes: Vec<FramePane>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AxisTextAlign {
+    Left,
+    Center,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AxisLabel {
+    pub text: String,
+    pub x: f64,
+    pub y: f64,
+    pub color: Color,
+    pub align: AxisTextAlign,
+    pub background: Option<(f64, f64, f64, f64, Color)>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AxisFrame {
+    pub labels: Vec<AxisLabel>,
+    pub separators: Vec<f64>,
+}
+
 #[derive(Clone, Copy)]
 struct ResolvedSeries {
     id: usize,
@@ -63,6 +86,7 @@ struct ResolvedSeries {
     area_top: Color,
     area_bottom: Color,
     point_markers: bool,
+    visible: bool,
     baseline: Option<f64>,
     line_type: LineType,
     overlay: bool,
@@ -74,6 +98,157 @@ fn css_color(value: &str, fallback: Color) -> Color {
 }
 
 impl ChartEngine {
+    /// Build backend-neutral axis label decisions. The host supplies only font measurement; all
+    /// visible ranges, scale choices, snapping, formatting, and label positions come from the
+    /// engine so Canvas2D, WebGPU text, and native glyph backends share one layout result.
+    pub fn build_axis_frame<F>(&mut self, max_label_width: f64, measure: F) -> AxisFrame
+    where
+        F: Fn(&str) -> f64,
+    {
+        self.layout_for_frame();
+        self.autoscale_visible();
+        let mut out = AxisFrame::default();
+        let visible = self.visible_range_for_frame();
+        let text_color = Color::parse_css(&self.options.get().layout.text_color).unwrap_or(Color::rgb(0x19, 0x19, 0x19));
+        let label_bg = Color::rgb(0x13, 0x17, 0x22);
+        let white = Color::rgb(0xff, 0xff, 0xff);
+        let text_x = self.pane_w + 5.0 + 5.0;
+        for pane in &self.panes {
+            for mark in pane.price_scale.build_tick_marks(100, 0.0) {
+                let y = mark.coord;
+                if y >= pane.top - 0.5 && y <= pane.top + pane.height + 0.5 {
+                    out.labels.push(AxisLabel {
+                        text: self.price_formatter.format(mark.logical),
+                        x: text_x,
+                        y,
+                        color: text_color,
+                        align: AxisTextAlign::Left,
+                        background: None,
+                    });
+                }
+            }
+        }
+        if let Some((from, to)) = visible {
+            let time_marks = self.time_marks(max_label_width);
+            let times = self.data.merged_times();
+            for &(index, weight) in &time_marks {
+                if index < from || index > to { continue; }
+                let ts = times[index as usize];
+                let kind = weight_to_tick_mark_type(weight, self.time_visible, false);
+                out.labels.push(AxisLabel {
+                    text: format_tick_label(ts, kind),
+                    x: self.time_scale.index_to_coordinate(index),
+                    y: self.pane_h + 1.0 + 5.0 + 3.0 + 12.0 / 2.0,
+                    color: text_color,
+                    align: AxisTextAlign::Center,
+                    background: None,
+                });
+            }
+            self.append_marker_labels(&mut out.labels, from, to);
+        }
+        self.append_price_line_labels(&mut out.labels, &measure);
+        self.append_last_value_label(&mut out.labels, &measure);
+        self.append_crosshair_labels(&mut out.labels, &measure, label_bg, white);
+        out.separators = self.panes.iter().skip(1).map(|p| p.top - PANE_SEPARATOR).collect();
+        out
+    }
+
+    fn append_marker_labels(&self, labels: &mut Vec<AxisLabel>, from: i64, to: i64) {
+        let times = self.data.merged_times();
+        for (pi, pane) in self.panes.iter().enumerate() {
+            for s in &self.series {
+                if s.pane_index.min(self.panes.len() - 1) != pi { continue; }
+                let scale = if s.overlay { &pane.overlay_scale } else { &pane.price_scale };
+                if scale.is_empty() { continue; }
+                let plot = self.data.plot(s.id);
+                for marker in &s.markers {
+                    if marker.text.is_empty() { continue; }
+                    let Ok(pos) = times.binary_search(&marker.time) else { continue };
+                    let index = pos as i64;
+                    if index < from || index > to { continue; }
+                    let Some(row) = plot.search(index, MismatchDirection::None) else { continue };
+                    let high = plot.value_at(row, PlotValueIndex::High);
+                    let low = plot.value_at(row, PlotValueIndex::Low);
+                    let x = self.time_scale.index_to_coordinate(index);
+                    let y = match marker.position {
+                        crate::marker_pos::BELOW => scale.price_to_coordinate(low, low) + 18.0,
+                        crate::marker_pos::ABOVE => scale.price_to_coordinate(high, high) - 18.0,
+                        _ => scale.price_to_coordinate((high + low) / 2.0, high) - 14.0,
+                    };
+                    if y >= pane.top && y <= pane.top + pane.height && x >= 0.0 && x <= self.pane_w {
+                        labels.push(AxisLabel { text: marker.text.clone(), x, y, color: marker.color, align: AxisTextAlign::Center, background: None });
+                    }
+                }
+            }
+        }
+    }
+
+    fn append_price_line_labels<F>(&self, labels: &mut Vec<AxisLabel>, measure: &F)
+    where
+        F: Fn(&str) -> f64,
+    {
+        for (pi, pane) in self.panes.iter().enumerate() {
+            for s in &self.series {
+                if s.pane_index.min(self.panes.len() - 1) != pi { continue; }
+                let scale = if s.overlay { &pane.overlay_scale } else { &pane.price_scale };
+                for line in &s.price_lines {
+                    if scale.is_empty() { continue; }
+                    let y = scale.price_to_coordinate(line.price, line.price);
+                    if y < pane.top || y > pane.top + pane.height { continue; }
+                    let text = if line.title.is_empty() { self.price_formatter.format(line.price) } else { line.title.clone() };
+                    let width = 1.0 + 5.0 + 5.0 + 5.0 + measure(&text);
+                    let height = 12.0 + 2.5 * 2.0;
+                    labels.push(AxisLabel { text, x: self.pane_w + 5.0 + 5.0, y, color: line.color.contrast_text(), align: AxisTextAlign::Left, background: Some((self.pane_w, y - height / 2.0, width, height, line.color)) });
+                }
+            }
+        }
+    }
+
+    fn append_last_value_label<F>(&self, labels: &mut Vec<AxisLabel>, measure: &F)
+    where
+        F: Fn(&str) -> f64,
+    {
+        let plot = self.data.plot(self.series[0].id);
+        if plot.is_empty() || self.panes[0].price_scale.is_empty() { return; }
+        let row = plot.size() - 1;
+        let close = plot.value_at(row, PlotValueIndex::Close);
+        let y = self.panes[0].price_scale.price_to_coordinate(close, close);
+        if y < 0.0 || y > self.pane_h { return; }
+        let color = if close >= plot.value_at(row, PlotValueIndex::Open) { Color::rgb(0x26, 0xa6, 0x9a) } else { Color::rgb(0xef, 0x53, 0x50) };
+        let text = self.price_formatter.format(close);
+        let width = 1.0 + 5.0 + 5.0 + 5.0 + measure(&text);
+        let height = 12.0 + 2.5 * 2.0;
+        labels.push(AxisLabel { text, x: self.pane_w + 5.0 + 5.0, y, color: color.contrast_text(), align: AxisTextAlign::Left, background: Some((self.pane_w, y - height / 2.0, width, height, color)) });
+    }
+
+    fn append_crosshair_labels<F>(&self, labels: &mut Vec<AxisLabel>, measure: &F, bg: Color, white: Color)
+    where
+        F: Fn(&str) -> f64,
+    {
+        let Some((x_css, y_css)) = self.crosshair else { return };
+        let Some((from, to)) = self.visible_range_for_frame() else { return };
+        if self.crosshair_mode == CrosshairMode::Hidden || self.data.plot(self.series[0].id).is_empty() { return; }
+        if let Some(pi) = self.panes.iter().position(|p| y_css >= p.top && y_css <= p.top + p.height) {
+            let scale = &self.panes[pi].price_scale;
+            if !scale.is_empty() {
+                let (price, snap_y) = if pi == 0 { self.crosshair_snap(x_css, y_css, from, to) } else { (scale.coordinate_to_price(y_css, 0.0), y_css) };
+                let text = self.price_formatter.format(price);
+                let width = 1.0 + 5.0 + 5.0 + 5.0 + measure(&text);
+                let height = 12.0 + 2.5 * 2.0;
+                labels.push(AxisLabel { text, x: self.pane_w + 5.0 + 5.0, y: snap_y, color: white, align: AxisTextAlign::Left, background: Some((self.pane_w, snap_y - height / 2.0, width, height, bg)) });
+            }
+        }
+        if x_css <= self.pane_w {
+            let index = self.snapped_crosshair_index(x_css, from, to);
+            let text = format_crosshair_time(self.data.merged_times()[index as usize], self.time_visible, false);
+            let width = measure(&text) + 9.0 * 2.0;
+            let height = 12.0 + 3.0 + 3.0;
+            let x = self.time_scale.index_to_coordinate(index);
+            let box_x = (x - width / 2.0).clamp(0.0, (self.css_width - width).max(0.0));
+            labels.push(AxisLabel { text, x: box_x + width / 2.0, y: self.pane_h + 1.0 + height / 2.0, color: white, align: AxisTextAlign::Center, background: Some((box_x, self.pane_h + 1.0, width, height, bg)) });
+        }
+    }
+
     /// Recompute pane price ranges for the current visible time window.
     /// Hosts that need scale-dependent layout measurements may call this before building a frame;
     /// `build_frame` calls it as well so standalone backends remain correct.
@@ -88,6 +263,15 @@ impl ChartEngine {
     /// The frame owns no GPU buffers and performs no browser calls. It is suitable for WebGPU,
     /// Canvas2D, tiny-skia, screenshots, and golden tests alike.
     pub fn build_frame(&mut self) -> ChartFrame {
+        let mut frame = ChartFrame::default();
+        self.build_frame_into(&mut frame);
+        frame
+    }
+
+    /// Rebuild a frame while retaining its pane, primitive, and point allocations. Hosts that
+    /// repaint repeatedly should keep one `ChartFrame` and call this method instead of allocating
+    /// a fresh tree for every cursor/animation frame.
+    pub fn build_frame_into(&mut self, output: &mut ChartFrame) {
         self.layout_for_frame();
         let visible = self.visible_range_for_frame();
         self.autoscale_visible();
@@ -108,6 +292,7 @@ impl ChartEngine {
                 area_top: s.area_top_color.unwrap_or(AREA_TOP),
                 area_bottom: s.area_bottom_color.unwrap_or(AREA_BOTTOM),
                 point_markers: s.point_markers,
+                visible: s.visible,
                 baseline: s.baseline,
                 line_type: s.line_type,
                 overlay: s.overlay,
@@ -115,17 +300,22 @@ impl ChartEngine {
             });
         }
 
-        let mut panes = Vec::with_capacity(pane_count);
+        output.width = self.pane_w;
+        output.height = self.pane_h;
+        output.pixel_ratio = self.dpr;
+        output.panes.resize_with(pane_count, FramePane::default);
+        output.panes.truncate(pane_count);
         let time_marks = self.time_marks_for_frame();
         for (pi, pane) in self.panes.iter().enumerate() {
             let top_px = (pane.top * vpr).round().max(0.0) as u32;
             let height_px = (pane.height * vpr).round().max(0.0) as u32;
-            let mut out = FramePane {
-                top: pane.top,
-                height: pane.height,
-                scissor: [0, top_px, pane_w_px, height_px],
-                ..Default::default()
-            };
+            let out = &mut output.panes[pi];
+            out.top = pane.top;
+            out.height = pane.height;
+            out.scissor = [0, top_px, pane_w_px, height_px];
+            out.under.clear();
+            out.main.clear();
+            out.points.clear();
             if let Some((from, to)) = visible {
                 self.build_grid_frame(
                     &mut out.under,
@@ -140,7 +330,7 @@ impl ChartEngine {
                     &pane.price_scale,
                 );
                 for rs in &resolved {
-                    if rs.pane != pi {
+                    if rs.pane != pi || !rs.visible {
                         continue;
                     }
                     let scale = if rs.overlay { &pane.overlay_scale } else { &pane.price_scale };
@@ -160,9 +350,7 @@ impl ChartEngine {
                 }
             }
             self.build_crosshair_frame(pi, pane_w_px as i32, hpr, vpr, &mut out.main);
-            panes.push(out);
         }
-        ChartFrame { width: self.pane_w, height: self.pane_h, pixel_ratio: self.dpr, panes }
     }
 
     fn layout_for_frame(&mut self) {
@@ -183,6 +371,11 @@ impl ChartEngine {
         (from <= to).then_some((from, to))
     }
 
+    /// Visible merged-time indices for host-side axis labels and hit-testing.
+    pub fn visible_range(&self) -> Option<(i64, i64)> {
+        self.visible_range_for_frame()
+    }
+
     fn autoscale_for_frame(&mut self, from: i64, to: i64) {
         let n = self.panes.len().max(1);
         let mut main: Vec<Option<PriceRange>> = vec![None; n];
@@ -201,7 +394,16 @@ impl ChartEngine {
 
     fn time_marks_for_frame(&mut self) -> Vec<(i64, u8)> {
         let max_width = (12.0 + 4.0) * 5.0 / 8.0 * 8.0;
-        self.tick_marks.build(self.time_scale.bar_spacing(), max_width).iter().map(|m| (m.index, m.weight)).collect()
+        self.time_marks(max_width)
+    }
+
+    /// Build the time marks used by both the frame grid and host axis labels.
+    pub fn time_marks(&mut self, max_label_width: f64) -> Vec<(i64, u8)> {
+        self.tick_marks
+            .build(self.time_scale.bar_spacing(), max_label_width)
+            .iter()
+            .map(|m| (m.index, m.weight))
+            .collect()
     }
 
     fn build_crosshair_frame(&self, pane_index: usize, pane_w_px: i32, hpr: f64, vpr: f64, out: &mut Vec<Prim>) {

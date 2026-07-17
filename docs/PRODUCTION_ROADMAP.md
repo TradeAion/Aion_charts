@@ -40,6 +40,7 @@ and broader visual goldens.
 | Coordinate API | `priceToCoordinate`, `timeToCoordinate`, logical range | exposed on chart/time-scale façade | 🟢 Low |
 | Multi-pane | panes, separators, resize, `moveToPane`, stub axes | panes, separators, sizing, and pane scales present | 🟡 Med |
 | Overlay price scales | volume histogram w/ own scale | independent overlay scale present | 🟢 Low |
+| Rust indicator producers | indicator pane / compute layer | SMA, EMA, Bollinger outputs are engine-owned series; broader library pending | 🟡 Med |
 | Baseline series + line types | baseline, step/curved, point markers | baseline, line types, point markers present | 🟢 Low |
 | Series markers | `plugins/series-markers` | shape geometry present; text/API parity remains | 🟡 Med |
 | Price lines API | `createPriceLine` per series | create/remove plus labels present | 🟢 Low |
@@ -92,6 +93,10 @@ Canvas2D, native PNG, goldens, and the demo are consumers of that same engine an
 - **R5. Contract tests.** Run the same fixture through WebGPU/Canvas2D/native backends and assert
   geometry and image parity. Add an npm-pack smoke test that imports the packed package. The
   browser Canvas2D pane fallback is now wired; parity coverage remains.
+- **R6. Engine-owned indicators and retained frames.** Rust-native SMA/EMA/Bollinger producers now
+  own ordinary line-series outputs; typed-array ingestion avoids the temporary slice-copy path for
+  clean feeds; `ChartFrame` and WebGPU groups are rebuilt into retained buffers; `AxisFrame`
+  centralizes label content and placement while the browser remains only the font/drawing adapter.
 
 ### Phase A — Make it a consumable library  🔴 critical path
 

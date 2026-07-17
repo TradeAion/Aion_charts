@@ -143,6 +143,14 @@ impl TimeTickMarks {
         }
     }
 
+    /// Append weights for newly-added points without rebuilding prior weight buckets.
+    pub fn append_weights(&mut self, start_index: usize, weights: &[u8]) {
+        self.cache = None;
+        for (offset, &weight) in weights.iter().enumerate().skip(start_index) {
+            self.marks_by_weight.entry(weight).or_default().push(offset as TimePointIndex);
+        }
+    }
+
     /// Port of `TickMarks.build`: `max_width` is the max label width in px
     /// (`(font_size + 4) * 5 / 8 * max_label_chars`), `spacing` the current bar spacing.
     pub fn build(&mut self, spacing: f64, max_width: f64) -> &[TickMark] {
@@ -295,5 +303,15 @@ mod tests {
         let wide = tm.build(80.0, 80.0).len(); // 1 index per mark -> all fit
         let narrow = tm.build(2.0, 80.0).len(); // 40 indexes per mark -> few fit
         assert!(wide > narrow);
+    }
+
+    #[test]
+    fn append_weights_keeps_existing_marks_and_adds_new_point() {
+        let mut marks = TimeTickMarks::new();
+        marks.set_weights(&[50]);
+        marks.append_weights(1, &[50, 50]);
+        let built = marks.build(10.0, 10.0);
+        assert!(built.iter().any(|mark| mark.index == 0));
+        assert!(built.iter().any(|mark| mark.index == 1));
     }
 }
