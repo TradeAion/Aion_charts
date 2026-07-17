@@ -30,6 +30,18 @@ impl<'a> WasmCanvas2d<'a> {
 }
 
 impl Canvas2d for WasmCanvas2d<'_> {
+    fn save(&mut self) {
+        self.ctx.save();
+    }
+    fn restore(&mut self) {
+        self.ctx.restore();
+    }
+    fn clip_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.ctx.begin_path();
+        self.ctx.rect(x as f64, y as f64, w as f64, h as f64);
+        self.ctx.clip();
+    }
+
     fn set_fill_solid(&mut self, color: Color) {
         self.ctx.set_fill_style_str(&css(color));
     }

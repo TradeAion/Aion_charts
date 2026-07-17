@@ -8,9 +8,10 @@
 //! The golden is currently our own deterministic render; when a headless-Chromium reference
 //! pipeline exists, lightweight-charts PNGs drop in as additional goldens with the same diff.
 
-use aion_native::{diff_pixmaps, load_png, render_prims, scene::demo_scene};
+use aion_native::{diff_pixmaps, engine_scene::demo_engine, load_png, render_engine, render_prims, scene::demo_scene};
 
 const GOLDEN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/goldens/scene.png");
+const ENGINE_GOLDEN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/goldens/engine.png");
 
 #[test]
 fn scene_matches_golden() {
@@ -41,4 +42,13 @@ fn diff_detects_a_changed_scene() {
     let golden = load_png(GOLDEN).unwrap();
     let stats = diff_pixmaps(changed.pixmap(), &golden, 2).unwrap();
     assert!(stats.differing_pixels > 0, "a changed scene should differ from the golden");
+}
+
+#[test]
+fn real_engine_frame_matches_golden() {
+    let mut chart = demo_engine();
+    let canvas = render_engine(&mut chart);
+    let golden = load_png(ENGINE_GOLDEN).expect("real-engine golden PNG should load");
+    let stats = diff_pixmaps(canvas.pixmap(), &golden, 2).expect("engine golden size must match");
+    assert!(stats.fraction() < 0.001, "real engine frame drifted: {} / {} px differ (max {})", stats.differing_pixels, stats.total_pixels, stats.max_channel_delta);
 }

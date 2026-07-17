@@ -81,7 +81,8 @@
   <div id="chart_container"><div id="legend">O — H — L — C —</div></div>
 </div>
 <script type="module">
-// The real public API — same package a downstream user would `npm install`.
+// Built from the real package distribution. The demo build copies @aion/charts' published
+// artifacts; it does not compile or wire an engine of its own.
 import { create_chart } from "./dist/aion_charts.js";
 
 const container = document.getElementById("chart_container");

@@ -84,6 +84,8 @@ pub enum Prim {
         border_color: Color,
     },
     Circle { cx: f32, cy: f32, radius: f32, fill: Color, stroke_width: f32, stroke: Color },
+    /// Filled triangle in bitmap space (markers/arrows and other small annotations).
+    Triangle { a: [f32; 2], b: [f32; 2], c: [f32; 2], color: Color },
     /// Vertical gradient over the full target (pane background).
     Background { gradient: Gradient },
     // Text runs come with the glyph engine in aion_render_wgpu; the IR slot is reserved so

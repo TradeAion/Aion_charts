@@ -1,0 +1,11 @@
+[package]
+name = "aion_engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Headless chart model and frame-production state for Aion Charts"
+
+[dependencies]
+aion_core = { path = "../aion_core" }
+aion_render = { path = "../aion_render" }
+

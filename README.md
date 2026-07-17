@@ -15,6 +15,7 @@ trajectory toward a full TradingView-class charting platform.
 | Crate | Purpose |
 |---|---|
 | `crates/aion_core` | Platform-free chart model: scales, ranges, invalidation, formatters |
+| `crates/aion_engine` | Headless chart instance: panes, series, data, layout, interaction, frame production |
 | `crates/aion_render` | Draw-list IR + rendering math (bar widths, primitives) |
 | `crates/aion_render_wgpu` | WebGPU backend (pipelines, glyph atlas) — WIP |
 | `crates/aion_wasm` | wasm-bindgen host shell (DOM, events, RAF) — WIP |

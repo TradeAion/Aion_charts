@@ -7,10 +7,12 @@
 //! server-side chart rendering, all off-GPU.
 
 pub mod scene;
+pub mod engine_scene;
 
 use aion_render::canvas2d::{execute, Canvas2d, Viewport};
 use aion_render::color::Color;
 use aion_render::draw_list::Prim;
+use aion_engine::ChartEngine;
 use tiny_skia::{
     Color as SkColor, FillRule, GradientStop, LinearGradient, Paint, PathBuilder, Pixmap, Point,
     Rect, Shader, SpreadMode, Stroke, StrokeDash, Transform,
@@ -195,6 +197,39 @@ pub fn render_prims(
     canvas
 }
 
+/// Render a real headless chart instance through the same Prim frame consumed by browser hosts.
+/// This intentionally covers the chart pane layer; browser-only axis text remains a host concern.
+pub fn render_engine(chart: &mut ChartEngine) -> TinySkiaCanvas {
+    let frame = chart.build_frame();
+    let mut prims = Vec::new();
+    let mut points = Vec::new();
+    for pane in frame.panes {
+        let point_base = points.len() as u32;
+        points.extend(pane.points);
+        prims.extend(pane.under);
+        for prim in pane.main {
+            prims.push(remap_prim_points(prim, point_base));
+        }
+    }
+    let options = chart.options.get();
+    let background = Color::parse_css(&options.layout.background.color).unwrap_or(Color::rgb(0xff, 0xff, 0xff));
+    render_prims(
+        (frame.width * frame.pixel_ratio).round().max(1.0) as u32,
+        (frame.height * frame.pixel_ratio).round().max(1.0) as u32,
+        background,
+        &prims,
+        &points,
+    )
+}
+
+fn remap_prim_points(prim: Prim, base: u32) -> Prim {
+    match prim {
+        Prim::Polyline { first_point, point_count, width, style, line_type, color } => Prim::Polyline { first_point: first_point + base, point_count, width, style, line_type, color },
+        Prim::AreaFill { first_point, point_count, base_y, line_type, gradient } => Prim::AreaFill { first_point: first_point + base, point_count, base_y, line_type, gradient },
+        other => other,
+    }
+}
+
 /// Result of comparing two rasterized images pixel-by-pixel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DiffStats {
@@ -254,6 +289,7 @@ pub fn load_png(path: &str) -> Result<Pixmap, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aion_engine::SeriesKind;
     use aion_render::draw_list::{Gradient, IRect};
 
     #[test]
@@ -297,5 +333,31 @@ mod tests {
         let bottom = canvas.pixel_rgba(5, 97);
         assert!(top[0] < 40, "top should be near-black, got {top:?}");
         assert!(bottom[0] > 215, "bottom should be near-white, got {bottom:?}");
+    }
+
+    #[test]
+    fn renders_a_real_headless_chart_frame() {
+        let mut chart = ChartEngine::new(160.0, 100.0, 1.0);
+        chart
+            .set_series_data(
+                0,
+                &[1.0, 2.0, 3.0],
+                &[10.0, 11.0, 10.5],
+                &[12.0, 13.0, 12.0],
+                &[9.0, 10.0, 9.5],
+                &[11.0, 12.0, 10.0],
+            )
+            .unwrap();
+        chart.time_scale.set_width(160.0);
+        chart.fit_content();
+        chart.series[0].kind = SeriesKind::Candlestick;
+        let canvas = render_engine(&mut chart);
+        let non_background = canvas
+            .pixmap()
+            .data()
+            .chunks_exact(4)
+            .filter(|px| px[0..3] != [0xff, 0xff, 0xff])
+            .count();
+        assert!(non_background > 0);
     }
 }

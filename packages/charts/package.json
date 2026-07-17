@@ -1,16 +1,25 @@
 {
   "name": "@aion/charts",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "Aion Charts public TypeScript API (snake_case, semantics mirror lightweight-charts v5)",
-  "main": "src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build:wasm": "wasm-pack build ../../crates/aion_wasm --target web --out-dir ../../packages/charts/pkg",
-    "build:bundle": "esbuild src/index.ts --bundle --format=esm --outfile=../../examples/web_demo/dist/aion_charts.js",
-    "build:copy-wasm": "node -e \"const fs=require('fs');fs.mkdirSync('../../examples/web_demo/dist',{recursive:true});fs.copyFileSync('pkg/aion_wasm_bg.wasm','../../examples/web_demo/dist/aion_wasm_bg.wasm')\"",
-    "build": "npm run build:wasm && npm run build:bundle && npm run build:copy-wasm"
+    "build:js": "esbuild src/index.ts --bundle --format=esm --sourcemap --outfile=dist/index.js",
+    "build:types": "tsc --declaration --emitDeclarationOnly --outDir dist --noEmit false",
+    "build:copy-wasm": "node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});fs.copyFileSync('pkg/aion_wasm_bg.wasm','dist/aion_wasm_bg.wasm')\"",
+    "build": "npm run build:wasm && npm run build:js && npm run build:types && npm run build:copy-wasm"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",

@@ -2,9 +2,10 @@
  * @aion/charts — public API (snake_case; semantics mirror lightweight-charts v5).
  *
  * A thin, typed façade over the `aion_wasm` engine. It owns the browser-side concerns that the
- * engine deliberately leaves out: creating the two stacked canvases (WebGPU pane + Canvas2D axis
- * overlay), the input-gesture recognizer, typed-array packing of data at the boundary, and the
- * chart/series/time-scale handle objects. All model, layout, and rendering math lives in Rust.
+ * engine deliberately leaves out: creating the two stacked canvases (WebGPU/Canvas2D pane +
+ * Canvas2D axis overlay), the input-gesture recognizer, typed-array packing of data at the
+ * boundary, and the chart/series/time-scale handle objects. All model, layout, and rendering math
+ * lives in Rust.
  *
  * WebGPU device acquisition is async, so `create_chart` returns a Promise — the one deliberate
  * divergence from LWC's synchronous `createChart`.
@@ -818,8 +819,8 @@ function install_gestures(chart: chart_impl): () => void {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Create a chart inside `container`. Resolves once the WebGPU device is ready and the first frame
- * is drawn. Mirrors lightweight-charts' `createChart`, but async (WebGPU acquisition).
+ * Create a chart inside `container`. Resolves once the rendering backend is ready and the first
+ * frame is drawn. Mirrors lightweight-charts' `createChart`, but async (backend acquisition).
  */
 export async function create_chart(
   container: HTMLElement,
@@ -827,8 +828,9 @@ export async function create_chart(
 ): Promise<chart_api> {
   await ensure_init();
 
-  // Two stacked, absolutely-positioned canvases filling the container: WebGPU pane below, the
-  // transparent Canvas2D axis overlay (which also receives pointer events) above.
+  // Two stacked, absolutely-positioned canvases filling the container: the pane (WebGPU when
+  // available, Canvas2D fallback otherwise) below, and the transparent Canvas2D axis overlay
+  // (which also receives pointer events) above.
   if (getComputedStyle(container).position === "static") {
     container.style.position = "relative";
   }
@@ -850,7 +852,7 @@ export async function create_chart(
   const css_w = Math.max(rect.width, 1);
   const css_h = Math.max(rect.height, 1);
   const dpr = window.devicePixelRatio || 1;
-  // Bootstrap the bitmap size so the WebGPU surface configures; auto-resize (if enabled) or a
+  // Bootstrap the bitmap size so either pane backend configures; auto-resize (if enabled) or a
   // manual resize() will correct it.
   for (const c of [pane, overlay]) {
     c.width = Math.max(1, Math.round(css_w * dpr));

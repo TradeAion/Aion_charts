@@ -20,6 +20,13 @@ use crate::line::{expand_line, LinePoint};
 /// Coordinates are bitmap-space (device px), matching the IR. Concrete impls wrap web-sys or a
 /// native rasterizer; the unit tests use a recording impl.
 pub trait Canvas2d {
+    /// Save the target state before applying a backend-specific clip.
+    fn save(&mut self) {}
+    /// Restore the target state after drawing a clipped layer.
+    fn restore(&mut self) {}
+    /// Clip subsequent drawing to an integer bitmap-space rectangle.
+    fn clip_rect(&mut self, _x: f32, _y: f32, _w: f32, _h: f32) {}
+
     /// Set the fill style to a solid color.
     fn set_fill_solid(&mut self, color: Color);
     /// Set the fill style to a vertical linear gradient from `y_top` (`top`) to `y_bottom`.
@@ -185,6 +192,15 @@ pub fn execute(prims: &[Prim], points: &[[f32; 2]], target: &mut impl Canvas2d, 
                     target.set_line_width(*stroke_width);
                     target.stroke();
                 }
+            }
+            Prim::Triangle { a, b, c, color } => {
+                target.set_fill_solid(*color);
+                target.begin_path();
+                target.move_to(a[0], a[1]);
+                target.line_to(b[0], b[1]);
+                target.line_to(c[0], c[1]);
+                target.close_path();
+                target.fill();
             }
             Prim::RoundRect { x, y, w, h, radii, fill, border_width, border_color } => {
                 round_rect_path(target, *x, *y, *w, *h, *radii);

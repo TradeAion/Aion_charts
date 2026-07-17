@@ -1,7 +1,7 @@
 # Aion Charts — Production Roadmap
 
-Path from the current engine (renders candles/bars/line/area/histogram, single pane, both axes,
-crosshair, zoom/pan/streaming) to a **near-production charting library on par with
+Path from the current engine (renders candles/bars/line/area/histogram/baseline, multiple panes,
+both axes, crosshair, zoom/pan/streaming) to a **near-production charting library on par with
 lightweight-charts (LWC) v5.2.0**, with the plugin/pane architecture in place for the
 TradingView-class ambition.
 
@@ -11,19 +11,22 @@ phase ordering in ARCHITECTURE.md §9 where they disagree — see "Reordering ra
 
 ---
 
-## 1. Honest state assessment (2026-07-12)
+## 1. Honest state assessment (2026-07-17)
 
-- **Aion:** ~7,100 lines Rust across `aion_core` / `aion_render` / `aion_render_wgpu` / `aion_wasm`.
+- **Aion:** ~9,600 lines Rust across `aion_core` / `aion_engine` / `aion_render` /
+  `aion_render_wgpu` / `aion_wasm` / `aion_native`, plus an ~800-line TypeScript façade.
 - **LWC v5.2.0 reference** (`tmp/lightweight-charts/`): ~30,300 lines TS.
 
 **Strong (done well):** core scale math (price scale 4 modes + log, time scale, tick spans),
 plot list + data layer, invalidate mask, magnet crosshair, formatters; candle/bar/line/area/
-histogram geometry; wgpu quad/tri/tex pipelines + MSAA; Canvas2D axis-text overlay; a working
-single-pane multi-series chart in `aion_wasm`.
+histogram/baseline geometry; wgpu quad/tri/tex pipelines + MSAA; shared Canvas2D execution;
+headless `ChartEngine` frames; native PNG/golden coverage; and a working multi-pane,
+multi-series TypeScript package.
 
-**The defining gap:** the consumable library — `packages/charts/src/index.ts` — is a **stub that
-throws**. Aion today is an *engine*, not a *library*. The largest distance to production is the
-product surface (API façade, options, validation, subscriptions), **not** rendering fidelity.
+**The defining gaps:** the package boundary and headless/rendering seam are now repaired. The
+remaining production distance is parity and breadth: LWC-level subscriptions/plugins, text and
+axis parity across backends, a no-WebGPU runtime matrix, performance at very large data volumes,
+and broader visual goldens.
 
 ---
 
@@ -31,20 +34,20 @@ product surface (API façade, options, validation, subscriptions), **not** rende
 
 | Area | LWC reference | Aion status | Severity |
 |---|---|---|---|
-| Public TS API | `api/chart-api.ts`, `series-api.ts`, handles | 24-line stub that throws | 🔴 Blocker |
-| Options system | deep-merge, ~8 groups, per-series | `set_*` setters only | 🔴 Blocker |
-| Data validation | `data-validators.ts` (order/dupe/NaN/whitespace) | none | 🔴 Blocker |
-| Coordinate API | `priceToCoordinate`, `timeToCoordinate`, logical range | not exposed | 🟠 High |
-| Multi-pane | panes, separators, resize, `moveToPane`, stub axes | single pane | 🟠 High |
-| Overlay price scales | volume histogram w/ own scale | one shared scale | 🟠 High |
-| Baseline series + line types | baseline, step/curved, point markers | line/area only | 🟠 High |
-| Series markers | `plugins/series-markers` | none | 🟠 High |
-| Price lines API | `createPriceLine` per series | last-value only | 🟡 Med |
+| Public TS API | `api/chart-api.ts`, `series-api.ts`, handles | façade and handles present; LWC breadth still incomplete | 🟠 High |
+| Options system | deep-merge, ~8 groups, per-series | deep-merge and common chart/series options present | 🟡 Med |
+| Data validation | `data-validators.ts` (order/dupe/NaN/whitespace) | repair-and-report validation present | 🟢 Low |
+| Coordinate API | `priceToCoordinate`, `timeToCoordinate`, logical range | exposed on chart/time-scale façade | 🟢 Low |
+| Multi-pane | panes, separators, resize, `moveToPane`, stub axes | panes, separators, sizing, and pane scales present | 🟡 Med |
+| Overlay price scales | volume histogram w/ own scale | independent overlay scale present | 🟢 Low |
+| Baseline series + line types | baseline, step/curved, point markers | baseline, line types, point markers present | 🟢 Low |
+| Series markers | `plugins/series-markers` | shape geometry present; text/API parity remains | 🟡 Med |
+| Price lines API | `createPriceLine` per series | create/remove plus labels present | 🟢 Low |
 | Subscriptions | crosshair move / click / dblclick / range change | inline, not surfaced | 🟡 Med |
 | Plugins / primitives | series + pane primitives, custom series, JS recorder | none | 🟡 Med (platform) |
 | Watermark | text + image | none | 🟡 Med |
-| Fallback backend | Canvas2D executor | WebGPU-only | 🟠 High (reach) |
-| Golden tests | (planned) | none | 🟠 High (safety) |
+| Fallback backend | Canvas2D executor | Shared-frame fallback wired; no-WebGPU runtime matrix pending | 🟡 Med (reach) |
+| Golden tests | (planned) | real-engine and primitive goldens; LWC parity matrix pending | 🟡 Med (safety) |
 | Data conflation | `data-conflater.ts` (1M+ pts) | none | 🟢 Low (perf) |
 | Yield-curve / price horz | pluggable horz behaviors | time only | 🟢 Low |
 
@@ -52,17 +55,43 @@ product surface (API façade, options, validation, subscriptions), **not** rende
 
 ## 3. Reordering rationale
 
-ARCHITECTURE.md §9 has pushed rendering (Phases 4–5). The product-defining gap is the **library
-shell**: a pixel-perfect engine with an API that throws is further from production than a slightly
-less perfect engine you can `npm install` and configure. Therefore:
+ARCHITECTURE.md §9 had pushed rendering (Phases 4–5). The product-defining gap was the **library
+shell**: a pixel-perfect engine with an incomplete package boundary was further from production
+than a slightly less perfect engine you can `npm install` and configure. Therefore:
 
 1. **Phase A (library shell) moves to the front.** Nothing ships without it.
 2. **Golden tests + Canvas2D fallback (Phase D) start now, in parallel** — they de-risk every
-   change made in A–C and turn the WebGPU-only demo into a browser-universal product.
+   change made in A–C and turn the formerly WebGPU-only demo into a browser-universal product.
 
 ---
 
 ## 4. Phases
+
+### Phase R — Architecture recovery  🔴 current critical path
+
+The July implementation allowed the browser/WASM host to absorb the chart model and frame
+builder. That violated the intended dependency rules: native rendering could only draw a
+hand-authored demonstration scene, and the npm build emitted directly into the web demo. Work on
+Phase C and the Canvas2D fallback was paused until this seam was repaired; fallback work is now
+active again against the shared frame.
+
+*Exit: one DOM/GPU-free chart instance produces one backend-neutral frame; WebGPU, browser
+Canvas2D, native PNG, goldens, and the demo are consumers of that same engine and package.*
+
+- **R1. Headless chart ownership.** `aion_engine::ChartEngine` owns panes, series, merged data,
+  scales, options, interaction state, layout, and invalidation. `aion_wasm` owns only browser
+  lifecycle and bindings.
+- **R2. Backend-neutral frame.** Move every chart builder out of `aion_wasm`; eliminate
+  `TriVertex`/`DrawGroup` from model/frame construction. All geometry is expressed in the
+  `aion_render` IR before a backend sees it.
+- **R3. Real native/golden path.** Build native PNGs and goldens by feeding data/options to
+  `ChartEngine`, not by hand-authoring a chart-like primitive scene.
+- **R4. Real package boundary.** `@aion/charts` produces its own JS, declarations, and WASM under
+  `dist`; the demo consumes those distribution artifacts and the library build never targets the
+  demo directory.
+- **R5. Contract tests.** Run the same fixture through WebGPU/Canvas2D/native backends and assert
+  geometry and image parity. Add an npm-pack smoke test that imports the packed package. The
+  browser Canvas2D pane fallback is now wired; parity coverage remains.
 
 ### Phase A — Make it a consumable library  🔴 critical path
 
@@ -129,6 +158,43 @@ less perfect engine you can `npm install` and configure. Therefore:
 ## 6. Execution log
 
 Progress is appended here as phases land (newest last).
+
+- 2026-07-17 — **Architecture audit: Phase R inserted and C/D feature work paused.** The demo did
+  use the TypeScript façade, but the façade build targeted the demo directly and the actual chart
+  instance (`ChartInner`) mixed platform-neutral state with DOM and WebGPU resources inside
+  `aion_wasm`. The native golden rendered a handcrafted chart-like scene rather than the engine.
+  Recovery began with a DOM/GPU-free `aion_engine` crate; chart-owned state (`ChartEngine`, panes,
+  series, scales, data, options, interaction/viewport state) moved there and the WASM host now
+  contains it. The package build now emits independent `dist/index.js`, `index.d.ts`, and WASM;
+  the demo copies those published artifacts as a separate application build. Remaining R work:
+  finish contract/parity coverage and remove the legacy handcrafted primitive fixture once the
+  low-level renderer regression is split into its own explicit test.
+
+- 2026-07-17 — **Phase R2/R3 increment: shared core frame + real native golden.** `aion_engine`
+  now produces a DOM/GPU-free `ChartFrame` containing pane scissor geometry, grid, autoscaled
+  candles, bars, lines, areas, and histograms as `aion_render::Prim` values. The WASM render path
+  consumes that frame for all pane geometry; only WebGPU submission and browser text labels remain
+  in the adapter. `aion_native::render_engine` consumes the
+  same frame, and a committed `engine.png` golden now exercises a real `ChartEngine` fixture rather
+  than only the handcrafted primitive scene. Native unit, golden, workspace tests, package build,
+  package import smoke, and demo build are green.
+
+- 2026-07-17 — **Phase R2 increment: shared interaction geometry.** Crosshair lines, magnet
+  snapping, and the line/area crosshair marker now come from `ChartEngine::build_frame` as
+  backend-neutral primitives. The WASM adapter no longer constructs chart geometry with
+  `TriVertex`; it only owns WebGPU submission and browser text labels. Workspace tests and the
+  package build remain green without compiler warnings.
+
+- 2026-07-17 — **Phase R1 increment: shared data/layout bookkeeping.** Sanitized series installs,
+  streaming updates, time-point/tick synchronization, autoscaling, and stacked-pane layout now
+  execute in `aion_engine`; WASM keeps only diagnostics and browser-facing measurements. This
+  removes the second model mutation and pane-layout implementation from the browser shell.
+
+- 2026-07-17 — **Phase R5 increment: real Canvas2D pane fallback.** `create_chart` now treats
+  WebGPU initialization as optional. When unavailable, the pane canvas executes the same
+  `ChartFrame` through `aion_render::canvas2d`, with per-pane clipping; the overlay continues to
+  render browser text labels. The fallback is no longer limited to a primitive smoke test. The
+  packaged demo was also opened and rendered successfully with no browser console errors.
 
 - 2026-07-12 — Roadmap authored. Beginning Phase A.
 - 2026-07-12 — **A3 done.** `aion_core::model::data_validation` (sanitize_ohlc / sanitize_point:

@@ -1,7 +1,8 @@
 //! The chart object exported to JS.
 //!
 //! Hybrid rendering, mirroring lightweight-charts' per-cell canvas layout:
-//! - the **pane** (grid, series, crosshair lines) is drawn with WebGPU;
+//! - the **pane** (grid, series, crosshair lines) is drawn with WebGPU or the shared Canvas2D
+//!   fallback;
 //! - the **axes** (borders, tick labels, crosshair axis labels) are drawn natively on a
 //!   stacked Canvas2D overlay via web-sys, so axis text is the browser's own `fillText`.
 //!
@@ -20,39 +21,31 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::CanvasRenderingContext2d;
 
-use aion_core::format::price_formatter::PriceFormatter;
 use aion_core::format::time_formatter::{
     format_crosshair_time, format_tick_label, weight_to_tick_mark_type,
 };
-use aion_core::model::data_layer::{DataLayer, SeriesId};
-use aion_core::model::data_validation::{sanitize_ohlc, sanitize_point};
+use aion_core::model::data_layer::SeriesId;
+use aion_core::model::data_validation::sanitize_ohlc;
 use aion_core::model::magnet::{magnet_snap, CrosshairMode};
 use aion_core::model::plot_list::{PlotList, PlotValueIndex};
-use aion_core::model::price_range::PriceRange;
 use aion_core::model::range::{LogicalRange, StrictRange};
-use aion_core::options::{crosshair_mode, ChartOptions, ChartOptionsStore};
+use aion_core::options::{crosshair_mode, ChartOptions};
 use aion_core::TimePointIndex;
-use aion_core::scale::price_scale_core::{PriceScaleCore, PriceScaleCoreOptions, PriceScaleMargins};
-use aion_core::scale::time_scale_core::{TimeScaleCore, TimeScaleOptions};
-use aion_core::scale::time_tick_marks::{fill_weights_for_points, TimeTickMarks};
-use aion_render::bars::{build_bars, BarItem, BarsParams};
-use aion_render::candles::{build_candles, CandleItem, CandlesParams};
-use aion_render::color::Color;
-use aion_render::draw_list::{Gradient, LineStyle, LineType, Prim};
-use aion_render::histogram::{build_histogram, HistogramItem, HistogramParams};
-use aion_render::line::{
-    build_baseline, build_disc, AreaMesh, LineParams, LinePoint, LineVertex, StrokeMesh,
+use aion_core::scale::price_scale_core::PriceScaleCore;
+use aion_engine::{
+    line_style_from_u8, marker_pos, marker_shape, ChartEngine, Marker, Pane, PriceLine, SeriesKind,
 };
+use aion_render::canvas2d::{execute as execute_canvas2d, Canvas2d, Viewport as CanvasViewport};
+use aion_render::color::Color;
+use aion_render::draw_list::LineType;
 use aion_render_wgpu::{
     geom_prims_to_tris, prims_to_instances, render_frame, DrawGroup, LabelAtlas, MsaaTarget,
-    QuadRenderer, TexQuadRenderer, TriRenderer, TriVertex, SAMPLE_COUNT,
+    QuadRenderer, TexQuadRenderer, TriRenderer, SAMPLE_COUNT,
 };
 
 // lightweight-charts default palette (RENDERING_SPEC.md §2.5, §7, §8, §15)
 const UP_COLOR: Color = Color::rgb(0x26, 0xa6, 0x9a);
 const DOWN_COLOR: Color = Color::rgb(0xef, 0x53, 0x50);
-const GRID_COLOR: Color = Color::rgb(0xd6, 0xdc, 0xde);
-const CROSSHAIR_COLOR: Color = Color::rgb(0x95, 0x98, 0xa1);
 
 // Axis palette (as CSS color strings for the 2D overlay)
 const BORDER_CSS: &str = "#2B2B43";
@@ -63,24 +56,11 @@ const WHITE_CSS: &str = "#FFFFFF";
 // Line/Area series defaults (line-series.ts / area-series.ts)
 const LINE_COLOR: Color = Color::rgb(0x21, 0x96, 0xf3);
 const AREA_LINE_COLOR: Color = Color::rgb(0x33, 0xd7, 0x78);
-const AREA_TOP_COLOR: Color = Color::rgba(0x2e, 0xdc, 0x87, 102); // rgba(46,220,135,0.4)
-const AREA_BOTTOM_COLOR: Color = Color::rgba(0x28, 0xdd, 0x64, 0); // rgba(40,221,100,0)
 const HISTOGRAM_COLOR: Color = Color::rgba(0x26, 0xa6, 0x9a, 0x80);
 // TradingView-style volume: translucent green on up bars, red on down bars.
-const VOLUME_UP_COLOR: Color = Color::rgba(0x26, 0xa6, 0x9a, 0x80);
-const VOLUME_DOWN_COLOR: Color = Color::rgba(0xef, 0x53, 0x50, 0x80);
 
-// Baseline series defaults (baseline-series.ts): teal above, red below, translucent fills.
-const BASELINE_TOP_LINE: Color = Color::rgb(0x26, 0xa6, 0x9a);
-const BASELINE_BOTTOM_LINE: Color = Color::rgb(0xef, 0x53, 0x50);
-const BASELINE_TOP_FILL: Color = Color::rgba(0x26, 0xa6, 0x9a, 0x48);
-const BASELINE_BOTTOM_FILL: Color = Color::rgba(0xef, 0x53, 0x50, 0x48);
-const DEFAULT_LINE_WIDTH: f64 = 3.0;
 
 // Crosshair marker (line/area) — line-series.ts defaults.
-const CROSSHAIR_MARKER_RADIUS: f64 = 4.0;
-const CROSSHAIR_MARKER_BORDER_WIDTH: f64 = 2.0;
-const MARKER_BORDER_COLOR: Color = Color::rgb(0xFF, 0xFF, 0xFF); // = chart background
 
 /// LWC default font stack (`helpers/make-font.ts` / layout defaults).
 const FONT_FAMILY: &str =
@@ -101,66 +81,6 @@ const TIME_PADDING_HORZ: f64 = 9.0;
 const TICK_MARK_MAX_CHARS: f64 = 8.0;
 const TIME_AXIS_HEIGHT: f64 = 28.0;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SeriesKind {
-    Candlestick,
-    Bar,
-    Line,
-    Area,
-    Histogram,
-    Baseline,
-}
-
-impl SeriesKind {
-    fn from_u8(kind: u8) -> Self {
-        match kind {
-            1 => SeriesKind::Bar,
-            2 => SeriesKind::Line,
-            3 => SeriesKind::Area,
-            4 => SeriesKind::Histogram,
-            5 => SeriesKind::Baseline,
-            _ => SeriesKind::Candlestick,
-        }
-    }
-}
-
-fn line_style_from_u8(style: u8) -> LineStyle {
-    match style {
-        1 => LineStyle::Dotted,
-        2 => LineStyle::Dashed,
-        3 => LineStyle::LargeDashed,
-        4 => LineStyle::SparseDotted,
-        _ => LineStyle::Solid,
-    }
-}
-
-/// Marker placement relative to its bar.
-mod marker_pos {
-    pub const ABOVE: u8 = 0;
-    pub const BELOW: u8 = 1;
-    pub const IN_BAR: u8 = 2;
-}
-/// Marker shape.
-mod marker_shape {
-    pub const CIRCLE: u8 = 0;
-    pub const SQUARE: u8 = 1;
-    pub const ARROW_UP: u8 = 2;
-    pub const ARROW_DOWN: u8 = 3;
-}
-
-/// A per-bar annotation on a series (roadmap Phase B4): a colored shape above/below/in the bar,
-/// with optional text. Mirrors lightweight-charts `setMarkers`.
-#[derive(Clone)]
-struct Marker {
-    time: i64,
-    position: u8,
-    shape: u8,
-    color: Color,
-    /// Optional label; rendered on the 2D overlay (a later increment).
-    #[allow(dead_code)]
-    text: String,
-}
-
 /// JSON shape accepted from the JS boundary for `set_series_markers`.
 #[derive(serde::Deserialize)]
 struct MarkerInput {
@@ -175,18 +95,6 @@ struct MarkerInput {
     text: String,
 }
 
-/// A user-created horizontal price line on a series (roadmap Phase B4): a styled line at a fixed
-/// price plus a colored axis label. Mirrors lightweight-charts `createPriceLine`.
-#[derive(Clone)]
-struct PriceLine {
-    id: u32,
-    price: f64,
-    color: Color,
-    width: i32,
-    style: LineStyle,
-    title: String,
-}
-
 fn crosshair_mode_from_u8(mode: u8) -> CrosshairMode {
     match mode {
         crosshair_mode::NORMAL => CrosshairMode::Normal,
@@ -196,144 +104,8 @@ fn crosshair_mode_from_u8(mode: u8) -> CrosshairMode {
     }
 }
 
-struct SeriesEntry {
-    id: SeriesId,
-    kind: SeriesKind,
-    /// Overrides the default line/area color when set (e.g. an SMA overlay).
-    line_color: Color,
-    /// Up/down body colors for candlestick/bar series (`None` = LWC default green/red).
-    up_color: Option<Color>,
-    down_color: Option<Color>,
-    /// Stroke width (css px) for line/area series (`None` = [`DEFAULT_LINE_WIDTH`]).
-    line_width: Option<f64>,
-    /// Area-fill gradient overrides (top at the line, bottom at the base); `None` = kind default.
-    area_top_color: Option<Color>,
-    area_bottom_color: Option<Color>,
-    /// Histogram: color each bar by the main price series' up/down direction at that index
-    /// (TradingView-style volume). `None`/false = the series' solid color.
-    histogram_updown: bool,
-    /// When true the series maps to its pane's bottom-band overlay price scale (volume-style),
-    /// excluded from that pane's main autoscale so its magnitude never distorts the price axis.
-    overlay: bool,
-    /// Which stacked pane this series lives in (0 = top/price pane).
-    pane_index: usize,
-    /// How a line/area series is joined between points (Simple / WithSteps / Curved).
-    line_type: LineType,
-    /// Draw a filled disc at each data point (when bars are spaced enough) on line/area series.
-    point_markers: bool,
-    /// Baseline price for a Baseline series; `None` = auto (midpoint of the visible range).
-    baseline: Option<f64>,
-    /// Pulse an expanding ring at the last value (driven by the host's animation clock).
-    last_price_animation: bool,
-    /// User-created horizontal price lines on this series (roadmap Phase B4).
-    price_lines: Vec<PriceLine>,
-    /// Per-bar markers on this series (roadmap Phase B4).
-    markers: Vec<Marker>,
-}
-
-/// Per-series render parameters snapshotted each frame (colors/widths resolved against defaults),
-/// so the builders don't hold a `self.series` borrow across the per-pane loop.
-struct RenderSeries {
-    id: SeriesId,
-    kind: SeriesKind,
-    line_color: Color,
-    up_color: Color,
-    down_color: Color,
-    line_width: f64,
-    area_top: Color,
-    area_bottom: Color,
-    histogram_updown: bool,
-    pane_index: usize,
-    overlay: bool,
-    line_type: LineType,
-    point_markers: bool,
-}
-
-impl SeriesEntry {
-    /// A series with LWC-default styling; overrides are applied later via `apply_options`.
-    fn new(id: SeriesId, kind: SeriesKind) -> Self {
-        SeriesEntry {
-            id,
-            kind,
-            line_color: LINE_COLOR,
-            up_color: None,
-            down_color: None,
-            line_width: None,
-            area_top_color: None,
-            area_bottom_color: None,
-            histogram_updown: false,
-            overlay: false,
-            pane_index: 0,
-            line_type: LineType::Simple,
-            point_markers: false,
-            baseline: None,
-            last_price_animation: false,
-            price_lines: Vec::new(),
-            markers: Vec::new(),
-        }
-    }
-}
-
 /// Height (css px) of the separator between stacked panes.
 const PANE_SEPARATOR: f64 = 1.0;
-/// Per-pane fractional price-scale padding (top/bottom of the pane's slot). Chosen to match the
-/// prior single-pane look (LWC default right-scale margins).
-const PANE_PAD_TOP: f64 = 0.2;
-const PANE_PAD_BOTTOM: f64 = 0.1;
-
-/// One vertically-stacked pane: its own price scale + a bottom-band overlay scale, sized to a slot
-/// of the content area each layout pass (roadmap Phase B1). Scales use the "absolute coordinate"
-/// convention — full content height + internal margins positioning the band — so builders read
-/// `price_to_coordinate` as a canvas-absolute Y with no per-pane offset.
-struct Pane {
-    price_scale: PriceScaleCore,
-    overlay_scale: PriceScaleCore,
-    stretch_factor: f64,
-    /// Overlay (volume) band as fractions of the pane slot: top leaves that fraction above.
-    overlay_top: f64,
-    overlay_bottom: f64,
-    /// css top / height of this pane's slot, set in `recompute_layout`.
-    top: f64,
-    height: f64,
-}
-
-impl Pane {
-    fn new() -> Self {
-        let scale = || {
-            PriceScaleCore::new(PriceScaleCoreOptions {
-                scale_margins: PriceScaleMargins { top: 0.0, bottom: 0.0 },
-                ..PriceScaleCoreOptions::default()
-            })
-        };
-        Pane {
-            price_scale: scale(),
-            overlay_scale: scale(),
-            stretch_factor: 1.0,
-            overlay_top: 0.8,
-            overlay_bottom: 0.0,
-            top: 0.0,
-            height: 0.0,
-        }
-    }
-
-    /// Position both scales' bands within `[top, top+height]` of a full-content-height canvas, so
-    /// `price_to_coordinate` yields canvas-absolute Y.
-    fn layout(&mut self, content_h: f64) {
-        self.price_scale.set_height(content_h);
-        self.overlay_scale.set_height(content_h);
-        let below = (content_h - self.top - self.height).max(0.0);
-        // main scale: padded band across the whole pane slot
-        self.price_scale.set_internal_margins(
-            self.top + PANE_PAD_TOP * self.height,
-            below + PANE_PAD_BOTTOM * self.height,
-        );
-        // overlay scale: band = the [overlay_top, 1-overlay_bottom] fraction of the pane slot
-        self.overlay_scale.set_internal_margins(
-            self.top + self.overlay_top * self.height,
-            below + self.overlay_bottom * self.height,
-        );
-    }
-}
 
 struct Gfx {
     device: wgpu::Device,
@@ -350,33 +122,25 @@ struct Gfx {
 }
 
 struct ChartInner {
-    gfx: Gfx,
+    gfx: Option<Gfx>,
+    pane_ctx: Option<CanvasRenderingContext2d>,
     axis_ctx: CanvasRenderingContext2d,
-    time_scale: TimeScaleCore,
-    /// Vertically-stacked panes, each with its own price + overlay scale (roadmap Phase B1).
-    /// `panes[0]` is the top/price pane and owns the visible price axis.
-    panes: Vec<Pane>,
-    price_formatter: PriceFormatter,
-    data: DataLayer,
-    series: Vec<SeriesEntry>,
-    tick_marks: TimeTickMarks,
-    /// Accumulated chart options (deep-merged across `apply_options`); drives grid/crosshair/
-    /// background colors in the render path (roadmap Phase A2).
-    options: ChartOptionsStore,
-    crosshair_mode: CrosshairMode,
-    /// Host animation clock (ms), set each frame by the shell's rAF loop; drives the last-price
-    /// pulse (roadmap Phase B3).
-    animation_time: f64,
-    /// Monotonic id source for user-created price lines (roadmap Phase B4).
-    next_price_line_id: u32,
-    time_visible: bool,
-    css_width: f64,
-    css_height: f64,
-    dpr: f64,
-    crosshair: Option<(f64, f64)>,
-    pane_w: f64,
-    pane_h: f64,
-    axis_w: f64,
+    bitmap_w: u32,
+    bitmap_h: u32,
+    engine: ChartEngine,
+}
+impl std::ops::Deref for ChartInner {
+    type Target = ChartEngine;
+
+    fn deref(&self) -> &Self::Target {
+        &self.engine
+    }
+}
+
+impl std::ops::DerefMut for ChartInner {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.engine
+    }
 }
 
 /// Keeps the `ResizeObserver` and its callback alive for the chart's lifetime.
@@ -446,8 +210,9 @@ fn apply_device_size(
     let _ = c.render();
 }
 
-/// Creates a chart bound to `pane_canvas` (WebGPU) and `overlay_canvas` (Canvas2D). Both must
-/// be full chart size with bitmap size = css size * dpr, already set by the caller.
+/// Creates a chart bound to `pane_canvas` (WebGPU, falling back to Canvas2D) and `overlay_canvas`
+/// (Canvas2D axis/text layer). Both must be full chart size with bitmap size = css size * dpr,
+/// already set by the caller.
 /// Call [`AionChart::enable_auto_resize`] to have the engine own sizing from then on.
 #[wasm_bindgen]
 pub async fn create_chart(
@@ -469,74 +234,29 @@ pub async fn create_chart(
         .ok_or_else(|| JsValue::from_str("no 2d context"))?
         .dyn_into::<CanvasRenderingContext2d>()?;
 
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-    let surface = instance
-        .create_surface(wgpu::SurfaceTarget::Canvas(pane_canvas))
-        .map_err(|e| JsValue::from_str(&format!("create_surface failed: {e}")))?;
-
-    let adapter = instance
-        .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        })
-        .await
-        .map_err(|e| JsValue::from_str(&format!("request_adapter failed: {e}")))?;
-
-    let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor::default())
-        .await
-        .map_err(|e| JsValue::from_str(&format!("request_device failed: {e}")))?;
-
     let bitmap_w = (css_width * dpr).round().max(1.0) as u32;
     let bitmap_h = (css_height * dpr).round().max(1.0) as u32;
-
-    let config = surface
-        .get_default_config(&adapter, bitmap_w, bitmap_h)
-        .ok_or_else(|| JsValue::from_str("surface not supported by adapter"))?;
-    surface.configure(&device, &config);
-
-    let quad_renderer = QuadRenderer::new(&device, config.format, SAMPLE_COUNT);
-    let atlas = LabelAtlas::new(&device);
-    let tex_renderer = TexQuadRenderer::new(&device, config.format, atlas.view(), SAMPLE_COUNT);
-    let tri_renderer = TriRenderer::new(&device, config.format, SAMPLE_COUNT);
-    let msaa = MsaaTarget::new(&device, config.format, bitmap_w, bitmap_h);
-
-    // main series (id 0) — set_data / set_series_type target it for API compatibility
-    let mut data = DataLayer::new();
-    let main = data.add_series();
+    let (gfx, pane_ctx) = match try_create_gfx(pane_canvas, css_width, css_height, dpr).await {
+        Ok(gfx) => (Some(gfx), None),
+        Err(error) => {
+            web_sys::console::warn_1(
+                &format!("aion: WebGPU unavailable; using Canvas2D fallback ({error:?})").into(),
+            );
+            let pane_ctx = pane_el
+                .get_context("2d")?
+                .ok_or_else(|| JsValue::from_str("no 2d pane context"))?
+                .dyn_into::<CanvasRenderingContext2d>()?;
+            (None, Some(pane_ctx))
+        }
+    };
 
     let inner = ChartInner {
-        gfx: Gfx {
-            device,
-            queue,
-            surface,
-            config,
-            quad_renderer,
-            tri_renderer,
-            msaa,
-            _atlas: atlas,
-            tex_renderer,
-        },
+        gfx,
+        pane_ctx,
         axis_ctx,
-        time_scale: TimeScaleCore::new(TimeScaleOptions::default()),
-        panes: vec![Pane::new()],
-        price_formatter: PriceFormatter::default(),
-        data,
-        series: vec![SeriesEntry::new(main, SeriesKind::Candlestick)],
-        tick_marks: TimeTickMarks::new(),
-        options: ChartOptionsStore::new(),
-        crosshair_mode: CrosshairMode::Magnet,
-        animation_time: 0.0,
-        next_price_line_id: 1,
-        time_visible: true,
-        css_width,
-        css_height,
-        dpr,
-        crosshair: None,
-        pane_w: css_width,
-        pane_h: css_height,
-        axis_w: 0.0,
+        bitmap_w,
+        bitmap_h,
+        engine: ChartEngine::new(css_width, css_height, dpr),
     };
 
     Ok(AionChart {
@@ -849,8 +569,7 @@ impl AionChart {
 impl ChartInner {
     /// Adds a series and returns its id. `kind`: 0 candles, 1 bars, 2 line, 3 area, 4 histogram.
     pub fn add_series(&mut self, kind: u8) -> u32 {
-        let id = self.data.add_series();
-        self.series.push(SeriesEntry::new(id, SeriesKind::from_u8(kind)));
+        let id = self.engine.add_series(SeriesKind::from_u8(kind));
         id as u32
     }
 
@@ -892,8 +611,7 @@ impl ChartInner {
                 .into(),
             );
         }
-        self.data.set_data(id as SeriesId, s.times, s.open, s.high, s.low, s.close);
-        self.on_time_points_changed();
+        self.engine.install_series_data(id as SeriesId, s.times, s.open, s.high, s.low, s.close);
     }
 
     /// Streaming update of the main series (append new time or replace last).
@@ -910,12 +628,10 @@ impl ChartInner {
             return;
         }
         // Drop a bad tick rather than corrupting the series (roadmap Phase A3).
-        let Some((t, values)) = sanitize_point(time, [open, high, low, close]) else {
+        if !self.engine.update_series_bar(series_id as SeriesId, time, [open, high, low, close]) {
             web_sys::console::warn_1(&"aion: update_bar dropped a non-finite point".into());
             return;
-        };
-        self.data.update(series_id as SeriesId, t, values);
-        self.on_time_points_changed();
+        }
     }
 
     /// Sets a series' line/area color (overrides the kind default).
@@ -1206,9 +922,13 @@ impl ChartInner {
         self.dpr = dpr;
         let bitmap_w = (css_width * dpr).round().max(1.0) as u32;
         let bitmap_h = (css_height * dpr).round().max(1.0) as u32;
-        self.gfx.config.width = bitmap_w;
-        self.gfx.config.height = bitmap_h;
-        self.gfx.surface.configure(&self.gfx.device, &self.gfx.config);
+        self.bitmap_w = bitmap_w;
+        self.bitmap_h = bitmap_h;
+        if let Some(gfx) = self.gfx.as_mut() {
+            gfx.config.width = bitmap_w;
+            gfx.config.height = bitmap_h;
+            gfx.surface.configure(&gfx.device, &gfx.config);
+        }
         // Update geometry eagerly so fit_content/zoom/scroll called before the next render
         // (and the price_axis_width getter) see the new pane size, not a stale one.
         self.recompute_layout();
@@ -1219,15 +939,13 @@ impl ChartInner {
     /// (The axis labels depend only on the price range, so one refinement pass converges.)
     fn recompute_layout(&mut self) {
         let content_h = (self.css_height - TIME_AXIS_HEIGHT).max(1.0);
-        self.layout_panes(content_h);
+        self.engine.layout_panes(content_h);
 
         let mut axis_w = self.compute_price_axis_width();
         for _ in 0..2 {
             let pane_w = (self.css_width - axis_w).max(1.0);
             self.time_scale.set_width(pane_w);
-            if let Some((from, to)) = self.visible_data_range() {
-                self.autoscale(from, to);
-            }
+            self.engine.autoscale_visible();
             let new_w = self.compute_price_axis_width();
             if new_w == axis_w {
                 break;
@@ -1237,23 +955,6 @@ impl ChartInner {
         self.pane_w = (self.css_width - axis_w).max(1.0);
         self.pane_h = content_h;
         self.axis_w = axis_w;
-    }
-
-    /// Split the content area into pane slots by stretch factor (minus separators) and position
-    /// each pane's scales into its slot.
-    fn layout_panes(&mut self, content_h: f64) {
-        let n = self.panes.len();
-        let sep_total = PANE_SEPARATOR * n.saturating_sub(1) as f64;
-        let avail = (content_h - sep_total).max(1.0);
-        let sum_stretch: f64 = self.panes.iter().map(|p| p.stretch_factor).sum::<f64>().max(1e-6);
-        let mut y = 0.0;
-        for pane in &mut self.panes {
-            let h = (avail * pane.stretch_factor / sum_stretch).max(1.0);
-            pane.top = y;
-            pane.height = h;
-            pane.layout(content_h);
-            y += h + PANE_SEPARATOR;
-        }
     }
 
     // --- gestures ---
@@ -1425,15 +1126,8 @@ impl ChartInner {
     // --- rendering ---
 
     pub fn render(&mut self) -> Result<(), JsValue> {
-        let hpr = self.dpr;
-        let vpr = self.dpr;
-
         // ---- layout (price axis width negotiated against the price labels) ----
         self.recompute_layout();
-        let pane_w = self.pane_w;
-        let pane_h = self.pane_h;
-
-        let pane_w_px = (pane_w * hpr).round() as u32;
 
         // time tick marks: built once (needs &mut), shared by GPU grid + 2D labels
         let pixels_per_character = (FONT_SIZE + 4.0) * 5.0 / 8.0;
@@ -1448,134 +1142,71 @@ impl ChartInner {
 
         // ---- GPU: one scissored draw group per stacked pane ----
         let visible = self.visible_data_range();
-        // snapshots to avoid holding a self borrow across the per-pane builder calls
-        let panes_geom: Vec<(f64, f64)> = self.panes.iter().map(|p| (p.top, p.height)).collect();
-        let series: Vec<RenderSeries> = self
-            .series
-            .iter()
-            .map(|s| RenderSeries {
-                id: s.id,
-                kind: s.kind,
-                line_color: s.line_color,
-                up_color: s.up_color.unwrap_or(UP_COLOR),
-                down_color: s.down_color.unwrap_or(DOWN_COLOR),
-                line_width: s.line_width.unwrap_or(DEFAULT_LINE_WIDTH),
-                area_top: s.area_top_color.unwrap_or(AREA_TOP_COLOR),
-                area_bottom: s.area_bottom_color.unwrap_or(AREA_BOTTOM_COLOR),
-                histogram_updown: s.histogram_updown,
-                pane_index: s.pane_index.min(panes_geom.len() - 1),
-                overlay: s.overlay,
-                line_type: s.line_type,
-                point_markers: s.point_markers,
-            })
-            .collect();
+        // The headless engine owns chart geometry. The WASM host only adds browser-adapter
+        // concerns such as crosshair interaction and text labels.
+        let engine_frame = self.engine.build_frame();
+        let groups = if self.gfx.is_some() {
+            let mut groups: Vec<DrawGroup> = Vec::with_capacity(engine_frame.panes.len());
+            for pane_frame in &engine_frame.panes {
+                let mut group = DrawGroup {
+                    scissor: Some(pane_frame.scissor),
+                    ..Default::default()
+                };
+                let prims = pane_frame.main.clone();
+                let grid_prims = pane_frame.under.clone();
+                let points = pane_frame.points.clone();
 
-        let mut groups: Vec<DrawGroup> = Vec::with_capacity(panes_geom.len());
-        for (pi, (ptop, ph)) in panes_geom.iter().copied().enumerate() {
-            let band_top_px = (ptop * vpr).round() as i32;
-            let band_h_px = (ph * vpr).round() as i32;
-            let mut group = DrawGroup {
-                scissor: Some([0, band_top_px.max(0) as u32, pane_w_px, band_h_px.max(0) as u32]),
-                ..Default::default()
-            };
-            let mut prims: Vec<Prim> = Vec::new();
-            // Grid prims live in their own list so the wgpu path can put them in the under-layer
-            // (drawn below the series tris); otherwise grid quads paint over line/area (LWC draws
-            // grid first, under everything). The Canvas2D fallback keeps them first in its list.
-            let mut grid_prims: Vec<Prim> = Vec::new();
-            // Shared device-space point pool for this pane's Polyline/AreaFill/Circle prims.
-            let mut points: Vec<[f32; 2]> = Vec::new();
-
-            if let Some((from, to)) = visible {
-                self.build_grid(&mut grid_prims, &time_marks, from, to, pane_w_px as i32, band_top_px, band_h_px, hpr, vpr, &self.panes[pi].price_scale);
-                for rs in &series {
-                    if rs.pane_index != pi {
-                        continue;
-                    }
-                    let scale = if rs.overlay { &self.panes[pi].overlay_scale } else { &self.panes[pi].price_scale };
-                    match rs.kind {
-                        SeriesKind::Candlestick => self.build_candle_prims(rs.id, from, to, hpr, vpr, rs.up_color, rs.down_color, &mut prims, scale),
-                        SeriesKind::Bar => self.build_bar_prims(rs.id, from, to, hpr, vpr, rs.up_color, rs.down_color, &mut prims, scale),
-                        SeriesKind::Histogram => self.build_histogram_prims(rs.id, from, to, hpr, vpr, rs, &mut prims, scale),
-                        SeriesKind::Baseline => self.build_baseline_prims(rs.id, rs.line_type, from, to, hpr, vpr, &mut group, scale),
-                        SeriesKind::Line | SeriesKind::Area => {
-                            self.build_line_prims(rs, from, to, ptop + ph, hpr, vpr, &mut prims, &mut points, scale)
-                        }
-                    }
-                }
-                self.build_price_lines(pi, &mut prims, pane_w_px as i32, vpr);
-                self.build_markers(pi, &mut group, from, to, hpr, vpr);
-                if pi == 0 {
-                    self.build_last_value_line(&mut prims, pane_w_px as i32, vpr);
-                    self.build_last_price_pulse(&mut group, hpr, vpr);
-                }
+                // Convert the shared frame only at the WebGPU backend boundary.
+                geom_prims_to_tris(&prims, &points, &mut group.fill_tris, &mut group.stroke_tris);
+                prims_to_instances(&grid_prims, &mut group.under_quads);
+                prims_to_instances(&prims, &mut group.quads);
+                groups.push(group);
             }
-
-            let mut crosshair_stroke: Vec<TriVertex> = Vec::new();
-            self.build_crosshair_lines(&mut prims, &mut crosshair_stroke, pane_w_px as i32, band_top_px, band_h_px, pane_w, pane_h, hpr, vpr, pi);
-            // Tessellate the geometry prims (line/area/markers) into this group's tri meshes, then
-            // the crisp-rect prims into quads. Both come from the one `prims` list that the Canvas2D
-            // fallback also consumes.
-            geom_prims_to_tris(&prims, &points, &mut group.fill_tris, &mut group.stroke_tris);
-            group.stroke_tris.extend(crosshair_stroke);
-            prims_to_instances(&grid_prims, &mut group.under_quads);
-            prims_to_instances(&prims, &mut group.quads);
-            groups.push(group);
-        }
-
-        self.gfx.msaa.ensure(&self.gfx.device, self.gfx.config.format, self.gfx.config.width, self.gfx.config.height);
-
-        let frame = self
-            .gfx
-            .surface
-            .get_current_texture()
-            .map_err(|e| JsValue::from_str(&format!("get_current_texture failed: {e}")))?;
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        // Background clear color from layout.background (roadmap Phase A2). For the non-sRGB
-        // surface, a CSS byte maps straight to the 0..1 channel (no gamma conversion), matching
-        // how the premultiplied quad colors are written.
-        let bg = Color::parse_css(&self.opts().layout.background.color).unwrap_or(Color::rgb(0xff, 0xff, 0xff));
-        let bg_clear = wgpu::Color {
-            r: bg.r() as f64 / 255.0,
-            g: bg.g() as f64 / 255.0,
-            b: bg.b() as f64 / 255.0,
-            a: 1.0,
+            groups
+        } else {
+            Vec::new()
         };
 
-        render_frame(
-            &self.gfx.device,
-            &self.gfx.queue,
-            self.gfx.msaa.view(),
-            &view,
-            self.gfx.config.width,
-            self.gfx.config.height,
-            bg_clear,
-            &self.gfx.quad_renderer,
-            &self.gfx.tex_renderer,
-            &self.gfx.tri_renderer,
-            &groups,
-        );
-        frame.present();
+        let bg = Color::parse_css(&self.opts().layout.background.color)
+            .unwrap_or(Color::rgb(0xff, 0xff, 0xff));
+        if let Some(gfx) = self.gfx.as_mut() {
+            gfx.msaa.ensure(&gfx.device, gfx.config.format, gfx.config.width, gfx.config.height);
+            let frame = gfx
+                .surface
+                .get_current_texture()
+                .map_err(|e| JsValue::from_str(&format!("get_current_texture failed: {e}")))?;
+            let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+            // Background clear color from layout.background (roadmap Phase A2).
+            let bg_clear = wgpu::Color {
+                r: bg.r() as f64 / 255.0,
+                g: bg.g() as f64 / 255.0,
+                b: bg.b() as f64 / 255.0,
+                a: 1.0,
+            };
+            render_frame(
+                &gfx.device,
+                &gfx.queue,
+                gfx.msaa.view(),
+                &view,
+                gfx.config.width,
+                gfx.config.height,
+                bg_clear,
+                &gfx.quad_renderer,
+                &gfx.tex_renderer,
+                &gfx.tri_renderer,
+                &groups,
+            );
+            frame.present();
+        } else {
+            self.render_canvas2d(&engine_frame)?;
+        }
 
         self.draw_axes_2d(visible, &time_marks)?;
         Ok(())
     }
 
     // --- data / scale bookkeeping ---
-
-    fn on_time_points_changed(&mut self) {
-        let n = self.data.merged_times().len();
-        let mut weights = vec![0u8; n];
-        fill_weights_for_points(self.data.merged_times(), &mut weights, 0);
-        self.tick_marks.set_weights(&weights);
-        self.time_scale.set_points_len(n);
-        self.time_scale.set_base_index(self.data.base_index());
-        // keep geometry current so fit_content/zoom right after set_data use the real width
-        if self.css_width > 0.0 {
-            self.recompute_layout();
-        }
-    }
 
     fn main_plot(&self) -> &PlotList {
         self.data.plot(self.series[0].id)
@@ -1596,41 +1227,6 @@ impl ChartInner {
     }
 
     /// Autoscale every pane's price + overlay scale over just its own series' visible min/max.
-    /// Splitting per pane (and per overlay within a pane) keeps a volume histogram's magnitude from
-    /// distorting the price axis and lets each pane frame its indicator independently (Phase B1/B2).
-    fn autoscale(&mut self, from: i64, to: i64) {
-        let n = self.panes.len();
-        let entries: Vec<(SeriesId, usize, bool)> =
-            self.series.iter().map(|s| (s.id, s.pane_index.min(n - 1), s.overlay)).collect();
-        let mut mains: Vec<Option<PriceRange>> = vec![None; n];
-        let mut overlays: Vec<Option<PriceRange>> = vec![None; n];
-        for (id, pane_index, is_overlay) in entries {
-            let Some(mm) = self
-                .data
-                .plot_mut(id)
-                .min_max_on_range_cached(from, to, &[PlotValueIndex::Low, PlotValueIndex::High])
-            else {
-                continue;
-            };
-            let slot = if is_overlay { &mut overlays[pane_index] } else { &mut mains[pane_index] };
-            let r = PriceRange::new(mm.min, mm.max);
-            *slot = Some(match slot.take() {
-                None => r,
-                Some(m) => m.merge(Some(&r)),
-            });
-        }
-        for (i, pane) in self.panes.iter_mut().enumerate() {
-            if let Some(r) = mains[i].take() {
-                pane.price_scale.apply_autoscale_range(Some(r), 0.01);
-            }
-            if let Some(r) = overlays[i].take() {
-                // volume-style series grow from a zero baseline, so include 0 in the range
-                let r = r.merge(Some(&PriceRange::new(0.0, 0.0)));
-                pane.overlay_scale.apply_autoscale_range(Some(r), 0.01);
-            }
-        }
-    }
-
     /// The main (right-axis) price scale — pane 0's. Used by the price axis, crosshair, last-value
     /// line, and the public coordinate API.
     fn price_scale(&self) -> &PriceScaleCore {
@@ -1667,318 +1263,6 @@ impl ChartInner {
         w + (w as i64 % 2) as f64
     }
 
-    // ---- GPU pane builders (each iterates its series' rows in the visible window) ----
-
-    #[allow(clippy::too_many_arguments)]
-    fn build_grid(&self, prims: &mut Vec<Prim>, time_marks: &[(i64, u8)], from: i64, to: i64, pane_w_px: i32, band_top_px: i32, band_h_px: i32, hpr: f64, vpr: f64, scale: &PriceScaleCore) {
-        let line_width = 1f64.max(hpr.floor()) as i32;
-        let grid = self.opts().grid;
-        let vert_color = Color::parse_css(&grid.vert_lines.color).unwrap_or(GRID_COLOR);
-        let horz_color = Color::parse_css(&grid.horz_lines.color).unwrap_or(GRID_COLOR);
-        if grid.vert_lines.visible {
-            for &(index, _weight) in time_marks {
-                if index < from || index > to {
-                    continue;
-                }
-                let x = (self.time_scale.index_to_coordinate(index) * hpr).round() as i32;
-                prims.push(Prim::VLine { x, y0: band_top_px - line_width, y1: band_top_px + band_h_px + line_width, width: line_width, style: LineStyle::Solid, color: vert_color });
-            }
-        }
-        if grid.horz_lines.visible {
-            // scale coords are canvas-absolute; the pane's scissor clips ticks to its band.
-            for mark in scale.build_tick_marks(100, 0.0) {
-                let y = (mark.coord * vpr).round() as i32;
-                prims.push(Prim::HLine { y, x0: -line_width, x1: pane_w_px + line_width, width: line_width, style: LineStyle::Solid, color: horz_color });
-            }
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn build_candle_prims(&self, id: SeriesId, from: i64, to: i64, hpr: f64, vpr: f64, up_color: Color, down_color: Color, prims: &mut Vec<Prim>, scale: &PriceScaleCore) {
-        let plot = self.data.plot(id);
-        let idxs = plot.indices();
-        let (o, h, l, c) = (
-            plot.column(PlotValueIndex::Open),
-            plot.column(PlotValueIndex::High),
-            plot.column(PlotValueIndex::Low),
-            plot.column(PlotValueIndex::Close),
-        );
-        let mut items = Vec::new();
-        for r in plot.visible_rows(from, to) {
-            let (open, high, low, close) = (o[r], h[r], l[r], c[r]);
-            let color = if close >= open { up_color } else { down_color };
-            items.push(CandleItem {
-                x: self.time_scale.index_to_coordinate(idxs[r]),
-                open_y: scale.price_to_coordinate(open, close),
-                high_y: scale.price_to_coordinate(high, close),
-                low_y: scale.price_to_coordinate(low, close),
-                close_y: scale.price_to_coordinate(close, close),
-                body_color: color,
-                border_color: color,
-                wick_color: color,
-            });
-        }
-        build_candles(&items, &CandlesParams { bar_spacing: self.time_scale.bar_spacing(), horizontal_pixel_ratio: hpr, vertical_pixel_ratio: vpr, wick_visible: true, border_visible: true }, prims);
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn build_bar_prims(&self, id: SeriesId, from: i64, to: i64, hpr: f64, vpr: f64, up_color: Color, down_color: Color, prims: &mut Vec<Prim>, scale: &PriceScaleCore) {
-        let plot = self.data.plot(id);
-        let idxs = plot.indices();
-        let (o, h, l, c) = (
-            plot.column(PlotValueIndex::Open),
-            plot.column(PlotValueIndex::High),
-            plot.column(PlotValueIndex::Low),
-            plot.column(PlotValueIndex::Close),
-        );
-        let mut items = Vec::new();
-        for r in plot.visible_rows(from, to) {
-            let (open, high, low, close) = (o[r], h[r], l[r], c[r]);
-            items.push(BarItem {
-                x: self.time_scale.index_to_coordinate(idxs[r]),
-                open_y: scale.price_to_coordinate(open, close),
-                high_y: scale.price_to_coordinate(high, close),
-                low_y: scale.price_to_coordinate(low, close),
-                close_y: scale.price_to_coordinate(close, close),
-                color: if close >= open { up_color } else { down_color },
-            });
-        }
-        build_bars(&items, &BarsParams { bar_spacing: self.time_scale.bar_spacing(), horizontal_pixel_ratio: hpr, vertical_pixel_ratio: vpr, open_visible: true, thin_bars: true }, prims);
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn build_histogram_prims(&self, id: SeriesId, from: i64, to: i64, hpr: f64, vpr: f64, rs: &RenderSeries, prims: &mut Vec<Prim>, scale: &PriceScaleCore) {
-        let plot = self.data.plot(id);
-        let idxs = plot.indices();
-        let c = plot.column(PlotValueIndex::Close);
-        // base = coordinate of price 0 (histogram grows from the bottom for volume-like data)
-        let base = scale.price_to_coordinate(0.0, 0.0);
-        // Solid fill: the series color override if set, else the histogram default.
-        let solid = if rs.line_color != LINE_COLOR { rs.line_color } else { HISTOGRAM_COLOR };
-        // TradingView-style volume colors the bar by the main price series' up/down at that index.
-        let main_plot = rs.histogram_updown.then(|| self.main_plot());
-        let (up, down) = (VOLUME_UP_COLOR, VOLUME_DOWN_COLOR);
-        let mut items = Vec::new();
-        for r in plot.visible_rows(from, to) {
-            let value = c[r];
-            let color = match main_plot {
-                Some(mp) => match mp.search(idxs[r], aion_core::model::plot_list::MismatchDirection::None) {
-                    Some(row) if mp.value_at(row, PlotValueIndex::Close) >= mp.value_at(row, PlotValueIndex::Open) => up,
-                    Some(_) => down,
-                    None => solid,
-                },
-                None => solid,
-            };
-            items.push(HistogramItem {
-                x: self.time_scale.index_to_coordinate(idxs[r]),
-                y: scale.price_to_coordinate(value, value),
-                time: idxs[r],
-                color,
-            });
-        }
-        build_histogram(&items, &HistogramParams { bar_spacing: self.time_scale.bar_spacing(), horizontal_pixel_ratio: hpr, vertical_pixel_ratio: vpr, histogram_base: base }, prims);
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    /// Emits a line/area series as high-level geometry prims (`AreaFill` + `Polyline` + `Circle`
-    /// markers) into the pane's `prims` list, pushing device-space points into the shared `points`
-    /// pool. Both backends consume this: the wgpu path tessellates via `geom_prims_to_tris`, the
-    /// Canvas2D fallback via the executor (roadmap Phase D2). Coordinates are pre-multiplied by the
-    /// pixel ratios so the pool is device-space.
-    fn build_line_prims(&self, rs: &RenderSeries, from: i64, to: i64, band_bottom: f64, hpr: f64, vpr: f64, prims: &mut Vec<Prim>, points: &mut Vec<[f32; 2]>, scale: &PriceScaleCore) {
-        let plot = self.data.plot(rs.id);
-        let idxs = plot.indices();
-        let c = plot.column(PlotValueIndex::Close);
-        let first_point = points.len() as u32;
-        for r in plot.visible_rows(from, to) {
-            let close = c[r];
-            let x = self.time_scale.index_to_coordinate(idxs[r]) * hpr;
-            let y = scale.price_to_coordinate(close, close) * vpr;
-            points.push([x as f32, y as f32]);
-        }
-        let point_count = points.len() as u32 - first_point;
-        if point_count == 0 {
-            return;
-        }
-
-        // default line color per kind unless overridden (line_color != LINE_COLOR sentinel)
-        let line_color = if rs.line_color != LINE_COLOR {
-            rs.line_color
-        } else if rs.kind == SeriesKind::Area {
-            AREA_LINE_COLOR
-        } else {
-            LINE_COLOR
-        };
-        let line_width = rs.line_width;
-
-        if rs.kind == SeriesKind::Area {
-            prims.push(Prim::AreaFill {
-                first_point,
-                point_count,
-                base_y: (band_bottom * vpr) as f32,
-                line_type: rs.line_type,
-                gradient: Gradient { top: rs.area_top, bottom: rs.area_bottom },
-            });
-        }
-        prims.push(Prim::Polyline {
-            first_point,
-            point_count,
-            width: (line_width * vpr) as f32,
-            style: LineStyle::Solid,
-            line_type: rs.line_type,
-            color: line_color,
-        });
-
-        // point markers on data points, only when bars are spaced enough that discs don't merge
-        // (mirrors LWC, which hides them below a bar-spacing threshold). RENDERING_SPEC.md §5.
-        if rs.point_markers {
-            let radius = (line_width + 1.0).max(3.0);
-            if self.time_scale.bar_spacing() >= 2.0 * radius + 2.0 {
-                let r = (radius * vpr) as f32;
-                for i in first_point..first_point + point_count {
-                    let p = points[i as usize];
-                    prims.push(Prim::Circle { cx: p[0], cy: p[1], radius: r, fill: line_color, stroke_width: 0.0, stroke: line_color });
-                }
-            }
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn build_baseline_prims(&self, id: SeriesId, line_type: LineType, from: i64, to: i64, hpr: f64, vpr: f64, group: &mut DrawGroup, scale: &PriceScaleCore) {
-        let plot = self.data.plot(id);
-        let idxs = plot.indices();
-        let c = plot.column(PlotValueIndex::Close);
-        let rows: Vec<usize> = plot.visible_rows(from, to).collect();
-        if rows.is_empty() {
-            return;
-        }
-        // baseline price: the series' set value, else the midpoint of the visible min/max
-        let baseline_price = self
-            .series
-            .iter()
-            .find(|s| s.id == id)
-            .and_then(|s| s.baseline)
-            .unwrap_or_else(|| {
-                let (mut mn, mut mx) = (f64::INFINITY, f64::NEG_INFINITY);
-                for &r in &rows {
-                    mn = mn.min(c[r]);
-                    mx = mx.max(c[r]);
-                }
-                (mn + mx) / 2.0
-            });
-        let baseline_y = scale.price_to_coordinate(baseline_price, baseline_price);
-        let points: Vec<LinePoint> = rows
-            .iter()
-            .map(|&r| LinePoint { x: self.time_scale.index_to_coordinate(idxs[r]), y: scale.price_to_coordinate(c[r], c[r]) })
-            .collect();
-        let params = LineParams { horizontal_pixel_ratio: hpr, vertical_pixel_ratio: vpr, line_width: DEFAULT_LINE_WIDTH, line_type };
-        let mut stroke = StrokeMesh::default();
-        let mut fill = AreaMesh::default();
-        build_baseline(&points, baseline_y, BASELINE_TOP_LINE, BASELINE_BOTTOM_LINE, BASELINE_TOP_FILL, BASELINE_BOTTOM_FILL, &params, &mut stroke, &mut fill);
-        group.fill_tris.extend(fill.vertices.iter().map(mesh_vertex));
-        group.stroke_tris.extend(stroke.vertices.iter().map(mesh_vertex));
-    }
-
-    /// Series markers (shapes above/below/in bars) for every series in `pane_index` (roadmap B4).
-    #[allow(clippy::too_many_arguments)]
-    fn build_markers(&self, pane_index: usize, group: &mut DrawGroup, from: i64, to: i64, hpr: f64, vpr: f64) {
-        let pane = &self.panes[pane_index];
-        let times = self.data.merged_times();
-        let size = 6.0 * vpr as f32;
-        let gap = 4.0 * vpr as f32;
-        for s in &self.series {
-            if s.pane_index.min(self.panes.len() - 1) != pane_index || s.markers.is_empty() {
-                continue;
-            }
-            let scale = if s.overlay { &pane.overlay_scale } else { &pane.price_scale };
-            if scale.is_empty() {
-                continue;
-            }
-            let plot = self.data.plot(s.id);
-            for m in &s.markers {
-                let Ok(pos) = times.binary_search(&m.time) else { continue };
-                let idx = pos as i64;
-                if idx < from || idx > to {
-                    continue;
-                }
-                let Some(row) = plot.search(idx, aion_core::model::plot_list::MismatchDirection::None) else { continue };
-                let high = plot.value_at(row, PlotValueIndex::High);
-                let low = plot.value_at(row, PlotValueIndex::Low);
-                let x = (self.time_scale.index_to_coordinate(idx) * hpr) as f32;
-                let y = match m.position {
-                    marker_pos::ABOVE => (scale.price_to_coordinate(high, high) * vpr) as f32 - size - gap,
-                    marker_pos::BELOW => (scale.price_to_coordinate(low, low) * vpr) as f32 + size + gap,
-                    _ => (scale.price_to_coordinate((high + low) / 2.0, high) * vpr) as f32,
-                };
-                let mut tris: Vec<LineVertex> = Vec::new();
-                match m.shape {
-                    marker_shape::SQUARE => push_square([x, y], size, m.color, &mut tris),
-                    marker_shape::ARROW_UP => push_arrow([x, y], size, m.color, true, &mut tris),
-                    marker_shape::ARROW_DOWN => push_arrow([x, y], size, m.color, false, &mut tris),
-                    _ => build_disc([x, y], size, m.color, &mut tris),
-                }
-                group.stroke_tris.extend(tris.iter().map(mesh_vertex));
-            }
-        }
-    }
-
-    /// Horizontal price lines for every series in `pane_index`, each on its series' scale.
-    fn build_price_lines(&self, pane_index: usize, prims: &mut Vec<Prim>, pane_w_px: i32, vpr: f64) {
-        let pane = &self.panes[pane_index];
-        let min_w = 1f64.max(vpr.floor()) as i32;
-        for s in &self.series {
-            if s.pane_index.min(self.panes.len() - 1) != pane_index || s.price_lines.is_empty() {
-                continue;
-            }
-            let scale = if s.overlay { &pane.overlay_scale } else { &pane.price_scale };
-            if scale.is_empty() {
-                continue;
-            }
-            for pl in &s.price_lines {
-                let y = (scale.price_to_coordinate(pl.price, pl.price) * vpr).round() as i32;
-                prims.push(Prim::HLine { y, x0: 0, x1: pane_w_px, width: pl.width.max(min_w), style: pl.style, color: pl.color });
-            }
-        }
-    }
-
-    /// Pulsing ring at the main series' last value (roadmap Phase B3). An expanding, fading disc
-    /// under a solid center dot, cycling on the host animation clock (LWC ~2600 ms period).
-    fn build_last_price_pulse(&self, group: &mut DrawGroup, hpr: f64, vpr: f64) {
-        if !self.series[0].last_price_animation || self.main_plot().is_empty() || self.price_scale().is_empty() {
-            return;
-        }
-        let plot = self.main_plot();
-        let last = plot.size() - 1;
-        let Some(&idx) = plot.indices().last() else { return };
-        let close = plot.value_at(last, PlotValueIndex::Close);
-        let cx = (self.time_scale.index_to_coordinate(idx) * hpr) as f32;
-        let cy = (self.price_scale().price_to_coordinate(close, close) * vpr) as f32;
-        let base = self.last_value_color();
-
-        const PERIOD_MS: f64 = 2600.0;
-        let phase = ((self.animation_time.rem_euclid(PERIOD_MS)) / PERIOD_MS) as f32; // 0..1
-        let r_expand = (4.0 + phase * 10.0) * vpr as f32;
-        let alpha = ((1.0 - phase) * 0.35 * 255.0) as u8;
-        let ring = Color::rgba(base.r(), base.g(), base.b(), alpha);
-
-        let mut disc = Vec::new();
-        build_disc([cx, cy], r_expand, ring, &mut disc); // expanding fading ring (drawn first)
-        build_disc([cx, cy], 4.0 * vpr as f32, base, &mut disc); // solid center on top
-        group.stroke_tris.extend(disc.iter().map(mesh_vertex));
-    }
-
-    /// Dashed line at the main series' last close (priceLineSource LastBar).
-    fn build_last_value_line(&self, prims: &mut Vec<Prim>, pane_w_px: i32, vpr: f64) {
-        if self.main_plot().is_empty() || self.price_scale().is_empty() {
-            return;
-        }
-        let last = self.main_plot().size() - 1;
-        let close = self.main_plot().value_at(last, PlotValueIndex::Close);
-        let y = self.price_scale().price_to_coordinate(close, close);
-        let width = 1f64.max(vpr.floor()) as i32;
-        prims.push(Prim::HLine { y: (y * vpr).round() as i32, x0: 0, x1: pane_w_px, width, style: LineStyle::Dashed, color: self.last_value_color() });
-    }
-
     fn last_value_color(&self) -> Color {
         match self.series[0].kind {
             SeriesKind::Line => LINE_COLOR,
@@ -1989,55 +1273,6 @@ impl ChartInner {
                 let open = self.main_plot().value_at(last, PlotValueIndex::Open);
                 let close = self.main_plot().value_at(last, PlotValueIndex::Close);
                 if close >= open { UP_COLOR } else { DOWN_COLOR }
-            }
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn build_crosshair_lines(&self, prims: &mut Vec<Prim>, group_stroke: &mut Vec<TriVertex>, pane_w_px: i32, band_top_px: i32, band_h_px: i32, pane_w: f64, pane_h: f64, hpr: f64, vpr: f64, pane_index: usize) {
-        let Some((x_css, y_css)) = self.crosshair else { return };
-        if self.main_plot().is_empty() || self.time_scale.is_empty() {
-            return;
-        }
-        if x_css > pane_w || y_css > pane_h || self.crosshair_mode == CrosshairMode::Hidden {
-            return;
-        }
-
-        let snapped_x = self.snapped_crosshair_x(x_css);
-        let line_width = 1f64.max(hpr.floor()) as i32;
-
-        let ch = self.opts().crosshair;
-        let vert_color = Color::parse_css(&ch.vert_line.color).unwrap_or(CROSSHAIR_COLOR);
-        let horz_color = Color::parse_css(&ch.horz_line.color).unwrap_or(CROSSHAIR_COLOR);
-        // vertical line runs through every pane (its band; scissor clips it)
-        if ch.vert_line.visible {
-            prims.push(Prim::VLine { x: (snapped_x * hpr).round() as i32, y0: band_top_px, y1: band_top_px + band_h_px, width: line_width, style: LineStyle::LargeDashed, color: vert_color });
-        }
-
-        // horizontal line only in the pane the cursor is over; the price pane (0) magnet-snaps to
-        // the series, other panes follow the raw cursor y (roadmap Phase B1).
-        if self.pane_at_y(y_css) != Some(pane_index) {
-            return;
-        }
-        let snap_y = if pane_index == 0 { self.crosshair_snap(x_css, y_css).1 } else { y_css };
-        if ch.horz_line.visible {
-            prims.push(Prim::HLine { y: (snap_y * vpr).round() as i32, x0: 0, x1: pane_w_px, width: line_width, style: LineStyle::LargeDashed, color: horz_color });
-        }
-
-        // crosshair marker on line/area main series (price pane only)
-        if pane_index == 0 && matches!(self.series[0].kind, SeriesKind::Line | SeriesKind::Area) {
-            let index = self.snapped_crosshair_index(x_css);
-            if let Some(row) = self.main_plot().search(index, aion_core::model::plot_list::MismatchDirection::None) {
-                let close = self.main_plot().value_at(row, PlotValueIndex::Close);
-                let cx = (self.time_scale.index_to_coordinate(index) * hpr) as f32;
-                let cy = (self.price_scale().price_to_coordinate(close, close) * vpr) as f32;
-                let fill = if self.series[0].kind == SeriesKind::Area { AREA_LINE_COLOR } else { LINE_COLOR };
-                let outer_r = ((CROSSHAIR_MARKER_RADIUS + CROSSHAIR_MARKER_BORDER_WIDTH) * vpr) as f32;
-                let inner_r = (CROSSHAIR_MARKER_RADIUS * vpr) as f32;
-                let mut disc = Vec::new();
-                build_disc([cx, cy], outer_r, MARKER_BORDER_COLOR, &mut disc);
-                build_disc([cx, cy], inner_r, fill, &mut disc);
-                group_stroke.extend(disc.iter().map(mesh_vertex));
             }
         }
     }
@@ -2098,8 +1333,8 @@ impl ChartInner {
     fn draw_axes_2d(&self, visible: Option<(i64, i64)>, time_marks: &[(i64, u8)]) -> Result<(), JsValue> {
         let ctx = &self.axis_ctx;
         let dpr = self.dpr;
-        let bitmap_w = self.gfx.config.width as f64;
-        let bitmap_h = self.gfx.config.height as f64;
+        let bitmap_w = self.bitmap_w as f64;
+        let bitmap_h = self.bitmap_h as f64;
         let pane_w = self.pane_w;
         let pane_h = self.pane_h;
 
@@ -2333,7 +1568,7 @@ impl ChartInner {
             let box_w = ((text_w + TIME_PADDING_HORZ * 2.0) * dpr).round();
             let box_h = ((FONT_SIZE + TIME_PADDING_TOP + TIME_PADDING_BOTTOM) * dpr).round();
             let snapped_x = self.snapped_crosshair_x(x_css);
-            let bitmap_w = self.gfx.config.width as f64;
+            let bitmap_w = self.bitmap_w as f64;
             let box_x = ((snapped_x * dpr).round() - box_w / 2.0).clamp(0.0, bitmap_w - box_w);
             let box_y = (pane_h * dpr).round() + 1f64.max(dpr.floor());
             ctx.set_fill_style_str(LABEL_BG_CSS);
@@ -2344,36 +1579,76 @@ impl ChartInner {
         }
         Ok(())
     }
+
+    /// Execute the exact same frame consumed by WebGPU through the browser's 2D canvas backend.
+    fn render_canvas2d(&self, frame: &aion_engine::ChartFrame) -> Result<(), JsValue> {
+        let Some(ctx) = self.pane_ctx.as_ref() else {
+            return Err(JsValue::from_str("Canvas2D pane backend is not initialized"));
+        };
+        let width = self.bitmap_w as f64;
+        let height = self.bitmap_h as f64;
+        ctx.clear_rect(0.0, 0.0, width, height);
+        let bg = self.opts().layout.background.color;
+        ctx.set_fill_style_str(&bg);
+        ctx.fill_rect(0.0, 0.0, width, height);
+        let mut target = crate::canvas2d_target::WasmCanvas2d::new(ctx);
+        let viewport = CanvasViewport { width: width as f32, height: height as f32 };
+        for pane in &frame.panes {
+            target.save();
+            let [x, y, w, h] = pane.scissor;
+            target.clip_rect(x as f32, y as f32, w as f32, h as f32);
+            execute_canvas2d(&pane.under, &pane.points, &mut target, viewport);
+            execute_canvas2d(&pane.main, &pane.points, &mut target, viewport);
+            target.restore();
+        }
+        Ok(())
+    }
 }
 
-fn mesh_vertex(v: &aion_render::line::LineVertex) -> TriVertex {
-    TriVertex { pos: [v.x, v.y], color: v.color }
-}
-
-fn marker_rgba(c: Color) -> [f32; 4] {
-    [c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0, c.a() as f32 / 255.0]
-}
-
-/// Two triangles forming a filled square centered at `center` with half-extent `half`.
-fn push_square(center: [f32; 2], half: f32, color: Color, out: &mut Vec<LineVertex>) {
-    let col = marker_rgba(color);
-    let v = |x: f32, y: f32| LineVertex { x, y, color: col };
-    let (l, r, t, b) = (center[0] - half, center[0] + half, center[1] - half, center[1] + half);
-    out.push(v(l, t));
-    out.push(v(r, t));
-    out.push(v(r, b));
-    out.push(v(l, t));
-    out.push(v(r, b));
-    out.push(v(l, b));
-}
-
-/// A filled triangular arrow centered at `center`, pointing up (`up`) or down.
-fn push_arrow(center: [f32; 2], size: f32, color: Color, up: bool, out: &mut Vec<LineVertex>) {
-    let col = marker_rgba(color);
-    let v = |x: f32, y: f32| LineVertex { x, y, color: col };
-    let dir = if up { -1.0 } else { 1.0 };
-    // apex, then the two base corners
-    out.push(v(center[0], center[1] + dir * size));
-    out.push(v(center[0] - size, center[1] - dir * size));
-    out.push(v(center[0] + size, center[1] - dir * size));
+/// Attempt to initialize WebGPU. A failure is recoverable because the same chart frame can be
+/// executed by the Canvas2D backend.
+async fn try_create_gfx(
+    pane_canvas: web_sys::HtmlCanvasElement,
+    css_width: f64,
+    css_height: f64,
+    dpr: f64,
+) -> Result<Gfx, JsValue> {
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let surface = instance
+        .create_surface(wgpu::SurfaceTarget::Canvas(pane_canvas))
+        .map_err(|e| JsValue::from_str(&format!("create_surface failed: {e}")))?;
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: Some(&surface),
+            force_fallback_adapter: false,
+        })
+        .await
+        .map_err(|e| JsValue::from_str(&format!("request_adapter failed: {e}")))?;
+    let (device, queue) = adapter
+        .request_device(&wgpu::DeviceDescriptor::default())
+        .await
+        .map_err(|e| JsValue::from_str(&format!("request_device failed: {e}")))?;
+    let bitmap_w = (css_width * dpr).round().max(1.0) as u32;
+    let bitmap_h = (css_height * dpr).round().max(1.0) as u32;
+    let config = surface
+        .get_default_config(&adapter, bitmap_w, bitmap_h)
+        .ok_or_else(|| JsValue::from_str("surface not supported by adapter"))?;
+    surface.configure(&device, &config);
+    let quad_renderer = QuadRenderer::new(&device, config.format, SAMPLE_COUNT);
+    let atlas = LabelAtlas::new(&device);
+    let tex_renderer = TexQuadRenderer::new(&device, config.format, atlas.view(), SAMPLE_COUNT);
+    let tri_renderer = TriRenderer::new(&device, config.format, SAMPLE_COUNT);
+    let msaa = MsaaTarget::new(&device, config.format, bitmap_w, bitmap_h);
+    Ok(Gfx {
+        device,
+        queue,
+        surface,
+        config,
+        quad_renderer,
+        tri_renderer,
+        msaa,
+        _atlas: atlas,
+        tex_renderer,
+    })
 }

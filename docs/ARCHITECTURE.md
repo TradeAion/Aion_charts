@@ -61,6 +61,7 @@ lightweight-charts' camelCase.
 aion_charts/
 ├─ crates/
 │  ├─ aion_core/          # platform-free chart model (no wasm, no gpu deps)
+│  ├─ aion_engine/        # headless chart coordinator + backend-neutral frame production
 │  │  ├─ src/
 │  │  │  ├─ model/        # chart, pane, series, time_scale, price_scale, crosshair, magnet,
 │  │  │  │                # data_layer, plot_list, range, invalidate_mask, kinetic
@@ -73,7 +74,7 @@ aion_charts/
 │  ├─ aion_render_wgpu/   # wgpu backend: pipelines, glyph atlas, batching, surfaces
 │  ├─ aion_wasm/          # wasm-bindgen shell: DOM events, ResizeObserver, RAF, clipboard,
 │  │                      # canvas surface creation, JS callback plumbing
-│  └─ aion_native/        # (later) winit host for desktop screenshots & goldens tests
+│  └─ aion_native/        # tiny-skia host for headless PNGs & golden tests
 ├─ packages/
 │  └─ charts/             # TypeScript API package (thin, mirrors LWC API semantics, snake_case)
 ├─ docs/
@@ -83,8 +84,11 @@ aion_charts/
 ```
 
 Dependency rules: `aion_core` depends on nothing platform-specific (usable for server-side
-rendering & native apps later). `aion_render` knows primitives, not GPUs. Only `aion_render_wgpu`
-touches wgpu. Only `aion_wasm` touches the DOM.
+rendering & native apps later). `aion_engine` owns complete chart instances and depends only on
+`aion_core` + `aion_render`. `aion_render` knows primitives, not GPUs. Only
+`aion_render_wgpu` touches wgpu. Only `aion_wasm` touches the DOM. Browser, native, screenshot,
+and test hosts must all drive the same `aion_engine::ChartEngine`; no host may own chart state or
+construct a separate chart-like scene.
 
 ---
 
@@ -347,7 +351,8 @@ time tick marks (weights) for vertical grid. Then first goldens.
 **Phase 2 — Axes & text (2–3 wks). PARTIALLY DONE.**
 
 Text architecture decision (2026-07): axes render on a **stacked Canvas2D overlay**, not the
-GPU — mirroring LWC's per-cell canvas layout. The pane is one WebGPU canvas; a second
+GPU — mirroring LWC's per-cell canvas layout. The pane is one WebGPU canvas when available and
+falls back to the same frame executed on a Canvas2D context; a second
 full-size Canvas2D canvas sits exactly on top, transparent except over the axis strips, and
 Rust draws all axis chrome/labels to it via web-sys `fillText`/`fillRect`. This gives native,
 premium axis text (the product goal) while all layout/format logic stays in Rust. The GPU

@@ -71,6 +71,14 @@ pub fn geom_prims_to_tris(
                 build_disc([*cx, *cy], *radius, *f, &mut disc);
                 stroke.extend(disc.iter().map(tri));
             }
+            Prim::Triangle { a, b, c, color } => {
+                let col = [color.r() as f32 / 255.0, color.g() as f32 / 255.0, color.b() as f32 / 255.0, color.a() as f32 / 255.0];
+                stroke.extend([
+                    TriVertex { pos: *a, color: col },
+                    TriVertex { pos: *b, color: col },
+                    TriVertex { pos: *c, color: col },
+                ]);
+            }
             _ => {}
         }
     }
