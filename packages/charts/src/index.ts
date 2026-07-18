@@ -52,6 +52,16 @@ export interface time_range {
   to: number;
 }
 
+export interface bars_info extends Partial<time_range> {
+  bars_before: number;
+  bars_after: number;
+}
+
+/** LWC mismatch-direction values used by `data_by_index`. */
+export type mismatch_direction = -1 | 0 | 1;
+export type data_changed_scope = "full" | "update";
+export type data_changed_handler = (scope: data_changed_scope) => void;
+
 /** Parameters delivered to crosshair-move and click subscribers (mirrors LWC `MouseEventParams`). */
 export interface mouse_event_params {
   /** UTC seconds of the bar under the cursor, or `null` off the data. */
@@ -65,6 +75,30 @@ export interface mouse_event_params {
 }
 
 export type mouse_event_handler = (params: mouse_event_params) => void;
+export type dbl_click_handler = (params: mouse_event_params) => void;
+export type visible_logical_range_handler = (range: logical_range | null) => void;
+export type visible_time_range_handler = (range: time_range | null) => void;
+
+export interface time_scale_options {
+  /** Distance between adjacent bars in CSS pixels. */
+  bar_spacing: number;
+  /** Empty logical bars between the final data point and the right edge. */
+  right_offset: number;
+}
+
+export interface price_scale_options {
+  /** 0 normal, 1 logarithmic, 2 percentage, 3 indexed-to-100 (LWC values). */
+  mode: 0 | 1 | 2 | 3;
+  auto_scale: boolean;
+  invert_scale: boolean;
+  scale_margins: { top: number; bottom: number };
+}
+
+/** The visible raw-value range of a price scale. */
+export interface price_range {
+  from: number;
+  to: number;
+}
 
 /** Deeply-partial chart options; forwarded to the engine and deep-merged there (LWC semantics). */
 export type deep_partial<T> = { [K in keyof T]?: deep_partial<T[K]> };
@@ -78,6 +112,8 @@ export interface chart_options {
   layout: { background: { type: string; color: string }; textColor: string; fontSize: number; fontFamily: string; attributionLogo: boolean };
   grid: { vertLines: grid_line_options; horzLines: grid_line_options };
   crosshair: { vertLine: Partial<grid_line_options>; horzLine: Partial<grid_line_options>; mode: number };
+  leftPriceScale: { visible: boolean };
+  rightPriceScale: { visible: boolean };
   /** Install a ResizeObserver so the chart tracks its container's size. Default `false` (LWC parity). */
   autoSize: boolean;
   hoveredSeriesOnTop: boolean;
@@ -109,6 +145,10 @@ export interface series_options {
    * excluded from the main price axis autoscale. Mirrors LWC's `priceScaleId: ''` + scaleMargins.
    */
   overlay: boolean;
+  /** LWC price-scale id: visible left/right pane axis, or empty string for an overlay scale. */
+  price_scale_id: "left" | "right" | "";
+  /** Camel-case LWC alias of `price_scale_id`. */
+  priceScaleId: "left" | "right" | "";
   /** Overlay band as fractions of pane height (default `{ top: 0.8, bottom: 0 }` ⇒ bottom fifth). */
   scale_margins: { top: number; bottom: number };
   /** Stacked pane index (0 = top/price pane). A new pane is created on demand (roadmap Phase B1). */
@@ -163,14 +203,19 @@ export interface price_line_api {
 export interface series_marker {
   /** Bar time (must match a data point's time). */
   time: number;
-  /** Placement relative to the bar. Default `"above"`. */
-  position?: "above" | "below" | "inBar";
+  /** Placement relative to the bar. LWC names are canonical; short aliases remain compatible. */
+  position?: "aboveBar" | "belowBar" | "inBar" | "above" | "below";
   /** Marker shape. Default `"circle"`. */
   shape?: "circle" | "square" | "arrowUp" | "arrowDown";
   /** Fill color (any CSS color the engine parses). Default series color. */
   color?: string;
-  /** Optional label (reserved; rendered in a later increment). */
+  /** Optional label rendered beside the marker. */
   text?: string;
+}
+
+export interface series_marker_options {
+  /** Expand price-scale pixel margins so marker shapes remain visible. Default `true` (LWC). */
+  auto_scale: boolean;
 }
 
 const KIND_TO_U8: Record<series_kind, number> = {
@@ -201,20 +246,64 @@ export interface series_api {
   /** Add a horizontal price line on this series; returns a handle with `.remove()`. */
   create_price_line(options: price_line_options): price_line_api;
   /** Replace this series' per-bar markers (pass `[]` to clear). Roadmap Phase B4. */
-  set_markers(markers: readonly series_marker[]): void;
+  set_markers(markers: readonly series_marker[], options?: Partial<series_marker_options>): void;
+  /** Price-scale handle currently used by this series. */
+  price_scale(): price_scale_api;
+  price_to_coordinate(price: number): number | null;
+  coordinate_to_price(coordinate: number): number | null;
+  bars_in_logical_range(range: logical_range): bars_info | null;
+  data_by_index(logical_index: number, mismatch_direction?: mismatch_direction): series_data | null;
+  data(): readonly series_data[];
+  series_type(): series_kind;
+  subscribe_data_changed(handler: data_changed_handler): void;
+  unsubscribe_data_changed(handler: data_changed_handler): void;
   /** The engine-side series id. */
   readonly id: number;
 }
 
 /** The horizontal (time) scale. */
 export interface time_scale_api {
+  /** Distance in logical bars between the latest point and the right edge. */
+  scroll_position(): number;
+  /** Scroll to a logical right-edge position. Animation is currently applied immediately. */
+  scroll_to_position(position: number, animated: boolean): void;
+  /** Return the latest point to the real-time edge. */
+  scroll_to_real_time(): void;
+  /** Restore configured default spacing and right offset. */
+  reset_time_scale(): void;
   fit_content(): void;
+  apply_options(options: Partial<time_scale_options>): void;
+  options(): time_scale_options;
   get_visible_logical_range(): logical_range | null;
   set_visible_logical_range(range: logical_range): void;
   get_visible_range(): time_range | null;
   set_visible_range(range: time_range): void;
+  /** Fire after the visible logical range changes. */
+  subscribe_visible_logical_range_change(handler: visible_logical_range_handler): void;
+  unsubscribe_visible_logical_range_change(handler: visible_logical_range_handler): void;
+  /** Fire after the visible time range changes. */
+  subscribe_visible_time_range_change(handler: visible_time_range_handler): void;
+  unsubscribe_visible_time_range_change(handler: visible_time_range_handler): void;
   time_to_coordinate(time: number): number | null;
   coordinate_to_time(x: number): number | null;
+  logical_to_coordinate(logical: number): number | null;
+  coordinate_to_logical(x: number): number | null;
+  /** Exact timestamp lookup, or LWC-compatible lower-bound lookup when `find_nearest` is true. */
+  time_to_index(time: number, find_nearest?: boolean): number | null;
+  /** Current media-coordinate width of the horizontal scale. */
+  width(): number;
+  /** Current media-coordinate height of the horizontal axis, or zero when hidden. */
+  height(): number;
+}
+
+/** A pane price scale. Left/right are visible axes; the empty id is an independent overlay. */
+export interface price_scale_api {
+  apply_options(options: deep_partial<price_scale_options>): void;
+  options(): price_scale_options;
+  width(): number;
+  set_visible_range(range: price_range): void;
+  get_visible_range(): price_range | null;
+  set_auto_scale(on: boolean): void;
 }
 
 /** The chart. Create with {@link create_chart}. */
@@ -233,6 +322,8 @@ export interface pane_api {
 }
 
 export interface chart_api {
+  /** Active pane backend: `webgpu` when available, otherwise the shared `canvas2d` fallback. */
+  backend(): "webgpu" | "canvas2d";
   add_series(kind: series_kind, options?: Partial<series_options>): series_api;
   /** Add a Rust-native simple moving-average line derived from an existing series. */
   add_sma(source: series_api, period: number, options?: Partial<series_options>): series_api;
@@ -243,6 +334,7 @@ export interface chart_api {
   apply_options(options: deep_partial<chart_options>): void;
   options(): unknown;
   time_scale(): time_scale_api;
+  price_scale(price_scale_id?: "left" | "right" | "", pane_index?: number): price_scale_api;
   /** The stacked panes, top to bottom (roadmap Phase B1). At least one always exists. */
   panes(): pane_api[];
   price_to_coordinate(price: number): number | null;
@@ -253,10 +345,21 @@ export interface chart_api {
   /** Fire on a click/tap inside the pane. */
   subscribe_click(handler: mouse_event_handler): void;
   unsubscribe_click(handler: mouse_event_handler): void;
+  /** Fire on a double-click inside the pane (the default fit-content action still runs). */
+  subscribe_dbl_click(handler: dbl_click_handler): void;
+  unsubscribe_dbl_click(handler: dbl_click_handler): void;
+  /** Fire after the visible logical range changes. */
+  subscribe_visible_logical_range_change(handler: visible_logical_range_handler): void;
+  unsubscribe_visible_logical_range_change(handler: visible_logical_range_handler): void;
+  /** Fire after the visible time range changes. */
+  subscribe_visible_time_range_change(handler: visible_time_range_handler): void;
+  unsubscribe_visible_time_range_change(handler: visible_time_range_handler): void;
   /** Manually set the CSS size (and optional devicePixelRatio). Ignored while `autoSize` is on. */
   resize(width: number, height: number, dpr?: number): void;
   /** Force a repaint. Normally unnecessary — mutating calls repaint themselves. */
   render(): void;
+  /** Snapshot the composed pane and axis layers at their current device-pixel resolution. */
+  take_screenshot(): HTMLCanvasElement;
   /** Tear down: remove canvases and listeners. */
   remove(): void;
 }
@@ -274,8 +377,16 @@ function ensure_init(): Promise<unknown> {
   return init_promise;
 }
 
-function undef_to_null(v: number | undefined): number | null {
+function undef_to_null<T>(v: T | undefined): T | null {
   return v === undefined ? null : v;
+}
+
+function same_logical_range(a: logical_range | null, b: logical_range | null): boolean {
+  return a === b || (a !== null && b !== null && a.from === b.from && a.to === b.to);
+}
+
+function same_time_range(a: time_range | null, b: time_range | null): boolean {
+  return a === b || (a !== null && b !== null && a.from === b.from && a.to === b.to);
 }
 
 /** Pack a data array into the six Float64Arrays the engine expects (single-value → o=h=l=c). */
@@ -332,6 +443,8 @@ function parse_rgb(css: string): [number, number, number] | null {
 }
 
 class series_impl implements series_api {
+  private readonly data_changed_subs = new Set<data_changed_handler>();
+
   constructor(
     readonly id: number,
     readonly kind: series_kind,
@@ -342,6 +455,7 @@ class series_impl implements series_api {
     const p = pack(data);
     this.chart.wasm.set_series_data_typed(this.id, p.times, p.open, p.high, p.low, p.close);
     this.chart.repaint();
+    for (const handler of this.data_changed_subs) handler("full");
   }
 
   update(point: series_data): void {
@@ -352,6 +466,7 @@ class series_impl implements series_api {
     // Series-scoped streaming: append a new time point or replace the last on this series.
     this.chart.wasm.update_series_bar(this.id, point.time, o, h, l, c);
     this.chart.repaint();
+    for (const handler of this.data_changed_subs) handler("update");
   }
 
   apply_options(options: Partial<series_options>): void {
@@ -392,6 +507,14 @@ class series_impl implements series_api {
     if (options.overlay) {
       const m = options.scale_margins ?? { top: 0.8, bottom: 0 };
       this.chart.wasm.set_series_overlay(this.id, m.top, m.bottom);
+    } else if (options.price_scale_id !== undefined || options.priceScaleId !== undefined) {
+      const id = options.priceScaleId ?? options.price_scale_id;
+      const target = id === "left" ? 1 : id === "" ? 2 : 0;
+      this.chart.wasm.set_series_price_scale(this.id, target);
+      if (target === 2) {
+        const m = options.scale_margins ?? { top: 0.8, bottom: 0 };
+        this.chart.wasm.set_series_overlay(this.id, m.top, m.bottom);
+      }
     }
     if (options.last_price_animation !== undefined) {
       this.chart.wasm.set_series_last_price_animation(this.id, options.last_price_animation);
@@ -438,18 +561,105 @@ class series_impl implements series_api {
     };
   }
 
-  set_markers(markers: readonly series_marker[]): void {
+  set_markers(markers: readonly series_marker[], options?: Partial<series_marker_options>): void {
+    if (options?.auto_scale !== undefined) {
+      this.chart.wasm.set_series_markers_auto_scale(this.id, options.auto_scale);
+    }
     this.chart.wasm.set_series_markers(this.id, JSON.stringify(markers));
     this.chart.repaint();
+  }
+
+  price_scale(): price_scale_api {
+    const pane = undef_to_null(this.chart.wasm.series_pane_index(this.id)) ?? 0;
+    const target = undef_to_null(this.chart.wasm.series_price_scale_id(this.id)) ?? 0;
+    return new price_scale_impl(this.chart, pane, target);
+  }
+  price_to_coordinate(price: number): number | null {
+    return undef_to_null(this.chart.wasm.series_price_to_coordinate(this.id, price));
+  }
+  coordinate_to_price(coordinate: number): number | null {
+    return undef_to_null(this.chart.wasm.series_coordinate_to_price(this.id, coordinate));
+  }
+  bars_in_logical_range(range: logical_range): bars_info | null {
+    const info = this.chart.wasm.series_bars_in_logical_range(this.id, range.from, range.to);
+    if (info.length < 2) return null;
+    return info.length === 4
+      ? { bars_before: info[0]!, bars_after: info[1]!, from: info[2]!, to: info[3]! }
+      : { bars_before: info[0]!, bars_after: info[1]! };
+  }
+  private unpack_point(values: Float64Array | number[], offset = 0): series_data | null {
+    if (values.length < offset + 5) return null;
+    const time = values[offset]!;
+    if (this.series_type() === "candlestick" || this.series_type() === "bar") {
+      return {
+        time,
+        open: values[offset + 1]!,
+        high: values[offset + 2]!,
+        low: values[offset + 3]!,
+        close: values[offset + 4]!,
+      };
+    }
+    return { time, value: values[offset + 4]! };
+  }
+  data_by_index(logical_index: number, mismatch_direction: mismatch_direction = 0): series_data | null {
+    return this.unpack_point(
+      this.chart.wasm.series_data_by_index(this.id, logical_index, mismatch_direction),
+    );
+  }
+  data(): readonly series_data[] {
+    const values = this.chart.wasm.series_data(this.id);
+    const output: series_data[] = [];
+    for (let offset = 0; offset + 4 < values.length; offset += 5) {
+      const point = this.unpack_point(values, offset);
+      if (point !== null) output.push(point);
+    }
+    return output;
+  }
+  series_type(): series_kind {
+    const kind = this.chart.wasm.series_kind(this.id) ?? KIND_TO_U8[this.kind];
+    return (["candlestick", "bar", "line", "area", "histogram", "baseline"] as const)[kind]
+      ?? "candlestick";
+  }
+  subscribe_data_changed(handler: data_changed_handler): void {
+    this.data_changed_subs.add(handler);
+  }
+  unsubscribe_data_changed(handler: data_changed_handler): void {
+    this.data_changed_subs.delete(handler);
   }
 }
 
 class time_scale_impl implements time_scale_api {
   constructor(private readonly chart: chart_impl) {}
 
+  scroll_position(): number {
+    return this.chart.wasm.scroll_position();
+  }
+  scroll_to_position(position: number, _animated: boolean): void {
+    this.chart.wasm.scroll_to_position(position);
+    this.chart.repaint();
+  }
+  scroll_to_real_time(): void {
+    this.chart.wasm.scroll_to_real_time();
+    this.chart.repaint();
+  }
+  reset_time_scale(): void {
+    this.chart.wasm.reset_time_scale();
+    this.chart.repaint();
+  }
   fit_content(): void {
     this.chart.wasm.fit_content();
     this.chart.repaint();
+  }
+  apply_options(options: Partial<time_scale_options>): void {
+    if (options.bar_spacing !== undefined) this.chart.wasm.set_bar_spacing(options.bar_spacing);
+    if (options.right_offset !== undefined) this.chart.wasm.set_right_offset(options.right_offset);
+    this.chart.repaint();
+  }
+  options(): time_scale_options {
+    return {
+      bar_spacing: this.chart.wasm.bar_spacing(),
+      right_offset: this.chart.wasm.right_offset(),
+    };
   }
   get_visible_logical_range(): logical_range | null {
     const r = this.chart.wasm.visible_logical_range();
@@ -467,11 +677,101 @@ class time_scale_impl implements time_scale_api {
     this.chart.wasm.set_visible_time_range(range.from, range.to);
     this.chart.repaint();
   }
+  subscribe_visible_logical_range_change(handler: visible_logical_range_handler): void {
+    this.chart.subscribe_visible_logical_range_change(handler);
+  }
+  unsubscribe_visible_logical_range_change(handler: visible_logical_range_handler): void {
+    this.chart.unsubscribe_visible_logical_range_change(handler);
+  }
+  subscribe_visible_time_range_change(handler: visible_time_range_handler): void {
+    this.chart.subscribe_visible_time_range_change(handler);
+  }
+  unsubscribe_visible_time_range_change(handler: visible_time_range_handler): void {
+    this.chart.unsubscribe_visible_time_range_change(handler);
+  }
   time_to_coordinate(time: number): number | null {
     return undef_to_null(this.chart.wasm.time_to_coordinate(time));
   }
   coordinate_to_time(x: number): number | null {
     return undef_to_null(this.chart.wasm.coordinate_to_time(x));
+  }
+  logical_to_coordinate(logical: number): number | null {
+    return undef_to_null(this.chart.wasm.logical_to_coordinate(logical));
+  }
+  coordinate_to_logical(x: number): number | null {
+    return undef_to_null(this.chart.wasm.coordinate_to_logical(x));
+  }
+  time_to_index(time: number, find_nearest = false): number | null {
+    const index = undef_to_null(this.chart.wasm.time_to_index(time, find_nearest));
+    return index === null ? null : Number(index);
+  }
+  width(): number {
+    return this.chart.wasm.time_scale_width();
+  }
+  height(): number {
+    return this.chart.wasm.time_scale_height();
+  }
+}
+
+class price_scale_impl implements price_scale_api {
+  constructor(
+    private readonly chart: chart_impl,
+    private readonly pane: number,
+    private readonly target: number,
+  ) {}
+
+  apply_options(options: deep_partial<price_scale_options>): void {
+    if (options.mode !== undefined) {
+      this.chart.wasm.set_price_scale_mode(this.pane, this.target, options.mode);
+    }
+    if (options.auto_scale !== undefined) {
+      this.chart.wasm.set_price_scale_auto_scale(this.pane, this.target, options.auto_scale);
+    }
+    if (options.invert_scale !== undefined) {
+      this.chart.wasm.set_price_scale_inverted(this.pane, this.target, options.invert_scale);
+    }
+    if (options.scale_margins !== undefined) {
+      const current = this.options().scale_margins;
+      this.chart.wasm.set_price_scale_margins(
+        this.pane,
+        this.target,
+        options.scale_margins.top ?? current.top,
+        options.scale_margins.bottom ?? current.bottom,
+      );
+    }
+    this.chart.repaint();
+  }
+
+  options(): price_scale_options {
+    const margins = this.chart.wasm.price_scale_margins(this.pane, this.target);
+    return {
+      mode: (this.chart.wasm.price_scale_mode(this.pane, this.target) ?? 0) as 0 | 1 | 2 | 3,
+      auto_scale: this.chart.wasm.price_scale_auto_scale(this.pane, this.target) ?? false,
+      invert_scale: this.chart.wasm.price_scale_inverted(this.pane, this.target) ?? false,
+      scale_margins: {
+        top: margins.length === 2 ? margins[0]! : 0,
+        bottom: margins.length === 2 ? margins[1]! : 0,
+      },
+    };
+  }
+
+  width(): number {
+    return this.chart.wasm.price_scale_width(this.pane, this.target);
+  }
+
+  set_visible_range(range: price_range): void {
+    this.chart.wasm.set_price_scale_visible_range(this.pane, this.target, range.from, range.to);
+    this.chart.repaint();
+  }
+
+  get_visible_range(): price_range | null {
+    const range = this.chart.wasm.price_scale_visible_range(this.pane, this.target);
+    return range.length === 2 ? { from: range[0]!, to: range[1]! } : null;
+  }
+
+  set_auto_scale(on: boolean): void {
+    this.chart.wasm.set_price_scale_auto_scale(this.pane, this.target, on);
+    this.chart.repaint();
   }
 }
 
@@ -506,15 +806,32 @@ class chart_impl implements chart_api {
   private readonly series_by_id = new Map<number, series_impl>();
   private readonly crosshair_subs = new Set<mouse_event_handler>();
   private readonly click_subs = new Set<mouse_event_handler>();
+  private readonly dbl_click_subs = new Set<dbl_click_handler>();
+  private readonly visible_logical_range_subs = new Set<visible_logical_range_handler>();
+  private readonly visible_time_range_subs = new Set<visible_time_range_handler>();
+  private last_visible_logical_range: logical_range | null;
+  private last_visible_time_range: time_range | null;
+  private readonly backend_runtime_id: number;
   private anim_frame: number | null = null;
+  private readonly backend_loss_handler = (event: Event): void => {
+    if ((event as CustomEvent<number>).detail !== this.backend_runtime_id || this.removed) return;
+    // The wgpu callback may arrive from a promise microtask. Defer the repaint once more so the
+    // callback stack is fully unwound before Rust drops GPU resources and paints the warm 2D pane.
+    queueMicrotask(() => this.repaint());
+  };
 
   constructor(
     readonly wasm: AionChart,
     private readonly container: HTMLElement,
-    private readonly pane: HTMLCanvasElement,
+    private readonly gpu_pane: HTMLCanvasElement,
+    private readonly fallback_pane: HTMLCanvasElement,
     private readonly overlay: HTMLCanvasElement,
     auto_size: boolean,
   ) {
+    this.backend_runtime_id = this.wasm.backend_runtime_id();
+    window.addEventListener("aion-chart-backend-lost", this.backend_loss_handler);
+    this.last_visible_logical_range = this.read_visible_logical_range();
+    this.last_visible_time_range = this.read_visible_time_range();
     this.detach_gestures = install_gestures(this);
     if (auto_size) {
       this.wasm.enable_auto_resize(container);
@@ -525,6 +842,37 @@ class chart_impl implements chart_api {
   repaint(): void {
     if (!this.removed) {
       this.wasm.render();
+      this.emit_visible_range_changes();
+    }
+  }
+
+  private read_visible_logical_range(): logical_range | null {
+    const r = this.wasm.visible_logical_range();
+    return r.length === 2 ? { from: r[0]!, to: r[1]! } : null;
+  }
+
+  private read_visible_time_range(): time_range | null {
+    const r = this.wasm.visible_time_range();
+    return r.length === 2 ? { from: r[0]!, to: r[1]! } : null;
+  }
+
+  private emit_visible_range_changes(): void {
+    const logical = this.read_visible_logical_range();
+    const time = this.read_visible_time_range();
+    const logical_changed = !same_logical_range(this.last_visible_logical_range, logical);
+    const time_changed = !same_time_range(this.last_visible_time_range, time);
+    this.last_visible_logical_range = logical;
+    this.last_visible_time_range = time;
+
+    if (logical_changed) {
+      for (const handler of this.visible_logical_range_subs) {
+        handler(logical ? { ...logical } : null);
+      }
+    }
+    if (time_changed) {
+      for (const handler of this.visible_time_range_subs) {
+        handler(time ? { ...time } : null);
+      }
     }
   }
 
@@ -610,6 +958,24 @@ class chart_impl implements chart_api {
   unsubscribe_click(handler: mouse_event_handler): void {
     this.click_subs.delete(handler);
   }
+  subscribe_dbl_click(handler: dbl_click_handler): void {
+    this.dbl_click_subs.add(handler);
+  }
+  unsubscribe_dbl_click(handler: dbl_click_handler): void {
+    this.dbl_click_subs.delete(handler);
+  }
+  subscribe_visible_logical_range_change(handler: visible_logical_range_handler): void {
+    this.visible_logical_range_subs.add(handler);
+  }
+  unsubscribe_visible_logical_range_change(handler: visible_logical_range_handler): void {
+    this.visible_logical_range_subs.delete(handler);
+  }
+  subscribe_visible_time_range_change(handler: visible_time_range_handler): void {
+    this.visible_time_range_subs.add(handler);
+  }
+  unsubscribe_visible_time_range_change(handler: visible_time_range_handler): void {
+    this.visible_time_range_subs.delete(handler);
+  }
 
   /** Build event params for a cursor at (x, y) in pane CSS px. */
   private build_params(x: number, y: number): mouse_event_params {
@@ -651,6 +1017,12 @@ class chart_impl implements chart_api {
     for (const h of this.click_subs) h(params);
   }
 
+  emit_dbl_click(x: number, y: number): void {
+    if (this.dbl_click_subs.size === 0) return;
+    const params = this.build_params(x, y);
+    for (const h of this.dbl_click_subs) h(params);
+  }
+
   apply_options(options: deep_partial<chart_options>): void {
     this.wasm.apply_options(JSON.stringify(options));
     this.repaint();
@@ -660,8 +1032,17 @@ class chart_impl implements chart_api {
     return JSON.parse(this.wasm.options_json());
   }
 
+  backend(): "webgpu" | "canvas2d" {
+    return this.wasm.backend_kind() as "webgpu" | "canvas2d";
+  }
+
   time_scale(): time_scale_api {
     return this.ts;
+  }
+
+  price_scale(price_scale_id: "left" | "right" | "" = "right", pane_index = 0): price_scale_api {
+    const target = price_scale_id === "left" ? 1 : price_scale_id === "" ? 2 : 0;
+    return new price_scale_impl(this, pane_index, target);
   }
 
   panes(): pane_api[] {
@@ -689,6 +1070,23 @@ class chart_impl implements chart_api {
     this.repaint();
   }
 
+  take_screenshot(): HTMLCanvasElement {
+    // Browser WebGPU canvases are presentable but are not synchronously readable through
+    // CanvasRenderingContext2D.drawImage (Chromium returns transparent pixels). Repaint the current
+    // engine frame, then execute that same retained frame through the already-warm Canvas2D pane.
+    // This keeps the LWC-style synchronous API deterministic without duplicating chart state.
+    this.repaint();
+    this.wasm.render_canvas2d_snapshot();
+    const output = document.createElement("canvas");
+    output.width = this.overlay.width;
+    output.height = this.overlay.height;
+    const ctx = output.getContext("2d");
+    if (ctx === null) throw new Error("aion: screenshot Canvas2D context is unavailable");
+    ctx.drawImage(this.fallback_pane, 0, 0);
+    ctx.drawImage(this.overlay, 0, 0);
+    return output;
+  }
+
   overlay_el(): HTMLCanvasElement {
     return this.overlay;
   }
@@ -697,9 +1095,11 @@ class chart_impl implements chart_api {
     if (this.removed) return;
     this.removed = true;
     this.stop_animation();
+    window.removeEventListener("aion-chart-backend-lost", this.backend_loss_handler);
     this.detach_gestures?.();
     this.observer?.disconnect();
-    this.pane.remove();
+    this.gpu_pane.remove();
+    this.fallback_pane.remove();
     this.overlay.remove();
   }
 }
@@ -718,9 +1118,9 @@ function install_gestures(chart: chart_impl): () => void {
   let sep_drag: { index: number; last_y: number } | null = null;
   const SEP_HIT = 4; // css px hit tolerance around a pane boundary
 
-  const local_xy = (e: PointerEvent) => {
+  const local_xy = (e: { clientX: number; clientY: number }) => {
     const r = overlay.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    return { x: e.clientX - r.left - wasm.pane_left(), y: e.clientY - r.top };
   };
 
   /** Index of the separator within SEP_HIT px of css-y `y`, or -1. */
@@ -737,7 +1137,7 @@ function install_gestures(chart: chart_impl): () => void {
     const delta_y = -(e.deltaY / 100);
     if (delta_y !== 0) {
       const zoom_scale = Math.sign(delta_y) * Math.min(1, Math.abs(delta_y));
-      wasm.zoom(e.offsetX, zoom_scale);
+      wasm.zoom(e.offsetX - wasm.pane_left(), zoom_scale);
       chart.repaint();
     }
   };
@@ -816,13 +1216,15 @@ function install_gestures(chart: chart_impl): () => void {
       chart.emit_crosshair_left();
     }
   };
-  const on_dblclick = () => {
+  const on_dblclick = (e: MouseEvent) => {
+    const p = local_xy(e);
+    chart.emit_dbl_click(p.x, p.y);
     wasm.fit_content();
     chart.repaint();
   };
   const on_click = (e: MouseEvent) => {
-    const r = overlay.getBoundingClientRect();
-    chart.emit_click(e.clientX - r.left, e.clientY - r.top);
+    const p = local_xy(e);
+    chart.emit_click(p.x, p.y);
   };
   const on_leave = (e: PointerEvent) => {
     if (e.pointerType === "mouse") end_pointer(e);
@@ -863,15 +1265,17 @@ export async function create_chart(
 ): Promise<chart_api> {
   await ensure_init();
 
-  // Two stacked, absolutely-positioned canvases filling the container: the pane (WebGPU when
-  // available, Canvas2D fallback otherwise) below, and the transparent Canvas2D axis overlay
-  // (which also receives pointer events) above.
+  // Three stacked, absolutely-positioned canvases fill the container: dedicated WebGPU and
+  // Canvas2D panes below the transparent axis/input overlay. A canvas cannot change context type,
+  // so keeping the fallback pane warm is what makes device-loss failover possible without
+  // recreating the chart or moving state out of the headless engine.
   if (getComputedStyle(container).position === "static") {
     container.style.position = "relative";
   }
-  const pane = document.createElement("canvas");
+  const gpu_pane = document.createElement("canvas");
+  const fallback_pane = document.createElement("canvas");
   const overlay = document.createElement("canvas");
-  for (const c of [pane, overlay]) {
+  for (const c of [gpu_pane, fallback_pane, overlay]) {
     c.style.position = "absolute";
     c.style.inset = "0";
     c.style.width = "100%";
@@ -880,7 +1284,8 @@ export async function create_chart(
     (c.style as CSSStyleDeclaration & { touchAction: string }).touchAction = "none";
   }
   overlay.style.cursor = "crosshair";
-  container.appendChild(pane);
+  container.appendChild(gpu_pane);
+  container.appendChild(fallback_pane);
   container.appendChild(overlay);
 
   const rect = container.getBoundingClientRect();
@@ -889,17 +1294,36 @@ export async function create_chart(
   const dpr = window.devicePixelRatio || 1;
   // Bootstrap the bitmap size so either pane backend configures; auto-resize (if enabled) or a
   // manual resize() will correct it.
-  for (const c of [pane, overlay]) {
+  for (const c of [gpu_pane, fallback_pane, overlay]) {
     c.width = Math.max(1, Math.round(css_w * dpr));
     c.height = Math.max(1, Math.round(css_h * dpr));
   }
 
-  const wasm = await wasm_create_chart(pane, overlay, css_w, css_h, dpr, options?.backend === "canvas2d");
+  const simulate_adapter_failure = (
+    options as (deep_partial<chart_options> & {
+      __simulate_webgpu_adapter_failure?: boolean;
+      __force_webgpu_fallback_adapter?: boolean;
+    }) | undefined
+  )?.__simulate_webgpu_adapter_failure === true;
+  const force_fallback_adapter = (
+    options as (deep_partial<chart_options> & { __force_webgpu_fallback_adapter?: boolean }) | undefined
+  )?.__force_webgpu_fallback_adapter === true;
+  const wasm = await wasm_create_chart(
+    gpu_pane,
+    fallback_pane,
+    overlay,
+    css_w,
+    css_h,
+    dpr,
+    options?.backend === "canvas2d",
+    simulate_adapter_failure,
+    force_fallback_adapter,
+  );
   if (options) {
     wasm.apply_options(JSON.stringify(options));
   }
   const auto_size = options?.autoSize === true;
-  const chart = new chart_impl(wasm, container, pane, overlay, auto_size);
+  const chart = new chart_impl(wasm, container, gpu_pane, fallback_pane, overlay, auto_size);
   chart.render();
   return chart;
 }

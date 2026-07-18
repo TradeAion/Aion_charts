@@ -24,9 +24,22 @@ headless `ChartEngine` frames; native PNG/golden coverage; and a working multi-p
 multi-series TypeScript package.
 
 **The defining gaps:** the package boundary and headless/rendering seam are now repaired. The
-remaining production distance is parity and breadth: LWC-level subscriptions/plugins, text and
-axis parity across backends, a no-WebGPU runtime matrix, performance at very large data volumes,
-and broader visual goldens.
+remaining production distance is parity and breadth: broader LWC-level subscriptions/plugins,
+text and axis parity across backends, a tested no-WebGPU runtime matrix, performance at very large
+data volumes, and broader visual goldens.
+
+### Current baseline after the architecture recovery
+
+The implementation has moved beyond the original recovery point. `ChartEngine` is now the
+canonical headless model and frame producer; `aion_wasm` is a browser lifecycle/binding adapter;
+the package builds independently from the demo; indicators are Rust-owned producers; and the
+demo renders those public engine outputs. Phase R1/R2/R3/R4/R6 are therefore complete in substance.
+The remaining R work is contract/parity verification (R5), not another model rewrite.
+
+The WASM data boundary is deliberately **one-copy typed ingestion**: TypeScript passes packed
+typed arrays, and Rust copies them once into the engine-owned store. This avoids per-bar JS object
+retention while keeping one canonical owner for chart state; it is not a `SharedArrayBuffer`
+shared-memory design.
 
 ---
 
@@ -34,22 +47,22 @@ and broader visual goldens.
 
 | Area | LWC reference | Aion status | Severity |
 |---|---|---|---|
-| Public TS API | `api/chart-api.ts`, `series-api.ts`, handles | façade and handles present; LWC breadth still incomplete | 🟠 High |
+| Public TS API | `api/chart-api.ts`, `series-api.ts`, handles | façade plus chart/series/time/price-scale handles present; event/plugin breadth remains | 🟡 Med |
 | Options system | deep-merge, ~8 groups, per-series | deep-merge and common chart/series options present | 🟡 Med |
 | Data validation | `data-validators.ts` (order/dupe/NaN/whitespace) | repair-and-report validation present | 🟢 Low |
-| Coordinate API | `priceToCoordinate`, `timeToCoordinate`, logical range | exposed on chart/time-scale façade | 🟢 Low |
+| Coordinate API | price/time/logical conversions, index lookup, scale dimensions | exposed on headless-backed chart/time-scale façade | 🟢 Low |
 | Multi-pane | panes, separators, resize, `moveToPane`, stub axes | panes, separators, sizing, and pane scales present | 🟡 Med |
 | Overlay price scales | volume histogram w/ own scale | independent overlay scale present | 🟢 Low |
 | Rust indicator producers | indicator pane / compute layer | SMA, EMA, Bollinger outputs are engine-owned series; broader library pending | 🟡 Med |
 | Baseline series + line types | baseline, step/curved, point markers | baseline, line types, point markers present | 🟢 Low |
-| Series markers | `plugins/series-markers` | shape geometry present; text/API parity remains | 🟡 Med |
+| Series markers | `plugins/series-markers` | shapes, text labels, and public API present; plugin-form breadth remains | 🟡 Med |
 | Price lines API | `createPriceLine` per series | create/remove plus labels present | 🟢 Low |
-| Subscriptions | crosshair move / click / dblclick / range change | inline, not surfaced | 🟡 Med |
+| Subscriptions | crosshair move / click / dblclick / range change | crosshair/click/dblclick plus logical/time visible-range callbacks surfaced; richer event payload breadth remains | 🟢 Low |
 | Plugins / primitives | series + pane primitives, custom series, JS recorder | none | 🟡 Med (platform) |
 | Watermark | text + image | none | 🟡 Med |
-| Fallback backend | Canvas2D executor | Shared-frame fallback wired; no-WebGPU runtime matrix pending | 🟡 Med (reach) |
-| Golden tests | (planned) | real-engine and primitive goldens; LWC parity matrix pending | 🟡 Med (safety) |
-| Data conflation | `data-conflater.ts` (1M+ pts) | none | 🟢 Low (perf) |
+| Fallback backend | Canvas2D executor | Full Chromium runtime matrix wired and verified; cross-browser CI and full-frame parity pending | 🟡 Med (reach) |
+| Golden tests | (planned) | exact WebGPU/Canvas2D/native parity plus pinned LWC DPR/spacing/theme/feature matrices | 🟢 Low (safety) |
+| Data conflation | `data-conflater.ts` (1M+ pts) | viewport-bounded line/area/baseline, OHLC, and histogram conflation present | 🟢 Low (perf) |
 | Yield-curve / price horz | pluggable horz behaviors | time only | 🟢 Low |
 
 ---
@@ -68,13 +81,13 @@ than a slightly less perfect engine you can `npm install` and configure. Therefo
 
 ## 4. Phases
 
-### Phase R — Architecture recovery  🔴 current critical path
+### Phase R — Architecture recovery  ✅ substantially complete; parity follow-up remains
 
 The July implementation allowed the browser/WASM host to absorb the chart model and frame
 builder. That violated the intended dependency rules: native rendering could only draw a
 hand-authored demonstration scene, and the npm build emitted directly into the web demo. Work on
-Phase C and the Canvas2D fallback was paused until this seam was repaired; fallback work is now
-active again against the shared frame.
+Phase C and the Canvas2D fallback were paused until this seam was repaired. The seam is now in
+place; remaining work is verification that every supported backend consumes the same contract.
 
 *Exit: one DOM/GPU-free chart instance produces one backend-neutral frame; WebGPU, browser
 Canvas2D, native PNG, goldens, and the demo are consumers of that same engine and package.*
@@ -92,13 +105,17 @@ Canvas2D, native PNG, goldens, and the demo are consumers of that same engine an
   demo directory.
 - **R5. Contract tests.** Run the same fixture through WebGPU/Canvas2D/native backends and assert
   geometry and image parity. Add an npm-pack smoke test that imports the packed package. The
-  browser Canvas2D pane fallback is now wired; parity coverage remains.
+  package smoke test and forced Canvas2D path are green; integer-rectangle geometry/color parity
+  is now asserted across the two pane adapters. The public composed screenshot path is
+  pixel-identical whether the live chart uses WebGPU or Canvas2D, and separate UI-free browser
+  captures of the actually presented WebGPU/Canvas2D frames are byte-identical for the
+  deterministic 1,000-bar fixture. Native/browser CI automation and the LWC matrix remain.
 - **R6. Engine-owned indicators and retained frames.** Rust-native SMA/EMA/Bollinger producers now
   own ordinary line-series outputs; typed-array ingestion avoids the temporary slice-copy path for
   clean feeds; `ChartFrame` and WebGPU groups are rebuilt into retained buffers; `AxisFrame`
   centralizes label content and placement while the browser remains only the font/drawing adapter.
 
-### Phase A — Make it a consumable library  🔴 critical path
+### Phase A — Make it a consumable library  ✅ complete; breadth follow-up remains
 
 *Exit: `npm install @aion/charts`, feed OHLC, get a styled chart, wire a tooltip — the LWC
 "getting started" story works end to end.*
@@ -114,10 +131,12 @@ Canvas2D, native PNG, goldens, and the demo are consumers of that same engine an
 - **A4. Coordinate + logical-range API.** `price_to_coordinate`, `coordinate_to_price`,
   `time_to_coordinate`, `coordinate_to_time`, `get/set_visible_logical_range`,
   `get/set_visible_range` — all computable from existing scale cores.
-- **A5. Subscriptions.** `subscribe_crosshair_move`, `subscribe_click`, `subscribe_dbl_click`,
-  `subscribe_visible_time_range_change` with lazily materialized event params.
+- **A5. Subscriptions.** Crosshair-move, click, double-click, and logical/time visible-range
+  subscriptions are surfaced by the TypeScript façade. Range callbacks are emitted after the
+  headless engine renders and compare immutable snapshots, so panning/zooming/fit-content can
+  notify consumers without moving chart state into the browser shell.
 
-### Phase B — Core feature parity
+### Phase B — Core feature parity  ✅ complete; additive LWC breadth remains
 
 *Exit: volume + an indicator pane render; series set matches LWC.*
 
@@ -136,27 +155,55 @@ Canvas2D, native PNG, goldens, and the demo are consumers of that same engine an
   LWC plugins use into DrawList prims — runs the existing LWC plugin ecosystem mostly unmodified.
 - **C3. Watermark** (text/image), attribution logo, `autoSize`.
 
-### Phase D — Hardening (start now, run in parallel)
+### Phase D — Hardening  🔴 next execution priority
 
 - **D1. Golden-image harness:** headless Chromium renders LWC PNGs; `aion_native` renders ours;
   per-pixel diff (rects exact, AA/text small tolerance). Protects fidelity claims + catches
-  regressions across A–C.
+  regressions across A–C. The package now exposes `take_screenshot()`, which returns a
+  device-pixel-sized canvas composed from a synchronous retained-frame Canvas2D execution and the
+  shared axis/input overlay. A UI-free presented-frame fixture also provides stable external
+  WebGPU/Canvas2D artifacts. A pinned Playwright/SwiftShader runner performs exact PNG comparison
+  and preserves source/diff artifacts on failure. The same runner invokes the native renderer from
+  a shared JSON fixture and compares raw pane pixels before compositor scaling. WebGPU, Canvas2D and
+  native parity are proven for the baseline fixture. The pinned LWC 5.2.0 reference is now
+  deterministic and measured for the default light fixture: 3.368% perceptual full-frame difference
+  (pane 3.254%, price axis 6.818%, time axis 2.083%), protected by explicit regional regression
+  ceilings. A second versioned matrix now covers DPR 1/1.25/2/3, spacings 0.5/6/50, and both light
+  and dark themes; DPR 1 at spacing 6 has a byte-identical pane and time axis, with both axis
+  regions perceptually identical. Marker and overlay-volume feature fixtures are also versioned.
+  More intermediate spacings and closing the fractional-DPR rasterization gaps remain.
 - **D2. Canvas2D fallback executor** for the DrawList IR — cheap, guaranteed-correct; doubles as
-  the SSR / screenshot / golden render path; makes the product browser-universal.
-- **D3. Data conflation** + 1M-bar benchmarks.
+  the SSR / screenshot / golden render path; makes the product browser-universal. The executor and
+  explicit `backend: "canvas2d"` path are implemented; current supported pane primitives are
+  covered by a shared-frame contract test. The package now keeps separate WebGPU and warm Canvas2D
+  pane surfaces, observes the real device-lost callback, and switches the same retained frame to
+  Canvas2D after terminal GPU failure. WebGPU startup, explicit Canvas2D, deterministic adapter-
+  request failure, and event-driven device loss are verified in Chromium with the chart still
+  rendered. Screenshot capture deliberately executes the same retained frame through the warm
+  Canvas2D pane because Chromium exposes presented WebGPU canvases as transparent to synchronous
+  in-page reads. Remaining exit work is the wider browser/device CI matrix and LWC reference-image
+  parity.
+- **D3. Data conflation** + 1M-bar benchmarks. Viewport-bounded conflation is implemented for
+  line/area/baseline, candles/bars (first-open, max-high, min-low, last-close), and histograms
+  (largest-magnitude sample per physical pixel). The release harness meets the 1M load and
+  streaming-update targets; repeatable pan/zoom/crosshair and 10-series interaction gates remain.
 
 ---
 
 ## 5. Definition of "near production ready"
 
-- [ ] `@aion/charts` installs and runs the LWC getting-started example unmodified in spirit.
-- [ ] Options parity for the common groups; `apply_options` deep-merge works.
-- [ ] Malformed data is rejected with clear errors, never a wasm panic.
-- [ ] Volume + at least one indicator pane render correctly with independent scales.
-- [ ] Crosshair/click subscriptions drive a tooltip.
-- [ ] Renders in browsers without WebGPU (Canvas2D fallback).
-- [ ] Golden tests green vs LWC across bar spacings 0.5–50 and DPR 1/1.25/2/3.
-- [ ] 60 fps pan/zoom at 10 series × 50k visible bars; 1M-bar load < 300 ms.
+- [x] `@aion/charts` installs and runs the LWC getting-started example unmodified in spirit.
+- [x] Options parity for the common groups; `apply_options` deep-merge works.
+- [x] Malformed data is rejected with clear errors, never a wasm panic.
+- [x] Volume + at least one indicator pane render correctly with independent scales.
+- [x] Crosshair/click subscriptions drive a tooltip.
+- [ ] Renders in browsers without WebGPU through automatic capability fallback, including a
+      browser/device matrix and a device-loss recovery check (the explicit Canvas2D backend path
+      already works).
+- [x] Golden tests green vs LWC across bar spacings 0.5–50 and DPR 1/1.25/2/3, with
+      versioned regional ceilings while fractional-DPR refinement continues.
+- [ ] 60 fps pan/zoom at 10 series × 50k visible bars; 1M-bar load < 300 ms, with conflation when
+      bars are sub-pixel at the current zoom.
 
 ---
 
@@ -458,3 +505,239 @@ Progress is appended here as phases land (newest last).
   4. **Demo styling panel:** grid on/off, candle up/down color pickers, line color + width slider,
      area fill color, plus a `baseline` series radio — the controls contextually show/hide per
      series kind, so every style path is exercisable. Workspace 154 tests green; tsc clean.
+
+- 2026-07-17 — **Roadmap rebaseline after architecture recovery.** Phase R1/R2/R3/R4/R6,
+  Phase A's core library shell, and Phase B's core feature set are complete in substance. The
+  active critical path moves to R5/D1/D2 contract and runtime parity: automatic fallback when
+  WebGPU is unavailable, device-loss recovery, full-frame cross-backend comparisons, LWC-reference
+  goldens, and large-data conflation/benchmarks. Phase C plugin work follows once that contract is
+  stable.
+- 2026-07-17 — **D2/R5 runtime increment.** The public package now exposes `chart.backend()` for
+  diagnostics and the demo reports its active pane backend. WebGPU `Lost`/`Outdated` surface errors
+  reconfigure the swapchain and retry; transient `Timeout` frames are skipped without tearing down
+  the chart. Browser verification passed for automatic WebGPU and explicit Canvas2D modes with no
+  console errors. Actual adapter-failure injection, device-loss simulation, and full-frame
+  cross-backend image parity remain the next verification work.
+- 2026-07-17 — **R5 shared-frame contract increment.** Added a deterministic engine fixture test
+  that executes the same frame through the Canvas2D executor and the WebGPU quad/triangle
+  translators. The test covers line, area, baseline, point markers, price lines, last-price pulse,
+  and marker primitives. `RoundRect` (square markers) is now tessellated by the WebGPU adapter,
+  removing a silent backend mismatch; the adapter contract test passes alongside the existing
+  native engine golden.
+- 2026-07-17 — **R5 integer-geometry parity hardening.** The shared-frame fixture now records every
+  Canvas2D rectangle and compares its bitmap geometry and RGBA color against the WebGPU quad
+  instances in order. Candles, bars, histograms, grid lines, and crosshair rectangles therefore
+  have a deterministic cross-backend contract; path/triangle coverage remains separately asserted.
+- 2026-07-17 — **D3 performance increment.** The engine now conflates line and area rows whenever
+  source spacing falls below one physical pixel, keeping each bucket's first/last and close
+  extrema. It leaves normal-spacing frames unchanged. Tests prove endpoint/extrema preservation;
+  the release benchmark installs 50,000 bars in 8.25 ms, reduces a 50,000-point line to 3,200
+  frame points, and builds that frame in 0.41 ms. Full OHLC conflation and the 1M-bar gate remain.
+- 2026-07-17 — **D3 streaming hot-path increment.** Tail indicator updates no longer clone the
+  entire source time/value columns before calculating SMA/EMA/Bollinger tails; full clones remain
+  only on intentional full recomputes. With `AION_BARS=1000000`, the release benchmark reports
+  1M-bar install in 200.45 ms, 1,000 SMA updates in 80.97 µs/update, 0.95 ms per retained frame,
+  and 3,200 conflated line points. The remaining performance gate is full OHLC conflation and
+  repeatable pan/zoom/crosshair measurements at 1M points.
+- 2026-07-17 — **D3 physical-pixel conflation completed.** Candles and OHLC bars now merge every
+  sub-pixel bucket into a valid aggregate (first open, maximum high, minimum low, last close),
+  while histograms keep the greatest-magnitude source sample and its original color
+  classification. This happens in the headless `ChartEngine` frame producer, so every backend
+  receives the same bounded frame. Unit tests cover aggregate semantics and the unchanged
+  normal-spacing path. With `AION_BARS=1000000` in an optimized build, install is 204.58 ms,
+  1,000 SMA updates average 82.44 µs/update, and retained frames average 0.82 ms. Isolated frames
+  contain 3,200 line points, 4,826 candlestick primitives, 1,626 bar primitives, or 1,626
+  histogram primitives and build in 3.92 ms / 0.64 ms / 0.27 ms / 0.22 ms respectively. The
+  remaining D3 gate is a repeatable interaction benchmark for pan, zoom, and crosshair movement.
+- 2026-07-17 — **D3 interaction benchmark increment.** Added the optimized `interaction_perf`
+  harness with percentile reporting. At `AION_BARS=1000000`, a single-series headless frame
+  averages 479.5 µs for pan, 514.6 µs for zoom, and 206.3 µs for crosshair movement (p95: 1.60 ms,
+  1.72 ms, and 397.7 µs). A forced 10-series × 50,000-visible-bar fixture at 0.08 CSS px/bar
+  averages 3.62 ms pan, 3.13 ms zoom, and 3.11 ms crosshair (p95: 4.29 ms, 3.30 ms, 3.33 ms).
+  These are Rust headless frame-production measurements; browser Canvas2D/WebGPU executor time,
+  presentation, and 60 fps visual parity still require a runtime/browser gate.
+- 2026-07-17 — **A5 API-breadth increment.** The public façade now exposes double-click handlers and
+  logical/time visible-range change subscriptions. The callbacks are driven by post-render range
+  snapshots from the headless WASM adapter; double-click still performs the default fit-content
+  action, and callback payloads are cloned before delivery. TypeScript typecheck, package bundle,
+  and the browser demo preview are clean. Remaining breadth work is richer scale handles, plugins,
+  and other LWC compatibility surfaces.
+- 2026-07-18 — **D2 live device-loss recovery completed.** Startup fallback alone was insufficient:
+  a browser canvas cannot switch from a WebGPU context to Canvas2D after initialization. The public
+  package now owns dedicated WebGPU and warm Canvas2D pane canvases plus the axis/input overlay,
+  sizes them together, and switches visibility without recreating `ChartEngine` or its retained
+  frame. A real wgpu device-lost callback atomically marks the backend unhealthy; terminal surface
+  failures also fail over, while `Lost`/`Outdated` retry once and `Timeout` skips one frame. The
+  surface policy has unit coverage. Browser loss injection proved `webgpu` → `canvas2d` with the
+  complete 1,000-bar frame still visible; explicit Canvas2D startup also passed. Remaining D2 work
+  is the wider browser/device CI matrix.
+- 2026-07-18 — **D2 Chromium runtime matrix completed.** Added a deterministic adapter-acquisition
+  failure injection at the actual `request_adapter` boundary. The package took its ordinary startup
+  fallback path, reported `canvas2d`, and rendered the complete 1,000-bar chart. The device-loss
+  injection was replayed after removing the demo's manual `render()` call: the WASM device callback
+  routed a chart-specific loss event to the package, which scheduled recovery and repainted the warm
+  Canvas2D pane automatically. Together with normal WebGPU and explicit Canvas2D startup, all four
+  runtime conditions are now proven in Chromium. Cross-browser/device automation remains release-CI
+  work rather than an engine-architecture gap.
+- 2026-07-18 — **D1/R5 composed screenshot parity increment.** Added public
+  `chart.take_screenshot()`, returning a new bitmap-resolution canvas composed from the warm
+  Canvas2D execution of the current retained frame plus the shared axis/input overlay. An automated
+  in-page gate now creates the ordinary automatic-WebGPU chart and a forced-Canvas2D chart through
+  the published package; their public screenshots differ in 0 pixels. Chromium does not permit
+  page JavaScript to read the actually presented WebGPU surface (both `drawImage` and
+  `createImageBitmap` return transparency), so a separate `runtimeTest=presentedFrame` mode removes
+  all non-chart UI for external browser capture. Independent 1280×720 WebGPU and Canvas2D captures
+  of that mode were byte-identical. This closes one browser cross-backend parity increment; native/
+  LWC goldens over the full spacing, DPR, theme, and feature matrix remain.
+- 2026-07-18 — **D1/R5 external browser parity runner completed.** The web demo now includes a
+  no-cache Node static server and pinned Playwright, PNG, and pixel-diff dependencies. Its Chromium
+  project runs full Chrome-for-Testing in new-headless mode, explicitly selects Dawn's SwiftShader
+  fallback adapter through a hidden test-only package/WASM option, and fails if the chart selects
+  Canvas2D instead of WebGPU. One test proves the synchronous public screenshot contract; the other
+  captures the actually presented UI-free WebGPU and Canvas2D frames and attaches both sources plus
+  a diff on failure. The deterministic 1280×720, DPR 1.5 suite passes 2/2 locally with exact zero-
+  pixel differences. Production adapter policy remains hardware-first and does not expose the test
+  option publicly.
+- 2026-07-18 — **D1 native/browser shared fixture completed.** Added one versioned JSON contract for
+  the deterministic 1,000-bar data generator, 1280×720 CSS viewport, DPR 1.5, 58px price-axis strip
+  and 28px time-axis strip. Runtime tests explicitly apply that size instead of relying on headless
+  `ResizeObserver` device-pixel reporting; ordinary charts retain auto-size behavior. The native
+  example reads the same fixture, configures `ChartEngine` to the identical 1833×1038 pane, and
+  emits a PNG through tiny-skia. The Playwright suite invokes that native binary, extracts the raw
+  browser Canvas2D pane, and compares all 1,902,654 pixels: 0 differ, maximum/mean channel delta 0.
+  Axis text remains outside this comparison because native has no font adapter yet. Browser backend
+  plus native parity now passes 3/3; the next D1 gap is the LWC reference and axis/text matrix.
+- 2026-07-18 — **D1 pinned LWC reference begun.** The browser harness now installs Lightweight
+  Charts 5.2.0 exactly, renders the same deterministic 1,000-bar fixture through its public API,
+  proves two LWC captures are byte-stable, and measures Aion against LWC after the same Chromium
+  compositor. The first honest baseline is 3.41% perceptual difference for the full frame, with
+  separate pane (3.25%), price-axis (7.68%), and time-axis (2.16%) results. Versioned ceilings make
+  regressions fail without misrepresenting the current result as parity. The next D1 work is to
+  reduce those gaps and expand the matrix across DPR, spacing, theme, markers, and overlays.
+- 2026-07-18 — **First LWC-measured axis correction.** Aion's Canvas2D axis adapter now applies
+  LWC's actual-glyph-bounds vertical midpoint correction to price labels and its stable `Apr0`
+  sample correction to centered time labels. Price-axis perceptual difference fell from 7.68% to
+  6.92% and mean channel error from 7.68 to 5.85; time-axis output held at 2.16%. The full-frame
+  result improved from 3.41% to 3.38%, and the versioned ceilings were tightened accordingly.
+- 2026-07-18 — **D1 LWC spacing/DPR/theme matrix and two engine fixes.** Added public
+  `time_scale().apply_options({ bar_spacing, right_offset })` backed by headless `ChartEngine`
+  state, then established seven regional LWC cases across DPR 1/1.25/2/3, spacing 0.5/6/50, and
+  light/dark themes. The matrix exposed that hidden series still contributed to autoscale and that
+  Aion shrank its price axis eagerly after a range narrowed. Hidden series are now excluded at the
+  authoritative engine autoscale layer, while the browser layout follows LWC's grow-fast/
+  shrink-only-on-full-layout rule. In the spacing-50 case, axis width, visible logical range, and
+  price extent now match LWC; full-frame difference fell from 10.26% to 1.15%, pane difference
+  from 10.52% to 0.88%, and price-axis difference from 11.68% to 5.45%. At DPR 1/spacing 6 the pane
+  is byte-identical. Every case has a checked-in measured baseline and explicit regression ceiling.
+- 2026-07-18 — **D1 LWC marker/overlay feature matrix and marker correction.** Added shared marker
+  and volume data modules consumed through the public Aion and LWC 5.2 APIs, plus a no-feature
+  control at DPR 1.5 / spacing 6 so feature cost is measurable independently of existing raster
+  differences. The gate exposed five engine defects: fixed-size markers, midpoint-anchored `inBar`
+  markers instead of close anchoring, incorrect text offsets, triangle-only arrows, and markers
+  surviving a hidden series. The headless frame producer now follows LWC's spacing buckets,
+  shape-specific dimensions, close anchoring and label layout, emits arrow heads plus stems, and
+  skips invisible series. Marker pane difference is 0.869% versus the 0.827% control—only 0.042
+  percentage points of feature-specific divergence with marker autoscale disabled. Overlay volume is 1.627% and is now protected
+  by its own versioned ceiling. A diagnostic maximum-volume bar matched its value, x coordinate,
+  top/base coordinates and 8-device-pixel width; the excess changed area comes from LWC's layered-
+  canvas gap smearing at fractional DPR rather than divergent headless scale geometry.
+- 2026-07-18 — **Default marker-autoscale parity completed.** Marker autoscale margins now live in
+  `ChartEngine`, use LWC's spacing-dependent `shapeHeight × 1.5 + margin × 2` contract, take the
+  maximum per price scale, distinguish above/below/in-bar positions, reset when markers or series
+  visibility change, and work on overlay scales and stacked panes. The public
+  `set_markers(markers, { auto_scale })` option can disable the default. The LWC feature fixture now
+  runs with default autoscale enabled and asserts identical visible logical ranges, public price
+  extents, and axis widths. Its pane difference is 0.880% versus the 0.827% control. Remaining work
+  is fractional-DPR raster refinement, richer scale/API handles, and the Phase C plugin surface.
+- 2026-07-18 — **D1 media-coordinate axis-text contract completed.** The headless `AxisFrame` now
+  records the semantic midpoint policy and weight of every label: price labels use their actual
+  glyph bounds, ordinary time ticks use no midpoint correction and bold only the maximum visible
+  weight, marker labels use no correction, and crosshair time uses LWC's stable `Apr0` correction.
+  The browser adapter renders these labels with a 12px media-coordinate font under a DPR transform,
+  matching LWC's canvas model instead of approximating it with a rounded device-pixel font. At
+  DPR 1 / spacing 6 the pane and time axis are byte-identical to LWC and both axis regions have zero
+  perceptual difference. The pinned DPR 1.5 baseline improved to 3.368% full-frame, 6.818% price-
+  axis, and 2.083% time-axis difference. Fractional-DPR compositor/antialiasing refinement remains;
+  label selection, placement, emphasis, and midpoint policy are no longer browser-owned behavior.
+- 2026-07-18 — **Richer LWC scale handles moved behind the headless boundary.** Pure time-scale
+  queries and mutations that still lived in the WASM host—time/index/logical conversion, visible
+  ranges, scrolling, real-time/reset behavior, and scale dimensions—now live on `ChartEngine`.
+  The public time-scale handle adds `scroll_position`, `scroll_to_position`,
+  `scroll_to_real_time`, `reset_time_scale`, logical/index conversion, and width/height. New chart-
+  and series-scoped price-scale handles expose options, width, manual visible range, and autoscale.
+  Price-scale range, inversion, margins, and autoscale state are authoritative engine state; frame
+  construction now respects manual ranges instead of overwriting them. A real-browser public-API
+  gate verifies the handles and the engine has dedicated host-free tests.
+- 2026-07-18 — **All four price-scale modes integrated through the engine.** Normal, logarithmic,
+  percentage, and indexed-to-100 modes now transform each series' visible raw range using its
+  LWC-compatible first-visible base before merging autoscale ranges. Every renderer, marker,
+  price line, last-value/crosshair label, and series coordinate conversion uses that stable base.
+  Public scale margins are now the authoritative LWC defaults (`0.2/0.1` main, `0.8/0` overlay)
+  instead of being duplicated as hidden pane padding. Axis label formatting and optimal-width
+  negotiation moved from WASM into `ChartEngine`, with the browser supplying glyph metrics only.
+  The browser gate matches LWC exactly for percentage range, 66px axis width, visible logical
+  range, and series coordinate; logarithmic API range/coordinate and indexed range/width/logical-
+  window/coordinate also match exactly.
+- 2026-07-18 — **Series data/range query surface completed behind the engine boundary.** Public
+  `data`, `data_by_index`, `bars_in_logical_range`, `series_type`, and data-change subscriptions
+  query the engine-owned merged logical index rather than retaining a duplicate JavaScript data
+  model. Sparse-gap and fractional before/after semantics are compared directly with LWC in the
+  browser gate.
+- 2026-07-18 — **True left price scales completed through the shared frame contract.** Each pane
+  now owns independent left, right and overlay scale state and series can select the LWC-style
+  `priceScaleId: "left"`. A visible left strip reserves width before the time scale is laid out;
+  the engine records that pane origin, shifts all backend-neutral geometry, scopes the frame
+  scissor to the translated pane, and emits right-aligned left-axis labels. WebGPU, Canvas2D,
+  screenshots and native consumers therefore receive the same geometry instead of a browser-only
+  painted axis. A paired browser fixture matches LWC's left width, raw range, series coordinate,
+  round trip and logical window exactly. Remaining API breadth is richer event payloads and the
+  lower-priority compatibility tail.
+- 2026-07-18 — **Fractional-DPR pane scaling now uses the actual bitmap/media ratio.** Frame
+  production derives horizontal and vertical pane ratios from independently rounded bitmap
+  dimensions, matching LWC/fancy-canvas instead of assuming they always equal the nominal device
+  pixel ratio. The existing seven-case matrix remains green and unchanged at its current rounded
+  primitive positions, which narrows the remaining measured gap to browser compositor/text/AA
+  behavior rather than a pane-scale coordinate error.
+
+## 11. Revised execution order
+
+The active plan is now different from the original scaffolding sequence. The earlier sequence is
+retained in the execution log for history; the next work should be:
+
+1. **D1/R5 — Contract and parity hardening.** Public screenshot, externally presented WebGPU/
+   Canvas2D, and raw browser/native pane comparisons are automated and exact for the shared baseline
+   fixture. LWC-reference baselines now cover representative spacing, DPR, theme, marker, and
+   overlay-volume cases, including default marker autoscale with exact public price extents. Add
+   deterministic native axis text and reduce the remaining fractional-DPR axis/overlay raster
+   gaps. Browser axis semantics and the DPR-1 LWC contract are now closed.
+2. **D2 — Runtime reach.** WebGPU available, explicit Canvas2D, adapter-request failure, and live
+   device-loss failover are verified in Chromium with a complete retained frame. Expand the same
+   assertions across the supported browser/device CI matrix.
+3. **Performance hardening.** Visible-range data conflation plus repeatable headless 1M and
+   10-series × 50k-visible-bars pan/zoom/crosshair evidence is in place. Add the corresponding
+   browser executor/presentation gate and verify 60 fps under the same fixtures.
+4. **API breadth.** Time-scale scrolling/reset/index/dimension methods, all four price-scale modes,
+   series price-coordinate and logical-range/data helpers, and left/right/overlay price-scale
+   handles are headless-backed and browser-tested. Fill the remaining high-value LWC surface:
+   richer mouse/series event payloads and the lower-priority compatibility tail.
+5. **Phase C platform surface.** Once the draw-list and backend contract are stable, add Rust
+   primitives, the JS plugin recorder, watermark, and custom-series APIs.
+6. **Release readiness.** Freeze the public API, add CI for Rust/WASM/package/browser matrices,
+   publish LWC-style examples and migration docs, and define versioned compatibility guarantees.
+
+### What “no WebGPU coverage” means
+
+It does **not** mean that Canvas2D is missing. The explicit Canvas2D backend, adapter-request
+fallback, and WebGPU device-loss failover are proven in Chromium. The remaining WebGPU coverage
+gap is running those assertions across the broader supported browser/device matrix. The required
+matrix is:
+
+| Runtime condition | Expected behavior |
+|---|---|
+| WebGPU available | Use the WebGPU executor and render the shared `ChartFrame`. |
+| WebGPU unavailable or adapter request fails | Transparently use Canvas2D with the same frame. **Injected and verified in Chromium.** |
+| WebGPU device/context is lost | Continue immediately through the warm Canvas2D pane with the retained frame. **Verified in Chromium.** |
+| Explicit `backend: "canvas2d"` | Skip WebGPU probing and use Canvas2D deterministically. |
+
+Coverage means automated browser tests for those conditions, plus visual and geometry parity checks,
+so the fallback is a real product path rather than a separately maintained demo mode.

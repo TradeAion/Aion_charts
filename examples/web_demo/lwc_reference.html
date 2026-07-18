@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lightweight Charts 5.2.0 reference fixture</title>
+<style>
+  html, body, #chart { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #fff; }
+</style>
+</head>
+<body>
+<div id="chart"></div>
+<script type="module">
+import {
+  CandlestickSeries,
+  ColorType,
+  HistogramSeries,
+  createChart,
+  createSeriesMarkers,
+} from "./node_modules/lightweight-charts/dist/lightweight-charts.standalone.production.mjs";
+import { generate_fixture_data } from "./fixture_data.js";
+import { fixture_theme } from "./fixture_styles.js";
+import { marker_fixture, volume_fixture } from "./fixture_features.js";
+
+const fixture = await fetch("./fixtures/d1/candles.json", { cache: "no-store" }).then((response) => response.json());
+const query = new URLSearchParams(location.search);
+const requested_spacing = Number.parseFloat(query.get("spacing") ?? "");
+const requested_feature = query.get("feature");
+const requested_left_scale = query.get("leftScale") === "1";
+const palette = fixture_theme(query.get("theme") ?? "light");
+const container = document.getElementById("chart");
+const chart = createChart(container, {
+  width: fixture.css_width,
+  height: fixture.css_height,
+  autoSize: false,
+  layout: {
+    background: { type: ColorType.Solid, color: palette.background },
+    textColor: palette.text,
+    attributionLogo: false,
+  },
+  grid: {
+    vertLines: { color: palette.grid },
+    horzLines: { color: palette.grid },
+  },
+  timeScale: { minimumHeight: fixture.time_axis_height },
+  leftPriceScale: { visible: requested_left_scale },
+  rightPriceScale: { visible: !requested_left_scale },
+});
+const series = chart.addSeries(CandlestickSeries, {
+  priceScaleId: requested_left_scale ? "left" : "right",
+  upColor: "#26a69a",
+  downColor: "#ef5350",
+  borderUpColor: "#26a69a",
+  borderDownColor: "#ef5350",
+  wickUpColor: "#26a69a",
+  wickDownColor: "#ef5350",
+});
+const data = generate_fixture_data(fixture);
+series.setData(data);
+chart.timeScale().fitContent();
+if (Number.isFinite(requested_spacing)) {
+  chart.timeScale().applyOptions({ barSpacing: requested_spacing, rightOffset: 0 });
+}
+let feature_handle = null;
+if (requested_feature === "markers") {
+  feature_handle = createSeriesMarkers(series, marker_fixture(data));
+} else if (requested_feature === "volume") {
+  feature_handle = chart.addSeries(HistogramSeries, {
+    priceScaleId: "",
+    priceFormat: { type: "volume" },
+    priceLineVisible: false,
+    lastValueVisible: false,
+  });
+  feature_handle.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+  feature_handle.setData(volume_fixture(data));
+}
+await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+// The test consumes only LWC's public API. Exposing the handles merely lets Playwright wait for
+// the asynchronous canvas paint and capture the official composed screenshot.
+window.__lwc_reference = { chart, fixture, series, feature_handle };
+document.documentElement.dataset.barSpacing = String(chart.timeScale().options().barSpacing);
+document.documentElement.dataset.visibleLogicalRange = JSON.stringify(chart.timeScale().getVisibleLogicalRange());
+document.documentElement.dataset.priceAxisWidth = String(chart.priceScale(requested_left_scale ? "left" : "right").width());
+document.documentElement.dataset.ready = "true";
+</script>
+</body>
+</html>

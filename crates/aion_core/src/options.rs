@@ -122,7 +122,11 @@ pub struct GridLineOptions {
 
 impl Default for GridLineOptions {
     fn default() -> Self {
-        Self { color: grid_color(), style: line_style::SOLID, visible: true }
+        Self {
+            color: grid_color(),
+            style: line_style::SOLID,
+            visible: true,
+        }
     }
 }
 
@@ -137,7 +141,10 @@ pub struct GridOptions {
 
 impl Default for GridOptions {
     fn default() -> Self {
-        Self { vert_lines: GridLineOptions::default(), horz_lines: GridLineOptions::default() }
+        Self {
+            vert_lines: GridLineOptions::default(),
+            horz_lines: GridLineOptions::default(),
+        }
     }
 }
 
@@ -180,6 +187,26 @@ pub struct CrosshairOptions {
     pub mode: u8,
 }
 
+/// Chart-level visibility of a pane price-axis strip. Scale math and per-series scale options are
+/// owned by `PriceScaleCore`; this flag determines whether layout reserves and paints the strip.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PriceAxisOptions {
+    pub visible: bool,
+}
+
+impl PriceAxisOptions {
+    fn visible(visible: bool) -> Self {
+        Self { visible }
+    }
+}
+
+impl Default for PriceAxisOptions {
+    fn default() -> Self {
+        Self::visible(true)
+    }
+}
+
 impl Default for CrosshairOptions {
     fn default() -> Self {
         Self {
@@ -197,6 +224,10 @@ pub struct ChartOptions {
     pub layout: LayoutOptions,
     pub grid: GridOptions,
     pub crosshair: CrosshairOptions,
+    #[serde(rename = "leftPriceScale")]
+    pub left_price_scale: PriceAxisOptions,
+    #[serde(rename = "rightPriceScale")]
+    pub right_price_scale: PriceAxisOptions,
     #[serde(rename = "autoSize")]
     pub auto_size: bool,
     #[serde(rename = "hoveredSeriesOnTop")]
@@ -209,6 +240,8 @@ impl Default for ChartOptions {
             layout: LayoutOptions::default(),
             grid: GridOptions::default(),
             crosshair: CrosshairOptions::default(),
+            left_price_scale: PriceAxisOptions::visible(false),
+            right_price_scale: PriceAxisOptions::visible(true),
             auto_size: false,
             hovered_series_on_top: true,
         }
@@ -250,7 +283,9 @@ impl Default for ChartOptionsStore {
 impl ChartOptionsStore {
     /// Start from the LWC-matching defaults.
     pub fn new() -> Self {
-        Self { value: serde_json::to_value(ChartOptions::default()).expect("options serialize") }
+        Self {
+            value: serde_json::to_value(ChartOptions::default()).expect("options serialize"),
+        }
     }
 
     /// Deep-merge a JSON patch object into the current options. A non-object patch is ignored
@@ -346,7 +381,9 @@ mod tests {
     #[test]
     fn apply_str_parses_and_merges() {
         let mut store = ChartOptionsStore::new();
-        store.apply_str(r##"{ "layout": { "background": { "color": "#0d0d0d" } } }"##).unwrap();
+        store
+            .apply_str(r##"{ "layout": { "background": { "color": "#0d0d0d" } } }"##)
+            .unwrap();
         assert_eq!(store.get().layout.background.color, "#0d0d0d");
     }
 
@@ -362,7 +399,8 @@ mod tests {
     fn unknown_keys_are_ignored_on_read() {
         // A patch with keys we don't model must not break deserialization of the ones we do.
         let mut store = ChartOptionsStore::new();
-        store.apply(&json!({ "grid": { "vertLines": { "color": "#abcabc" } }, "somethingNew": 42 }));
+        store
+            .apply(&json!({ "grid": { "vertLines": { "color": "#abcabc" } }, "somethingNew": 42 }));
         assert_eq!(store.get().grid.vert_lines.color, "#abcabc");
     }
 

@@ -1,4 +1,5 @@
-//! Converts the anti-aliased geometry subset of the Prim IR (`Polyline` / `AreaFill` / `Circle`)
+//! Converts the anti-aliased geometry subset of the Prim IR (`Polyline` / `AreaFill` / `Circle` /
+//! `RoundRect`)
 //! into triangle-mesh vertices for the wgpu tri pipeline.
 //!
 //! The crisp-rect subset goes through [`prims_to_instances`](crate::prims_to_instances); this is
@@ -11,14 +12,17 @@
 
 use aion_render::draw_list::{LineType, Prim};
 use aion_render::line::{
-    build_area_fill, build_disc, build_line_stroke, AreaMesh, LinePoint, LineParams, LineVertex,
+    build_area_fill, build_disc, build_line_stroke, AreaMesh, LineParams, LinePoint, LineVertex,
     StrokeMesh,
 };
 
 use crate::tri_pipeline::TriVertex;
 
 fn tri(v: &LineVertex) -> TriVertex {
-    TriVertex { pos: [v.x, v.y], color: v.color }
+    TriVertex {
+        pos: [v.x, v.y],
+        color: v.color,
+    }
 }
 
 /// Slice a `[first, first+count)` window of the shared device-space pool into `LinePoint`s.
@@ -28,17 +32,131 @@ fn pool_slice(points: &[[f32; 2]], first: u32, count: u32) -> Vec<LinePoint> {
         .get(a..b)
         .unwrap_or(&[])
         .iter()
-        .map(|p| LinePoint { x: p[0] as f64, y: p[1] as f64 })
+        .map(|p| LinePoint {
+            x: p[0] as f64,
+            y: p[1] as f64,
+        })
         .collect()
 }
 
 /// Identity `LineParams` — the pool already carries the DPR, so tessellation must not re-scale.
 fn identity(line_width: f64, line_type: LineType) -> LineParams {
-    LineParams { horizontal_pixel_ratio: 1.0, vertical_pixel_ratio: 1.0, line_width, line_type }
+    LineParams {
+        horizontal_pixel_ratio: 1.0,
+        vertical_pixel_ratio: 1.0,
+        line_width,
+        line_type,
+    }
+}
+
+/// Approximate a rounded rectangle with a small, deterministic polygon. RoundRect is currently
+/// used by engine-owned square markers; keeping it in the shared Prim adapter means those markers
+/// render in WebGPU exactly as they do through the Canvas2D/native paths instead of disappearing.
+fn round_rect_polygon(x: f32, y: f32, w: f32, h: f32, radii: [f32; 4]) -> Vec<[f32; 2]> {
+    use std::f32::consts::PI;
+    let max_radius = (w.abs().min(h.abs()) / 2.0).max(0.0);
+    let [lt, rt, rb, lb] = radii.map(|r| r.max(0.0).min(max_radius));
+    let mut out = Vec::with_capacity(24);
+    out.push([x + lt, y]);
+    out.push([x + w - rt, y]);
+    append_arc(&mut out, x + w - rt, y + rt, rt, -PI / 2.0, 0.0);
+    out.push([x + w, y + h - rb]);
+    append_arc(&mut out, x + w - rb, y + h - rb, rb, 0.0, PI / 2.0);
+    out.push([x + lb, y + h]);
+    append_arc(&mut out, x + lb, y + h - lb, lb, PI / 2.0, PI);
+    out.push([x, y + lt]);
+    append_arc(&mut out, x + lt, y + lt, lt, PI, 3.0 * PI / 2.0);
+    out
+}
+
+fn append_arc(out: &mut Vec<[f32; 2]>, cx: f32, cy: f32, radius: f32, start: f32, end: f32) {
+    for step in 1..=4 {
+        let t = start + (end - start) * (step as f32 / 4.0);
+        out.push([cx + radius * t.cos(), cy + radius * t.sin()]);
+    }
+}
+
+fn fill_polygon(poly: &[[f32; 2]], color: aion_render::color::Color, out: &mut Vec<TriVertex>) {
+    if poly.len() < 3 {
+        return;
+    }
+    let center = [
+        poly.iter().map(|p| p[0]).sum::<f32>() / poly.len() as f32,
+        poly.iter().map(|p| p[1]).sum::<f32>() / poly.len() as f32,
+    ];
+    let col = [
+        color.r() as f32 / 255.0,
+        color.g() as f32 / 255.0,
+        color.b() as f32 / 255.0,
+        color.a() as f32 / 255.0,
+    ];
+    for pair in poly.windows(2) {
+        out.extend([
+            TriVertex {
+                pos: center,
+                color: col,
+            },
+            TriVertex {
+                pos: pair[0],
+                color: col,
+            },
+            TriVertex {
+                pos: pair[1],
+                color: col,
+            },
+        ]);
+    }
+    out.extend([
+        TriVertex {
+            pos: center,
+            color: col,
+        },
+        TriVertex {
+            pos: *poly.last().unwrap(),
+            color: col,
+        },
+        TriVertex {
+            pos: poly[0],
+            color: col,
+        },
+    ]);
+}
+
+fn round_rect_to_tris(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    radii: [f32; 4],
+    fill: aion_render::color::Color,
+    border_width: f32,
+    border: aion_render::color::Color,
+    out: &mut Vec<TriVertex>,
+) {
+    if w <= 0.0 || h <= 0.0 {
+        return;
+    }
+    let outer = round_rect_polygon(x, y, w, h, radii);
+    if border_width > 0.0 {
+        fill_polygon(&outer, border, out);
+        let inset = border_width.min(w / 2.0).min(h / 2.0);
+        let inner_radii = radii.map(|r| (r - inset).max(0.0));
+        let inner = round_rect_polygon(
+            x + inset,
+            y + inset,
+            w - inset * 2.0,
+            h - inset * 2.0,
+            inner_radii,
+        );
+        fill_polygon(&inner, fill, out);
+    } else {
+        fill_polygon(&outer, fill, out);
+    }
 }
 
 /// Tessellate the geometry prims into `fill` (area fills, drawn first/below) and `stroke` (line
-/// strokes + filled discs). Rects, text, and unhandled prims are ignored — they render elsewhere.
+/// strokes + filled discs/markers). Rects, text, and unhandled prims are ignored — they render
+/// elsewhere.
 pub fn geom_prims_to_tris(
     prims: &[Prim],
     points: &[[f32; 2]],
@@ -47,7 +165,13 @@ pub fn geom_prims_to_tris(
 ) {
     for prim in prims {
         match prim {
-            Prim::AreaFill { first_point, point_count, base_y, line_type, gradient } => {
+            Prim::AreaFill {
+                first_point,
+                point_count,
+                base_y,
+                line_type,
+                gradient,
+            } => {
                 let pts = pool_slice(points, *first_point, *point_count);
                 let mut mesh = AreaMesh::default();
                 build_area_fill(
@@ -60,24 +184,78 @@ pub fn geom_prims_to_tris(
                 );
                 fill.extend(mesh.vertices.iter().map(tri));
             }
-            Prim::Polyline { first_point, point_count, width, line_type, color, .. } => {
+            Prim::Polyline {
+                first_point,
+                point_count,
+                width,
+                line_type,
+                color,
+                ..
+            } => {
                 let pts = pool_slice(points, *first_point, *point_count);
                 let mut mesh = StrokeMesh::default();
-                build_line_stroke(&pts, *color, &identity(*width as f64, *line_type), &mut mesh);
+                build_line_stroke(
+                    &pts,
+                    *color,
+                    &identity(*width as f64, *line_type),
+                    &mut mesh,
+                );
                 stroke.extend(mesh.vertices.iter().map(tri));
             }
-            Prim::Circle { cx, cy, radius, fill: f, .. } => {
+            Prim::Circle {
+                cx,
+                cy,
+                radius,
+                fill: f,
+                ..
+            } => {
                 let mut disc = Vec::new();
                 build_disc([*cx, *cy], *radius, *f, &mut disc);
                 stroke.extend(disc.iter().map(tri));
             }
             Prim::Triangle { a, b, c, color } => {
-                let col = [color.r() as f32 / 255.0, color.g() as f32 / 255.0, color.b() as f32 / 255.0, color.a() as f32 / 255.0];
+                let col = [
+                    color.r() as f32 / 255.0,
+                    color.g() as f32 / 255.0,
+                    color.b() as f32 / 255.0,
+                    color.a() as f32 / 255.0,
+                ];
                 stroke.extend([
-                    TriVertex { pos: *a, color: col },
-                    TriVertex { pos: *b, color: col },
-                    TriVertex { pos: *c, color: col },
+                    TriVertex {
+                        pos: *a,
+                        color: col,
+                    },
+                    TriVertex {
+                        pos: *b,
+                        color: col,
+                    },
+                    TriVertex {
+                        pos: *c,
+                        color: col,
+                    },
                 ]);
+            }
+            Prim::RoundRect {
+                x,
+                y,
+                w,
+                h,
+                radii,
+                fill,
+                border_width,
+                border_color,
+            } => {
+                round_rect_to_tris(
+                    *x,
+                    *y,
+                    *w,
+                    *h,
+                    *radii,
+                    *fill,
+                    *border_width,
+                    *border_color,
+                    stroke,
+                );
             }
             _ => {}
         }
@@ -104,7 +282,10 @@ mod tests {
         let (mut fill, mut stroke) = (Vec::new(), Vec::new());
         geom_prims_to_tris(&prims, &points, &mut fill, &mut stroke);
         assert!(fill.is_empty());
-        assert!(!stroke.is_empty(), "two segments + a join tessellate to tris");
+        assert!(
+            !stroke.is_empty(),
+            "two segments + a join tessellate to tris"
+        );
     }
 
     #[test]
@@ -115,7 +296,10 @@ mod tests {
             point_count: 2,
             base_y: 40.0,
             line_type: LineType::Simple,
-            gradient: Gradient { top: Color::rgb(0, 0, 0xFF), bottom: Color::rgba(0, 0, 0xFF, 0) },
+            gradient: Gradient {
+                top: Color::rgb(0, 0, 0xFF),
+                bottom: Color::rgba(0, 0, 0xFF, 0),
+            },
         }];
         let (mut fill, mut stroke) = (Vec::new(), Vec::new());
         geom_prims_to_tris(&prims, &points, &mut fill, &mut stroke);
@@ -143,11 +327,45 @@ mod tests {
     fn rects_and_text_ignored() {
         use aion_render::draw_list::IRect;
         let prims = [
-            Prim::Rect { rect: IRect { x: 0, y: 0, w: 5, h: 5 }, color: Color::rgb(0, 0, 0) },
-            Prim::Text { run_id: 0, x: 0.0, y: 0.0, color: Color::rgb(0, 0, 0) },
+            Prim::Rect {
+                rect: IRect {
+                    x: 0,
+                    y: 0,
+                    w: 5,
+                    h: 5,
+                },
+                color: Color::rgb(0, 0, 0),
+            },
+            Prim::Text {
+                run_id: 0,
+                x: 0.0,
+                y: 0.0,
+                color: Color::rgb(0, 0, 0),
+            },
         ];
         let (mut fill, mut stroke) = (Vec::new(), Vec::new());
         geom_prims_to_tris(&prims, &[], &mut fill, &mut stroke);
         assert!(fill.is_empty() && stroke.is_empty());
+    }
+
+    #[test]
+    fn rounded_rect_tessellates_to_stroke() {
+        let prims = [Prim::RoundRect {
+            x: 2.0,
+            y: 3.0,
+            w: 12.0,
+            h: 8.0,
+            radii: [2.0; 4],
+            fill: Color::rgb(0x10, 0x20, 0x30),
+            border_width: 0.0,
+            border_color: Color::rgb(0, 0, 0),
+        }];
+        let (mut fill, mut stroke) = (Vec::new(), Vec::new());
+        geom_prims_to_tris(&prims, &[], &mut fill, &mut stroke);
+        assert!(fill.is_empty());
+        assert!(
+            stroke.len() >= 3 * 8,
+            "rounded marker must produce filled triangles"
+        );
     }
 }

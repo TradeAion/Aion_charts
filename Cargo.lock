@@ -33,8 +33,11 @@ version = "0.1.0"
 name = "aion_native"
 version = "0.1.0"
 dependencies = [
+ "aion_core",
  "aion_engine",
  "aion_render",
+ "serde",
+ "serde_json",
  "tiny-skia",
 ]
 
@@ -49,6 +52,7 @@ dependencies = [
 name = "aion_render_wgpu"
 version = "0.1.0"
 dependencies = [
+ "aion_engine",
  "aion_render",
  "bytemuck",
  "wgpu",

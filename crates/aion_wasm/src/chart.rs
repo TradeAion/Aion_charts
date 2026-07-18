@@ -16,23 +16,27 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::{
+    atomic::{AtomicBool, AtomicU32, Ordering},
+    Arc,
+};
 
+use js_sys::Float64Array;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use js_sys::Float64Array;
 use web_sys::CanvasRenderingContext2d;
 
+use crate::axis_policy::negotiated_axis_width;
+use crate::backend_policy::{surface_error_action, SurfaceErrorAction};
 use aion_core::model::data_layer::SeriesId;
 use aion_core::model::data_validation::sanitize_ohlc;
 use aion_core::model::magnet::CrosshairMode;
-use aion_core::model::plot_list::{PlotList, PlotValueIndex};
-use aion_core::model::range::{LogicalRange, StrictRange};
+use aion_core::model::plot_list::{MismatchDirection, PlotValueIndex};
 use aion_core::options::{crosshair_mode, ChartOptions};
-use aion_core::TimePointIndex;
-use aion_core::scale::price_scale_core::PriceScaleCore;
+use aion_core::scale::price_scale_core::PriceScaleMode;
 use aion_engine::{
-    line_style_from_u8, marker_pos, marker_shape, AxisFrame, AxisTextAlign, ChartEngine, Marker,
-    Pane, PriceLine, SeriesKind,
+    line_style_from_u8, marker_pos, marker_shape, AxisFrame, AxisTextAlign, AxisTextMidpoint,
+    ChartEngine, Marker, Pane, PriceLine, PriceScaleTarget, SeriesKind, TIME_AXIS_HEIGHT,
 };
 use aion_render::canvas2d::{execute as execute_canvas2d, Canvas2d, Viewport as CanvasViewport};
 use aion_render::color::Color;
@@ -42,11 +46,21 @@ use aion_render_wgpu::{
     QuadRenderer, TexQuadRenderer, TriRenderer, SAMPLE_COUNT,
 };
 
+#[wasm_bindgen(inline_js = r#"
+export function notify_aion_backend_loss(runtimeId) {
+    window.dispatchEvent(new CustomEvent('aion-chart-backend-lost', { detail: runtimeId }));
+}
+"#)]
+extern "C" {
+    fn notify_aion_backend_loss(runtime_id: u32);
+}
+
+static NEXT_RUNTIME_ID: AtomicU32 = AtomicU32::new(1);
+
 // lightweight-charts default palette (RENDERING_SPEC.md §2.5, §7, §8, §15)
 // Axis palette (as CSS color strings for the 2D overlay)
 const BORDER_CSS: &str = "#2B2B43";
 // TradingView-style volume: translucent green on up bars, red on down bars.
-
 
 // Crosshair marker (line/area) — line-series.ts defaults.
 
@@ -56,14 +70,7 @@ const FONT_FAMILY: &str =
 
 /// Axis metrics (RENDERING_SPEC.md §10, §11), font size 12.
 const FONT_SIZE: f64 = 12.0;
-const AXIS_BORDER_SIZE: f64 = 1.0;
-const AXIS_TICK_LENGTH: f64 = 5.0;
-const PRICE_PADDING_INNER: f64 = 5.0;
-const PRICE_PADDING_OUTER: f64 = 5.0;
-const PRICE_LABEL_OFFSET: f64 = 5.0;
-const PRICE_DEFAULT_TEXT_WIDTH: f64 = 34.0;
 const TICK_MARK_MAX_CHARS: f64 = 8.0;
-const TIME_AXIS_HEIGHT: f64 = 28.0;
 
 /// JSON shape accepted from the JS boundary for `set_series_markers`.
 #[derive(serde::Deserialize)]
@@ -88,6 +95,48 @@ fn crosshair_mode_from_u8(mode: u8) -> CrosshairMode {
     }
 }
 
+fn price_scale_mode_from_u8(mode: u8) -> PriceScaleMode {
+    match mode {
+        1 => PriceScaleMode::Logarithmic,
+        2 => PriceScaleMode::Percentage,
+        3 => PriceScaleMode::IndexedTo100,
+        _ => PriceScaleMode::Normal,
+    }
+}
+
+fn price_scale_mode_to_u8(mode: PriceScaleMode) -> u8 {
+    match mode {
+        PriceScaleMode::Normal => 0,
+        PriceScaleMode::Logarithmic => 1,
+        PriceScaleMode::Percentage => 2,
+        PriceScaleMode::IndexedTo100 => 3,
+    }
+}
+
+fn price_scale_target_from_u8(target: u8) -> PriceScaleTarget {
+    match target {
+        1 => PriceScaleTarget::Left,
+        2 => PriceScaleTarget::Overlay,
+        _ => PriceScaleTarget::Right,
+    }
+}
+
+fn price_scale_target_to_u8(target: PriceScaleTarget) -> u8 {
+    match target {
+        PriceScaleTarget::Right => 0,
+        PriceScaleTarget::Left => 1,
+        PriceScaleTarget::Overlay => 2,
+    }
+}
+
+fn mismatch_direction_from_i8(direction: i8) -> MismatchDirection {
+    match direction {
+        -1 => MismatchDirection::NearestLeft,
+        1 => MismatchDirection::NearestRight,
+        _ => MismatchDirection::None,
+    }
+}
+
 /// Height (css px) of the separator between stacked panes.
 const PANE_SEPARATOR: f64 = 1.0;
 
@@ -103,11 +152,21 @@ struct Gfx {
     // tex renderer's bind group references, so it must stay alive.
     _atlas: LabelAtlas,
     tex_renderer: TexQuadRenderer,
+    device_lost: Arc<AtomicBool>,
+}
+
+enum PaneRenderOutcome {
+    Presented,
+    Timeout,
+    Fallback(String),
+    Canvas2d,
 }
 
 struct ChartInner {
     gfx: Option<Gfx>,
-    pane_ctx: Option<CanvasRenderingContext2d>,
+    gpu_pane: web_sys::HtmlCanvasElement,
+    fallback_pane: web_sys::HtmlCanvasElement,
+    pane_ctx: CanvasRenderingContext2d,
     axis_ctx: CanvasRenderingContext2d,
     bitmap_w: u32,
     bitmap_h: u32,
@@ -148,7 +207,9 @@ impl Drop for ResizeBinding {
 #[wasm_bindgen]
 pub struct AionChart {
     inner: Rc<RefCell<ChartInner>>,
-    pane: web_sys::HtmlCanvasElement,
+    runtime_id: u32,
+    gpu_pane: web_sys::HtmlCanvasElement,
+    fallback_pane: web_sys::HtmlCanvasElement,
     overlay: web_sys::HtmlCanvasElement,
     _resize: Option<ResizeBinding>,
 }
@@ -169,12 +230,26 @@ fn device_pixel_box(entry: &web_sys::ResizeObserverEntry) -> Option<(f64, f64)> 
     Some((size.inline_size(), size.block_size()))
 }
 
-/// Sizes both canvases to `(bw, bh)` device pixels while pinning their CSS box to the real
+fn set_backend_visibility(
+    gpu_pane: &web_sys::HtmlCanvasElement,
+    fallback_pane: &web_sys::HtmlCanvasElement,
+    use_webgpu: bool,
+) {
+    let _ = gpu_pane
+        .style()
+        .set_property("visibility", if use_webgpu { "visible" } else { "hidden" });
+    let _ = fallback_pane
+        .style()
+        .set_property("visibility", if use_webgpu { "hidden" } else { "visible" });
+}
+
+/// Sizes all three canvases to `(bw, bh)` device pixels while pinning their CSS box to the real
 /// displayed size, then resizes + repaints the engine. Shared by the initial bind and every
 /// observer callback.
 fn apply_device_size(
     inner: &Rc<RefCell<ChartInner>>,
-    pane: &web_sys::HtmlCanvasElement,
+    gpu_pane: &web_sys::HtmlCanvasElement,
+    fallback_pane: &web_sys::HtmlCanvasElement,
     overlay: &web_sys::HtmlCanvasElement,
     css_w: f64,
     css_h: f64,
@@ -182,7 +257,7 @@ fn apply_device_size(
     bh: f64,
 ) {
     let (bw_u, bh_u) = (bw.max(1.0) as u32, bh.max(1.0) as u32);
-    for c in [pane, overlay] {
+    for c in [gpu_pane, fallback_pane, overlay] {
         c.set_width(bw_u);
         c.set_height(bh_u);
         let style = c.style();
@@ -197,24 +272,27 @@ fn apply_device_size(
     let _ = c.render();
 }
 
-/// Creates a chart bound to `pane_canvas` (WebGPU, falling back to Canvas2D) and `overlay_canvas`
-/// (Canvas2D axis/text layer). Both must be full chart size with bitmap size = css size * dpr,
-/// already set by the caller.
+/// Creates a chart bound to dedicated WebGPU and Canvas2D pane canvases plus an axis/text overlay.
+/// All three must be full chart size with bitmap size = css size * dpr, already set by the caller.
 /// Call [`AionChart::enable_auto_resize`] to have the engine own sizing from then on.
 #[wasm_bindgen]
 pub async fn create_chart(
-    pane_canvas: web_sys::HtmlCanvasElement,
+    gpu_pane_canvas: web_sys::HtmlCanvasElement,
+    fallback_pane_canvas: web_sys::HtmlCanvasElement,
     overlay_canvas: web_sys::HtmlCanvasElement,
     css_width: f64,
     css_height: f64,
     dpr: f64,
     force_canvas2d: bool,
+    simulate_adapter_failure: bool,
+    force_fallback_adapter: bool,
 ) -> Result<AionChart, JsValue> {
     console_error_panic_hook::set_once();
 
-    // Keep handles to both canvas elements so the engine can own device-pixel resizing
+    // Keep handles to all canvas elements so the engine can own device-pixel resizing
     // (create_surface takes the pane canvas by value; the clone is just a JS reference).
-    let pane_el = pane_canvas.clone();
+    let gpu_pane_el = gpu_pane_canvas.clone();
+    let fallback_pane_el = fallback_pane_canvas.clone();
     let overlay_el = overlay_canvas.clone();
 
     let axis_ctx = overlay_canvas
@@ -224,30 +302,44 @@ pub async fn create_chart(
 
     let bitmap_w = (css_width * dpr).round().max(1.0) as u32;
     let bitmap_h = (css_height * dpr).round().max(1.0) as u32;
-    let (gfx, pane_ctx) = if force_canvas2d {
-        let pane_ctx = pane_el
-            .get_context("2d")?
-            .ok_or_else(|| JsValue::from_str("no 2d pane context"))?
-            .dyn_into::<CanvasRenderingContext2d>()?;
-        (None, Some(pane_ctx))
+    let runtime_id = NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed);
+    // A canvas cannot change context type after WebGPU has claimed it. Keep a dedicated 2D pane
+    // warm from construction so a device loss can switch backends without replacing DOM nodes or
+    // rebuilding chart state.
+    let pane_ctx = fallback_pane_el
+        .get_context("2d")?
+        .ok_or_else(|| JsValue::from_str("no 2d pane context"))?
+        .dyn_into::<CanvasRenderingContext2d>()?;
+    let gfx = if force_canvas2d {
+        None
     } else {
-        match try_create_gfx(pane_canvas, css_width, css_height, dpr).await {
-            Ok(gfx) => (Some(gfx), None),
+        match try_create_gfx(
+            gpu_pane_canvas,
+            css_width,
+            css_height,
+            dpr,
+            runtime_id,
+            simulate_adapter_failure,
+            force_fallback_adapter,
+        )
+        .await
+        {
+            Ok(gfx) => Some(gfx),
             Err(error) => {
-            web_sys::console::warn_1(
-                &format!("aion: WebGPU unavailable; using Canvas2D fallback ({error:?})").into(),
-            );
-            let pane_ctx = pane_el
-                .get_context("2d")?
-                .ok_or_else(|| JsValue::from_str("no 2d pane context"))?
-                .dyn_into::<CanvasRenderingContext2d>()?;
-                (None, Some(pane_ctx))
+                web_sys::console::warn_1(
+                    &format!("aion: WebGPU unavailable; using Canvas2D fallback ({error:?})")
+                        .into(),
+                );
+                None
             }
         }
     };
+    set_backend_visibility(&gpu_pane_el, &fallback_pane_el, gfx.is_some());
 
     let inner = ChartInner {
         gfx,
+        gpu_pane: gpu_pane_el.clone(),
+        fallback_pane: fallback_pane_el.clone(),
         pane_ctx,
         axis_ctx,
         bitmap_w,
@@ -260,7 +352,9 @@ pub async fn create_chart(
 
     Ok(AionChart {
         inner: Rc::new(RefCell::new(inner)),
-        pane: pane_el,
+        runtime_id,
+        gpu_pane: gpu_pane_el,
+        fallback_pane: fallback_pane_el,
         overlay: overlay_el,
         _resize: None,
     })
@@ -275,7 +369,8 @@ impl AionChart {
     /// re-rendering on every size/DPR change. After this, the embedder never sizes canvases.
     pub fn enable_auto_resize(&mut self, container: web_sys::HtmlElement) -> Result<(), JsValue> {
         let inner = self.inner.clone();
-        let pane = self.pane.clone();
+        let gpu_pane = self.gpu_pane.clone();
+        let fallback_pane = self.fallback_pane.clone();
         let overlay = self.overlay.clone();
         let container_cb = container.clone();
 
@@ -289,10 +384,21 @@ impl AionChart {
                 .ok()
                 .and_then(|e| device_pixel_box(&e));
             let (bw, bh) = device.unwrap_or_else(|| {
-                let dpr = web_sys::window().map(|w| w.device_pixel_ratio()).unwrap_or(1.0);
+                let dpr = web_sys::window()
+                    .map(|w| w.device_pixel_ratio())
+                    .unwrap_or(1.0);
                 ((css_w * dpr).round(), (css_h * dpr).round())
             });
-            apply_device_size(&inner, &pane, &overlay, css_w, css_h, bw, bh);
+            apply_device_size(
+                &inner,
+                &gpu_pane,
+                &fallback_pane,
+                &overlay,
+                css_w,
+                css_h,
+                bw,
+                bh,
+            );
         }) as Box<dyn FnMut(js_sys::Array)>);
 
         let observer = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref())?;
@@ -304,10 +410,13 @@ impl AionChart {
         // Size once now so the first paint is correct even before the observer first fires.
         let rect = container.get_bounding_client_rect();
         let (css_w, css_h) = (rect.width().max(1.0), rect.height().max(1.0));
-        let dpr = web_sys::window().map(|w| w.device_pixel_ratio()).unwrap_or(1.0);
+        let dpr = web_sys::window()
+            .map(|w| w.device_pixel_ratio())
+            .unwrap_or(1.0);
         apply_device_size(
             &self.inner,
-            &self.pane,
+            &self.gpu_pane,
+            &self.fallback_pane,
             &self.overlay,
             css_w,
             css_h,
@@ -315,7 +424,10 @@ impl AionChart {
             (css_h * dpr).round(),
         );
 
-        self._resize = Some(ResizeBinding { observer, _callback: callback });
+        self._resize = Some(ResizeBinding {
+            observer,
+            _callback: callback,
+        });
         Ok(())
     }
 
@@ -336,33 +448,76 @@ impl AionChart {
 
     /// Add upper, middle, and lower Bollinger-band lines. Returns an empty array for invalid input.
     pub fn add_bollinger(&mut self, source_id: u32, period: u32, deviation: f64) -> Vec<u32> {
-        self.inner.borrow_mut().add_bollinger(source_id, period, deviation)
+        self.inner
+            .borrow_mut()
+            .add_bollinger(source_id, period, deviation)
     }
 
     /// Sets the main series' data (series 0). `times` are ascending UTC seconds.
-    pub fn set_data(&mut self, times: &[f64], open: &[f64], high: &[f64], low: &[f64], close: &[f64]) {
-        self.inner.borrow_mut().set_data(times, open, high, low, close);
+    pub fn set_data(
+        &mut self,
+        times: &[f64],
+        open: &[f64],
+        high: &[f64],
+        low: &[f64],
+        close: &[f64],
+    ) {
+        self.inner
+            .borrow_mut()
+            .set_data(times, open, high, low, close);
     }
 
     /// Sets a series' data by id.
-    pub fn set_series_data(&mut self, id: u32, times: &[f64], open: &[f64], high: &[f64], low: &[f64], close: &[f64]) {
-        self.inner.borrow_mut().set_series_data(id, times, open, high, low, close);
+    pub fn set_series_data(
+        &mut self,
+        id: u32,
+        times: &[f64],
+        open: &[f64],
+        high: &[f64],
+        low: &[f64],
+        close: &[f64],
+    ) {
+        self.inner
+            .borrow_mut()
+            .set_series_data(id, times, open, high, low, close);
     }
 
     /// Typed-array ingestion path: wasm-bindgen passes the JS views as externrefs and the engine
     /// takes one owned copy, avoiding the temporary slice copy generated for `&[f64]` methods.
-    pub fn set_series_data_typed(&mut self, id: u32, times: &Float64Array, open: &Float64Array, high: &Float64Array, low: &Float64Array, close: &Float64Array) {
-        self.inner.borrow_mut().set_series_data_typed(id, times, open, high, low, close);
+    pub fn set_series_data_typed(
+        &mut self,
+        id: u32,
+        times: &Float64Array,
+        open: &Float64Array,
+        high: &Float64Array,
+        low: &Float64Array,
+        close: &Float64Array,
+    ) {
+        self.inner
+            .borrow_mut()
+            .set_series_data_typed(id, times, open, high, low, close);
     }
 
     /// Streaming update of the main series (append new time or replace last).
     pub fn update_bar(&mut self, time: f64, open: f64, high: f64, low: f64, close: f64) {
-        self.inner.borrow_mut().update_bar(time, open, high, low, close);
+        self.inner
+            .borrow_mut()
+            .update_bar(time, open, high, low, close);
     }
 
     /// Streaming update of an arbitrary series by id (append new time or replace last).
-    pub fn update_series_bar(&mut self, series_id: u32, time: f64, open: f64, high: f64, low: f64, close: f64) {
-        self.inner.borrow_mut().update_series_bar(series_id, time, open, high, low, close);
+    pub fn update_series_bar(
+        &mut self,
+        series_id: u32,
+        time: f64,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
+    ) {
+        self.inner
+            .borrow_mut()
+            .update_series_bar(series_id, time, open, high, low, close);
     }
 
     /// Sets a series' line/area color (overrides the kind default).
@@ -377,7 +532,9 @@ impl AionChart {
 
     /// Set candlestick/bar up & down body colors as CSS strings (empty string = keep default).
     pub fn set_series_updown_colors(&mut self, id: u32, up: &str, down: &str) {
-        self.inner.borrow_mut().set_series_updown_colors(id, up, down);
+        self.inner
+            .borrow_mut()
+            .set_series_updown_colors(id, up, down);
     }
 
     /// Set a line/area series' stroke width (css px).
@@ -387,13 +544,17 @@ impl AionChart {
 
     /// Set an area series' fill gradient colors (top at the line, bottom at the base; CSS strings).
     pub fn set_series_area_colors(&mut self, id: u32, top: &str, bottom: &str) {
-        self.inner.borrow_mut().set_series_area_colors(id, top, bottom);
+        self.inner
+            .borrow_mut()
+            .set_series_area_colors(id, top, bottom);
     }
 
     /// Color a histogram (volume) by the main price series' up/down direction per bar
     /// (TradingView-style volume).
     pub fn set_series_histogram_updown(&mut self, id: u32, enabled: bool) {
-        self.inner.borrow_mut().set_series_histogram_updown(id, enabled);
+        self.inner
+            .borrow_mut()
+            .set_series_histogram_updown(id, enabled);
     }
 
     /// Set a line/area series' join type: 0 = simple, 1 = stepped, 2 = curved. Call `render()`
@@ -404,7 +565,9 @@ impl AionChart {
 
     /// Toggle per-point disc markers on a line/area series. Call `render()` after (Phase B3).
     pub fn set_series_point_markers(&mut self, id: u32, visible: bool) {
-        self.inner.borrow_mut().set_series_point_markers(id, visible);
+        self.inner
+            .borrow_mut()
+            .set_series_point_markers(id, visible);
     }
 
     /// Set a Baseline series' baseline price (`NaN` = auto). Call `render()` after (Phase B3).
@@ -414,14 +577,28 @@ impl AionChart {
 
     /// Toggle the pulsing last-price ring on a series (roadmap Phase B3).
     pub fn set_series_last_price_animation(&mut self, id: u32, enabled: bool) {
-        self.inner.borrow_mut().set_series_last_price_animation(id, enabled);
+        self.inner
+            .borrow_mut()
+            .set_series_last_price_animation(id, enabled);
     }
 
     /// Add a horizontal price line to a series; returns its id. `style`: 0 solid, 1 dotted, 2
     /// dashed, 3 large-dashed, 4 sparse-dotted. Call `render()` after (roadmap Phase B4).
     #[allow(clippy::too_many_arguments)]
-    pub fn create_price_line(&mut self, series_id: u32, price: f64, r: u8, g: u8, b: u8, width: u32, style: u8, title: &str) -> u32 {
-        self.inner.borrow_mut().create_price_line(series_id, price, r, g, b, width, style, title)
+    pub fn create_price_line(
+        &mut self,
+        series_id: u32,
+        price: f64,
+        r: u8,
+        g: u8,
+        b: u8,
+        width: u32,
+        style: u8,
+        title: &str,
+    ) -> u32 {
+        self.inner
+            .borrow_mut()
+            .create_price_line(series_id, price, r, g, b, width, style, title)
     }
     /// Remove a price line by id. Call `render()` after (roadmap Phase B4).
     pub fn remove_price_line(&mut self, id: u32) {
@@ -431,6 +608,12 @@ impl AionChart {
     /// Replace a series' markers from a JSON array. Call `render()` after (roadmap Phase B4).
     pub fn set_series_markers(&mut self, series_id: u32, json: &str) {
         self.inner.borrow_mut().set_series_markers(series_id, json);
+    }
+    /// Toggle marker pixel margins in price-scale autoscaling (enabled by default, as in LWC).
+    pub fn set_series_markers_auto_scale(&mut self, series_id: u32, enabled: bool) {
+        self.inner
+            .borrow_mut()
+            .set_series_markers_auto_scale(series_id, enabled);
     }
     /// Whether any series wants the last-price pulse (host uses this to run/stop its rAF loop).
     pub fn wants_animation(&self) -> bool {
@@ -451,7 +634,9 @@ impl AionChart {
     /// `stretch_factor` sizes a newly-created pane relative to the others. Call `render()` after
     /// (roadmap Phase B1).
     pub fn set_series_pane(&mut self, id: u32, pane_index: usize, stretch_factor: f64) {
-        self.inner.borrow_mut().set_series_pane(id, pane_index, stretch_factor);
+        self.inner
+            .borrow_mut()
+            .set_series_pane(id, pane_index, stretch_factor);
     }
 
     /// Number of stacked panes.
@@ -529,6 +714,12 @@ impl AionChart {
     pub fn fit_content(&mut self) {
         self.inner.borrow_mut().fit_content();
     }
+    pub fn set_bar_spacing(&mut self, spacing: f64) {
+        self.inner.borrow_mut().set_bar_spacing(spacing);
+    }
+    pub fn set_right_offset(&mut self, offset: f64) {
+        self.inner.borrow_mut().set_right_offset(offset);
+    }
     pub fn set_crosshair(&mut self, x_css: f64, y_css: f64) {
         self.inner.borrow_mut().set_crosshair(x_css, y_css);
     }
@@ -538,8 +729,111 @@ impl AionChart {
     pub fn bar_spacing(&self) -> f64 {
         self.inner.borrow().bar_spacing()
     }
+    pub fn right_offset(&self) -> f64 {
+        self.inner.borrow().right_offset()
+    }
+    pub fn scroll_position(&self) -> f64 {
+        self.inner.borrow().scroll_position()
+    }
+    pub fn scroll_to_position(&mut self, position: f64) {
+        self.inner.borrow_mut().scroll_to_position(position);
+    }
+    pub fn scroll_to_real_time(&mut self) {
+        self.inner.borrow_mut().scroll_to_real_time();
+    }
+    pub fn reset_time_scale(&mut self) {
+        self.inner.borrow_mut().reset_time_scale();
+    }
+    pub fn time_scale_width(&self) -> f64 {
+        self.inner.borrow().time_scale_width()
+    }
+    pub fn time_scale_height(&self) -> f64 {
+        self.inner.borrow().time_scale_height()
+    }
+    pub fn price_scale_width(&self, pane: usize, target: u8) -> f64 {
+        self.inner.borrow().price_scale_width(pane, target)
+    }
+    pub fn price_scale_visible_range(&self, pane: usize, target: u8) -> Vec<f64> {
+        self.inner.borrow().price_scale_visible_range(pane, target)
+    }
+    pub fn set_price_scale_visible_range(&mut self, pane: usize, target: u8, from: f64, to: f64) {
+        self.inner
+            .borrow_mut()
+            .set_price_scale_visible_range(pane, target, from, to);
+    }
+    pub fn price_scale_auto_scale(&self, pane: usize, target: u8) -> Option<bool> {
+        self.inner.borrow().price_scale_auto_scale(pane, target)
+    }
+    pub fn set_price_scale_auto_scale(&mut self, pane: usize, target: u8, enabled: bool) {
+        self.inner
+            .borrow_mut()
+            .set_price_scale_auto_scale(pane, target, enabled);
+    }
+    pub fn price_scale_inverted(&self, pane: usize, target: u8) -> Option<bool> {
+        self.inner.borrow().price_scale_inverted(pane, target)
+    }
+    pub fn set_price_scale_inverted(&mut self, pane: usize, target: u8, inverted: bool) {
+        self.inner
+            .borrow_mut()
+            .set_price_scale_inverted(pane, target, inverted);
+    }
+    pub fn price_scale_margins(&self, pane: usize, target: u8) -> Vec<f64> {
+        self.inner.borrow().price_scale_margins(pane, target)
+    }
+    pub fn set_price_scale_margins(&mut self, pane: usize, target: u8, top: f64, bottom: f64) {
+        self.inner
+            .borrow_mut()
+            .set_price_scale_margins(pane, target, top, bottom);
+    }
+    pub fn price_scale_mode(&self, pane: usize, target: u8) -> Option<u8> {
+        self.inner.borrow().price_scale_mode(pane, target)
+    }
+    pub fn set_price_scale_mode(&mut self, pane: usize, target: u8, mode: u8) {
+        self.inner
+            .borrow_mut()
+            .set_price_scale_mode(pane, target, mode);
+    }
+    pub fn series_pane_index(&self, id: u32) -> Option<usize> {
+        self.inner.borrow().series_pane_index(id)
+    }
+    pub fn series_is_overlay(&self, id: u32) -> Option<bool> {
+        self.inner.borrow().series_is_overlay(id)
+    }
+    pub fn series_price_scale_id(&self, id: u32) -> Option<u8> {
+        self.inner.borrow().series_price_scale_id(id)
+    }
+    pub fn set_series_price_scale(&mut self, id: u32, target: u8) {
+        self.inner.borrow_mut().set_series_price_scale(id, target);
+    }
+    pub fn series_price_to_coordinate(&self, id: u32, price: f64) -> Option<f64> {
+        self.inner.borrow().series_price_to_coordinate(id, price)
+    }
+    pub fn series_coordinate_to_price(&self, id: u32, coordinate: f64) -> Option<f64> {
+        self.inner
+            .borrow()
+            .series_coordinate_to_price(id, coordinate)
+    }
+    pub fn series_kind(&self, id: u32) -> Option<u8> {
+        self.inner.borrow().series_kind(id)
+    }
+    pub fn series_data_by_index(&self, id: u32, index: f64, mismatch: i8) -> Vec<f64> {
+        self.inner
+            .borrow()
+            .series_data_by_index(id, index, mismatch)
+    }
+    pub fn series_data(&self, id: u32) -> Vec<f64> {
+        self.inner.borrow().series_data(id)
+    }
+    pub fn series_bars_in_logical_range(&self, id: u32, from: f64, to: f64) -> Vec<f64> {
+        self.inner
+            .borrow()
+            .series_bars_in_logical_range(id, from, to)
+    }
     pub fn price_axis_width(&self) -> f64 {
         self.inner.borrow().price_axis_width()
+    }
+    pub fn pane_left(&self) -> f64 {
+        self.inner.borrow().pane_left()
     }
 
     // --- coordinate & logical-range API (roadmap Phase A4) ---
@@ -560,9 +854,17 @@ impl AionChart {
     pub fn coordinate_to_time(&self, x_css: f64) -> Option<f64> {
         self.inner.borrow().coordinate_to_time(x_css)
     }
-    /// Float logical (bar) index under X (CSS px), or `undefined` if there is no data.
+    /// Integer logical (bar) index owning X (CSS px), or `undefined` if there is no data.
     pub fn coordinate_to_logical(&self, x_css: f64) -> Option<f64> {
         self.inner.borrow().coordinate_to_logical(x_css)
+    }
+    /// X (CSS px) for an integer logical index.
+    pub fn logical_to_coordinate(&self, logical: f64) -> Option<f64> {
+        self.inner.borrow().logical_to_coordinate(logical)
+    }
+    /// Logical index for a UTC-seconds timestamp. `find_nearest` follows LWC lower-bound rules.
+    pub fn time_to_index(&self, time: f64, find_nearest: bool) -> Option<i64> {
+        self.inner.borrow().time_to_index(time, find_nearest)
     }
     /// Per-series OHLC at the bar under X (CSS px) as a flat `[id, o, h, l, c, ...]` Float64Array
     /// (see the inner method); empty off-chart. Backs crosshair/click `seriesData`.
@@ -583,11 +885,42 @@ impl AionChart {
     }
     /// Set the visible window to bracket `[from_time, to_time]` UTC seconds; call `render()` after.
     pub fn set_visible_time_range(&mut self, from_time: f64, to_time: f64) {
-        self.inner.borrow_mut().set_visible_time_range(from_time, to_time);
+        self.inner
+            .borrow_mut()
+            .set_visible_time_range(from_time, to_time);
     }
 
     pub fn render(&mut self) -> Result<(), JsValue> {
         self.inner.borrow_mut().render()
+    }
+
+    /// Paint the retained backend-neutral frame into the warm Canvas2D pane without changing the
+    /// active onscreen backend. The TypeScript package uses this to implement its synchronous,
+    /// deterministic composed screenshot API even while WebGPU is active.
+    #[doc(hidden)]
+    pub fn render_canvas2d_snapshot(&self) -> Result<(), JsValue> {
+        self.inner.borrow().render_canvas2d()
+    }
+
+    /// Reports the active pane backend for diagnostics and runtime-matrix tests.
+    pub fn backend_kind(&self) -> String {
+        self.inner.borrow().backend_kind()
+    }
+
+    /// Internal id used by the package shell to route device-loss notifications to this chart.
+    #[doc(hidden)]
+    pub fn backend_runtime_id(&self) -> u32 {
+        self.runtime_id
+    }
+
+    /// Deterministic browser-matrix hook. This is intentionally absent from the public TypeScript
+    /// chart API; it marks the current device as lost so the next render exercises real failover.
+    #[doc(hidden)]
+    pub fn simulate_device_loss_for_test(&mut self) {
+        if let Some(gfx) = self.inner.borrow().gfx.as_ref() {
+            gfx.device_lost.store(true, Ordering::Release);
+            notify_aion_backend_loss(self.runtime_id);
+        }
     }
 }
 
@@ -599,11 +932,17 @@ impl ChartInner {
     }
 
     pub fn add_sma(&mut self, source_id: u32, period: u32) -> u32 {
-        self.engine.add_sma(source_id as SeriesId, period as usize).map(|id| id as u32).unwrap_or(u32::MAX)
+        self.engine
+            .add_sma(source_id as SeriesId, period as usize)
+            .map(|id| id as u32)
+            .unwrap_or(u32::MAX)
     }
 
     pub fn add_ema(&mut self, source_id: u32, period: u32) -> u32 {
-        self.engine.add_ema(source_id as SeriesId, period as usize).map(|id| id as u32).unwrap_or(u32::MAX)
+        self.engine
+            .add_ema(source_id as SeriesId, period as usize)
+            .map(|id| id as u32)
+            .unwrap_or(u32::MAX)
     }
 
     pub fn add_bollinger(&mut self, source_id: u32, period: u32, deviation: f64) -> Vec<u32> {
@@ -615,7 +954,14 @@ impl ChartInner {
     }
 
     /// Sets the main series' data (series 0). `times` are ascending UTC seconds.
-    pub fn set_data(&mut self, times: &[f64], open: &[f64], high: &[f64], low: &[f64], close: &[f64]) {
+    pub fn set_data(
+        &mut self,
+        times: &[f64],
+        open: &[f64],
+        high: &[f64],
+        low: &[f64],
+        close: &[f64],
+    ) {
         let id = self.series[0].id;
         self.set_series_data(id as u32, times, open, high, low, close);
     }
@@ -652,12 +998,25 @@ impl ChartInner {
                 .into(),
             );
         }
-        self.engine.install_series_data(id as SeriesId, s.times, s.open, s.high, s.low, s.close);
+        self.engine
+            .install_series_data(id as SeriesId, s.times, s.open, s.high, s.low, s.close);
     }
 
-    pub fn set_series_data_typed(&mut self, id: u32, times: &Float64Array, open: &Float64Array, high: &Float64Array, low: &Float64Array, close: &Float64Array) {
+    pub fn set_series_data_typed(
+        &mut self,
+        id: u32,
+        times: &Float64Array,
+        open: &Float64Array,
+        high: &Float64Array,
+        low: &Float64Array,
+        close: &Float64Array,
+    ) {
         let s = match aion_core::model::data_validation::sanitize_ohlc_owned(
-            times.to_vec(), open.to_vec(), high.to_vec(), low.to_vec(), close.to_vec(),
+            times.to_vec(),
+            open.to_vec(),
+            high.to_vec(),
+            low.to_vec(),
+            close.to_vec(),
         ) {
             Ok(s) => s,
             Err(e) => {
@@ -668,7 +1027,8 @@ impl ChartInner {
         if !s.report.is_clean() {
             web_sys::console::warn_1(&format!("aion: set_series_data sanitized data — accepted {}, dropped {} invalid, {} duplicate{}", s.report.accepted, s.report.dropped_invalid, s.report.dropped_duplicate, if s.report.reordered { ", reordered" } else { "" }).into());
         }
-        self.engine.install_series_data(id as SeriesId, s.times, s.open, s.high, s.low, s.close);
+        self.engine
+            .install_series_data(id as SeriesId, s.times, s.open, s.high, s.low, s.close);
     }
 
     /// Streaming update of the main series (append new time or replace last).
@@ -678,14 +1038,25 @@ impl ChartInner {
     }
 
     /// Streaming update of the series with `series_id` (append a new time or replace the last).
-    pub fn update_series_bar(&mut self, series_id: u32, time: f64, open: f64, high: f64, low: f64, close: f64) {
+    pub fn update_series_bar(
+        &mut self,
+        series_id: u32,
+        time: f64,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
+    ) {
         // Ignore updates to an unknown series rather than corrupting the data layer.
         if !self.series.iter().any(|s| s.id == series_id as SeriesId) {
             web_sys::console::warn_1(&"aion: update_bar for unknown series id".into());
             return;
         }
         // Drop a bad tick rather than corrupting the series (roadmap Phase A3).
-        if !self.engine.update_series_bar(series_id as SeriesId, time, [open, high, low, close]) {
+        if !self
+            .engine
+            .update_series_bar(series_id as SeriesId, time, [open, high, low, close])
+        {
             web_sys::console::warn_1(&"aion: update_bar dropped a non-finite point".into());
             return;
         }
@@ -770,10 +1141,24 @@ impl ChartInner {
 
     /// Add a horizontal price line to a series; returns its id (roadmap Phase B4).
     #[allow(clippy::too_many_arguments)]
-    pub fn create_price_line(&mut self, series_id: u32, price: f64, r: u8, g: u8, b: u8, width: u32, style: u8, title: &str) -> u32 {
+    pub fn create_price_line(
+        &mut self,
+        series_id: u32,
+        price: f64,
+        r: u8,
+        g: u8,
+        b: u8,
+        width: u32,
+        style: u8,
+        title: &str,
+    ) -> u32 {
         let id = self.next_price_line_id;
         self.next_price_line_id += 1;
-        if let Some(s) = self.series.iter_mut().find(|s| s.id == series_id as SeriesId) {
+        if let Some(s) = self
+            .series
+            .iter_mut()
+            .find(|s| s.id == series_id as SeriesId)
+        {
             s.price_lines.push(PriceLine {
                 id,
                 price,
@@ -816,9 +1201,13 @@ impl ChartInner {
                 text: m.text,
             })
             .collect();
-        if let Some(s) = self.series.iter_mut().find(|s| s.id == series_id as SeriesId) {
-            s.markers = markers;
-        }
+        self.engine
+            .set_series_markers(series_id as SeriesId, markers);
+    }
+
+    pub fn set_series_markers_auto_scale(&mut self, series_id: u32, enabled: bool) {
+        self.engine
+            .set_series_markers_auto_scale(series_id as SeriesId, enabled);
     }
 
     /// Toggle the pulsing last-price ring on a series (roadmap Phase B3).
@@ -846,11 +1235,15 @@ impl ChartInner {
         let mut pane_index = 0;
         if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
             s.overlay = true;
+            s.left_scale = false;
             pane_index = s.pane_index;
         }
         if let Some(p) = self.panes.get_mut(pane_index) {
             p.overlay_top = top.clamp(0.0, 1.0);
             p.overlay_bottom = bottom.clamp(0.0, 1.0);
+            p.overlay_scale
+                .set_scale_margins(p.overlay_top, p.overlay_bottom);
+            p.refresh_internal_margins();
         }
     }
 
@@ -912,7 +1305,7 @@ impl ChartInner {
         if let Some(p) = self.panes.get_mut(i) {
             p.stretch_factor = factor.max(0.01);
             if self.css_width > 0.0 {
-                self.recompute_layout();
+                self.recompute_layout(false);
             }
         }
     }
@@ -932,7 +1325,7 @@ impl ChartInner {
             self.drag_pane_separator(i - 1, -delta);
         }
         if self.css_width > 0.0 {
-            self.recompute_layout();
+            self.recompute_layout(false);
         }
     }
 
@@ -960,7 +1353,9 @@ impl ChartInner {
     /// after to repaint (roadmap Phase A2).
     pub fn apply_options(&mut self, patch_json: &str) {
         if let Err(e) = self.options.apply_str(patch_json) {
-            web_sys::console::warn_1(&format!("aion: apply_options ignored malformed patch — {e}").into());
+            web_sys::console::warn_1(
+                &format!("aion: apply_options ignored malformed patch — {e}").into(),
+            );
             return;
         }
         // Re-derive runtime state that isn't read straight from the store each frame.
@@ -992,28 +1387,72 @@ impl ChartInner {
         }
         // Update geometry eagerly so fit_content/zoom/scroll called before the next render
         // (and the price_axis_width getter) see the new pane size, not a stale one.
-        self.recompute_layout();
+        self.recompute_layout(true);
     }
 
     /// Negotiates the price-axis width against its labels and sets the time-scale width /
     /// price-scale height accordingly. Idempotent; called on resize, data change, and render.
     /// (The axis labels depend only on the price range, so one refinement pass converges.)
-    fn recompute_layout(&mut self) {
+    fn recompute_layout(&mut self, allow_axis_shrink: bool) {
         let content_h = (self.css_height - TIME_AXIS_HEIGHT).max(1.0);
         self.engine.layout_panes(content_h);
-
-        let mut axis_w = self.compute_price_axis_width();
+        let options = self.opts();
+        let measured_axis_w = if options.right_price_scale.visible {
+            self.compute_price_axis_width(PriceScaleTarget::Right)
+        } else {
+            0.0
+        };
+        let measured_left_axis_w = if options.left_price_scale.visible {
+            self.compute_price_axis_width(PriceScaleTarget::Left)
+        } else {
+            0.0
+        };
+        let mut axis_w = if options.right_price_scale.visible {
+            negotiated_axis_width(self.axis_w, measured_axis_w, allow_axis_shrink)
+        } else {
+            0.0
+        };
+        let mut left_axis_w = if options.left_price_scale.visible {
+            negotiated_axis_width(self.left_axis_w, measured_left_axis_w, allow_axis_shrink)
+        } else {
+            0.0
+        };
         for _ in 0..2 {
-            let pane_w = (self.css_width - axis_w).max(1.0);
+            let pane_w = (self.css_width - left_axis_w - axis_w).max(1.0);
+            self.pane_left = left_axis_w;
+            self.left_axis_w = left_axis_w;
+            self.axis_w = axis_w;
             self.time_scale.set_width(pane_w);
             self.engine.autoscale_visible();
-            let new_w = self.compute_price_axis_width();
-            if new_w == axis_w {
+            let measured_new_w = if options.right_price_scale.visible {
+                self.compute_price_axis_width(PriceScaleTarget::Right)
+            } else {
+                0.0
+            };
+            let measured_new_left_w = if options.left_price_scale.visible {
+                self.compute_price_axis_width(PriceScaleTarget::Left)
+            } else {
+                0.0
+            };
+            let new_w = if options.right_price_scale.visible {
+                negotiated_axis_width(axis_w, measured_new_w, allow_axis_shrink)
+            } else {
+                0.0
+            };
+            let new_left_w = if options.left_price_scale.visible {
+                negotiated_axis_width(left_axis_w, measured_new_left_w, allow_axis_shrink)
+            } else {
+                0.0
+            };
+            if new_w == axis_w && new_left_w == left_axis_w {
                 break;
             }
             axis_w = new_w;
+            left_axis_w = new_left_w;
         }
-        self.pane_w = (self.css_width - axis_w).max(1.0);
+        self.pane_left = left_axis_w;
+        self.left_axis_w = left_axis_w;
+        self.pane_w = (self.css_width - left_axis_w - axis_w).max(1.0);
         self.pane_h = content_h;
         self.axis_w = axis_w;
     }
@@ -1034,7 +1473,182 @@ impl ChartInner {
         self.time_scale.end_scroll();
     }
     pub fn fit_content(&mut self) {
-        self.time_scale.fit_content();
+        self.engine.fit_content();
+    }
+    pub fn scroll_position(&self) -> f64 {
+        self.engine.scroll_position()
+    }
+    pub fn scroll_to_position(&mut self, position: f64) {
+        self.engine.scroll_to_position(position);
+    }
+    pub fn scroll_to_real_time(&mut self) {
+        self.engine.scroll_to_real_time();
+    }
+    pub fn reset_time_scale(&mut self) {
+        self.engine.reset_time_scale();
+    }
+    pub fn time_scale_width(&self) -> f64 {
+        self.time_scale.width()
+    }
+    pub fn time_scale_height(&self) -> f64 {
+        if self.time_visible {
+            TIME_AXIS_HEIGHT
+        } else {
+            0.0
+        }
+    }
+    pub fn price_scale_width(&self, pane: usize, target: u8) -> f64 {
+        if pane >= self.panes.len() {
+            return 0.0;
+        }
+        match price_scale_target_from_u8(target) {
+            PriceScaleTarget::Right => self.axis_w,
+            PriceScaleTarget::Left => self.left_axis_w,
+            PriceScaleTarget::Overlay => 0.0,
+        }
+    }
+    pub fn price_scale_visible_range(&self, pane: usize, target: u8) -> Vec<f64> {
+        self.engine
+            .price_scale_visible_range_for(pane, price_scale_target_from_u8(target))
+            .map(|(from, to)| vec![from, to])
+            .unwrap_or_default()
+    }
+    pub fn set_price_scale_visible_range(&mut self, pane: usize, target: u8, from: f64, to: f64) {
+        self.engine.set_price_scale_visible_range_for(
+            pane,
+            price_scale_target_from_u8(target),
+            from,
+            to,
+        );
+    }
+    pub fn price_scale_auto_scale(&self, pane: usize, target: u8) -> Option<bool> {
+        self.engine
+            .price_scale_auto_scale_for(pane, price_scale_target_from_u8(target))
+    }
+    pub fn set_price_scale_auto_scale(&mut self, pane: usize, target: u8, enabled: bool) {
+        self.engine.set_price_scale_auto_scale_for(
+            pane,
+            price_scale_target_from_u8(target),
+            enabled,
+        );
+    }
+    pub fn price_scale_inverted(&self, pane: usize, target: u8) -> Option<bool> {
+        self.engine
+            .price_scale_inverted_for(pane, price_scale_target_from_u8(target))
+    }
+    pub fn set_price_scale_inverted(&mut self, pane: usize, target: u8, inverted: bool) {
+        self.engine.set_price_scale_inverted_for(
+            pane,
+            price_scale_target_from_u8(target),
+            inverted,
+        );
+    }
+    pub fn price_scale_margins(&self, pane: usize, target: u8) -> Vec<f64> {
+        self.engine
+            .price_scale_margins_for(pane, price_scale_target_from_u8(target))
+            .map(|(top, bottom)| vec![top, bottom])
+            .unwrap_or_default()
+    }
+    pub fn set_price_scale_margins(&mut self, pane: usize, target: u8, top: f64, bottom: f64) {
+        self.engine.set_price_scale_margins_for(
+            pane,
+            price_scale_target_from_u8(target),
+            top,
+            bottom,
+        );
+    }
+    pub fn price_scale_mode(&self, pane: usize, target: u8) -> Option<u8> {
+        self.engine
+            .price_scale_mode_for(pane, price_scale_target_from_u8(target))
+            .map(price_scale_mode_to_u8)
+    }
+    pub fn set_price_scale_mode(&mut self, pane: usize, target: u8, mode: u8) {
+        self.engine.set_price_scale_mode_for(
+            pane,
+            price_scale_target_from_u8(target),
+            price_scale_mode_from_u8(mode),
+        );
+        // A mode change is a full layout invalidation in LWC: label formatting can become wider
+        // (percentage) or narrower (indexed/normal), so the grow-fast/shrink-on-full-layout axis
+        // policy must be allowed to renegotiate in both directions immediately.
+        self.recompute_layout(true);
+    }
+    pub fn series_pane_index(&self, id: u32) -> Option<usize> {
+        self.engine
+            .series_price_scale(id as usize)
+            .map(|(pane, _)| pane)
+    }
+    pub fn series_is_overlay(&self, id: u32) -> Option<bool> {
+        self.engine
+            .series_price_scale(id as usize)
+            .map(|(_, target)| target == PriceScaleTarget::Overlay)
+    }
+    pub fn series_price_scale_id(&self, id: u32) -> Option<u8> {
+        self.engine
+            .series_price_scale(id as usize)
+            .map(|(_, target)| price_scale_target_to_u8(target))
+    }
+    pub fn set_series_price_scale(&mut self, id: u32, target: u8) {
+        self.engine
+            .set_series_price_scale(id as usize, price_scale_target_from_u8(target));
+        self.recompute_layout(true);
+    }
+    pub fn series_price_to_coordinate(&self, id: u32, price: f64) -> Option<f64> {
+        self.engine.series_price_to_coordinate(id as usize, price)
+    }
+    pub fn series_coordinate_to_price(&self, id: u32, coordinate: f64) -> Option<f64> {
+        self.engine
+            .series_coordinate_to_price(id as usize, coordinate)
+    }
+    pub fn series_kind(&self, id: u32) -> Option<u8> {
+        self.engine.series_kind(id as usize).map(SeriesKind::to_u8)
+    }
+    pub fn series_data_by_index(&self, id: u32, index: f64, mismatch: i8) -> Vec<f64> {
+        if !index.is_finite() || index.fract() != 0.0 {
+            return Vec::new();
+        }
+        self.engine
+            .series_data_by_index(
+                id as usize,
+                index as i64,
+                mismatch_direction_from_i8(mismatch),
+            )
+            .map(|point| {
+                vec![
+                    point.time as f64,
+                    point.open,
+                    point.high,
+                    point.low,
+                    point.close,
+                ]
+            })
+            .unwrap_or_default()
+    }
+    pub fn series_data(&self, id: u32) -> Vec<f64> {
+        let points = self.engine.series_data(id as usize);
+        let mut output = Vec::with_capacity(points.len() * 5);
+        for point in points {
+            output.extend_from_slice(&[
+                point.time as f64,
+                point.open,
+                point.high,
+                point.low,
+                point.close,
+            ]);
+        }
+        output
+    }
+    pub fn series_bars_in_logical_range(&self, id: u32, from: f64, to: f64) -> Vec<f64> {
+        self.engine
+            .series_bars_in_logical_range(id as usize, from, to)
+            .map(|info| {
+                let mut output = vec![info.bars_before, info.bars_after];
+                if let (Some(from), Some(to)) = (info.from, info.to) {
+                    output.extend_from_slice(&[from as f64, to as f64]);
+                }
+                output
+            })
+            .unwrap_or_default()
     }
     pub fn set_crosshair(&mut self, x_css: f64, y_css: f64) {
         self.crosshair = Some((x_css, y_css));
@@ -1042,11 +1656,11 @@ impl ChartInner {
     pub fn clear_crosshair(&mut self) {
         self.crosshair = None;
     }
-    pub fn bar_spacing(&self) -> f64 {
-        self.time_scale.bar_spacing()
-    }
     pub fn price_axis_width(&self) -> f64 {
         self.axis_w
+    }
+    pub fn pane_left(&self) -> f64 {
+        self.pane_left
     }
 
     // --- coordinate & logical-range API (roadmap Phase A4) ---
@@ -1058,49 +1672,40 @@ impl ChartInner {
     /// Y (CSS px) for a price on the active price scale, or `None` if the scale has no range yet.
     /// In percentage/indexed modes the price is its own base value (as in the render path).
     pub fn price_to_coordinate(&self, price: f64) -> Option<f64> {
-        if self.price_scale().price_range().is_none() {
-            return None;
-        }
-        Some(self.price_scale().price_to_coordinate(price, price))
+        self.engine
+            .series_price_to_coordinate(self.series[0].id, price)
     }
 
     /// Price for a Y (CSS px), or `None` if the scale has no range yet.
     pub fn coordinate_to_price(&self, y_css: f64) -> Option<f64> {
-        if self.price_scale().price_range().is_none() {
-            return None;
-        }
-        Some(self.price_scale().coordinate_to_price(y_css, 0.0))
+        self.engine
+            .series_coordinate_to_price(self.series[0].id, y_css)
     }
 
     /// X (CSS px) for a UTC-seconds timestamp that sits exactly on a data point, else `None`
     /// (mirrors LWC `timeToCoordinate`, which does not snap to the nearest bar).
     pub fn time_to_coordinate(&self, time: f64) -> Option<f64> {
-        let t = time as i64;
-        let idx = self.data.merged_times().binary_search(&t).ok()?;
-        Some(self.time_scale.index_to_coordinate(idx as TimePointIndex))
+        self.engine.time_to_coordinate(time)
     }
 
     /// UTC-seconds timestamp of the data point nearest to X (CSS px), or `None` if X maps outside
     /// the data range (mirrors LWC `coordinateToTime`).
     pub fn coordinate_to_time(&self, x_css: f64) -> Option<f64> {
-        let times = self.data.merged_times();
-        if times.is_empty() {
-            return None;
-        }
-        let idx = self.time_scale.coordinate_to_index(x_css);
-        if idx < 0 || idx as usize >= times.len() {
-            return None;
-        }
-        Some(times[idx as usize] as f64)
+        self.engine.coordinate_to_time(x_css)
     }
 
-    /// Float logical (bar) index under an X coordinate, or `None` when there is no data. May be
-    /// negative or beyond the last bar (positions off the ends), matching LWC's `Logical`.
+    /// Integer logical bar owning an X coordinate, or `None` when there is no data. May be negative
+    /// or beyond the last bar, matching LWC's public `coordinateToLogical`.
     pub fn coordinate_to_logical(&self, x_css: f64) -> Option<f64> {
-        if self.data.merged_times().is_empty() {
-            return None;
-        }
-        Some(self.time_scale.coordinate_to_float_index(x_css))
+        self.engine.coordinate_to_logical(x_css)
+    }
+
+    pub fn logical_to_coordinate(&self, logical: f64) -> Option<f64> {
+        self.engine.logical_to_coordinate(logical)
+    }
+
+    pub fn time_to_index(&self, time: f64, find_nearest: bool) -> Option<i64> {
+        self.engine.time_to_index(time, find_nearest)
     }
 
     /// Per-series values at the bar under an X coordinate, flattened as groups of five:
@@ -1133,77 +1738,75 @@ impl ChartInner {
 
     /// Visible window in logical (bar) units as `[from, to]`, or empty when there is no data.
     pub fn visible_logical_range(&self) -> Vec<f64> {
-        match self.time_scale.visible_logical_range() {
-            Some(r) => vec![r.left(), r.right()],
+        match self.engine.visible_logical_range() {
+            Some((from, to)) => vec![from, to],
             None => Vec::new(),
         }
     }
 
     /// Set the visible window in logical (bar) units. No-op if `from > to`. Call `render()` after.
     pub fn set_visible_logical_range(&mut self, from: f64, to: f64) {
-        if from <= to {
-            self.time_scale.set_logical_range(LogicalRange::new(from, to));
-        }
+        self.engine.set_visible_logical_range(from, to);
     }
 
     /// Visible window as `[from_time, to_time]` UTC seconds (data points nearest each edge), or
     /// empty when there is no data.
     pub fn visible_time_range(&self) -> Vec<f64> {
-        let times = self.data.merged_times();
-        let Some(r) = self.time_scale.visible_strict_range() else { return Vec::new() };
-        if times.is_empty() {
-            return Vec::new();
-        }
-        let last = times.len() as i64 - 1;
-        let l = r.left().clamp(0, last) as usize;
-        let rr = r.right().clamp(0, last) as usize;
-        vec![times[l] as f64, times[rr] as f64]
+        self.engine
+            .visible_time_range()
+            .map(|(from, to)| vec![from, to])
+            .unwrap_or_default()
     }
 
     /// Set the visible window to span the data points bracketing `[from_time, to_time]` (UTC
     /// seconds). No-op if the times are reversed or there is no data. Call `render()` after.
     pub fn set_visible_time_range(&mut self, from_time: f64, to_time: f64) {
-        if from_time > to_time {
-            return;
-        }
-        let times = self.data.merged_times();
-        if times.is_empty() {
-            return;
-        }
-        // nearest bracketing indices: first point >= from, last point <= to
-        let left = times.partition_point(|&t| (t as f64) < from_time);
-        let right = times.partition_point(|&t| (t as f64) <= to_time);
-        if right == 0 || left >= times.len() {
-            return; // window lies entirely outside the data
-        }
-        let last = times.len() - 1;
-        let l = left.min(last) as i64;
-        let r = (right - 1).min(last) as i64;
-        if l <= r {
-            self.time_scale.set_visible_range(StrictRange::new(l, r), false);
-        }
+        self.engine.set_visible_time_range(from_time, to_time);
     }
 
     // --- rendering ---
 
+    /// Reports the active pane backend for diagnostics and runtime-matrix tests.
+    pub fn backend_kind(&self) -> String {
+        if self.gfx.is_some() {
+            "webgpu".into()
+        } else {
+            "canvas2d".into()
+        }
+    }
+
     pub fn render(&mut self) -> Result<(), JsValue> {
         // ---- layout (price axis width negotiated against the price labels) ----
-        self.recompute_layout();
+        self.recompute_layout(false);
 
         // time tick marks: built once (needs &mut), shared by GPU grid + 2D labels
         let pixels_per_character = (FONT_SIZE + 4.0) * 5.0 / 8.0;
         let max_label_width = pixels_per_character * TICK_MARK_MAX_CHARS;
         let axis_ctx = &self.axis_ctx;
         let dpr = self.dpr;
-        self.axis_frame = self.engine.build_axis_frame(max_label_width, |text| measure_text_ctx(axis_ctx, dpr, text));
+        self.axis_frame = self.engine.build_axis_frame(max_label_width, |text| {
+            measure_text_ctx(axis_ctx, dpr, text)
+        });
 
         // ---- GPU: one scissored draw group per stacked pane ----
         // The headless engine owns chart geometry. The WASM host only adds browser-adapter
         // concerns such as crosshair interaction and text labels.
         self.engine.build_frame_into(&mut self.frame);
-        let engine_frame = &self.frame;
-        let groups = if self.gfx.is_some() {
-            self.gpu_groups.resize_with(engine_frame.panes.len(), DrawGroup::default);
+
+        if self
+            .gfx
+            .as_ref()
+            .is_some_and(|gfx| gfx.device_lost.load(Ordering::Acquire))
+        {
+            self.activate_canvas2d("WebGPU device was lost");
+        }
+
+        let bg = Color::parse_css(&self.opts().layout.background.color)
+            .unwrap_or(Color::rgb(0xff, 0xff, 0xff));
+        let pane_outcome = if self.gfx.is_some() {
+            let engine_frame = &self.frame;
+            self.gpu_groups
+                .resize_with(engine_frame.panes.len(), DrawGroup::default);
             self.gpu_groups.truncate(engine_frame.panes.len());
             for (group, pane_frame) in self.gpu_groups.iter_mut().zip(&engine_frame.panes) {
                 group.scissor = Some(pane_frame.scissor);
@@ -1213,48 +1816,94 @@ impl ChartInner {
                 group.quads.clear();
                 group.tex_quads.clear();
                 // Convert the shared frame only at the WebGPU backend boundary.
-                geom_prims_to_tris(&pane_frame.main, &pane_frame.points, &mut group.fill_tris, &mut group.stroke_tris);
+                geom_prims_to_tris(
+                    &pane_frame.main,
+                    &pane_frame.points,
+                    &mut group.fill_tris,
+                    &mut group.stroke_tris,
+                );
                 prims_to_instances(&pane_frame.under, &mut group.under_quads);
                 prims_to_instances(&pane_frame.main, &mut group.quads);
             }
-            &self.gpu_groups[..]
-        } else {
-            &[] as &[DrawGroup]
-        };
-
-        let bg = Color::parse_css(&self.opts().layout.background.color)
-            .unwrap_or(Color::rgb(0xff, 0xff, 0xff));
-        if let Some(gfx) = self.gfx.as_mut() {
-            gfx.msaa.ensure(&gfx.device, gfx.config.format, gfx.config.width, gfx.config.height);
-            let frame = gfx
-                .surface
-                .get_current_texture()
-                .map_err(|e| JsValue::from_str(&format!("get_current_texture failed: {e}")))?;
-            let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-            // Background clear color from layout.background (roadmap Phase A2).
-            let bg_clear = wgpu::Color {
-                r: bg.r() as f64 / 255.0,
-                g: bg.g() as f64 / 255.0,
-                b: bg.b() as f64 / 255.0,
-                a: 1.0,
-            };
-            render_frame(
+            let groups = &self.gpu_groups[..];
+            let gfx = self.gfx.as_mut().expect("checked above");
+            gfx.msaa.ensure(
                 &gfx.device,
-                &gfx.queue,
-                gfx.msaa.view(),
-                &view,
+                gfx.config.format,
                 gfx.config.width,
                 gfx.config.height,
-                bg_clear,
-                &gfx.quad_renderer,
-                &gfx.tex_renderer,
-                &gfx.tri_renderer,
-                groups,
             );
-            frame.present();
+
+            let acquired = match gfx.surface.get_current_texture() {
+                Ok(frame) => Ok(Some(frame)),
+                Err(error) => match surface_error_action(&error) {
+                    SurfaceErrorAction::Reconfigure => {
+                        // Resize and suspend/resume can invalidate only the swapchain. Reconfigure
+                        // and retry once; if that fails, the warm Canvas2D pane takes over.
+                        gfx.surface.configure(&gfx.device, &gfx.config);
+                        match gfx.surface.get_current_texture() {
+                            Ok(frame) => Ok(Some(frame)),
+                            Err(retry_error)
+                                if surface_error_action(&retry_error)
+                                    == SurfaceErrorAction::SkipFrame =>
+                            {
+                                Ok(None)
+                            }
+                            Err(retry_error) => Err(retry_error),
+                        }
+                    }
+                    SurfaceErrorAction::SkipFrame => Ok(None),
+                    SurfaceErrorAction::Fallback => Err(error),
+                },
+            };
+
+            match acquired {
+                Ok(Some(frame)) => {
+                    let view = frame
+                        .texture
+                        .create_view(&wgpu::TextureViewDescriptor::default());
+                    let bg_clear = wgpu::Color {
+                        r: bg.r() as f64 / 255.0,
+                        g: bg.g() as f64 / 255.0,
+                        b: bg.b() as f64 / 255.0,
+                        a: 1.0,
+                    };
+                    render_frame(
+                        &gfx.device,
+                        &gfx.queue,
+                        gfx.msaa.view(),
+                        &view,
+                        gfx.config.width,
+                        gfx.config.height,
+                        bg_clear,
+                        &gfx.quad_renderer,
+                        &gfx.tex_renderer,
+                        &gfx.tri_renderer,
+                        groups,
+                    );
+                    frame.present();
+                    PaneRenderOutcome::Presented
+                }
+                Ok(None) => PaneRenderOutcome::Timeout,
+                Err(error) => PaneRenderOutcome::Fallback(format!(
+                    "WebGPU surface acquisition failed after recovery: {error}"
+                )),
+            }
         } else {
-            self.render_canvas2d(&engine_frame)?;
+            PaneRenderOutcome::Canvas2d
+        };
+
+        match pane_outcome {
+            PaneRenderOutcome::Presented => {}
+            PaneRenderOutcome::Timeout => {
+                // Keep the last complete frame. The next animation/input repaint retries.
+                return Ok(());
+            }
+            PaneRenderOutcome::Fallback(reason) => {
+                self.activate_canvas2d(&reason);
+                self.render_canvas2d()?;
+            }
+            PaneRenderOutcome::Canvas2d => self.render_canvas2d()?,
         }
 
         self.draw_axes_2d(&self.axis_frame)?;
@@ -1263,45 +1912,11 @@ impl ChartInner {
 
     // --- data / scale bookkeeping ---
 
-    fn main_plot(&self) -> &PlotList {
-        self.data.plot(self.series[0].id)
-    }
-
-    /// Autoscale every pane's price + overlay scale over just its own series' visible min/max.
-    /// The main (right-axis) price scale — pane 0's. Used by the price axis, crosshair, last-value
-    /// line, and the public coordinate API.
-    fn price_scale(&self) -> &PriceScaleCore {
-        &self.panes[0].price_scale
-    }
-
-    fn measure(&self, text: &str) -> f64 {
-        self.axis_ctx.set_font(&format!("{}px {FONT_FAMILY}", FONT_SIZE * self.dpr));
-        let device_w = self.axis_ctx.measure_text(text).map(|m| m.width()).unwrap_or(0.0);
-        device_w / self.dpr
-    }
-
-    fn compute_price_axis_width(&self) -> f64 {
-        let mut max_text_w = 0f64;
-        // widest tick label across all panes' price scales (volume numbers can exceed price ones)
-        for pane in &self.panes {
-            for mark in pane.price_scale.build_tick_marks(100, 0.0) {
-                max_text_w = max_text_w.max(self.measure(&self.price_formatter.format(mark.logical)));
-            }
-        }
-        if let Some((_, y)) = self.crosshair {
-            if !self.price_scale().is_empty() {
-                let price = self.price_scale().coordinate_to_price(y, 0.0);
-                max_text_w = max_text_w.max(self.measure(&self.price_formatter.format(price)));
-            }
-        }
-        if !self.main_plot().is_empty() {
-            let last = self.main_plot().size() - 1;
-            let close = self.main_plot().value_at(last, PlotValueIndex::Close);
-            max_text_w = max_text_w.max(self.measure(&self.price_formatter.format(close)));
-        }
-        let text_w = if max_text_w > 0.0 { max_text_w } else { PRICE_DEFAULT_TEXT_WIDTH };
-        let w = (AXIS_BORDER_SIZE + AXIS_TICK_LENGTH + PRICE_PADDING_INNER + PRICE_PADDING_OUTER + PRICE_LABEL_OFFSET + text_w).ceil();
-        w + (w as i64 % 2) as f64
+    fn compute_price_axis_width(&mut self, target: PriceScaleTarget) -> f64 {
+        let axis_ctx = self.axis_ctx.clone();
+        let dpr = self.dpr;
+        self.engine
+            .optimal_price_axis_width_for(target, |text| measure_text_ctx(&axis_ctx, dpr, text))
     }
 
     // ---- Canvas2D axis overlay ----
@@ -1311,48 +1926,116 @@ impl ChartInner {
         let dpr = self.dpr;
         let bitmap_w = self.bitmap_w as f64;
         let bitmap_h = self.bitmap_h as f64;
+        let pane_left = self.pane_left;
         let pane_w = self.pane_w;
         let pane_h = self.pane_h;
 
         ctx.clear_rect(0.0, 0.0, bitmap_w, bitmap_h);
-        let font = format!("{}px {FONT_FAMILY}", FONT_SIZE * dpr);
         let border_w = 1f64.max(dpr.floor());
 
         ctx.set_fill_style_str(BORDER_CSS);
-        ctx.fill_rect((pane_w * dpr).round(), 0.0, border_w, (pane_h * dpr).round());
+        if self.left_axis_w > 0.0 {
+            ctx.fill_rect(
+                (pane_left * dpr).round() - border_w,
+                0.0,
+                border_w,
+                (pane_h * dpr).round(),
+            );
+        }
+        if self.axis_w > 0.0 {
+            ctx.fill_rect(
+                ((pane_left + pane_w) * dpr).round(),
+                0.0,
+                border_w,
+                (pane_h * dpr).round(),
+            );
+        }
         ctx.fill_rect(0.0, (pane_h * dpr).round(), bitmap_w, border_w);
 
         // separators between stacked panes (roadmap Phase B1): a border line at each pane boundary
         for separator in &axis_frame.separators {
             let y = (separator * dpr).round();
-            ctx.fill_rect(0.0, y, (pane_w * dpr).round(), (PANE_SEPARATOR * dpr).max(border_w));
+            ctx.fill_rect(
+                (pane_left * dpr).round(),
+                y,
+                (pane_w * dpr).round(),
+                (PANE_SEPARATOR * dpr).max(border_w),
+            );
         }
 
-        self.draw_axis_labels(axis_frame, &font, dpr)?;
+        self.draw_axis_labels(axis_frame, dpr)?;
         Ok(())
     }
 
-    fn draw_axis_labels(&self, axis_frame: &AxisFrame, font: &str, dpr: f64) -> Result<(), JsValue> {
+    fn draw_axis_labels(&self, axis_frame: &AxisFrame, dpr: f64) -> Result<(), JsValue> {
         let ctx = &self.axis_ctx;
-        ctx.set_font(font);
-        ctx.set_text_baseline("middle");
+        // Label backgrounds are bitmap-aligned geometry, matching LWC's bitmap-coordinate pass.
         for label in &axis_frame.labels {
             if let Some((x, y, w, h, color)) = label.background {
                 ctx.set_fill_style_str(&color.to_hex());
-                ctx.fill_rect((x * dpr).round(), (y * dpr).round(), (w * dpr).round(), (h * dpr).round());
+                ctx.fill_rect(
+                    (x * dpr).round(),
+                    (y * dpr).round(),
+                    (w * dpr).round(),
+                    (h * dpr).round(),
+                );
             }
-            ctx.set_text_align(match label.align { AxisTextAlign::Left => "left", AxisTextAlign::Center => "center" });
-            ctx.set_fill_style_str(&label.color.to_hex());
-            ctx.fill_text(&label.text, (label.x * dpr).round(), (label.y * dpr).round())?;
         }
-        Ok(())
+
+        // LWC draws glyphs in media-coordinate space: the context is scaled by DPR while the font
+        // remains 12 CSS px. Using an independently hinted 12*dpr bitmap font is observably
+        // different at fractional DPR even when every logical coordinate is identical.
+        ctx.save();
+        if let Err(error) = ctx.scale(dpr, dpr) {
+            ctx.restore();
+            return Err(error);
+        }
+        ctx.set_text_baseline("middle");
+        let mut draw_result = Ok(());
+        for label in &axis_frame.labels {
+            ctx.set_font(&if label.bold {
+                format!("bold {FONT_SIZE}px {FONT_FAMILY}")
+            } else {
+                format!("{FONT_SIZE}px {FONT_FAMILY}")
+            });
+            ctx.set_text_align(match label.align {
+                AxisTextAlign::Left => "left",
+                AxisTextAlign::Right => "right",
+                AxisTextAlign::Center => "center",
+            });
+            ctx.set_fill_style_str(&label.color.to_hex());
+            let metrics_text = match label.midpoint {
+                AxisTextMidpoint::None => None,
+                AxisTextMidpoint::Label => Some(label.text.as_str()),
+                AxisTextMidpoint::StableTime => Some("Apr0"),
+            };
+            let y_mid_correction = metrics_text
+                .and_then(|text| ctx.measure_text(text).ok())
+                .map(|metrics| {
+                    (metrics.actual_bounding_box_ascent() - metrics.actual_bounding_box_descent())
+                        / 2.0
+                })
+                .unwrap_or(0.0);
+            if let Err(error) = ctx.fill_text(&label.text, label.x, label.y + y_mid_correction) {
+                draw_result = Err(error);
+                break;
+            }
+        }
+        ctx.restore();
+        draw_result
     }
 
-    /// Execute the exact same frame consumed by WebGPU through the browser's 2D canvas backend.
-    fn render_canvas2d(&self, frame: &aion_engine::ChartFrame) -> Result<(), JsValue> {
-        let Some(ctx) = self.pane_ctx.as_ref() else {
-            return Err(JsValue::from_str("Canvas2D pane backend is not initialized"));
-        };
+    /// Permanently switch this chart instance to its already-initialized Canvas2D pane.
+    fn activate_canvas2d(&mut self, reason: &str) {
+        if self.gfx.take().is_some() {
+            set_backend_visibility(&self.gpu_pane, &self.fallback_pane, false);
+            web_sys::console::warn_1(&format!("aion: {reason}; continuing with Canvas2D").into());
+        }
+    }
+
+    /// Execute the exact same retained frame consumed by WebGPU through Canvas2D.
+    fn render_canvas2d(&self) -> Result<(), JsValue> {
+        let ctx = &self.pane_ctx;
         let width = self.bitmap_w as f64;
         let height = self.bitmap_h as f64;
         ctx.clear_rect(0.0, 0.0, width, height);
@@ -1360,8 +2043,11 @@ impl ChartInner {
         ctx.set_fill_style_str(&bg);
         ctx.fill_rect(0.0, 0.0, width, height);
         let mut target = crate::canvas2d_target::WasmCanvas2d::new(ctx);
-        let viewport = CanvasViewport { width: width as f32, height: height as f32 };
-        for pane in &frame.panes {
+        let viewport = CanvasViewport {
+            width: width as f32,
+            height: height as f32,
+        };
+        for pane in &self.frame.panes {
             target.save();
             let [x, y, w, h] = pane.scissor;
             target.clip_rect(x as f32, y as f32, w as f32, h as f32);
@@ -1385,16 +2071,24 @@ async fn try_create_gfx(
     css_width: f64,
     css_height: f64,
     dpr: f64,
+    runtime_id: u32,
+    simulate_adapter_failure: bool,
+    force_fallback_adapter: bool,
 ) -> Result<Gfx, JsValue> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let surface = instance
         .create_surface(wgpu::SurfaceTarget::Canvas(pane_canvas))
         .map_err(|e| JsValue::from_str(&format!("create_surface failed: {e}")))?;
+    if simulate_adapter_failure {
+        return Err(JsValue::from_str(
+            "request_adapter failed: deterministic runtime-matrix injection",
+        ));
+    }
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
+            force_fallback_adapter,
         })
         .await
         .map_err(|e| JsValue::from_str(&format!("request_adapter failed: {e}")))?;
@@ -1402,6 +2096,16 @@ async fn try_create_gfx(
         .request_device(&wgpu::DeviceDescriptor::default())
         .await
         .map_err(|e| JsValue::from_str(&format!("request_device failed: {e}")))?;
+    let device_lost = Arc::new(AtomicBool::new(false));
+    let lost_flag = Arc::clone(&device_lost);
+    device.set_device_lost_callback(move |reason, _message| {
+        // `Destroyed` is the expected callback when resources are intentionally dropped during an
+        // already-completed fallback. Only an unknown/driver loss needs to initiate recovery.
+        if reason == wgpu::DeviceLostReason::Unknown {
+            lost_flag.store(true, Ordering::Release);
+            notify_aion_backend_loss(runtime_id);
+        }
+    });
     let bitmap_w = (css_width * dpr).round().max(1.0) as u32;
     let bitmap_h = (css_height * dpr).round().max(1.0) as u32;
     let config = surface
@@ -1423,5 +2127,6 @@ async fn try_create_gfx(
         msaa,
         _atlas: atlas,
         tex_renderer,
+        device_lost,
     })
 }

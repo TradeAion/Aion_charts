@@ -4,6 +4,11 @@
 //! WebGPU quads. The JS side (packages/charts, examples/web_demo) owns DOM events and calls
 //! the exported gesture methods; rendering happens on demand via `render()`.
 
+#[cfg(any(target_arch = "wasm32", test))]
+mod axis_policy;
+#[cfg(any(target_arch = "wasm32", test))]
+mod backend_policy;
+
 #[cfg(target_arch = "wasm32")]
 mod canvas2d_target;
 #[cfg(target_arch = "wasm32")]
@@ -37,9 +42,29 @@ mod smoke {
 
         let points = [[20.0f32, 80.0], [50.0, 30.0], [80.0, 60.0], [110.0, 20.0]];
         let prims = [
-            Prim::Background { gradient: Gradient { top: Color::rgb(0xff, 0xff, 0xff), bottom: Color::rgb(0xe8, 0xf0, 0xff) } },
-            Prim::Rect { rect: IRect { x: 10, y: 10, w: 40, h: 40 }, color: Color::rgb(0xff, 0x00, 0x00) },
-            Prim::Circle { cx: 150.0, cy: 40.0, radius: 15.0, fill: Color::rgb(0x00, 0x00, 0xff), stroke_width: 0.0, stroke: Color::rgb(0, 0, 0) },
+            Prim::Background {
+                gradient: Gradient {
+                    top: Color::rgb(0xff, 0xff, 0xff),
+                    bottom: Color::rgb(0xe8, 0xf0, 0xff),
+                },
+            },
+            Prim::Rect {
+                rect: IRect {
+                    x: 10,
+                    y: 10,
+                    w: 40,
+                    h: 40,
+                },
+                color: Color::rgb(0xff, 0x00, 0x00),
+            },
+            Prim::Circle {
+                cx: 150.0,
+                cy: 40.0,
+                radius: 15.0,
+                fill: Color::rgb(0x00, 0x00, 0xff),
+                stroke_width: 0.0,
+                stroke: Color::rgb(0, 0, 0),
+            },
             Prim::Polyline {
                 first_point: 0,
                 point_count: 4,
@@ -50,7 +75,15 @@ mod smoke {
             },
         ];
         let mut target = WasmCanvas2d::new(&ctx);
-        execute(&prims, &points, &mut target, Viewport { width: w, height: h });
+        execute(
+            &prims,
+            &points,
+            &mut target,
+            Viewport {
+                width: w,
+                height: h,
+            },
+        );
         Ok(())
     }
 }

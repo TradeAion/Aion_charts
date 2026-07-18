@@ -130,11 +130,16 @@ impl TimeScaleCore {
     // --- coordinate conversion (RENDERING_SPEC.md §1.1) ---
 
     pub fn index_to_coordinate(&self, index: TimePointIndex) -> Coordinate {
+        self.logical_to_coordinate(index as f64)
+    }
+
+    /// Convert a possibly fractional logical index to a media-coordinate X position.
+    pub fn logical_to_coordinate(&self, logical: f64) -> Coordinate {
         if self.is_empty() {
             return 0.0;
         }
         let base_index = self.base_index();
-        let delta_from_right = base_index as f64 + self.right_offset - index as f64;
+        let delta_from_right = base_index as f64 + self.right_offset - logical;
         self.width - (delta_from_right + 0.5) * self.bar_spacing - 1.0
     }
 

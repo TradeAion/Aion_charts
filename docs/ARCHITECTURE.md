@@ -46,8 +46,15 @@ What we deliberately change:
 - Canvas2D → **WebGPU draw lists** (instanced quads, polylines, glyph atlas). Rendering becomes
   retained *per frame*: views emit primitive lists, a backend encodes them.
 - Single WASM heap owns all data (no JS objects per bar). Data ingestion via typed arrays.
-- Multi-chart ready: one GPU device/queue shared across chart instances; one canvas per chart
-  (or one canvas per app with viewports — see §6.6).
+- Multi-chart ready: one GPU device/queue shared across chart instances; each browser chart owns
+  dedicated WebGPU and Canvas2D pane surfaces plus its axis/input overlay.
+- Public handle objects are adapters only. Time/index/logical conversions, visible-range mutation,
+  scroll/reset behavior, and price-scale range/autoscale/inversion/margin state live on the
+  platform-free `ChartEngine`; WASM delegates and TypeScript schedules repaint/callback delivery.
+- Price-scale mode autoscale uses each series' first close at or right of the visible left edge,
+  transforms its raw range into the shared normal/log/percentage/indexed domain, then merges it.
+  Series coordinates use that same stable base. Engine-formatted axis labels plus a host-supplied
+  glyph measurement callback negotiate axis width; the browser no longer formats scale labels.
 
 ---
 
@@ -207,8 +214,28 @@ correct, slow — nice for SSR/screenshots too).
 
 Frame loop & surfaces:
 
-- One `<canvas>` per chart, `configure()`d at bitmap size = suggested even CSS size × DPR
-  (spec §12 sizing rules; ResizeObserver device-pixel-content-box when available).
+- The browser package owns three stacked canvases: a WebGPU pane, a warm Canvas2D fallback pane,
+  and a Canvas2D axis/input overlay. All are sized to the same exact device-pixel content box.
+  WebGPU and Canvas2D consume one retained `ChartFrame`; only the active pane is visible. Separate
+  pane canvases are required because the platform does not allow one canvas to change context type
+  after WebGPU initialization.
+- A device-lost callback or terminal surface acquisition error hides the GPU pane and immediately
+  renders the retained frame through Canvas2D. `Lost`/`Outdated` swapchains still reconfigure and
+  retry once first; `Timeout` skips only the current presentation.
+- `chart.take_screenshot()` is synchronous. Presented WebGPU canvases are not synchronously
+  readable through `drawImage` in Chromium, so screenshot capture executes the current retained
+  `ChartFrame` through the warm Canvas2D pane and composes that pane with the shared axis overlay.
+  It does not move or reconstruct chart state in TypeScript. Tests of the actually presented GPU
+  surface use an external browser screenshot of the UI-free `presentedFrame` fixture.
+- D1 browser/native parity reads one JSON fixture containing the data-generator seed, fixed time,
+  viewport, DPR and axis-strip sizes. Runtime fixtures disable auto-resize and apply those exact
+  values, while normal package/demo charts retain device-pixel auto-sizing. The native renderer
+  rasterizes the comparable pane region; browser-only font/axis output remains a separate golden.
+- A visible left price scale is a first-class layout region, not an overlay. `ChartEngine` owns an
+  independent left scale per pane and records the pane's media-coordinate x origin. Frame
+  primitives remain engine-produced and are translated into that origin before WebGPU, Canvas2D,
+  screenshots or native rendering consume them; the frame scissor begins at the same origin.
+  Pointer adapters subtract the origin before invoking headless time-scale and interaction APIs.
 - RAF callback: drain merged InvalidateMask → run model updates (autoscale, time-scale
   invalidations, animations) → rebuild dirty views → encode draw list → submit. Skip encode
   entirely at level None; only top layers at Cursor.
@@ -226,8 +253,11 @@ const chart = create_chart(container, options?);
 const series = chart.add_series(candlestick_series, options?, pane_index?);
 series.set_data(bars); series.update(bar, historical_update?);
 series.create_price_line/price_scale()/apply_options()/price_to_coordinate()...
+series.data()/data_by_index()/bars_in_logical_range()/subscribe_data_changed()...
+chart.price_scale("left" | "right" | "", pane_index?)...
 chart.time_scale(): fit_content, scroll_to_position, set_visible_range,
-  (get/set)_visible_logical_range, subscribe_visible_time_range_change,
+  (get/set)_visible_logical_range, subscribe_visible_logical_range_change,
+  subscribe_visible_time_range_change,
   time_to_coordinate/coordinate_to_time, apply_options...
 chart.price_scale(id, pane_index?), chart.panes(), pane.move_to/set_height/set_stretch_factor...
 chart.subscribe_crosshair_move/subscribe_click/subscribe_dbl_click, chart.take_screenshot(),
@@ -244,6 +274,9 @@ chart.apply_options(), chart.remove()
 - Events out: one shared `Float64Array` scratch + a small enum tag; JS wrappers materialize the
   familiar `MouseEventParams {time, logical, point, seriesData, hoveredSeries, hoveredObjectId}`
   lazily (getter-based) so unsubscribed/unused fields cost nothing.
+- Visible logical/time range callbacks are façade-level observers of post-render snapshots from the
+  headless engine. They carry cloned range objects and never become a second source of chart state;
+  the browser shell only translates gestures and dispatches notifications.
 
 ### 6.2 Input handling
 
@@ -310,9 +343,13 @@ Mechanisms:
 - Coordinate conversion is a tight SIMD-friendly loop (`indexesToCoordinates`,
   `barPricesToCoordinates` are branch-free affine transforms — spec §1).
 - Static/top layer split (§4) makes crosshair-only frames ~free.
-- Data conflation (LWC v5 has it: power-of-2 bucket merge when barSpacing < 1/DPR px, OHLC-correct
-  merging) — port `data-conflater.ts` in phase 4; it's the difference between "fine" and
-  "instant" for 1M+ points zoomed out.
+- Data conflation (LWC v5 has it when barSpacing < 1/DPR px) is now viewport bounded across the
+  series set: line/area/baseline retain bucket endpoints and close extrema; candles/bars retain
+  first-open, max-high, min-low, and last-close; histograms retain the greatest magnitude. The
+  1M load/streaming gates pass; repeatable pan/zoom/crosshair measurements remain.
+- The repeatable native interaction harness currently measures a 1M-bar single-series headless
+  crosshair frame at ~0.21 ms mean and a forced 10-series × 50k-visible-bars frame at ~3.11 ms
+  mean. Those figures exclude browser executor/presentation cost; the browser 60 fps gate remains.
 - No GC pressure: events and data cross the boundary through preallocated typed arrays.
 
 ---
@@ -356,11 +393,14 @@ time tick marks (weights) for vertical grid. Then first goldens.
 **Phase 2 — Axes & text (2–3 wks). PARTIALLY DONE.**
 
 Text architecture decision (2026-07): axes render on a **stacked Canvas2D overlay**, not the
-GPU — mirroring LWC's per-cell canvas layout. The pane is one WebGPU canvas when available and
-falls back to the same frame executed on a Canvas2D context; a second
-full-size Canvas2D canvas sits exactly on top, transparent except over the axis strips. The
-headless engine now emits an `AxisFrame` containing label content, placement, separators, and
-label boxes; the browser supplies only font measurement and executes `fillText`/`fillRect`.
+GPU — mirroring LWC's per-cell canvas layout. The package owns separate WebGPU and Canvas2D pane
+canvases so it can fail over after device loss; a third full-size Canvas2D canvas sits exactly on
+top, transparent except over the axis strips and receiving input. The
+headless engine now emits an `AxisFrame` containing label content, placement, separators, label
+boxes, bold emphasis, and an explicit midpoint policy. The policies distinguish actual-glyph
+price-label correction, uncorrected ordinary/marker time labels, and stable crosshair-time
+correction. The browser supplies only font measurement and executes `fillText`/`fillRect` in media
+coordinates under a DPR transform, matching the canvas coordinate contract used by LWC.
 This gives native, premium axis text (the product goal) while all chart layout/format decisions
 stay in Rust. The GPU
 label atlas + textured-quad pipeline are kept, constructed-but-idle, reserved for future
@@ -370,10 +410,11 @@ golden path will still need the atlas text path, and the time-axis overlay can d
 GPU pane by a frame under heavy jank (price axis is immune — it doesn't move on horizontal pan).
 
 Done: hybrid pane(GPU)/axes(2D) rendering, price axis (optimal-width formula via real browser
-metrics, border, tick labels), time axis (28px optimalHeight, weight-based labels, en-US tick
-formatter), crosshair axis labels (dark boxes + white text), all native 2D. Remaining: label
-overlap resolution, bold high-weight time labels, `Intl` locale hook, edge tick marks,
-rounded crosshair-label corners, axis drag-scale gestures, goldens.
+metrics, border, tick labels), time axis (28px optimalHeight, weight-based labels with bold maximum
+weight, en-US tick formatter), crosshair axis labels (dark boxes + white text), media-coordinate
+font rasterization, and label-specific midpoint semantics. Remaining: label overlap resolution,
+`Intl` locale hook, edge tick marks, rounded crosshair-label corners, axis drag-scale gestures,
+deterministic native text, and closing fractional-DPR compositor/antialiasing gaps.
 *Exit: goldens of full chart with both axes match LWC.*
 
 **Phase 3 — Interaction (2–3 wks).** Gesture recognizer, wheel/pinch zoom, pan, axis drag scale,
@@ -387,8 +428,9 @@ AA — pixel-aligned rects/text stay bit-identical), triangle pipeline, MSAA fra
 `update()` streaming path, new-bar shift, **magnet crosshair** (Normal/Magnet/MagnetOHLC/Hidden,
 default Magnet like LWC — snaps horizontal line to close/OHLC), **crosshair marker** (white halo
 + series-color disc on line/area), **last-value price line + colored axis label** (dashed line
-to last close, contrast text). Remaining: baseline series, WithSteps/Curved line types, point
-markers, last-price animation, whitespace handling, custom price lines, data conflation port.
+to last close, contrast text), and viewport-bounded conflation for line/area/baseline, OHLC, and
+histogram series. The 1M load/streaming benchmark gate passes. Remaining: repeatable interaction
+benchmarks and the broader series/API parity tracked in `PRODUCTION_ROADMAP.md`.
 
 **Phase 5 — Multi-pane & platform features (2–3 wks). PARTIALLY DONE.** Done: **multi-series
 data layer** (`aion_core::data_layer` — merged union of all series' timestamps, per-series
@@ -419,10 +461,9 @@ docs site with LWC-style examples, drawings/tools groundwork.
 
 ---
 
-## 11. Immediate next steps
+## 11. Active execution plan
 
-1. Scaffold the cargo workspace + TS package + wasm build (wasm-pack or trunk; `wasm32-unknown-unknown`,
-   `wasm-bindgen`, `wgpu` with `webgpu` backend).
-2. Implement `aion-core::scale::time_scale` + `price_scale` with ported unit tests (pure math first —
-   no rendering deps, fastest way to lock correctness).
-3. SolidQuad pipeline + candlestick renderer → first golden comparison against LWC.
+The original scaffolding sequence is historical. The authoritative, current execution order is
+maintained in [PRODUCTION_ROADMAP.md §11](PRODUCTION_ROADMAP.md#11-revised-execution-order), which
+now starts with backend parity/runtime coverage, large-data hardening, API breadth, and only then
+the plugin/platform surface.

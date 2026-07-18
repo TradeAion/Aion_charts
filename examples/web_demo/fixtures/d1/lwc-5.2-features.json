@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "lwc_version": "5.2.0",
+  "fixture": "candles-1000-default-light",
+  "configuration": { "dpr": 1.5, "spacing": 6, "theme": "light", "marker_auto_scale": true },
+  "metric": "pixelmatch perceptual fraction, threshold 0.1, antialias excluded",
+  "cases": [
+    {
+      "name": "base",
+      "measured": { "full": 0.011039737654320987, "pane": 0.008272129351947332, "price_axis": 0.06439217770690762, "time_axis": 0.01562621775387733 },
+      "maximum": { "full": 0.015, "pane": 0.012, "price_axis": 0.075, "time_axis": 0.022 }
+    },
+    {
+      "name": "markers",
+      "measured": { "full": 0.011868730709876545, "pane": 0.008797710986863612, "price_axis": 0.07238721680730073, "time_axis": 0.01562621775387733 },
+      "maximum": { "full": 0.016, "pane": 0.012, "price_axis": 0.085, "time_axis": 0.022 }
+    },
+    {
+      "name": "volume",
+      "measured": { "full": 0.01847800925925926, "pane": 0.0162709562537382, "price_axis": 0.06439217770690762, "time_axis": 0.01562621775387733 },
+      "maximum": { "full": 0.024, "pane": 0.022, "price_axis": 0.075, "time_axis": 0.022 }
+    }
+  ]
+}

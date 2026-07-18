@@ -3,6 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm --prefix ../../packages/charts run build && node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});fs.copyFileSync('../../packages/charts/dist/index.js','dist/aion_charts.js');fs.copyFileSync('../../packages/charts/dist/index.js.map','dist/index.js.map');fs.copyFileSync('../../packages/charts/dist/aion_wasm_bg.wasm','dist/aion_wasm_bg.wasm')\""
+    "build": "npm --prefix ../../packages/charts run build && node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});fs.copyFileSync('../../packages/charts/dist/index.js','dist/aion_charts.js');fs.copyFileSync('../../packages/charts/dist/index.js.map','dist/index.js.map');fs.copyFileSync('../../packages/charts/dist/aion_wasm_bg.wasm','dist/aion_wasm_bg.wasm')\"",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "lightweight-charts": "5.2.0",
+    "pixelmatch": "7.2.0",
+    "pngjs": "7.0.0"
   }
 }

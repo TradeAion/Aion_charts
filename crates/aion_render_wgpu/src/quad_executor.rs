@@ -35,11 +35,38 @@ fn push_rect(out: &mut Vec<QuadInstance>, rect: IRect, color: Color) {
 fn push_rect_frame(out: &mut Vec<QuadInstance>, rect: IRect, border: i32, color: Color) {
     let IRect { x, y, w, h } = rect;
     // horizontal (top and bottom) edges
-    push_rect(out, IRect { x: x + border, y, w: w - border * 2, h: border }, color);
-    push_rect(out, IRect { x: x + border, y: y + h - border, w: w - border * 2, h: border }, color);
+    push_rect(
+        out,
+        IRect {
+            x: x + border,
+            y,
+            w: w - border * 2,
+            h: border,
+        },
+        color,
+    );
+    push_rect(
+        out,
+        IRect {
+            x: x + border,
+            y: y + h - border,
+            w: w - border * 2,
+            h: border,
+        },
+        color,
+    );
     // vertical (left and right) edges
     push_rect(out, IRect { x, y, w: border, h }, color);
-    push_rect(out, IRect { x: x + w - border, y, w: border, h }, color);
+    push_rect(
+        out,
+        IRect {
+            x: x + w - border,
+            y,
+            w: border,
+            h,
+        },
+        color,
+    );
 }
 
 /// Emits filled dash segments over `[from, to)` using the style's pattern.
@@ -72,20 +99,57 @@ pub fn prims_to_instances(prims: &[Prim], out: &mut Vec<QuadInstance>) {
     for prim in prims {
         match prim {
             Prim::Rect { rect, color } => push_rect(out, *rect, *color),
-            Prim::RectFrame { rect, border, color } => push_rect_frame(out, *rect, *border, *color),
-            Prim::HLine { y, x0, x1, width, style, color } => {
+            Prim::RectFrame {
+                rect,
+                border,
+                color,
+            } => push_rect_frame(out, *rect, *border, *color),
+            Prim::HLine {
+                y,
+                x0,
+                x1,
+                width,
+                style,
+                color,
+            } => {
                 let top = y - width / 2;
                 dash_segments(*style, *width, *x0, *x1, |a, b| {
-                    push_rect(out, IRect { x: a, y: top, w: b - a, h: *width }, *color);
+                    push_rect(
+                        out,
+                        IRect {
+                            x: a,
+                            y: top,
+                            w: b - a,
+                            h: *width,
+                        },
+                        *color,
+                    );
                 });
             }
-            Prim::VLine { x, y0, y1, width, style, color } => {
+            Prim::VLine {
+                x,
+                y0,
+                y1,
+                width,
+                style,
+                color,
+            } => {
                 let left = x - width / 2;
                 dash_segments(*style, *width, *y0, *y1, |a, b| {
-                    push_rect(out, IRect { x: left, y: a, w: *width, h: b - a }, *color);
+                    push_rect(
+                        out,
+                        IRect {
+                            x: left,
+                            y: a,
+                            w: *width,
+                            h: b - a,
+                        },
+                        *color,
+                    );
                 });
             }
-            // Later pipelines: Polyline, AreaFill, RoundRect, Circle, Text, Background.
+            // Non-rect geometry is handled by the triangle adapter; text remains on the host
+            // overlay rather than in the pane frame.
             _ => {}
         }
     }
@@ -100,7 +164,17 @@ mod tests {
     #[test]
     fn rect_frame_expands_to_four() {
         let mut out = Vec::new();
-        push_rect_frame(&mut out, IRect { x: 10, y: 20, w: 8, h: 6 }, 1, C);
+        push_rect_frame(
+            &mut out,
+            IRect {
+                x: 10,
+                y: 20,
+                w: 8,
+                h: 6,
+            },
+            1,
+            C,
+        );
         assert_eq!(out.len(), 4);
         // top edge: (11, 20, 6, 1)
         assert_eq!(out[0].rect, [11.0, 20.0, 6.0, 1.0]);
@@ -115,7 +189,14 @@ mod tests {
     fn solid_vline_covers_pixel_column() {
         let mut out = Vec::new();
         prims_to_instances(
-            &[Prim::VLine { x: 100, y0: 0, y1: 50, width: 1, style: LineStyle::Solid, color: C }],
+            &[Prim::VLine {
+                x: 100,
+                y0: 0,
+                y1: 50,
+                width: 1,
+                style: LineStyle::Solid,
+                color: C,
+            }],
             &mut out,
         );
         assert_eq!(out.len(), 1);
@@ -126,7 +207,14 @@ mod tests {
     fn large_dashed_pattern_6_on_6_off() {
         let mut out = Vec::new();
         prims_to_instances(
-            &[Prim::VLine { x: 0, y0: 0, y1: 24, width: 1, style: LineStyle::LargeDashed, color: C }],
+            &[Prim::VLine {
+                x: 0,
+                y0: 0,
+                y1: 24,
+                width: 1,
+                style: LineStyle::LargeDashed,
+                color: C,
+            }],
             &mut out,
         );
         // segments [0,6) and [12,18)
@@ -138,8 +226,26 @@ mod tests {
     #[test]
     fn degenerate_rects_dropped() {
         let mut out = Vec::new();
-        push_rect(&mut out, IRect { x: 0, y: 0, w: 0, h: 5 }, C);
-        push_rect(&mut out, IRect { x: 0, y: 0, w: 5, h: -1 }, C);
+        push_rect(
+            &mut out,
+            IRect {
+                x: 0,
+                y: 0,
+                w: 0,
+                h: 5,
+            },
+            C,
+        );
+        push_rect(
+            &mut out,
+            IRect {
+                x: 0,
+                y: 0,
+                w: 5,
+                h: -1,
+            },
+            C,
+        );
         assert!(out.is_empty());
     }
 }

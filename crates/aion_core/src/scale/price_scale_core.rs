@@ -65,6 +65,7 @@ pub struct PriceScaleCore {
     margin_above: f64,
     margin_below: f64,
     log_formula: LogFormula,
+    min_move: f64,
     scale_start_point: Option<f64>,
     scroll_start_point: Option<f64>,
     price_range_snapshot: Option<PriceRange>,
@@ -79,6 +80,7 @@ impl PriceScaleCore {
             margin_above: 0.0,
             margin_below: 0.0,
             log_formula: DEF_LOG_FORMULA,
+            min_move: 0.01,
             scale_start_point: None,
             scroll_start_point: None,
             price_range_snapshot: None,
@@ -91,6 +93,38 @@ impl PriceScaleCore {
 
     pub fn mode(&self) -> PriceScaleMode {
         self.options.mode
+    }
+
+    /// Change coordinate mode while keeping any convertible manual range coherent. Percentage and
+    /// indexed modes require a series base value, so—as in LWC—they always re-enter autoscale.
+    pub fn set_mode(&mut self, mode: PriceScaleMode) {
+        let old = self.options.mode;
+        if old == mode {
+            return;
+        }
+        let raw_range = match (old, self.price_range) {
+            (_, None) => None,
+            (PriceScaleMode::Logarithmic, Some(range)) => {
+                Some(log_formula::convert_price_range_from_log(&range, &self.log_formula))
+            }
+            (PriceScaleMode::Normal, Some(range)) => Some(range),
+            // Percentage/indexed ranges cannot be reversed without the source's base value.
+            _ => None,
+        };
+        self.options.mode = mode;
+        match mode {
+            PriceScaleMode::Normal => self.price_range = raw_range,
+            PriceScaleMode::Logarithmic => {
+                self.log_formula = log_formula::log_formula_for_price_range(raw_range.as_ref());
+                self.price_range = raw_range
+                    .as_ref()
+                    .map(|range| log_formula::convert_price_range_to_log(range, &self.log_formula));
+            }
+            PriceScaleMode::Percentage | PriceScaleMode::IndexedTo100 => {
+                self.options.auto_scale = true;
+                self.price_range = None;
+            }
+        }
     }
 
     pub fn is_log(&self) -> bool {
@@ -107,6 +141,10 @@ impl PriceScaleCore {
 
     pub fn is_inverted(&self) -> bool {
         self.options.invert_scale
+    }
+
+    pub fn set_invert_scale(&mut self, inverted: bool) {
+        self.options.invert_scale = inverted;
     }
 
     pub fn is_auto_scale(&self) -> bool {
@@ -131,6 +169,35 @@ impl PriceScaleCore {
 
     pub fn price_range(&self) -> Option<&PriceRange> {
         self.price_range.as_ref()
+    }
+
+    /// Price-scale API representation. Logarithmic storage is converted back to raw prices; the
+    /// other modes expose their current display-domain range directly, matching LWC.
+    pub fn price_range_for_api(&self) -> Option<PriceRange> {
+        let range = self.price_range?;
+        Some(if self.is_log() {
+            let raw = log_formula::convert_price_range_from_log(&range, &self.log_formula);
+            let precision = if self.min_move > 0.0 {
+                (-self.min_move.log10()).ceil().max(0.0).min(15.0) as i32
+            } else {
+                0
+            };
+            let factor = 10_f64.powi(precision);
+            let rounded = |value: f64| {
+                (((value / self.min_move).round() * self.min_move) * factor).round() / factor
+            };
+            PriceRange::new(rounded(raw.min_value()), rounded(raw.max_value()))
+        } else {
+            range
+        })
+    }
+
+    pub fn price_range_from_api(&self, range: &PriceRange) -> PriceRange {
+        if self.is_log() {
+            log_formula::convert_price_range_to_log(range, &self.log_formula)
+        } else {
+            *range
+        }
     }
 
     pub fn set_price_range(&mut self, range: Option<PriceRange>) {
@@ -199,6 +266,26 @@ impl PriceScaleCore {
             PriceScaleMode::Percentage => log_formula::to_percent(price, base_value),
             PriceScaleMode::IndexedTo100 => log_formula::to_indexed_to_100(price, base_value),
         }
+    }
+
+    /// Convert a raw source range to this scale's logical coordinate domain using the source's
+    /// first visible value. Returns `None` when the mode/base cannot produce finite coordinates.
+    pub fn price_range_to_logical(
+        &self,
+        raw: &PriceRange,
+        base_value: f64,
+    ) -> Option<PriceRange> {
+        let a = self.price_to_logical(raw.min_value(), base_value);
+        let b = self.price_to_logical(raw.max_value(), base_value);
+        if !a.is_finite() || !b.is_finite() {
+            return None;
+        }
+        Some(PriceRange::new(a.min(b), a.max(b)))
+    }
+
+    /// Public scalar counterpart used by engine-owned labels and series API conversion.
+    pub fn price_to_logical_value(&self, price: f64, base_value: f64) -> f64 {
+        self.price_to_logical(price, base_value)
     }
 
     fn logical_to_price(&self, logical: f64, base_value: f64) -> f64 {
@@ -408,6 +495,9 @@ impl PriceScaleCore {
     /// Applies a merged source range (already in logical space for the current mode).
     /// `min_move` = 1/base of the formatter source (e.g. 0.01).
     pub fn apply_autoscale_range(&mut self, merged: Option<PriceRange>, min_move: f64) {
+        if min_move.is_finite() && min_move > 0.0 {
+            self.min_move = min_move;
+        }
         let Some(mut price_range) = merged else {
             // reset empty to default
             if self.price_range.is_none() {

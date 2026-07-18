@@ -84,36 +84,99 @@
 // Built from the real package distribution. The demo build copies @aion/charts' published
 // artifacts; it does not compile or wire an engine of its own.
 import { create_chart } from "./dist/aion_charts.js";
+import { generate_fixture_data } from "./fixture_data.js";
+import { fixture_theme } from "./fixture_styles.js";
+import { marker_fixture, volume_fixture } from "./fixture_features.js";
 
 const container = document.getElementById("chart_container");
 const status = document.getElementById("status");
 
-// deterministic random-walk OHLC data (hourly bars ending "now"), as the array-of-objects the
-// public API accepts — the library packs it into typed arrays at the boundary.
-function generate_data(n) {
+// Deterministic random-walk OHLC data, as the array-of-objects the public API accepts — the
+// library packs it into typed arrays at the boundary. Runtime fixtures pin the final timestamp so
+// golden output cannot change at an hour boundary while two backends are being captured.
+function generate_data(n, fixture = {}) {
+  if (fixture.seed !== undefined) return generate_fixture_data({ ...fixture, bar_count: n });
   const out = [];
-  let seed = 42;
-  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
-  let price = 100;
+  let seed = fixture.seed ?? 42;
+  // Integer-safe LCG: Math.imul gives the same wrapping-u32 sequence used by the native fixture.
+  const rnd = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 0xffffffff;
+  let price = fixture.start_price ?? 100;
   const hour = 3600;
-  const start = Math.floor(Date.now() / 1000 / hour) * hour - (n - 1) * hour;
+  const end = fixture.end_time ?? Math.floor(Date.now() / 1000 / hour) * hour;
+  const close_span = fixture.close_span ?? 2.4;
+  const wick_span = fixture.wick_span ?? 1.2;
+  const start = end - (n - 1) * hour;
   for (let i = 0; i < n; i++) {
     const o = price;
-    const c = Math.max(1, o + (rnd() - 0.5) * 2.4);
-    out.push({ time: start + i * hour, open: o, high: Math.max(o, c) + rnd() * 1.2, low: Math.min(o, c) - rnd() * 1.2, close: c });
+    const c = Math.max(1, o + (rnd() - 0.5) * close_span);
+    out.push({ time: start + i * hour, open: o, high: Math.max(o, c) + rnd() * wick_span, low: Math.min(o, c) - rnd() * wick_span, close: c });
     price = c;
   }
   return out;
 }
 
-const requested_backend = new URLSearchParams(location.search).get("backend");
-const chart = await create_chart(container, { autoSize: true, backend: requested_backend === "canvas2d" ? "canvas2d" : "auto" });
+const query = new URLSearchParams(location.search);
+const requested_backend = query.get("backend");
+const runtime_test = query.get("runtimeTest");
+const requested_spacing = Number.parseFloat(query.get("spacing") ?? "");
+const requested_dpr = Number.parseFloat(query.get("dpr") ?? "");
+const requested_theme = query.get("theme") ?? "light";
+const requested_feature = query.get("feature");
+const requested_left_scale = query.get("leftScale") === "1";
+const parity_fixture = runtime_test === null
+  ? null
+  : await fetch("./fixtures/d1/candles.json", { cache: "no-store" }).then((response) => response.json());
+// External browser runners cannot read a presented WebGPU canvas from page JavaScript. This mode
+// removes all non-chart UI so an ordinary viewport screenshot is a stable full-frame artifact.
+if (runtime_test === "presentedFrame") {
+  document.getElementById("bar").style.display = "none";
+  document.getElementById("legend").style.display = "none";
+}
+const chart_options = {
+  autoSize: parity_fixture === null,
+  // The backend-parity gate must begin on the ordinary automatic path; the second chart is forced
+  // to Canvas2D by the separate runtime-test consumer.
+  backend: runtime_test === "backendParity" ? "auto" : requested_backend === "canvas2d" ? "canvas2d" : "auto",
+};
+if (requested_left_scale) {
+  chart_options.leftPriceScale = { visible: true };
+  chart_options.rightPriceScale = { visible: false };
+}
+if (parity_fixture !== null) {
+  const palette = fixture_theme(requested_theme);
+  chart_options.layout = {
+    background: { type: "solid", color: palette.background },
+    textColor: palette.text,
+  };
+  chart_options.grid = {
+    vertLines: { color: palette.grid },
+    horzLines: { color: palette.grid },
+  };
+}
+if (runtime_test === "adapterFailure") chart_options.__simulate_webgpu_adapter_failure = true;
+if (query.get("forceFallbackAdapter") === "1") chart_options.__force_webgpu_fallback_adapter = true;
+const chart = await create_chart(container, chart_options);
+if (parity_fixture !== null) {
+  chart.resize(
+    parity_fixture.css_width,
+    parity_fixture.css_height,
+    Number.isFinite(requested_dpr) ? requested_dpr : parity_fixture.pixel_ratio,
+  );
+}
 window.__chart = chart; // debug/test handle
 
-const data = generate_data(1000);
-const main = chart.add_series("candlestick");
+const data = generate_data(parity_fixture?.bar_count ?? 1000, parity_fixture ?? {});
+const main = chart.add_series("candlestick", requested_left_scale ? { priceScaleId: "left" } : undefined);
 main.set_data(data);
 chart.time_scale().fit_content();
+if (Number.isFinite(requested_spacing)) {
+  chart.time_scale().apply_options({ bar_spacing: requested_spacing, right_offset: 0 });
+}
+document.documentElement.dataset.barSpacing = String(chart.time_scale().options().bar_spacing);
+document.documentElement.dataset.visibleLogicalRange = JSON.stringify(chart.time_scale().get_visible_logical_range());
+const visible_price_axis = requested_left_scale ? chart.price_scale("left") : chart.price_scale("right");
+document.documentElement.dataset.priceAxisWidth = String(visible_price_axis.width());
+container.dataset.priceAxisWidth = String(visible_price_axis.width());
 window.__main = main; // debug/test handle
 window.__data = data;
 
@@ -122,10 +185,52 @@ const sma_series = chart.add_sma(main, 20, { color: "#ff9800", line_width: 2, vi
 
 // volume: single-value histogram on the SAME pane, pinned to the bottom band via the overlay
 // price scale (TradingView-style — no separate pane / divider), colored green/red by bar direction.
-const volume_data = data.map((d) => ({ time: d.time, value: Math.round(500 + Math.abs(d.close - d.open) * 4000 + 300) }));
+const volume_data = volume_fixture(data);
 let vol_series = null;
 
-status.textContent = `1000 bars · dpr ${(window.devicePixelRatio || 1).toFixed(3)}`;
+// Fidelity fixtures use only the package's public handles. The demo supplies data and options;
+// all scale, layout, and rendering behavior remains inside the headless engine.
+if (requested_feature === "markers") {
+  main.set_markers(marker_fixture(data));
+} else if (requested_feature === "volume") {
+  vol_series = chart.add_series("histogram", {
+    overlay: true,
+    scale_margins: { top: 0.82, bottom: 0 },
+    histogram_updown: true,
+  });
+  vol_series.set_data(volume_data);
+}
+
+status.textContent = `1000 bars · ${chart.backend()} · dpr ${(window.devicePixelRatio || 1).toFixed(3)}`;
+
+// Browser-matrix instrumentation, present only when explicitly requested. It drives the package's
+// hidden WASM fault hook and then uses the normal public render/backend surface for verification;
+// no chart model or rendering logic lives in this demo.
+if (runtime_test === "deviceLoss" || runtime_test === "1") {
+  const loss_button = document.createElement("button");
+  loss_button.id = "simulate_device_loss";
+  loss_button.textContent = "simulate WebGPU loss";
+  loss_button.addEventListener("click", () => {
+    chart.wasm.simulate_device_loss_for_test();
+    // The package's backend-loss event schedules recovery first; this later microtask only reports
+    // the result. The demo does not manually repaint or rebuild the chart.
+    queueMicrotask(() => {
+      status.textContent = `1000 bars · ${chart.backend()} · recovered`;
+      loss_button.disabled = true;
+    });
+  });
+  status.before(loss_button);
+}
+if (runtime_test === "screenshot") {
+  const snapshot = chart.take_screenshot();
+  snapshot.id = "chart_screenshot";
+  snapshot.style.width = "100%";
+  snapshot.style.height = "100%";
+  snapshot.style.display = "block";
+  chart.remove();
+  container.appendChild(snapshot);
+  status.textContent = `1000 bars · screenshot · ${snapshot.width}×${snapshot.height}`;
+}
 
 // ---- styling controls ----------------------------------------------------------------------
 // Show only the style group(s) relevant to the current series kind.
@@ -202,6 +307,16 @@ chart.subscribe_crosshair_move((params) => {
 chart.subscribe_click((params) => {
   if (params.time !== null) console.log("aion click @", new Date(params.time * 1000).toISOString());
 });
+
+if (runtime_test === "backendParity") {
+  const { run_backend_parity } = await import("./runtime_tests.js");
+  const result = await run_backend_parity({ create_chart, chart, container, data, fixture: parity_fixture });
+  window.__backend_parity_result = result;
+  document.documentElement.dataset.backendParity = result.status;
+  status.textContent = result.status === "passed"
+    ? `screenshot API parity PASS · ${result.screenshot_api.different_pixels}/${result.screenshot_api.total_pixels} pixels differ · presented GPU readback ${result.presented_backend_capture}`
+    : `backend parity ${result.status.toUpperCase()} · ${result.reason || `${result.different_pixels}/${result.total_pixels} pixels differ · max Δ ${result.maximum_channel_delta} · mean Δ ${result.mean_absolute_channel_delta.toFixed(3)} · GPU ${result.sample_webgpu.corner.join(",")} · 2D ${result.sample_canvas2d.corner.join(",")}`}`;
+}
 </script>
 </body>
 </html>

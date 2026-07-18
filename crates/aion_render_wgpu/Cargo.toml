@@ -9,3 +9,6 @@ description = "WebGPU backend for aion_render draw lists (pipelines, glyph atlas
 aion_render = { path = "../aion_render" }
 wgpu = { version = "25", default-features = false, features = ["webgpu", "wgsl"] }
 bytemuck = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+aion_engine = { path = "../aion_engine" }
