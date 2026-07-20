@@ -209,9 +209,19 @@ impl ChartInner {
 
     fn draw_axis_labels(&self, axis_frame: &AxisFrame, dpr: f64) -> Result<(), JsValue> {
         let ctx = &self.axis_ctx;
-        // Label backgrounds are bitmap-aligned geometry, matching LWC's bitmap-coordinate pass.
-        for label in &axis_frame.labels {
+
+        // Z-order matters: boxed labels (last value, price lines, crosshair) must fully cover any
+        // ordinary tick label they overlap, exactly like LWC where each axis view paints its
+        // background and text as one unit in view order. Painting all backgrounds first and all
+        // texts second lets tick glyphs bleed onto the boxes, so paint in two ordered layers:
+        // plain tick text first, then each boxed label's background + text.
+        self.draw_axis_label_texts(
+            axis_frame.labels.iter().filter(|l| l.background.is_none()),
+            dpr,
+        )?;
+        for label in axis_frame.labels.iter().filter(|l| l.background.is_some()) {
             if let Some((x, y, w, h, color)) = label.background {
+                // Backgrounds are bitmap-aligned geometry, matching LWC's bitmap-coordinate pass.
                 ctx.set_fill_style_str(&color.to_hex());
                 ctx.fill_rect(
                     (x * dpr).round(),
@@ -220,11 +230,20 @@ impl ChartInner {
                     (h * dpr).round(),
                 );
             }
+            self.draw_axis_label_texts(std::iter::once(label), dpr)?;
         }
+        Ok(())
+    }
 
-        // LWC draws glyphs in media-coordinate space: the context is scaled by DPR while the font
-        // remains 12 CSS px. Using an independently hinted 12*dpr bitmap font is observably
-        // different at fractional DPR even when every logical coordinate is identical.
+    /// Draws label glyphs in media-coordinate space: the context is scaled by DPR while the font
+    /// remains 12 CSS px. Using an independently hinted 12*dpr bitmap font is observably
+    /// different at fractional DPR even when every logical coordinate is identical.
+    fn draw_axis_label_texts<'l>(
+        &self,
+        labels: impl Iterator<Item = &'l AxisLabel>,
+        dpr: f64,
+    ) -> Result<(), JsValue> {
+        let ctx = &self.axis_ctx;
         ctx.save();
         if let Err(error) = ctx.scale(dpr, dpr) {
             ctx.restore();
@@ -232,7 +251,7 @@ impl ChartInner {
         }
         ctx.set_text_baseline("middle");
         let mut draw_result = Ok(());
-        for label in &axis_frame.labels {
+        for label in labels {
             ctx.set_font(&if label.bold {
                 format!("bold {FONT_SIZE}px {FONT_FAMILY}")
             } else {

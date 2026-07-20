@@ -38,8 +38,9 @@ use aion_core::model::plot_list::{MismatchDirection, PlotValueIndex};
 use aion_core::options::{crosshair_mode, ChartOptions};
 use aion_core::scale::price_scale_core::PriceScaleMode;
 use aion_engine::{
-    line_style_from_u8, marker_pos, marker_shape, AxisFrame, AxisTextAlign, AxisTextMidpoint,
-    ChartEngine, Marker, Pane, PriceLine, PriceScaleTarget, SeriesKind, TIME_AXIS_HEIGHT,
+    line_style_from_u8, marker_pos, marker_shape, AxisFrame, AxisLabel, AxisTextAlign,
+    AxisTextMidpoint, ChartEngine, Marker, Pane, PriceLine, PriceScaleTarget, SeriesKind,
+    TIME_AXIS_HEIGHT,
 };
 use aion_render::canvas2d::{execute as execute_canvas2d, Canvas2d, Viewport as CanvasViewport};
 use aion_render::color::Color;
