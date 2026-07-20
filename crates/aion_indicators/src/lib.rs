@@ -54,9 +54,23 @@ pub fn ema(values: &[f64], period: usize) -> Vec<Option<f64>> {
 /// Bollinger Bands using a simple moving-average center and population standard deviation.
 pub fn bollinger(values: &[f64], period: usize, deviation: f64) -> Vec<BollingerPoint> {
     if period == 0 {
-        return vec![BollingerPoint { middle: None, upper: None, lower: None }; values.len()];
+        return vec![
+            BollingerPoint {
+                middle: None,
+                upper: None,
+                lower: None
+            };
+            values.len()
+        ];
     }
-    let mut out = vec![BollingerPoint { middle: None, upper: None, lower: None }; values.len()];
+    let mut out = vec![
+        BollingerPoint {
+            middle: None,
+            upper: None,
+            lower: None
+        };
+        values.len()
+    ];
     let factor = deviation.max(0.0);
     for i in period.saturating_sub(1)..values.len() {
         let window = &values[i + 1 - period..=i];
@@ -78,12 +92,18 @@ mod tests {
 
     #[test]
     fn sma_has_a_warmup_window() {
-        assert_eq!(sma(&[1.0, 2.0, 3.0, 4.0], 3), vec![None, None, Some(2.0), Some(3.0)]);
+        assert_eq!(
+            sma(&[1.0, 2.0, 3.0, 4.0], 3),
+            vec![None, None, Some(2.0), Some(3.0)]
+        );
     }
 
     #[test]
     fn ema_uses_sma_seed() {
-        assert_eq!(ema(&[1.0, 2.0, 3.0, 5.0], 3), vec![None, None, Some(2.0), Some(3.5)]);
+        assert_eq!(
+            ema(&[1.0, 2.0, 3.0, 5.0], 3),
+            vec![None, None, Some(2.0), Some(3.5)]
+        );
     }
 
     #[test]

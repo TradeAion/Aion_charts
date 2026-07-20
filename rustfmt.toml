@@ -1,0 +1,2 @@
+# Stock rustfmt style (100-column default). Kept as an explicit marker that the
+# codebase is formatted with `cargo fmt` and checked in CI.

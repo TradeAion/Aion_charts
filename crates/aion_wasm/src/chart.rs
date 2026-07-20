@@ -247,6 +247,7 @@ fn set_backend_visibility(
 /// Sizes all three canvases to `(bw, bh)` device pixels while pinning their CSS box to the real
 /// displayed size, then resizes + repaints the engine. Shared by the initial bind and every
 /// observer callback.
+#[allow(clippy::too_many_arguments)] // three canvases + the full size/DPR tuple
 fn apply_device_size(
     inner: &Rc<RefCell<ChartInner>>,
     gpu_pane: &web_sys::HtmlCanvasElement,
@@ -276,6 +277,7 @@ fn apply_device_size(
 /// Creates a chart bound to dedicated WebGPU and Canvas2D pane canvases plus an axis/text overlay.
 /// All three must be full chart size with bitmap size = css size * dpr, already set by the caller.
 /// Call [`AionChart::enable_auto_resize`] to have the engine own sizing from then on.
+#[allow(clippy::too_many_arguments)] // public JS entry point: three canvases + size/DPR/backend
 #[wasm_bindgen]
 pub async fn create_chart(
     gpu_pane_canvas: web_sys::HtmlCanvasElement,
@@ -1059,7 +1061,6 @@ impl ChartInner {
             .update_series_bar(series_id as SeriesId, time, [open, high, low, close])
         {
             web_sys::console::warn_1(&"aion: update_bar dropped a non-finite point".into());
-            return;
         }
     }
 

@@ -198,11 +198,17 @@ mod tests {
         let mut m = InvalidateMask::light();
         m.invalidate_pane(
             0,
-            PaneInvalidation { level: InvalidationLevel::None, auto_scale: true },
+            PaneInvalidation {
+                level: InvalidationLevel::None,
+                auto_scale: true,
+            },
         );
         m.invalidate_pane(
             0,
-            PaneInvalidation { level: InvalidationLevel::Cursor, auto_scale: false },
+            PaneInvalidation {
+                level: InvalidationLevel::Cursor,
+                auto_scale: false,
+            },
         );
         let p = m.invalidate_for_pane(0);
         // global light dominates pane cursor level; autoscale flag is sticky
@@ -216,7 +222,10 @@ mod tests {
         m.set_bar_spacing(7.0);
         m.set_right_offset(3.0);
         m.set_fit_content();
-        assert_eq!(m.time_scale_invalidations(), &[TimeScaleInvalidation::FitContent]);
+        assert_eq!(
+            m.time_scale_invalidations(),
+            &[TimeScaleInvalidation::FitContent]
+        );
     }
 
     #[test]

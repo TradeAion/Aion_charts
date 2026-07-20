@@ -21,7 +21,7 @@ impl Color {
                 let mut out: u32 = 0;
                 for (i, c) in s.chars().enumerate() {
                     let n = c.to_digit(16)?;
-                    let byte = (n * 17) as u32; // 0xN -> 0xNN
+                    let byte = n * 17; // 0xN -> 0xNN
                     out |= byte << (8 * (3 - i));
                 }
                 if s.len() == 3 {
@@ -47,7 +47,9 @@ impl Color {
             return Self::from_hex(s);
         }
         let lower = s.to_ascii_lowercase();
-        let inner = lower.strip_prefix("rgba(").or_else(|| lower.strip_prefix("rgb("))?;
+        let inner = lower
+            .strip_prefix("rgba(")
+            .or_else(|| lower.strip_prefix("rgb("))?;
         let inner = inner.strip_suffix(')')?;
         let mut parts = inner.split(',').map(str::trim);
         let r: f64 = parts.next()?.parse().ok()?;
@@ -61,7 +63,12 @@ impl Color {
             return None; // too many components
         }
         let clamp8 = |v: f64| v.round().clamp(0.0, 255.0) as u8;
-        Some(Color::rgba(clamp8(r), clamp8(g), clamp8(b), clamp8(a * 255.0)))
+        Some(Color::rgba(
+            clamp8(r),
+            clamp8(g),
+            clamp8(b),
+            clamp8(a * 255.0),
+        ))
     }
 
     pub const fn r(&self) -> u8 {
@@ -104,8 +111,14 @@ mod tests {
 
     #[test]
     fn hex_parsing() {
-        assert_eq!(Color::from_hex("#26a69a"), Some(Color::rgb(0x26, 0xa6, 0x9a)));
-        assert_eq!(Color::from_hex("#26a69a80"), Some(Color::rgba(0x26, 0xa6, 0x9a, 0x80)));
+        assert_eq!(
+            Color::from_hex("#26a69a"),
+            Some(Color::rgb(0x26, 0xa6, 0x9a))
+        );
+        assert_eq!(
+            Color::from_hex("#26a69a80"),
+            Some(Color::rgba(0x26, 0xa6, 0x9a, 0x80))
+        );
         assert_eq!(Color::from_hex("oops"), None);
     }
 
@@ -114,17 +127,32 @@ mod tests {
         assert_eq!(Color::from_hex("#abc"), Some(Color::rgb(0xaa, 0xbb, 0xcc)));
         assert_eq!(Color::from_hex("#f00"), Some(Color::rgb(0xff, 0x00, 0x00)));
         // #RGBA -> alpha nibble doubled
-        assert_eq!(Color::from_hex("#0f08"), Some(Color::rgba(0x00, 0xff, 0x00, 0x88)));
+        assert_eq!(
+            Color::from_hex("#0f08"),
+            Some(Color::rgba(0x00, 0xff, 0x00, 0x88))
+        );
     }
 
     #[test]
     fn css_functional_parsing() {
-        assert_eq!(Color::parse_css("rgb(38, 166, 154)"), Some(Color::rgb(0x26, 0xa6, 0x9a)));
-        assert_eq!(Color::parse_css("rgba(38,166,154,1)"), Some(Color::rgb(0x26, 0xa6, 0x9a)));
+        assert_eq!(
+            Color::parse_css("rgb(38, 166, 154)"),
+            Some(Color::rgb(0x26, 0xa6, 0x9a))
+        );
+        assert_eq!(
+            Color::parse_css("rgba(38,166,154,1)"),
+            Some(Color::rgb(0x26, 0xa6, 0x9a))
+        );
         // half alpha rounds to 128
-        assert_eq!(Color::parse_css("rgba(0, 0, 0, 0.5)"), Some(Color::rgba(0, 0, 0, 128)));
+        assert_eq!(
+            Color::parse_css("rgba(0, 0, 0, 0.5)"),
+            Some(Color::rgba(0, 0, 0, 128))
+        );
         // hex still works through parse_css
-        assert_eq!(Color::parse_css("  #FFFFFF "), Some(Color::rgb(0xff, 0xff, 0xff)));
+        assert_eq!(
+            Color::parse_css("  #FFFFFF "),
+            Some(Color::rgb(0xff, 0xff, 0xff))
+        );
         // unsupported forms
         assert_eq!(Color::parse_css("red"), None);
         assert_eq!(Color::parse_css("rgb(1,2)"), None);
@@ -134,8 +162,14 @@ mod tests {
     #[test]
     fn contrast_and_hex() {
         // dark teal -> white text; light gray -> black text
-        assert_eq!(Color::rgb(0x26, 0xa6, 0x9a).contrast_text(), Color::rgb(0xFF, 0xFF, 0xFF));
-        assert_eq!(Color::rgb(0xe0, 0xe3, 0xeb).contrast_text(), Color::rgb(0, 0, 0));
+        assert_eq!(
+            Color::rgb(0x26, 0xa6, 0x9a).contrast_text(),
+            Color::rgb(0xFF, 0xFF, 0xFF)
+        );
+        assert_eq!(
+            Color::rgb(0xe0, 0xe3, 0xeb).contrast_text(),
+            Color::rgb(0, 0, 0)
+        );
         assert_eq!(Color::rgb(0x26, 0xa6, 0x9a).to_hex(), "#26a69a");
     }
 }

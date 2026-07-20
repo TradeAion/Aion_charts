@@ -92,7 +92,11 @@ pub fn fill_weights_for_points(times: &[i64], weights: &mut [u8], start_index: u
         return;
     }
 
-    let mut prev_time: Option<i64> = if start_index == 0 { None } else { Some(times[start_index - 1]) };
+    let mut prev_time: Option<i64> = if start_index == 0 {
+        None
+    } else {
+        Some(times[start_index - 1])
+    };
     let mut total_time_diff: i64 = 0;
 
     for index in start_index..times.len() {
@@ -139,7 +143,10 @@ impl TimeTickMarks {
         self.marks_by_weight.clear();
         self.cache = None;
         for (index, &weight) in weights.iter().enumerate() {
-            self.marks_by_weight.entry(weight).or_default().push(index as TimePointIndex);
+            self.marks_by_weight
+                .entry(weight)
+                .or_default()
+                .push(index as TimePointIndex);
         }
     }
 
@@ -147,7 +154,10 @@ impl TimeTickMarks {
     pub fn append_weights(&mut self, start_index: usize, weights: &[u8]) {
         self.cache = None;
         for (offset, &weight) in weights.iter().enumerate().skip(start_index) {
-            self.marks_by_weight.entry(weight).or_default().push(offset as TimePointIndex);
+            self.marks_by_weight
+                .entry(weight)
+                .or_default()
+                .push(offset as TimePointIndex);
         }
     }
 
@@ -155,7 +165,11 @@ impl TimeTickMarks {
     /// (`(font_size + 4) * 5 / 8 * max_label_chars`), `spacing` the current bar spacing.
     pub fn build(&mut self, spacing: f64, max_width: f64) -> &[TickMark] {
         let max_indexes_per_mark = (max_width / spacing).ceil() as i64;
-        if self.cache.as_ref().is_none_or(|(cached, _)| *cached != max_indexes_per_mark) {
+        if self
+            .cache
+            .as_ref()
+            .is_none_or(|(cached, _)| *cached != max_indexes_per_mark)
+        {
             let marks = self.build_impl(max_indexes_per_mark);
             self.cache = Some((max_indexes_per_mark, marks));
         }
@@ -196,7 +210,10 @@ impl TimeTickMarks {
                 if right_index.saturating_sub(current_index) >= max_indexes_per_mark
                     && current_index.saturating_sub(left_index) >= max_indexes_per_mark
                 {
-                    marks.push(TickMark { index: current_index, weight });
+                    marks.push(TickMark {
+                        index: current_index,
+                        weight,
+                    });
                     left_index = current_index;
                 }
             }
@@ -240,11 +257,20 @@ mod tests {
         let jan15 = 1_579_046_400; // 2020-01-15
         assert_eq!(weight_by_time(jan15, jan15 - day), TickMarkWeight::Day);
         // intraday: crossing 12h boundary
-        assert_eq!(weight_by_time(jan15 + 43_200, jan15 + 43_100), TickMarkWeight::Hour12);
+        assert_eq!(
+            weight_by_time(jan15 + 43_200, jan15 + 43_100),
+            TickMarkWeight::Hour12
+        );
         // crossing 1h but not 3h
-        assert_eq!(weight_by_time(jan15 + 3600, jan15 + 3599), TickMarkWeight::Hour1);
+        assert_eq!(
+            weight_by_time(jan15 + 3600, jan15 + 3599),
+            TickMarkWeight::Hour1
+        );
         // crossing 1min but not 5min
-        assert_eq!(weight_by_time(jan15 + 60, jan15 + 59), TickMarkWeight::Minute1);
+        assert_eq!(
+            weight_by_time(jan15 + 60, jan15 + 59),
+            TickMarkWeight::Minute1
+        );
         // same second
         assert_eq!(weight_by_time(jan15, jan15), TickMarkWeight::LessThanSecond);
     }
@@ -279,7 +305,10 @@ mod tests {
         let marks = tm.build(40.0, 80.0).to_vec();
         assert!(!marks.is_empty());
         // all month marks must be present
-        let month_count = marks.iter().filter(|m| m.weight == TickMarkWeight::Month as u8).count();
+        let month_count = marks
+            .iter()
+            .filter(|m| m.weight == TickMarkWeight::Month as u8)
+            .count();
         assert_eq!(month_count, 10);
         // result sorted by index
         assert!(marks.windows(2).all(|w| w[0].index < w[1].index));
@@ -293,7 +322,9 @@ mod tests {
 
         // tight space: only high-weight marks survive
         let tight = tm.build(4.0, 80.0).to_vec(); // max_indexes_per_mark = 20
-        assert!(tight.iter().all(|m| m.weight == TickMarkWeight::Month as u8));
+        assert!(tight
+            .iter()
+            .all(|m| m.weight == TickMarkWeight::Month as u8));
         // and they respect the 20-index spacing (every other month mark dropped)
         assert!(tight.windows(2).all(|w| w[1].index - w[0].index >= 20));
     }

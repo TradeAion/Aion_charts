@@ -2,9 +2,7 @@
 //! (data-source management and formatter selection live at a higher layer).
 
 use crate::model::price_range::PriceRange;
-use crate::scale::log_formula::{
-    self, LogFormula, DEF_LOG_FORMULA,
-};
+use crate::scale::log_formula::{self, LogFormula, DEF_LOG_FORMULA};
 use crate::scale::price_tick_span_calculator::composite_tick_span;
 use crate::Coordinate;
 
@@ -41,7 +39,10 @@ impl Default for PriceScaleCoreOptions {
             mode: PriceScaleMode::Normal,
             invert_scale: false,
             auto_scale: true,
-            scale_margins: PriceScaleMargins { top: 0.2, bottom: 0.1 },
+            scale_margins: PriceScaleMargins {
+                top: 0.2,
+                bottom: 0.1,
+            },
             tick_mark_density: 2.5,
             font_size: 12.0,
         }
@@ -104,9 +105,9 @@ impl PriceScaleCore {
         }
         let raw_range = match (old, self.price_range) {
             (_, None) => None,
-            (PriceScaleMode::Logarithmic, Some(range)) => {
-                Some(log_formula::convert_price_range_from_log(&range, &self.log_formula))
-            }
+            (PriceScaleMode::Logarithmic, Some(range)) => Some(
+                log_formula::convert_price_range_from_log(&range, &self.log_formula),
+            ),
             (PriceScaleMode::Normal, Some(range)) => Some(range),
             // Percentage/indexed ranges cannot be reversed without the source's base value.
             _ => None,
@@ -178,7 +179,7 @@ impl PriceScaleCore {
         Some(if self.is_log() {
             let raw = log_formula::convert_price_range_from_log(&range, &self.log_formula);
             let precision = if self.min_move > 0.0 {
-                (-self.min_move.log10()).ceil().max(0.0).min(15.0) as i32
+                (-self.min_move.log10()).ceil().clamp(0.0, 15.0) as i32
             } else {
                 0
             };
@@ -270,11 +271,7 @@ impl PriceScaleCore {
 
     /// Convert a raw source range to this scale's logical coordinate domain using the source's
     /// first visible value. Returns `None` when the mode/base cannot produce finite coordinates.
-    pub fn price_range_to_logical(
-        &self,
-        raw: &PriceRange,
-        base_value: f64,
-    ) -> Option<PriceRange> {
+    pub fn price_range_to_logical(&self, raw: &PriceRange, base_value: f64) -> Option<PriceRange> {
         let a = self.price_to_logical(raw.min_value(), base_value);
         let b = self.price_to_logical(raw.max_value(), base_value);
         if !a.is_finite() || !b.is_finite() {
@@ -314,7 +311,9 @@ impl PriceScaleCore {
             logical
         };
 
-        let Some(range) = self.price_range.as_ref() else { return 0.0 };
+        let Some(range) = self.price_range.as_ref() else {
+            return 0.0;
+        };
         let inv_coordinate = self.bottom_margin_px()
             + (self.internal_height() - 1.0) * (logical - range.min_value()) / range.length();
         self.inverted_coordinate(inv_coordinate)
@@ -326,7 +325,9 @@ impl PriceScaleCore {
         }
 
         let inv_coordinate = self.inverted_coordinate(coordinate);
-        let Some(range) = self.price_range.as_ref() else { return 0.0 };
+        let Some(range) = self.price_range.as_ref() else {
+            return 0.0;
+        };
         let logical = range.min_value()
             + range.length()
                 * ((inv_coordinate - self.bottom_margin_px()) / (self.internal_height() - 1.0));
@@ -373,7 +374,9 @@ impl PriceScaleCore {
             return;
         }
         let bh = self.bottom_margin_px();
-        let Some(range) = self.price_range.as_ref() else { return };
+        let Some(range) = self.price_range.as_ref() else {
+            return;
+        };
         let min = range.min_value();
         let max = range.max_value();
         let ih = self.internal_height() - 1.0;
@@ -421,7 +424,9 @@ impl PriceScaleCore {
         if self.is_percentage() || self.is_indexed_to_100() {
             return;
         }
-        let Some(scale_start_point) = self.scale_start_point else { return };
+        let Some(scale_start_point) = self.scale_start_point else {
+            return;
+        };
 
         self.options.auto_scale = false;
 
@@ -430,7 +435,9 @@ impl PriceScaleCore {
         let mut scale_coeff =
             (scale_start_point + (self.height - 1.0) * 0.2) / (x + (self.height - 1.0) * 0.2);
         // Set together with `scale_start_point` in `start_scale`; bail if the pair desynced.
-        let Some(mut new_price_range) = self.price_range_snapshot else { return };
+        let Some(mut new_price_range) = self.price_range_snapshot else {
+            return;
+        };
 
         scale_coeff = scale_coeff.max(0.1);
         new_price_range.scale_around_center(scale_coeff);
@@ -465,7 +472,9 @@ impl PriceScaleCore {
         if self.is_auto_scale() {
             return;
         }
-        let Some(scroll_start_point) = self.scroll_start_point else { return };
+        let Some(scroll_start_point) = self.scroll_start_point else {
+            return;
+        };
 
         // Both are set alongside `scroll_start_point` in `start_scroll`; bail if desynced.
         let (Some(price_range), Some(mut new_price_range)) =
@@ -516,19 +525,22 @@ impl PriceScaleCore {
             // degenerate range: extend by 5 min-move values on each side (in raw space)
             let extend_value = 5.0 * min_move;
             if self.is_log() {
-                price_range = log_formula::convert_price_range_from_log(&price_range, &self.log_formula);
+                price_range =
+                    log_formula::convert_price_range_from_log(&price_range, &self.log_formula);
             }
             price_range = PriceRange::new(
                 price_range.min_value() - extend_value,
                 price_range.max_value() + extend_value,
             );
             if self.is_log() {
-                price_range = log_formula::convert_price_range_to_log(&price_range, &self.log_formula);
+                price_range =
+                    log_formula::convert_price_range_to_log(&price_range, &self.log_formula);
             }
         }
 
         if self.is_log() {
-            let raw_range = log_formula::convert_price_range_from_log(&price_range, &self.log_formula);
+            let raw_range =
+                log_formula::convert_price_range_from_log(&price_range, &self.log_formula);
             let new_formula = log_formula::log_formula_for_price_range(Some(&raw_range));
             if !log_formula::log_formulas_are_same(&new_formula, &self.log_formula) {
                 let raw_snapshot = self
@@ -589,14 +601,21 @@ impl PriceScaleCore {
             let coord = self.logical_to_coordinate_raw(logical);
 
             // skip marks that don't fit (required for log scale)
-            let fits = prev_coord.is_none_or(|prev| (coord - prev).abs() >= self.tick_mark_height());
+            let fits =
+                prev_coord.is_none_or(|prev| (coord - prev).abs() >= self.tick_mark_height());
             let visible = coord >= min_coord && coord <= max_coord;
 
             if fits && visible {
                 marks.push(PriceMark { coord, logical });
                 prev_coord = Some(coord);
                 if self.is_log() {
-                    span = composite_tick_span(logical * sign, low, base, scale_height, self.tick_mark_height());
+                    span = composite_tick_span(
+                        logical * sign,
+                        low,
+                        base,
+                        scale_height,
+                        self.tick_mark_height(),
+                    );
                 }
             }
 
@@ -613,7 +632,9 @@ impl PriceScaleCore {
             return 0.0;
         }
         let inv_coordinate = self.inverted_coordinate(coordinate);
-        let Some(range) = self.price_range.as_ref() else { return 0.0 };
+        let Some(range) = self.price_range.as_ref() else {
+            return 0.0;
+        };
         // LWC's builder converters go through _coordinateToLogical which applies fromLog;
         // rebuildTickMarks then walks in *price* space for log scales.
         let logical = range.min_value()
@@ -714,7 +735,7 @@ mod tests {
         s.set_auto_scale(false);
         s.start_scale(150.0); // start point (inverted): 50
         s.scale_to(100.0); // x' = 100
-        // coeff = (50 + 199*0.2) / (100 + 199*0.2) = 89.8 / 139.8
+                           // coeff = (50 + 199*0.2) / (100 + 199*0.2) = 89.8 / 139.8
         let coeff: f64 = 89.8 / 139.8;
         let r = s.price_range().unwrap();
         let expected_half = 50.0 * coeff;

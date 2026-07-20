@@ -40,7 +40,11 @@ impl LabelAtlas {
     pub fn new(device: &wgpu::Device) -> Self {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("label_atlas"),
-            size: wgpu::Extent3d { width: ATLAS_SIZE, height: ATLAS_SIZE, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: ATLAS_SIZE,
+                height: ATLAS_SIZE,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -49,7 +53,14 @@ impl LabelAtlas {
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        Self { texture, view, cursor_x: 0, cursor_y: 0, shelf_h: 0, entries: HashMap::new() }
+        Self {
+            texture,
+            view,
+            cursor_x: 0,
+            cursor_y: 0,
+            shelf_h: 0,
+            entries: HashMap::new(),
+        }
     }
 
     pub fn view(&self) -> &wgpu::TextureView {
@@ -71,7 +82,10 @@ impl LabelAtlas {
         pixels: &[u8],
     ) -> AtlasSlot {
         debug_assert_eq!(pixels.len(), (w * h * 4) as usize);
-        assert!(w <= ATLAS_SIZE && h <= ATLAS_SIZE, "label larger than atlas");
+        assert!(
+            w <= ATLAS_SIZE && h <= ATLAS_SIZE,
+            "label larger than atlas"
+        );
 
         if self.cursor_x + w > ATLAS_SIZE {
             // new shelf
@@ -87,7 +101,12 @@ impl LabelAtlas {
             self.shelf_h = 0;
         }
 
-        let slot = AtlasSlot { x: self.cursor_x, y: self.cursor_y, w, h };
+        let slot = AtlasSlot {
+            x: self.cursor_x,
+            y: self.cursor_y,
+            w,
+            h,
+        };
         self.cursor_x += w;
         self.shelf_h = self.shelf_h.max(h);
 
@@ -95,7 +114,11 @@ impl LabelAtlas {
             wgpu::TexelCopyTextureInfo {
                 texture: &self.texture,
                 mip_level: 0,
-                origin: wgpu::Origin3d { x: slot.x, y: slot.y, z: 0 },
+                origin: wgpu::Origin3d {
+                    x: slot.x,
+                    y: slot.y,
+                    z: 0,
+                },
                 aspect: wgpu::TextureAspect::All,
             },
             pixels,
@@ -104,7 +127,11 @@ impl LabelAtlas {
                 bytes_per_row: Some(w * 4),
                 rows_per_image: Some(h),
             },
-            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
         );
 
         self.entries.insert(key, slot);

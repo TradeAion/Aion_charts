@@ -5,8 +5,9 @@
 
 use crate::scale::time_tick_marks::{civil_from_timestamp, TickMarkWeight};
 
-const MONTHS_SHORT: [&str; 12] =
-    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTHS_SHORT: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
 
 /// Port of `TickMarkType`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,7 +20,11 @@ pub enum TickMarkType {
 }
 
 /// Port of `weightToTickMarkType` (`horz-scale-behavior-time.ts`).
-pub fn weight_to_tick_mark_type(weight: u8, time_visible: bool, seconds_visible: bool) -> TickMarkType {
+pub fn weight_to_tick_mark_type(
+    weight: u8,
+    time_visible: bool,
+    seconds_visible: bool,
+) -> TickMarkType {
     let w = weight;
     if w <= TickMarkWeight::Second as u8 {
         if time_visible {
@@ -33,7 +38,11 @@ pub fn weight_to_tick_mark_type(weight: u8, time_visible: bool, seconds_visible:
         }
     } else if w < TickMarkWeight::Day as u8 {
         // minutes and hours
-        if time_visible { TickMarkType::Time } else { TickMarkType::DayOfMonth }
+        if time_visible {
+            TickMarkType::Time
+        } else {
+            TickMarkType::DayOfMonth
+        }
     } else if w < TickMarkWeight::Month as u8 {
         TickMarkType::DayOfMonth
     } else if w < TickMarkWeight::Year as u8 {
@@ -45,7 +54,11 @@ pub fn weight_to_tick_mark_type(weight: u8, time_visible: bool, seconds_visible:
 
 fn hms(ts: i64) -> (i64, i64, i64) {
     let secs_of_day = ts.rem_euclid(86_400);
-    (secs_of_day / 3600, (secs_of_day % 3600) / 60, secs_of_day % 60)
+    (
+        secs_of_day / 3600,
+        (secs_of_day % 3600) / 60,
+        secs_of_day % 60,
+    )
 }
 
 /// Tick label for a UTC timestamp — matches `defaultTickMarkFormatter` output for en-US.
@@ -70,7 +83,11 @@ pub fn format_tick_label(ts: i64, mark_type: TickMarkType) -> String {
 /// time is visible (`DateTimeFormatter` joins them with spaces).
 pub fn format_crosshair_time(ts: i64, time_visible: bool, seconds_visible: bool) -> String {
     let (year, month, day) = civil_from_timestamp(ts);
-    let date = format!("{day:02} {} '{:02}", MONTHS_SHORT[(month - 1) as usize], year.rem_euclid(100));
+    let date = format!(
+        "{day:02} {} '{:02}",
+        MONTHS_SHORT[(month - 1) as usize],
+        year.rem_euclid(100)
+    );
     if !time_visible {
         return date;
     }
@@ -95,7 +112,10 @@ mod tests {
         assert_eq!(format_tick_label(TS, TickMarkType::Month), "Jun");
         assert_eq!(format_tick_label(TS, TickMarkType::DayOfMonth), "25");
         assert_eq!(format_tick_label(TS, TickMarkType::Time), "14:30");
-        assert_eq!(format_tick_label(TS, TickMarkType::TimeWithSeconds), "14:30:45");
+        assert_eq!(
+            format_tick_label(TS, TickMarkType::TimeWithSeconds),
+            "14:30:45"
+        );
     }
 
     #[test]
@@ -131,6 +151,9 @@ mod tests {
     fn crosshair_format() {
         assert_eq!(format_crosshair_time(TS, false, false), "25 Jun '18");
         assert_eq!(format_crosshair_time(TS, true, false), "25 Jun '18   14:30");
-        assert_eq!(format_crosshair_time(TS, true, true), "25 Jun '18   14:30:45");
+        assert_eq!(
+            format_crosshair_time(TS, true, true),
+            "25 Jun '18   14:30:45"
+        );
     }
 }

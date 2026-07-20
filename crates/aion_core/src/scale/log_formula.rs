@@ -21,7 +21,11 @@ pub fn from_percent(value: f64, base_value: f64) -> f64 {
 
 pub fn to_percent(value: f64, base_value: f64) -> f64 {
     let result = 100.0 * (value - base_value) / base_value;
-    if base_value < 0.0 { -result } else { result }
+    if base_value < 0.0 {
+        -result
+    } else {
+        result
+    }
 }
 
 pub fn to_percent_range(range: &PriceRange, base_value: f64) -> PriceRange {
@@ -41,7 +45,11 @@ pub fn from_indexed_to_100(value: f64, base_value: f64) -> f64 {
 
 pub fn to_indexed_to_100(value: f64, base_value: f64) -> f64 {
     let result = 100.0 * (value - base_value) / base_value + 100.0;
-    if base_value < 0.0 { -result } else { result }
+    if base_value < 0.0 {
+        -result
+    } else {
+        result
+    }
 }
 
 pub fn to_indexed_to_100_range(range: &PriceRange, base_value: f64) -> PriceRange {
@@ -58,7 +66,11 @@ pub fn to_log(price: f64, formula: &LogFormula) -> f64 {
     }
 
     let res = (m + formula.coord_offset).log10() + formula.logical_offset as f64;
-    if price < 0.0 { -res } else { res }
+    if price < 0.0 {
+        -res
+    } else {
+        res
+    }
 }
 
 pub fn from_log(logical: f64, formula: &LogFormula) -> f64 {
@@ -68,7 +80,11 @@ pub fn from_log(logical: f64, formula: &LogFormula) -> f64 {
     }
 
     let res = 10f64.powf(m - formula.logical_offset as f64) - formula.coord_offset;
-    if logical < 0.0 { -res } else { res }
+    if logical < 0.0 {
+        -res
+    } else {
+        res
+    }
 }
 
 pub fn convert_price_range_to_log(range: &PriceRange, formula: &LogFormula) -> PriceRange {
@@ -107,7 +123,10 @@ pub fn log_formula_for_price_range(range: Option<&PriceRange>) -> LogFormula {
     let logical_offset = DEF_LOG_FORMULA.logical_offset + digits;
     let coord_offset = 1.0 / 10f64.powi(logical_offset);
 
-    LogFormula { logical_offset, coord_offset }
+    LogFormula {
+        logical_offset,
+        coord_offset,
+    }
 }
 
 pub fn log_formulas_are_same(f1: &LogFormula, f2: &LogFormula) -> bool {

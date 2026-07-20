@@ -17,6 +17,15 @@ license = "MIT"
 authors = ["Aion Charts"]
 repository = ""
 
+# Shared lint policy; every crate opts in via `[lints] workspace = true`.
+# CI enforces clippy with `-D warnings` on top of this.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+
 [profile.release]
 opt-level = 3
 lto = "thin"

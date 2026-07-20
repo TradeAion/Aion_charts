@@ -6,8 +6,8 @@
 
 pub mod bar_width;
 pub mod bars;
-pub mod canvas2d;
 pub mod candles;
+pub mod canvas2d;
 pub mod color;
 pub mod draw_list;
 pub mod histogram;

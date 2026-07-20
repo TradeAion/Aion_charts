@@ -97,10 +97,34 @@ fn fill_irect(target: &mut impl Canvas2d, rect: IRect) {
 /// Port of `fillRectInnerBorder` — four edge rects (same order as the wgpu executor).
 fn fill_rect_frame(target: &mut impl Canvas2d, rect: IRect, border: i32) {
     let IRect { x, y, w, h } = rect;
-    fill_irect(target, IRect { x: x + border, y, w: w - border * 2, h: border });
-    fill_irect(target, IRect { x: x + border, y: y + h - border, w: w - border * 2, h: border });
+    fill_irect(
+        target,
+        IRect {
+            x: x + border,
+            y,
+            w: w - border * 2,
+            h: border,
+        },
+    );
+    fill_irect(
+        target,
+        IRect {
+            x: x + border,
+            y: y + h - border,
+            w: w - border * 2,
+            h: border,
+        },
+    );
     fill_irect(target, IRect { x, y, w: border, h });
-    fill_irect(target, IRect { x: x + w - border, y, w: border, h });
+    fill_irect(
+        target,
+        IRect {
+            x: x + w - border,
+            y,
+            w: border,
+            h,
+        },
+    );
 }
 
 /// Trace `points` as a path (`move_to` then `line_to`), applying the `line_type` expansion.
@@ -122,39 +146,88 @@ fn pool_slice(points: &[[f32; 2]], first: u32, count: u32) -> Vec<LinePoint> {
         .get(a..b)
         .unwrap_or(&[])
         .iter()
-        .map(|p| LinePoint { x: p[0] as f64, y: p[1] as f64 })
+        .map(|p| LinePoint {
+            x: p[0] as f64,
+            y: p[1] as f64,
+        })
         .collect()
 }
 
 /// Execute one layer of prims against a 2D target. `points` is the layer's shared point pool
 /// (referenced by `Polyline`/`AreaFill`). `Text` is skipped — text is drawn by the native/2D text
 /// path, not this executor (the IR slot only reserves layer ordering).
-pub fn execute(prims: &[Prim], points: &[[f32; 2]], target: &mut impl Canvas2d, viewport: Viewport) {
+pub fn execute(
+    prims: &[Prim],
+    points: &[[f32; 2]],
+    target: &mut impl Canvas2d,
+    viewport: Viewport,
+) {
     for prim in prims {
         match prim {
             Prim::Rect { rect, color } => {
                 target.set_fill_solid(*color);
                 fill_irect(target, *rect);
             }
-            Prim::RectFrame { rect, border, color } => {
+            Prim::RectFrame {
+                rect,
+                border,
+                color,
+            } => {
                 target.set_fill_solid(*color);
                 fill_rect_frame(target, *rect, *border);
             }
-            Prim::HLine { y, x0, x1, width, style, color } => {
+            Prim::HLine {
+                y,
+                x0,
+                x1,
+                width,
+                style,
+                color,
+            } => {
                 target.set_fill_solid(*color);
                 let top = y - width / 2;
                 dash_segments(*style, *width, *x0, *x1, |a, b| {
-                    fill_irect(target, IRect { x: a, y: top, w: b - a, h: *width });
+                    fill_irect(
+                        target,
+                        IRect {
+                            x: a,
+                            y: top,
+                            w: b - a,
+                            h: *width,
+                        },
+                    );
                 });
             }
-            Prim::VLine { x, y0, y1, width, style, color } => {
+            Prim::VLine {
+                x,
+                y0,
+                y1,
+                width,
+                style,
+                color,
+            } => {
                 target.set_fill_solid(*color);
                 let left = x - width / 2;
                 dash_segments(*style, *width, *y0, *y1, |a, b| {
-                    fill_irect(target, IRect { x: left, y: a, w: *width, h: b - a });
+                    fill_irect(
+                        target,
+                        IRect {
+                            x: left,
+                            y: a,
+                            w: *width,
+                            h: b - a,
+                        },
+                    );
                 });
             }
-            Prim::Polyline { first_point, point_count, width, style, line_type, color } => {
+            Prim::Polyline {
+                first_point,
+                point_count,
+                width,
+                style,
+                line_type,
+                color,
+            } => {
                 let pts = pool_slice(points, *first_point, *point_count);
                 if pts.len() < 2 {
                     continue;
@@ -167,7 +240,13 @@ pub fn execute(prims: &[Prim], points: &[[f32; 2]], target: &mut impl Canvas2d, 
                 target.stroke();
                 target.set_line_dash(&[]);
             }
-            Prim::AreaFill { first_point, point_count, base_y, line_type, gradient } => {
+            Prim::AreaFill {
+                first_point,
+                point_count,
+                base_y,
+                line_type,
+                gradient,
+            } => {
                 let pts = pool_slice(points, *first_point, *point_count);
                 if pts.len() < 2 {
                     continue;
@@ -182,7 +261,14 @@ pub fn execute(prims: &[Prim], points: &[[f32; 2]], target: &mut impl Canvas2d, 
                 target.close_path();
                 target.fill();
             }
-            Prim::Circle { cx, cy, radius, fill, stroke_width, stroke } => {
+            Prim::Circle {
+                cx,
+                cy,
+                radius,
+                fill,
+                stroke_width,
+                stroke,
+            } => {
                 target.set_fill_solid(*fill);
                 target.begin_path();
                 target.arc(*cx, *cy, *radius, 0.0, std::f32::consts::TAU);
@@ -202,7 +288,16 @@ pub fn execute(prims: &[Prim], points: &[[f32; 2]], target: &mut impl Canvas2d, 
                 target.close_path();
                 target.fill();
             }
-            Prim::RoundRect { x, y, w, h, radii, fill, border_width, border_color } => {
+            Prim::RoundRect {
+                x,
+                y,
+                w,
+                h,
+                radii,
+                fill,
+                border_width,
+                border_color,
+            } => {
                 round_rect_path(target, *x, *y, *w, *h, *radii);
                 target.set_fill_solid(*fill);
                 target.fill();
@@ -269,7 +364,8 @@ mod tests {
             self.ops.push(format!("fill_solid {}", hx(c)));
         }
         fn set_fill_vgradient(&mut self, y0: f32, y1: f32, t: Color, b: Color) {
-            self.ops.push(format!("fill_grad {y0} {y1} {} {}", hx(t), hx(b)));
+            self.ops
+                .push(format!("fill_grad {y0} {y1} {} {}", hx(t), hx(b)));
         }
         fn set_stroke(&mut self, c: Color) {
             self.ops.push(format!("stroke_color {}", hx(c)));
@@ -308,25 +404,73 @@ mod tests {
 
     fn run(prims: &[Prim], points: &[[f32; 2]]) -> Vec<String> {
         let mut r = Recorder::default();
-        execute(prims, points, &mut r, Viewport { width: 200.0, height: 100.0 });
+        execute(
+            prims,
+            points,
+            &mut r,
+            Viewport {
+                width: 200.0,
+                height: 100.0,
+            },
+        );
         r.ops
     }
 
     #[test]
     fn rect_sets_color_then_fills() {
-        let ops = run(&[Prim::Rect { rect: IRect { x: 3, y: 4, w: 10, h: 6 }, color: C }], &[]);
-        assert_eq!(ops, vec!["fill_solid 102030ff".to_string(), "fill_rect 3 4 10 6".into()]);
+        let ops = run(
+            &[Prim::Rect {
+                rect: IRect {
+                    x: 3,
+                    y: 4,
+                    w: 10,
+                    h: 6,
+                },
+                color: C,
+            }],
+            &[],
+        );
+        assert_eq!(
+            ops,
+            vec![
+                "fill_solid 102030ff".to_string(),
+                "fill_rect 3 4 10 6".into()
+            ]
+        );
     }
 
     #[test]
     fn degenerate_rect_dropped_but_color_still_set() {
-        let ops = run(&[Prim::Rect { rect: IRect { x: 0, y: 0, w: 0, h: 6 }, color: C }], &[]);
+        let ops = run(
+            &[Prim::Rect {
+                rect: IRect {
+                    x: 0,
+                    y: 0,
+                    w: 0,
+                    h: 6,
+                },
+                color: C,
+            }],
+            &[],
+        );
         assert_eq!(ops, vec!["fill_solid 102030ff".to_string()]);
     }
 
     #[test]
     fn rect_frame_expands_to_four_edges() {
-        let ops = run(&[Prim::RectFrame { rect: IRect { x: 10, y: 20, w: 8, h: 6 }, border: 1, color: C }], &[]);
+        let ops = run(
+            &[Prim::RectFrame {
+                rect: IRect {
+                    x: 10,
+                    y: 20,
+                    w: 8,
+                    h: 6,
+                },
+                border: 1,
+                color: C,
+            }],
+            &[],
+        );
         assert_eq!(
             ops,
             vec![
@@ -342,14 +486,40 @@ mod tests {
     #[test]
     fn hline_centers_odd_width_and_fills_span() {
         // width 1 centered on y=50 -> top = 50 - 0 = 50
-        let ops = run(&[Prim::HLine { y: 50, x0: 10, x1: 40, width: 1, style: LineStyle::Solid, color: C }], &[]);
-        assert_eq!(ops, vec!["fill_solid 102030ff".to_string(), "fill_rect 10 50 30 1".into()]);
+        let ops = run(
+            &[Prim::HLine {
+                y: 50,
+                x0: 10,
+                x1: 40,
+                width: 1,
+                style: LineStyle::Solid,
+                color: C,
+            }],
+            &[],
+        );
+        assert_eq!(
+            ops,
+            vec![
+                "fill_solid 102030ff".to_string(),
+                "fill_rect 10 50 30 1".into()
+            ]
+        );
     }
 
     #[test]
     fn large_dashed_vline_emits_on_segments_only() {
         // pattern 6-on/6-off over [0,24): segments [0,6) and [12,18)
-        let ops = run(&[Prim::VLine { x: 5, y0: 0, y1: 24, width: 1, style: LineStyle::LargeDashed, color: C }], &[]);
+        let ops = run(
+            &[Prim::VLine {
+                x: 5,
+                y0: 0,
+                y1: 24,
+                width: 1,
+                style: LineStyle::LargeDashed,
+                color: C,
+            }],
+            &[],
+        );
         assert_eq!(
             ops,
             vec![
@@ -393,9 +563,18 @@ mod tests {
     #[test]
     fn area_fill_closes_down_to_base_with_gradient() {
         let points = [[0.0f32, 10.0], [20.0, 4.0]];
-        let g = Gradient { top: Color::rgb(0, 0, 0xFF), bottom: Color::rgba(0, 0, 0xFF, 0) };
+        let g = Gradient {
+            top: Color::rgb(0, 0, 0xFF),
+            bottom: Color::rgba(0, 0, 0xFF, 0),
+        };
         let ops = run(
-            &[Prim::AreaFill { first_point: 0, point_count: 2, base_y: 40.0, line_type: LineType::Simple, gradient: g }],
+            &[Prim::AreaFill {
+                first_point: 0,
+                point_count: 2,
+                base_y: 40.0,
+                line_type: LineType::Simple,
+                gradient: g,
+            }],
             &points,
         );
         // y_top is the min point y (4); gradient spans 4..40
@@ -412,14 +591,28 @@ mod tests {
     #[test]
     fn circle_fills_and_optionally_strokes() {
         let no_stroke = run(
-            &[Prim::Circle { cx: 5.0, cy: 6.0, radius: 3.0, fill: C, stroke_width: 0.0, stroke: C }],
+            &[Prim::Circle {
+                cx: 5.0,
+                cy: 6.0,
+                radius: 3.0,
+                fill: C,
+                stroke_width: 0.0,
+                stroke: C,
+            }],
             &[],
         );
         assert_eq!(no_stroke.iter().filter(|o| *o == "stroke").count(), 0);
         assert!(no_stroke.contains(&"fill".to_string()));
 
         let with_stroke = run(
-            &[Prim::Circle { cx: 5.0, cy: 6.0, radius: 3.0, fill: C, stroke_width: 1.5, stroke: C }],
+            &[Prim::Circle {
+                cx: 5.0,
+                cy: 6.0,
+                radius: 3.0,
+                fill: C,
+                stroke_width: 1.5,
+                stroke: C,
+            }],
             &[],
         );
         assert_eq!(with_stroke.iter().filter(|o| *o == "stroke").count(), 1);
@@ -427,7 +620,10 @@ mod tests {
 
     #[test]
     fn background_fills_full_viewport_with_gradient() {
-        let g = Gradient { top: Color::rgb(1, 2, 3), bottom: Color::rgb(4, 5, 6) };
+        let g = Gradient {
+            top: Color::rgb(1, 2, 3),
+            bottom: Color::rgb(4, 5, 6),
+        };
         let ops = run(&[Prim::Background { gradient: g }], &[]);
         assert_eq!(ops[0], "fill_grad 0 100 010203ff 040506ff");
         assert_eq!(ops[1], "fill_rect 0 0 200 100");
@@ -435,7 +631,15 @@ mod tests {
 
     #[test]
     fn text_prim_is_skipped() {
-        let ops = run(&[Prim::Text { run_id: 0, x: 1.0, y: 2.0, color: C }], &[]);
+        let ops = run(
+            &[Prim::Text {
+                run_id: 0,
+                x: 1.0,
+                y: 2.0,
+                color: C,
+            }],
+            &[],
+        );
         assert!(ops.is_empty());
     }
 }

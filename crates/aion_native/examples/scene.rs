@@ -6,9 +6,16 @@
 use aion_native::{render_prims, scene::demo_scene};
 
 fn main() {
-    let out = std::env::args().nth(1).unwrap_or_else(|| "scene.png".to_string());
+    let out = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "scene.png".to_string());
     let s = demo_scene();
     let canvas = render_prims(s.width, s.height, s.background, &s.prims, &s.points);
     canvas.save_png(&out).expect("save png");
-    println!("wrote {out} ({}x{}, {} prims)", s.width, s.height, s.prims.len());
+    println!(
+        "wrote {out} ({}x{}, {} prims)",
+        s.width,
+        s.height,
+        s.prims.len()
+    );
 }

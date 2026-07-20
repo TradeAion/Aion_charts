@@ -36,7 +36,12 @@ pub struct LineParams {
 }
 
 fn color_to_rgba(c: Color) -> [f32; 4] {
-    [c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0, c.a() as f32 / 255.0]
+    [
+        c.r() as f32 / 255.0,
+        c.g() as f32 / 255.0,
+        c.b() as f32 / 255.0,
+        c.a() as f32 / 255.0,
+    ]
 }
 
 /// A tessellated stroke: triangle list of extruded segment quads + round joins.
@@ -53,8 +58,19 @@ impl StrokeMesh {
         self.vertices.push(c);
     }
 
-    fn push_quad(&mut self, p0: [f32; 2], p1: [f32; 2], p2: [f32; 2], p3: [f32; 2], color: [f32; 4]) {
-        let v = |p: [f32; 2]| LineVertex { x: p[0], y: p[1], color };
+    fn push_quad(
+        &mut self,
+        p0: [f32; 2],
+        p1: [f32; 2],
+        p2: [f32; 2],
+        p3: [f32; 2],
+        color: [f32; 4],
+    ) {
+        let v = |p: [f32; 2]| LineVertex {
+            x: p[0],
+            y: p[1],
+            color,
+        };
         // p0-p1-p2, p0-p2-p3 (winding-agnostic; no culling in the pipeline)
         self.push_tri(v(p0), v(p1), v(p2));
         self.push_tri(v(p0), v(p2), v(p3));
@@ -63,7 +79,11 @@ impl StrokeMesh {
     fn push_round_join(&mut self, center: [f32; 2], radius: f32, color: [f32; 4]) {
         // fan approximation of the joint cap; 8 segments is plenty at typical line widths
         const SEGMENTS: usize = 8;
-        let v = |p: [f32; 2]| LineVertex { x: p[0], y: p[1], color };
+        let v = |p: [f32; 2]| LineVertex {
+            x: p[0],
+            y: p[1],
+            color,
+        };
         let c = v(center);
         for i in 0..SEGMENTS {
             let a0 = (i as f32) / SEGMENTS as f32 * std::f32::consts::TAU;
@@ -99,7 +119,10 @@ pub fn expand_line(points: &[LinePoint], line_type: LineType) -> Vec<LinePoint> 
             for (i, p) in points.iter().enumerate() {
                 if i > 0 {
                     // step corner: horizontal to this x at the previous y, then drop to this point
-                    out.push(LinePoint { x: p.x, y: points[i - 1].y });
+                    out.push(LinePoint {
+                        x: p.x,
+                        y: points[i - 1].y,
+                    });
                 }
                 out.push(*p);
             }
@@ -176,7 +199,14 @@ pub fn build_line_stroke(
     }
 }
 
-fn self_push_segment(out: &mut StrokeMesh, a: [f32; 2], b: [f32; 2], nx: f32, ny: f32, rgba: [f32; 4]) {
+fn self_push_segment(
+    out: &mut StrokeMesh,
+    a: [f32; 2],
+    b: [f32; 2],
+    nx: f32,
+    ny: f32,
+    rgba: [f32; 4],
+) {
     out.push_quad(
         [a[0] + nx, a[1] + ny],
         [b[0] + nx, b[1] + ny],
@@ -231,7 +261,11 @@ pub fn build_area_fill(
             top[3] + (bottom[3] - top[3]) * t,
         ]
     };
-    let vert = |x: f32, y: f32| LineVertex { x, y, color: shade(y) };
+    let vert = |x: f32, y: f32| LineVertex {
+        x,
+        y,
+        color: shade(y),
+    };
 
     let bp = |p: &LinePoint| [(p.x * hpr) as f32, (p.y * vpr) as f32];
 
@@ -287,7 +321,10 @@ pub fn build_baseline(
             vec![(a, b)]
         } else {
             let t = (baseline_y - a.y) / (b.y - a.y);
-            let c = LinePoint { x: a.x + (b.x - a.x) * t, y: baseline_y };
+            let c = LinePoint {
+                x: a.x + (b.x - a.x) * t,
+                y: baseline_y,
+            };
             vec![(a, c), (c, b)]
         }
     };
@@ -301,10 +338,26 @@ pub fn build_baseline(
             let b = [(s1.x * hpr) as f32, (s1.y * vpr) as f32];
 
             // fill between the sub-segment and the baseline
-            let av = LineVertex { x: a[0], y: a[1], color: fc };
-            let bv = LineVertex { x: b[0], y: b[1], color: fc };
-            let ab = LineVertex { x: a[0], y: base_b, color: fc };
-            let bb = LineVertex { x: b[0], y: base_b, color: fc };
+            let av = LineVertex {
+                x: a[0],
+                y: a[1],
+                color: fc,
+            };
+            let bv = LineVertex {
+                x: b[0],
+                y: b[1],
+                color: fc,
+            };
+            let ab = LineVertex {
+                x: a[0],
+                y: base_b,
+                color: fc,
+            };
+            let bb = LineVertex {
+                x: b[0],
+                y: base_b,
+                color: fc,
+            };
             fill.vertices.extend([av, bv, bb, av, bb, ab]);
 
             // stroke the sub-segment
@@ -314,7 +367,13 @@ pub fn build_baseline(
             if len >= 1e-6 {
                 let nx = -dy / len * half;
                 let ny = dx / len * half;
-                stroke.push_quad([a[0] + nx, a[1] + ny], [b[0] + nx, b[1] + ny], [b[0] - nx, b[1] - ny], [a[0] - nx, a[1] - ny], lc);
+                stroke.push_quad(
+                    [a[0] + nx, a[1] + ny],
+                    [b[0] + nx, b[1] + ny],
+                    [b[0] - nx, b[1] - ny],
+                    [a[0] - nx, a[1] - ny],
+                    lc,
+                );
             }
         }
     }
@@ -331,8 +390,14 @@ pub fn build_disc(center: [f32; 2], radius: f32, color: Color, out: &mut Vec<Lin
         let a0 = (i as f32) / SEGMENTS as f32 * std::f32::consts::TAU;
         let a1 = ((i + 1) as f32) / SEGMENTS as f32 * std::f32::consts::TAU;
         out.push(c);
-        out.push(v(center[0] + radius * a0.cos(), center[1] + radius * a0.sin()));
-        out.push(v(center[0] + radius * a1.cos(), center[1] + radius * a1.sin()));
+        out.push(v(
+            center[0] + radius * a0.cos(),
+            center[1] + radius * a0.sin(),
+        ));
+        out.push(v(
+            center[0] + radius * a1.cos(),
+            center[1] + radius * a1.sin(),
+        ));
     }
 }
 
@@ -383,7 +448,10 @@ mod tests {
         // curve interpolates through the original knots
         assert_eq!((out[0].x, out[0].y), (0.0, 0.0));
         assert_eq!((out[CURVE_SEGMENTS].x, out[CURVE_SEGMENTS].y), (10.0, 10.0));
-        assert_eq!((out[2 * CURVE_SEGMENTS].x, out[2 * CURVE_SEGMENTS].y), (20.0, 0.0));
+        assert_eq!(
+            (out[2 * CURVE_SEGMENTS].x, out[2 * CURVE_SEGMENTS].y),
+            (20.0, 0.0)
+        );
     }
 
     #[test]
@@ -397,14 +465,34 @@ mod tests {
 
         let mut s1 = StrokeMesh::default();
         let mut f1 = AreaMesh::default();
-        build_baseline(&crossing, 10.0, tl, bl, tf, bf, &params(1.0, 2.0), &mut s1, &mut f1);
+        build_baseline(
+            &crossing,
+            10.0,
+            tl,
+            bl,
+            tf,
+            bf,
+            &params(1.0, 2.0),
+            &mut s1,
+            &mut f1,
+        );
         // two sub-segments => 2 stroke quads (12 verts) and 2 fill quads (12 verts)
         assert_eq!(s1.vertices.len(), 12);
         assert_eq!(f1.vertices.len(), 12);
 
         let mut s2 = StrokeMesh::default();
         let mut f2 = AreaMesh::default();
-        build_baseline(&same, 10.0, tl, bl, tf, bf, &params(1.0, 2.0), &mut s2, &mut f2);
+        build_baseline(
+            &same,
+            10.0,
+            tl,
+            bl,
+            tf,
+            bf,
+            &params(1.0, 2.0),
+            &mut s2,
+            &mut f2,
+        );
         // one sub-segment => 1 quad each
         assert_eq!(s2.vertices.len(), 6);
         assert_eq!(f2.vertices.len(), 6);
@@ -412,7 +500,10 @@ mod tests {
 
     #[test]
     fn stroke_emits_two_triangles_per_segment() {
-        let pts = [LinePoint { x: 0.0, y: 10.0 }, LinePoint { x: 10.0, y: 10.0 }];
+        let pts = [
+            LinePoint { x: 0.0, y: 10.0 },
+            LinePoint { x: 10.0, y: 10.0 },
+        ];
         let mut mesh = StrokeMesh::default();
         build_line_stroke(&pts, BLUE, &params(1.0, 2.0), &mut mesh);
         // one segment, no interior joins -> 6 vertices (2 tris)
@@ -421,7 +512,10 @@ mod tests {
 
     #[test]
     fn horizontal_segment_extrudes_vertically() {
-        let pts = [LinePoint { x: 0.0, y: 10.0 }, LinePoint { x: 10.0, y: 10.0 }];
+        let pts = [
+            LinePoint { x: 0.0, y: 10.0 },
+            LinePoint { x: 10.0, y: 10.0 },
+        ];
         let mut mesh = StrokeMesh::default();
         build_line_stroke(&pts, BLUE, &params(1.0, 4.0), &mut mesh);
         // half width 2; the extruded quad should span y in [8, 12]
@@ -456,9 +550,19 @@ mod tests {
 
     #[test]
     fn area_fill_reaches_base() {
-        let pts = [LinePoint { x: 0.0, y: 10.0 }, LinePoint { x: 10.0, y: 20.0 }];
+        let pts = [
+            LinePoint { x: 0.0, y: 10.0 },
+            LinePoint { x: 10.0, y: 20.0 },
+        ];
         let mut mesh = AreaMesh::default();
-        build_area_fill(&pts, 100.0, BLUE, Color::rgba(0x21, 0x96, 0xf3, 0), &params(1.0, 2.0), &mut mesh);
+        build_area_fill(
+            &pts,
+            100.0,
+            BLUE,
+            Color::rgba(0x21, 0x96, 0xf3, 0),
+            &params(1.0, 2.0),
+            &mut mesh,
+        );
         // 6 verts per segment
         assert_eq!(mesh.vertices.len(), 6);
         // some vertex sits at base y = 100
@@ -474,7 +578,12 @@ mod tests {
     fn empty_and_single_point_no_geometry() {
         let mut mesh = StrokeMesh::default();
         build_line_stroke(&[], BLUE, &params(1.0, 2.0), &mut mesh);
-        build_line_stroke(&[LinePoint { x: 0.0, y: 0.0 }], BLUE, &params(1.0, 2.0), &mut mesh);
+        build_line_stroke(
+            &[LinePoint { x: 0.0, y: 0.0 }],
+            BLUE,
+            &params(1.0, 2.0),
+            &mut mesh,
+        );
         assert!(mesh.vertices.is_empty());
     }
 
@@ -483,7 +592,7 @@ mod tests {
         let mut v = Vec::new();
         build_disc([10.0, 20.0], 4.0, BLUE, &mut v);
         assert_eq!(v.len(), 24 * 3); // 24 fan triangles
-        // every triangle's first vertex is the center
+                                     // every triangle's first vertex is the center
         for tri in v.chunks(3) {
             assert_eq!([tri[0].x, tri[0].y], [10.0, 20.0]);
         }

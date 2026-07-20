@@ -22,7 +22,11 @@ struct RawSeries {
 
 impl RawSeries {
     fn empty() -> Self {
-        Self { times: Vec::new(), values: [vec![], vec![], vec![], vec![]], plot: PlotList::new() }
+        Self {
+            times: Vec::new(),
+            values: [vec![], vec![], vec![], vec![]],
+            plot: PlotList::new(),
+        }
     }
 }
 
@@ -62,7 +66,10 @@ impl DataLayer {
     /// Raw series columns for platform-independent derived-data producers.
     pub fn series_data(&self, id: SeriesId) -> Option<(&[i64], [&[f64]; 4])> {
         let s = self.series.get(id)?;
-        Some((&s.times, [&s.values[0], &s.values[1], &s.values[2], &s.values[3]]))
+        Some((
+            &s.times,
+            [&s.values[0], &s.values[1], &s.values[2], &s.values[3]],
+        ))
     }
 
     /// Merged index of the last point that has data (the time-scale base index), or None.
@@ -85,7 +92,10 @@ impl DataLayer {
         low: Vec<f64>,
         close: Vec<f64>,
     ) {
-        debug_assert!(times.windows(2).all(|w| w[0] < w[1]), "series times must be ascending unique");
+        debug_assert!(
+            times.windows(2).all(|w| w[0] < w[1]),
+            "series times must be ascending unique"
+        );
         let s = &mut self.series[id];
         s.times = times;
         s.values = [open, high, low, close];
@@ -202,15 +212,30 @@ mod tests {
     use crate::model::plot_list::{MismatchDirection, PlotValueIndex};
 
     /// Value of a series at a merged *index* (maps index -> sparse row).
-    fn value_at_index(dl: &DataLayer, id: SeriesId, index: TimePointIndex, plot: PlotValueIndex) -> f64 {
-        let row = dl.plot(id).search(index, MismatchDirection::None).expect("index present");
+    fn value_at_index(
+        dl: &DataLayer,
+        id: SeriesId,
+        index: TimePointIndex,
+        plot: PlotValueIndex,
+    ) -> f64 {
+        let row = dl
+            .plot(id)
+            .search(index, MismatchDirection::None)
+            .expect("index present");
         dl.plot(id).value_at(row, plot)
     }
 
     /// Sets a single-value series (all OHLC = the value) at the given times.
     fn set(dl: &mut DataLayer, id: SeriesId, times: &[i64], vals: &[f64]) {
         let col = |f: fn(f64) -> f64| vals.iter().map(|&v| f(v)).collect::<Vec<f64>>();
-        dl.set_data(id, times.to_vec(), col(|v| v), col(|v| v), col(|v| v), col(|v| v));
+        dl.set_data(
+            id,
+            times.to_vec(),
+            col(|v| v),
+            col(|v| v),
+            col(|v| v),
+            col(|v| v),
+        );
     }
 
     #[test]
@@ -276,7 +301,7 @@ mod tests {
         let b = dl.add_series();
         set(&mut dl, a, &[1, 2, 3, 4], &[1.0, 2.0, 3.0, 4.0]);
         set(&mut dl, b, &[1, 4], &[9.0, 9.0]); // whitespace at 2,3
-        // B gets a point at time 3 (an existing merged time, index 2)
+                                               // B gets a point at time 3 (an existing merged time, index 2)
         dl.update(b, 3, [7.0, 7.0, 7.0, 7.0]);
         assert_eq!(dl.merged_times(), &[1, 2, 3, 4]);
         assert!(dl.plot(b).contains(2)); // time 3 -> merged index 2

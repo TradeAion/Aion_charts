@@ -3,7 +3,9 @@ use std::time::Instant;
 use aion_core::scale::time_scale_core::{TimeScaleCore, TimeScaleOptions};
 use aion_engine::{ChartEngine, ChartFrame, SeriesKind};
 
-fn fixture(bars: usize, phase: f64) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+type FixtureColumns = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>);
+
+fn fixture(bars: usize, phase: f64) -> FixtureColumns {
     let mut times = Vec::with_capacity(bars);
     let mut open = Vec::with_capacity(bars);
     let mut high = Vec::with_capacity(bars);

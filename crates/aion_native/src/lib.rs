@@ -6,13 +6,13 @@
 //! calls for: golden-image tests (compare against lightweight-charts reference PNGs) and
 //! server-side chart rendering, all off-GPU.
 
-pub mod scene;
 pub mod engine_scene;
+pub mod scene;
 
+use aion_engine::ChartEngine;
 use aion_render::canvas2d::{execute, Canvas2d, Viewport};
 use aion_render::color::Color;
 use aion_render::draw_list::Prim;
-use aion_engine::ChartEngine;
 use tiny_skia::{
     Color as SkColor, FillRule, GradientStop, LinearGradient, Paint, PathBuilder, Pixmap, Point,
     Rect, Shader, SpreadMode, Stroke, StrokeDash, Transform,
@@ -23,7 +23,12 @@ use tiny_skia::{
 #[derive(Clone)]
 enum Fill {
     Solid(SkColor),
-    VGradient { y_top: f32, y_bottom: f32, top: SkColor, bottom: SkColor },
+    VGradient {
+        y_top: f32,
+        y_bottom: f32,
+        top: SkColor,
+        bottom: SkColor,
+    },
 }
 
 /// One accumulated path command; arcs are tessellated to line segments when the path is built.
@@ -32,7 +37,13 @@ enum PathOp {
     MoveTo(f32, f32),
     LineTo(f32, f32),
     Close,
-    Arc { cx: f32, cy: f32, r: f32, start: f32, end: f32 },
+    Arc {
+        cx: f32,
+        cy: f32,
+        r: f32,
+        start: f32,
+        end: f32,
+    },
 }
 
 fn sk(c: Color) -> SkColor {
@@ -76,28 +87,45 @@ impl TinySkiaCanvas {
 
     /// Straight (un-premultiplied) RGBA of one pixel — convenient for pixel assertions in tests.
     pub fn pixel_rgba(&self, x: u32, y: u32) -> [u8; 4] {
-        let p = self.pixmap.pixel(x, y).unwrap_or(tiny_skia::PremultipliedColorU8::from_rgba(0, 0, 0, 0).unwrap());
+        let p = self
+            .pixmap
+            .pixel(x, y)
+            .unwrap_or(tiny_skia::PremultipliedColorU8::from_rgba(0, 0, 0, 0).unwrap());
         let c = p.demultiply();
         [c.red(), c.green(), c.blue(), c.alpha()]
     }
 
     /// Build the current fill paint (solid or vertical gradient).
     fn fill_paint(&self) -> Paint<'static> {
-        let mut paint = Paint::default();
-        paint.anti_alias = true;
-        paint.shader = match self.fill {
+        let shader = match self.fill {
             Fill::Solid(c) => Shader::SolidColor(c),
-            Fill::VGradient { y_top, y_bottom, top, bottom } => LinearGradient::new(
+            Fill::VGradient {
+                y_top,
+                y_bottom,
+                top,
+                bottom,
+            } => LinearGradient::new(
                 Point::from_xy(0.0, y_top),
                 // guard against a zero-length gradient (LinearGradient::new returns None)
-                Point::from_xy(0.0, if (y_bottom - y_top).abs() < 1e-3 { y_top + 1.0 } else { y_bottom }),
+                Point::from_xy(
+                    0.0,
+                    if (y_bottom - y_top).abs() < 1e-3 {
+                        y_top + 1.0
+                    } else {
+                        y_bottom
+                    },
+                ),
                 vec![GradientStop::new(0.0, top), GradientStop::new(1.0, bottom)],
                 SpreadMode::Pad,
                 Transform::identity(),
             )
             .unwrap_or(Shader::SolidColor(top)),
         };
-        paint
+        Paint {
+            anti_alias: true,
+            shader,
+            ..Paint::default()
+        }
     }
 
     /// Materialize the accumulated path ops into a `tiny_skia::Path`.
@@ -108,13 +136,26 @@ impl TinySkiaCanvas {
                 PathOp::MoveTo(x, y) => pb.move_to(x, y),
                 PathOp::LineTo(x, y) => pb.line_to(x, y),
                 PathOp::Close => pb.close(),
-                PathOp::Arc { cx, cy, r, start, end } => {
+                PathOp::Arc {
+                    cx,
+                    cy,
+                    r,
+                    start,
+                    end,
+                } => {
                     // tessellate the arc; ensure the sub-path is started
                     const SEGS: usize = 24;
                     for i in 0..=SEGS {
                         let t = start + (end - start) * (i as f32 / SEGS as f32);
                         let (x, y) = (cx + r * t.cos(), cy + r * t.sin());
-                        if i == 0 && self.ops.first().map(|o| matches!(o, PathOp::Arc { .. })).unwrap_or(false) && pb.is_empty() {
+                        if i == 0
+                            && self
+                                .ops
+                                .first()
+                                .map(|o| matches!(o, PathOp::Arc { .. }))
+                                .unwrap_or(false)
+                            && pb.is_empty()
+                        {
                             pb.move_to(x, y);
                         } else {
                             pb.line_to(x, y);
@@ -132,7 +173,12 @@ impl Canvas2d for TinySkiaCanvas {
         self.fill = Fill::Solid(sk(color));
     }
     fn set_fill_vgradient(&mut self, y_top: f32, y_bottom: f32, top: Color, bottom: Color) {
-        self.fill = Fill::VGradient { y_top, y_bottom, top: sk(top), bottom: sk(bottom) };
+        self.fill = Fill::VGradient {
+            y_top,
+            y_bottom,
+            top: sk(top),
+            bottom: sk(bottom),
+        };
     }
     fn set_stroke(&mut self, color: Color) {
         self.stroke = sk(color);
@@ -147,7 +193,8 @@ impl Canvas2d for TinySkiaCanvas {
     fn fill_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         if let Some(rect) = Rect::from_xywh(x, y, w, h) {
             let paint = self.fill_paint();
-            self.pixmap.fill_rect(rect, &paint, Transform::identity(), None);
+            self.pixmap
+                .fill_rect(rect, &paint, Transform::identity(), None);
         }
     }
 
@@ -164,23 +211,45 @@ impl Canvas2d for TinySkiaCanvas {
         self.ops.push(PathOp::Close);
     }
     fn arc(&mut self, cx: f32, cy: f32, r: f32, start: f32, end: f32) {
-        self.ops.push(PathOp::Arc { cx, cy, r, start, end });
+        self.ops.push(PathOp::Arc {
+            cx,
+            cy,
+            r,
+            start,
+            end,
+        });
     }
     fn stroke(&mut self) {
-        let Some(path) = self.build_path() else { return };
-        let mut paint = Paint::default();
-        paint.anti_alias = true;
-        paint.shader = Shader::SolidColor(self.stroke);
-        let mut stroke = Stroke { width: self.line_width, ..Default::default() };
+        let Some(path) = self.build_path() else {
+            return;
+        };
+        let paint = Paint {
+            anti_alias: true,
+            shader: Shader::SolidColor(self.stroke),
+            ..Paint::default()
+        };
+        let mut stroke = Stroke {
+            width: self.line_width,
+            ..Default::default()
+        };
         if !self.dash.is_empty() {
             stroke.dash = StrokeDash::new(self.dash.clone(), 0.0);
         }
-        self.pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+        self.pixmap
+            .stroke_path(&path, &paint, &stroke, Transform::identity(), None);
     }
     fn fill(&mut self) {
-        let Some(path) = self.build_path() else { return };
+        let Some(path) = self.build_path() else {
+            return;
+        };
         let paint = self.fill_paint();
-        self.pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+        self.pixmap.fill_path(
+            &path,
+            &paint,
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
     }
 }
 
@@ -193,7 +262,15 @@ pub fn render_prims(
     points: &[[f32; 2]],
 ) -> TinySkiaCanvas {
     let mut canvas = TinySkiaCanvas::new(width, height, background);
-    execute(prims, points, &mut canvas, Viewport { width: width as f32, height: height as f32 });
+    execute(
+        prims,
+        points,
+        &mut canvas,
+        Viewport {
+            width: width as f32,
+            height: height as f32,
+        },
+    );
     canvas
 }
 
@@ -212,7 +289,8 @@ pub fn render_engine(chart: &mut ChartEngine) -> TinySkiaCanvas {
         }
     }
     let options = chart.options.get();
-    let background = Color::parse_css(&options.layout.background.color).unwrap_or(Color::rgb(0xff, 0xff, 0xff));
+    let background =
+        Color::parse_css(&options.layout.background.color).unwrap_or(Color::rgb(0xff, 0xff, 0xff));
     render_prims(
         (frame.width * frame.pixel_ratio).round().max(1.0) as u32,
         (frame.height * frame.pixel_ratio).round().max(1.0) as u32,
@@ -224,8 +302,34 @@ pub fn render_engine(chart: &mut ChartEngine) -> TinySkiaCanvas {
 
 fn remap_prim_points(prim: Prim, base: u32) -> Prim {
     match prim {
-        Prim::Polyline { first_point, point_count, width, style, line_type, color } => Prim::Polyline { first_point: first_point + base, point_count, width, style, line_type, color },
-        Prim::AreaFill { first_point, point_count, base_y, line_type, gradient } => Prim::AreaFill { first_point: first_point + base, point_count, base_y, line_type, gradient },
+        Prim::Polyline {
+            first_point,
+            point_count,
+            width,
+            style,
+            line_type,
+            color,
+        } => Prim::Polyline {
+            first_point: first_point + base,
+            point_count,
+            width,
+            style,
+            line_type,
+            color,
+        },
+        Prim::AreaFill {
+            first_point,
+            point_count,
+            base_y,
+            line_type,
+            gradient,
+        } => Prim::AreaFill {
+            first_point: first_point + base,
+            point_count,
+            base_y,
+            line_type,
+            gradient,
+        },
         other => other,
     }
 }
@@ -278,7 +382,11 @@ pub fn diff_pixmaps(a: &Pixmap, b: &Pixmap, tolerance: u8) -> Option<DiffStats> 
             differing += 1;
         }
     }
-    Some(DiffStats { differing_pixels: differing, max_channel_delta: max_delta, total_pixels: total })
+    Some(DiffStats {
+        differing_pixels: differing,
+        max_channel_delta: max_delta,
+        total_pixels: total,
+    })
 }
 
 /// Load a PNG file into a `Pixmap`.
@@ -300,7 +408,15 @@ mod tests {
             20,
             20,
             bg,
-            &[Prim::Rect { rect: IRect { x: 5, y: 5, w: 10, h: 10 }, color: red }],
+            &[Prim::Rect {
+                rect: IRect {
+                    x: 5,
+                    y: 5,
+                    w: 10,
+                    h: 10,
+                },
+                color: red,
+            }],
             &[],
         );
         // inside the rect -> red
@@ -317,7 +433,14 @@ mod tests {
             40,
             40,
             bg,
-            &[Prim::Circle { cx: 20.0, cy: 20.0, radius: 8.0, fill: blue, stroke_width: 0.0, stroke: blue }],
+            &[Prim::Circle {
+                cx: 20.0,
+                cy: 20.0,
+                radius: 8.0,
+                fill: blue,
+                stroke_width: 0.0,
+                stroke: blue,
+            }],
             &[],
         );
         assert_eq!(canvas.pixel_rgba(20, 20), [0x00, 0x00, 0xff, 0xff]);
@@ -327,12 +450,24 @@ mod tests {
 
     #[test]
     fn background_gradient_differs_top_to_bottom() {
-        let g = Gradient { top: Color::rgb(0x00, 0x00, 0x00), bottom: Color::rgb(0xff, 0xff, 0xff) };
-        let canvas = render_prims(10, 100, Color::rgb(0, 0, 0), &[Prim::Background { gradient: g }], &[]);
+        let g = Gradient {
+            top: Color::rgb(0x00, 0x00, 0x00),
+            bottom: Color::rgb(0xff, 0xff, 0xff),
+        };
+        let canvas = render_prims(
+            10,
+            100,
+            Color::rgb(0, 0, 0),
+            &[Prim::Background { gradient: g }],
+            &[],
+        );
         let top = canvas.pixel_rgba(5, 2);
         let bottom = canvas.pixel_rgba(5, 97);
         assert!(top[0] < 40, "top should be near-black, got {top:?}");
-        assert!(bottom[0] > 215, "bottom should be near-white, got {bottom:?}");
+        assert!(
+            bottom[0] > 215,
+            "bottom should be near-white, got {bottom:?}"
+        );
     }
 
     #[test]

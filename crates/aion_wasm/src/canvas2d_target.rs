@@ -12,7 +12,13 @@ fn css(c: Color) -> String {
     if c.a() == 0xFF {
         format!("#{:02x}{:02x}{:02x}", c.r(), c.g(), c.b())
     } else {
-        format!("rgba({},{},{},{})", c.r(), c.g(), c.b(), c.a() as f64 / 255.0)
+        format!(
+            "rgba({},{},{},{})",
+            c.r(),
+            c.g(),
+            c.b(),
+            c.a() as f64 / 255.0
+        )
     }
 }
 
@@ -47,8 +53,14 @@ impl Canvas2d for WasmCanvas2d<'_> {
     }
     fn set_fill_vgradient(&mut self, y_top: f32, y_bottom: f32, top: Color, bottom: Color) {
         // A zero-length gradient is invalid; nudge the endpoint so it degenerates to a near-solid.
-        let y1 = if (y_bottom - y_top).abs() < 1e-3 { y_top + 1.0 } else { y_bottom };
-        let grad = self.ctx.create_linear_gradient(0.0, y_top as f64, 0.0, y1 as f64);
+        let y1 = if (y_bottom - y_top).abs() < 1e-3 {
+            y_top + 1.0
+        } else {
+            y_bottom
+        };
+        let grad = self
+            .ctx
+            .create_linear_gradient(0.0, y_top as f64, 0.0, y1 as f64);
         let _ = grad.add_color_stop(0.0, &css(top));
         let _ = grad.add_color_stop(1.0, &css(bottom));
         self.ctx.set_fill_style_canvas_gradient(&grad);
@@ -84,7 +96,9 @@ impl Canvas2d for WasmCanvas2d<'_> {
         self.ctx.close_path();
     }
     fn arc(&mut self, cx: f32, cy: f32, r: f32, start: f32, end: f32) {
-        let _ = self.ctx.arc(cx as f64, cy as f64, r as f64, start as f64, end as f64);
+        let _ = self
+            .ctx
+            .arc(cx as f64, cy as f64, r as f64, start as f64, end as f64);
     }
     fn stroke(&mut self) {
         self.ctx.stroke();

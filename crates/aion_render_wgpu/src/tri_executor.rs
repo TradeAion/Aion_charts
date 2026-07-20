@@ -77,7 +77,9 @@ fn append_arc(out: &mut Vec<[f32; 2]>, cx: f32, cy: f32, radius: f32, start: f32
 }
 
 fn fill_polygon(poly: &[[f32; 2]], color: aion_render::color::Color, out: &mut Vec<TriVertex>) {
-    let (Some(&poly_first), Some(&poly_last)) = (poly.first(), poly.last()) else { return };
+    let (Some(&poly_first), Some(&poly_last)) = (poly.first(), poly.last()) else {
+        return;
+    };
     if poly.len() < 3 {
         return;
     }
@@ -123,6 +125,7 @@ fn fill_polygon(poly: &[[f32; 2]], color: aion_render::color::Color, out: &mut V
     ]);
 }
 
+#[allow(clippy::too_many_arguments)] // geometry parameters map 1:1 onto the RoundRect prim
 fn round_rect_to_tris(
     x: f32,
     y: f32,

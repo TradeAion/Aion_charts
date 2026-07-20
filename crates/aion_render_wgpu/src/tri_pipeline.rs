@@ -86,7 +86,10 @@ impl TriRenderer {
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("tri_bg"),
             layout: &bgl,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: globals_buf.as_entire_binding() }],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: globals_buf.as_entire_binding(),
+            }],
         });
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -121,7 +124,10 @@ impl TriRenderer {
             },
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
-            multisample: wgpu::MultisampleState { count: sample_count, ..Default::default() },
+            multisample: wgpu::MultisampleState {
+                count: sample_count,
+                ..Default::default()
+            },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: Some("fs_main"),
@@ -136,11 +142,18 @@ impl TriRenderer {
             cache: None,
         });
 
-        Self { pipeline, globals_buf, bind_group }
+        Self {
+            pipeline,
+            globals_buf,
+            bind_group,
+        }
     }
 
     pub(crate) fn write_globals(&self, queue: &wgpu::Queue, width_px: u32, height_px: u32) {
-        let globals = Globals { viewport: [width_px as f32, height_px as f32], _pad: [0.0, 0.0] };
+        let globals = Globals {
+            viewport: [width_px as f32, height_px as f32],
+            _pad: [0.0, 0.0],
+        };
         queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
     }
 

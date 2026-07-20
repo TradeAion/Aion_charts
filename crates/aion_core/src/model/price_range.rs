@@ -25,7 +25,10 @@ pub struct PriceRange {
 
 impl PriceRange {
     pub fn new(min_value: f64, max_value: f64) -> Self {
-        Self { min_value, max_value }
+        Self {
+            min_value,
+            max_value,
+        }
     }
 
     pub fn min_value(&self) -> f64 {

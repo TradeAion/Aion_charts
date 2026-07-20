@@ -120,11 +120,19 @@ impl TimeScaleCore {
     }
 
     fn first_index(&self) -> Option<TimePointIndex> {
-        if self.points_len == 0 { None } else { Some(0) }
+        if self.points_len == 0 {
+            None
+        } else {
+            Some(0)
+        }
     }
 
     fn last_index(&self) -> Option<TimePointIndex> {
-        if self.points_len == 0 { None } else { Some(self.points_len as i64 - 1) }
+        if self.points_len == 0 {
+            None
+        } else {
+            Some(self.points_len as i64 - 1)
+        }
     }
 
     // --- coordinate conversion (RENDERING_SPEC.md §1.1) ---
@@ -259,7 +267,11 @@ impl TimeScaleCore {
     }
 
     fn correct_bar_spacing(&mut self) {
-        let bar_spacing = clamp(self.bar_spacing, self.min_bar_spacing(), self.max_bar_spacing());
+        let bar_spacing = clamp(
+            self.bar_spacing,
+            self.min_bar_spacing(),
+            self.max_bar_spacing(),
+        );
         if self.bar_spacing != bar_spacing {
             self.bar_spacing = bar_spacing;
         }
@@ -305,8 +317,12 @@ impl TimeScaleCore {
         if !self.options.fix_left_edge {
             return;
         }
-        let Some(first_index) = self.first_index() else { return };
-        let Some(visible_range) = self.visible_strict_range() else { return };
+        let Some(first_index) = self.first_index() else {
+            return;
+        };
+        let Some(visible_range) = self.visible_strict_range() else {
+            return;
+        };
 
         let delta = visible_range.left() - first_index;
         if delta < 0 {
@@ -329,8 +345,8 @@ impl TimeScaleCore {
 
         if !self.options.right_bar_stays_on_scroll {
             // move the index under zoom_point back to its coordinate
-            let new_offset =
-                self.right_offset + (float_index_at_zoom_point - self.coordinate_to_float_index(zoom_point));
+            let new_offset = self.right_offset
+                + (float_index_at_zoom_point - self.coordinate_to_float_index(zoom_point));
             self.set_right_offset(new_offset);
         }
     }
@@ -365,7 +381,9 @@ impl TimeScaleCore {
             return;
         }
 
-        self.set_bar_spacing(start_state.bar_spacing * start_length_from_right / current_length_from_right);
+        self.set_bar_spacing(
+            start_state.bar_spacing * start_length_from_right / current_length_from_right,
+        );
     }
 
     pub fn end_scale(&mut self) {
@@ -482,7 +500,13 @@ impl TimeScaleCore {
 mod tests {
     use super::*;
 
-    fn scale(width: f64, bar_spacing: f64, right_offset: f64, points: usize, base: i64) -> TimeScaleCore {
+    fn scale(
+        width: f64,
+        bar_spacing: f64,
+        right_offset: f64,
+        points: usize,
+        base: i64,
+    ) -> TimeScaleCore {
         let mut s = TimeScaleCore::new(TimeScaleOptions {
             bar_spacing,
             right_offset,
@@ -510,7 +534,10 @@ mod tests {
         for index in [0i64, 5, 29, 30] {
             let x = s.index_to_coordinate(index);
             let f = s.coordinate_to_float_index(x);
-            assert!((f - (index as f64 - 0.5)).abs() < 1e-6, "index {index} -> x {x} -> {f}");
+            assert!(
+                (f - (index as f64 - 0.5)).abs() < 1e-6,
+                "index {index} -> x {x} -> {f}"
+            );
             assert_eq!(s.coordinate_to_index(x), index);
         }
     }
@@ -545,7 +572,10 @@ mod tests {
         s.zoom(cursor, 1.0); // zoom in 10%
         assert!((s.bar_spacing() - 6.6).abs() < 1e-12);
         let after = s.coordinate_to_float_index(cursor);
-        assert!((before - after).abs() < 1e-6, "point drifted: {before} -> {after}");
+        assert!(
+            (before - after).abs() < 1e-6,
+            "point drifted: {before} -> {after}"
+        );
     }
 
     #[test]

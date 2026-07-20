@@ -49,7 +49,11 @@ impl PriceFormatter {
             }
         }
 
-        Self { price_scale, min_move, fractional_length }
+        Self {
+            price_scale,
+            min_move,
+            fractional_length,
+        }
     }
 
     /// Constructs from a priceFormat option: precision + minMove (e.g. precision 2, minMove 0.01).
@@ -62,7 +66,11 @@ impl PriceFormatter {
     }
 
     pub fn format(&self, price: f64) -> String {
-        let sign = if price < 0.0 { MINUS_SIGN.to_string() } else { String::new() };
+        let sign = if price < 0.0 {
+            MINUS_SIGN.to_string()
+        } else {
+            String::new()
+        };
         format!("{}{}", sign, self.format_as_decimal(price.abs()))
     }
 
@@ -85,7 +93,10 @@ impl PriceFormatter {
             }
 
             let scaled = ((frac_part * fixup).round() / fixup * self.min_move).round() as u64;
-            frac_string = format!(".{}", number_to_string_with_leading_zero(scaled, frac_length));
+            frac_string = format!(
+                ".{}",
+                number_to_string_with_leading_zero(scaled, frac_length)
+            );
         } else {
             // round int part to min move
             int_part = (int_part * base).round() / base;

@@ -30,7 +30,10 @@ fn merge_min_max(first: Option<MinMax>, second: Option<MinMax>) -> Option<MinMax
     match (first, second) {
         (None, s) => s,
         (f, None) => f,
-        (Some(f), Some(s)) => Some(MinMax { min: f.min.min(s.min), max: f.max.max(s.max) }),
+        (Some(f), Some(s)) => Some(MinMax {
+            min: f.min.min(s.min),
+            max: f.max.max(s.max),
+        }),
     }
 }
 
@@ -65,7 +68,10 @@ impl PlotList {
         low: Vec<f64>,
         close: Vec<f64>,
     ) {
-        debug_assert!(indices.windows(2).all(|w| w[0] < w[1]), "indices must be sorted unique");
+        debug_assert!(
+            indices.windows(2).all(|w| w[0] < w[1]),
+            "indices must be sorted unique"
+        );
         debug_assert!(
             indices.len() == open.len()
                 && open.len() == high.len()
@@ -223,7 +229,10 @@ impl PlotList {
             }
             result = Some(match result {
                 None => MinMax { min: v, max: v },
-                Some(mm) => MinMax { min: mm.min.min(v), max: mm.max.max(v) },
+                Some(mm) => MinMax {
+                    min: mm.min.min(v),
+                    max: mm.max.max(v),
+                },
             });
         }
         result
@@ -329,7 +338,14 @@ mod tests {
     #[test]
     fn min_max_matches_brute_force_across_chunks() {
         let mut pl = make_list(200);
-        for (start, end) in [(0i64, 199i64), (5, 25), (29, 31), (30, 89), (61, 150), (100, 100)] {
+        for (start, end) in [
+            (0i64, 199i64),
+            (5, 25),
+            (29, 31),
+            (30, 89),
+            (61, 150),
+            (100, 100),
+        ] {
             let cached = pl
                 .min_max_on_range_cached(start, end, &[PlotValueIndex::Low, PlotValueIndex::High])
                 .unwrap();
@@ -342,8 +358,12 @@ mod tests {
     #[test]
     fn min_max_cache_is_consistent_on_repeat() {
         let mut pl = make_list(500);
-        let a = pl.min_max_on_range_cached(50, 450, &[PlotValueIndex::Low]).unwrap();
-        let b = pl.min_max_on_range_cached(50, 450, &[PlotValueIndex::Low]).unwrap();
+        let a = pl
+            .min_max_on_range_cached(50, 450, &[PlotValueIndex::Low])
+            .unwrap();
+        let b = pl
+            .min_max_on_range_cached(50, 450, &[PlotValueIndex::Low])
+            .unwrap();
         assert_eq!(a, b);
         assert_eq!(a.min, 50.0);
         assert_eq!(a.max, 450.0);
@@ -352,7 +372,9 @@ mod tests {
     #[test]
     fn min_max_clamps_to_data_bounds() {
         let mut pl = make_list(10);
-        let mm = pl.min_max_on_range_cached(-100, 100, &[PlotValueIndex::Close]).unwrap();
+        let mm = pl
+            .min_max_on_range_cached(-100, 100, &[PlotValueIndex::Close])
+            .unwrap();
         assert_eq!(mm.min, 7.0);
         assert_eq!(mm.max, 16.0);
     }
@@ -367,7 +389,9 @@ mod tests {
             vec![1.0, f64::NAN, 3.0],
             vec![1.0, f64::NAN, 3.0],
         );
-        let mm = pl.min_max_on_range_cached(0, 2, &[PlotValueIndex::Close]).unwrap();
+        let mm = pl
+            .min_max_on_range_cached(0, 2, &[PlotValueIndex::Close])
+            .unwrap();
         assert_eq!(mm.min, 1.0);
         assert_eq!(mm.max, 3.0);
     }
@@ -376,15 +400,21 @@ mod tests {
     fn upsert_last_invalidates_chunk_cache() {
         let mut pl = make_list(100);
         // warm the cache
-        let before = pl.min_max_on_range_cached(0, 99, &[PlotValueIndex::High]).unwrap();
+        let before = pl
+            .min_max_on_range_cached(0, 99, &[PlotValueIndex::High])
+            .unwrap();
         assert_eq!(before.max, 109.0);
         // replace last bar with a spike
         pl.upsert_last(99, [50.0, 999.0, 40.0, 60.0]);
-        let after = pl.min_max_on_range_cached(0, 99, &[PlotValueIndex::High]).unwrap();
+        let after = pl
+            .min_max_on_range_cached(0, 99, &[PlotValueIndex::High])
+            .unwrap();
         assert_eq!(after.max, 999.0);
         // append a new bar
         pl.upsert_last(100, [1.0, 2000.0, 0.5, 1.5]);
-        let appended = pl.min_max_on_range_cached(0, 100, &[PlotValueIndex::High]).unwrap();
+        let appended = pl
+            .min_max_on_range_cached(0, 100, &[PlotValueIndex::High])
+            .unwrap();
         assert_eq!(appended.max, 2000.0);
     }
 
@@ -399,7 +429,9 @@ mod tests {
             vec![0.5, 4.0, 2.0],
             vec![1.5, 5.5, 3.5],
         );
-        let mm = pl.min_max_on_range_cached(5, 15, &[PlotValueIndex::High]).unwrap();
+        let mm = pl
+            .min_max_on_range_cached(5, 15, &[PlotValueIndex::High])
+            .unwrap();
         assert_eq!(mm.max, 6.0); // only index 10 in range
         assert_eq!(pl.search(15, MismatchDirection::NearestLeft), Some(1));
     }

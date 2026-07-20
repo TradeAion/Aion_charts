@@ -37,11 +37,19 @@ impl PriceTickSpanCalculator {
             dividers
         };
 
-        Self { base, integral_dividers, fractional_dividers }
+        Self {
+            base,
+            integral_dividers,
+            fractional_dividers,
+        }
     }
 
     pub fn tick_span(&self, high: f64, low: f64, max_tick_span: f64) -> f64 {
-        let min_movement = if self.base == 0 { 0.0 } else { 1.0 / self.base as f64 };
+        let min_movement = if self.base == 0 {
+            0.0
+        } else {
+            1.0 / self.base as f64
+        };
 
         let mut result_tick_span = 10f64.powf(0f64.max((high - low).log10().ceil()));
 
@@ -51,8 +59,9 @@ impl PriceTickSpanCalculator {
         loop {
             // the second condition matters for very small values like 1e-10 where
             // greater_or_equal alone fails
-            let larger_min_movement = greater_or_equal(result_tick_span, min_movement, TICK_SPAN_EPSILON)
-                && result_tick_span > (min_movement + TICK_SPAN_EPSILON);
+            let larger_min_movement =
+                greater_or_equal(result_tick_span, min_movement, TICK_SPAN_EPSILON)
+                    && result_tick_span > (min_movement + TICK_SPAN_EPSILON);
             let larger_max_tick_span =
                 greater_or_equal(result_tick_span, max_tick_span * c, TICK_SPAN_EPSILON);
             let larger_1 = greater_or_equal(result_tick_span, 1.0, TICK_SPAN_EPSILON);
@@ -90,7 +99,13 @@ impl PriceTickSpanCalculator {
 
 /// The composite span used by the tick mark builder: the minimum over the three divider cycles.
 /// Port of `PriceTickMarkBuilder.tickSpan()` (`src/model/price-tick-mark-builder.ts`).
-pub fn composite_tick_span(high: f64, low: f64, base: i64, scale_height: f64, tick_mark_height: f64) -> f64 {
+pub fn composite_tick_span(
+    high: f64,
+    low: f64,
+    base: i64,
+    scale_height: f64,
+    tick_mark_height: f64,
+) -> f64 {
     assert!(high >= low, "high < low");
 
     let max_tick_span = (high - low) * tick_mark_height / scale_height;
@@ -137,7 +152,11 @@ mod tests {
     fn composite_takes_min_of_cycles() {
         let a = composite_tick_span(100.0, 0.0, 100, 500.0, 30.0);
         // each individual cycle produces >= a
-        for dividers in [vec![2.0, 2.5, 2.0], vec![2.0, 2.0, 2.5], vec![2.5, 2.0, 2.0]] {
+        for dividers in [
+            vec![2.0, 2.5, 2.0],
+            vec![2.0, 2.0, 2.5],
+            vec![2.5, 2.0, 2.0],
+        ] {
             let c = PriceTickSpanCalculator::new(100, dividers);
             assert!(c.tick_span(100.0, 0.0, 100.0 * 30.0 / 500.0) >= a);
         }

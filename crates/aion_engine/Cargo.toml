@@ -9,3 +9,6 @@ description = "Headless chart model and frame-production state for Aion Charts"
 aion_core = { path = "../aion_core" }
 aion_indicators = { path = "../aion_indicators" }
 aion_render = { path = "../aion_render" }
+
+[lints]
+workspace = true

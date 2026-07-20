@@ -102,11 +102,21 @@ fn draw_wicks(items: &[CandleItem], params: &CandlesParams, bar_width: i32, out:
 
         // upper wick: high -> body top; lower wick: body bottom + 1 -> low
         out.push(Prim::Rect {
-            rect: IRect { x: left, y: high, w: width, h: top - high },
+            rect: IRect {
+                x: left,
+                y: high,
+                w: width,
+                h: top - high,
+            },
             color: bar.wick_color,
         });
         out.push(Prim::Rect {
-            rect: IRect { x: left, y: bottom + 1, w: width, h: low - bottom },
+            rect: IRect {
+                x: left,
+                y: bottom + 1,
+                w: width,
+                h: low - bottom,
+            },
             color: bar.wick_color,
         });
 
@@ -135,13 +145,23 @@ fn draw_borders(items: &[CandleItem], params: &CandlesParams, bar_width: i32, ou
 
         if params.bar_spacing * hpr > (2 * border_width) as f64 {
             out.push(Prim::RectFrame {
-                rect: IRect { x: left, y: top, w: right - left + 1, h: bottom - top + 1 },
+                rect: IRect {
+                    x: left,
+                    y: top,
+                    w: right - left + 1,
+                    h: bottom - top + 1,
+                },
                 border: border_width,
                 color: bar.border_color,
             });
         } else {
             out.push(Prim::Rect {
-                rect: IRect { x: left, y: top, w: right - left + 1, h: bottom - top + 1 },
+                rect: IRect {
+                    x: left,
+                    y: top,
+                    w: right - left + 1,
+                    h: bottom - top + 1,
+                },
                 color: bar.border_color,
             });
         }
@@ -178,7 +198,12 @@ fn draw_bodies(
         }
 
         out.push(Prim::Rect {
-            rect: IRect { x: left, y: top, w: right - left + 1, h: bottom - top + 1 },
+            rect: IRect {
+                x: left,
+                y: top,
+                w: right - left + 1,
+                h: bottom - top + 1,
+            },
             color: bar.body_color,
         });
     }
@@ -238,18 +263,39 @@ mod tests {
         // upper: y=20, h=top-high=10; lower: y=bottom+1=51, h=low-bottom=10
         assert_eq!(
             out[0],
-            Prim::Rect { rect: IRect { x: 100, y: 20, w: 1, h: 10 }, color: WICK }
+            Prim::Rect {
+                rect: IRect {
+                    x: 100,
+                    y: 20,
+                    w: 1,
+                    h: 10
+                },
+                color: WICK
+            }
         );
         assert_eq!(
             out[1],
-            Prim::Rect { rect: IRect { x: 100, y: 51, w: 1, h: 10 }, color: WICK }
+            Prim::Rect {
+                rect: IRect {
+                    x: 100,
+                    y: 51,
+                    w: 1,
+                    h: 10
+                },
+                color: WICK
+            }
         );
 
         // border: left = 100 - floor(2.5) = 98, right = 102; spacing*hpr=6 > 2*1 -> frame
         assert_eq!(
             out[2],
             Prim::RectFrame {
-                rect: IRect { x: 98, y: 30, w: 5, h: 21 },
+                rect: IRect {
+                    x: 98,
+                    y: 30,
+                    w: 5,
+                    h: 21
+                },
                 border: 1,
                 color: BORDER
             }
@@ -258,7 +304,15 @@ mod tests {
         // body: inset by border 1 -> 99..101, 31..49
         assert_eq!(
             out[3],
-            Prim::Rect { rect: IRect { x: 99, y: 31, w: 3, h: 19 }, color: UP }
+            Prim::Rect {
+                rect: IRect {
+                    x: 99,
+                    y: 31,
+                    w: 3,
+                    h: 19
+                },
+                color: UP
+            }
         );
         assert_eq!(out.len(), 4);
     }
@@ -270,7 +324,11 @@ mod tests {
             candle(100.0, 50.0, 20.0, 60.0, 30.0),
             candle(101.5, 50.0, 20.0, 60.0, 30.0),
         ];
-        let p = CandlesParams { wick_visible: true, border_visible: false, ..params(1.5, 2.0) };
+        let p = CandlesParams {
+            wick_visible: true,
+            border_visible: false,
+            ..params(1.5, 2.0)
+        };
         let mut out = Vec::new();
         build_candles(&items, &p, &mut out);
 
@@ -291,11 +349,19 @@ mod tests {
             candle(100.0, 50.0, 20.0, 60.0, 30.0),
             candle(100.5, 50.0, 20.0, 60.0, 30.0), // rounds to 101? -> raw left 101
         ];
-        let p = CandlesParams { wick_visible: true, border_visible: false, ..params(0.5, 1.0) };
+        let p = CandlesParams {
+            wick_visible: true,
+            border_visible: false,
+            ..params(0.5, 1.0)
+        };
         let mut out = Vec::new();
         build_candles(&items, &p, &mut out);
         let rs = rects(&out);
-        assert!(rs[2].x >= rs[0].x + rs[0].w, "wicks must not overlap: {:?}", rs);
+        assert!(
+            rs[2].x >= rs[0].x + rs[0].w,
+            "wicks must not overlap: {:?}",
+            rs
+        );
     }
 
     #[test]
@@ -313,7 +379,10 @@ mod tests {
     fn doji_body_has_min_height_one() {
         // open == close -> top == bottom -> body height 1 (frame h = 1)
         let items = [candle(100.0, 40.0, 20.0, 60.0, 40.0)];
-        let p = CandlesParams { border_visible: false, ..params(6.0, 1.0) };
+        let p = CandlesParams {
+            border_visible: false,
+            ..params(6.0, 1.0)
+        };
         let mut out = Vec::new();
         build_candles(&items, &p, &mut out);
         let body = rects(&out)[2];

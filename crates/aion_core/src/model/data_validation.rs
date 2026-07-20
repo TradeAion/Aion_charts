@@ -48,7 +48,13 @@ impl ValidationReport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidationError {
     /// The time column and the value columns have differing lengths.
-    LengthMismatch { times: usize, open: usize, high: usize, low: usize, close: usize },
+    LengthMismatch {
+        times: usize,
+        open: usize,
+        high: usize,
+        low: usize,
+        close: usize,
+    },
 }
 
 impl core::fmt::Display for ValidationError {
@@ -168,9 +174,20 @@ pub fn sanitize_ohlc_owned(
             close: close.len(),
         });
     }
-    let clean = times.windows(2).all(|w| w[0].is_finite() && w[0].fract() == 0.0 && w[0] < w[1])
-        && times.last().map(|t| t.is_finite() && t.fract() == 0.0).unwrap_or(true)
-        && open.iter().chain(&high).chain(&low).chain(&close).copied().all(safe);
+    let clean = times
+        .windows(2)
+        .all(|w| w[0].is_finite() && w[0].fract() == 0.0 && w[0] < w[1])
+        && times
+            .last()
+            .map(|t| t.is_finite() && t.fract() == 0.0)
+            .unwrap_or(true)
+        && open
+            .iter()
+            .chain(&high)
+            .chain(&low)
+            .chain(&close)
+            .copied()
+            .all(safe);
     if clean {
         let accepted = times.len();
         return Ok(SanitizedOhlc {
@@ -179,7 +196,10 @@ pub fn sanitize_ohlc_owned(
             high,
             low,
             close,
-            report: ValidationReport { accepted, ..ValidationReport::default() },
+            report: ValidationReport {
+                accepted,
+                ..ValidationReport::default()
+            },
         });
     }
     sanitize_ohlc(&times, &open, &high, &low, &close)
@@ -215,7 +235,14 @@ mod tests {
     #[test]
     fn length_mismatch_is_an_error() {
         let err = sanitize_ohlc(&[1.0, 2.0], &[1.0], &[1.0], &[1.0], &[1.0]).unwrap_err();
-        assert!(matches!(err, ValidationError::LengthMismatch { times: 2, open: 1, .. }));
+        assert!(matches!(
+            err,
+            ValidationError::LengthMismatch {
+                times: 2,
+                open: 1,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -275,7 +302,14 @@ mod tests {
 
     #[test]
     fn full_ohlc_columns_are_kept_independent() {
-        let s = sanitize_ohlc(&[1.0, 2.0], &[1.0, 2.0], &[5.0, 6.0], &[0.5, 1.5], &[3.0, 4.0]).unwrap();
+        let s = sanitize_ohlc(
+            &[1.0, 2.0],
+            &[1.0, 2.0],
+            &[5.0, 6.0],
+            &[0.5, 1.5],
+            &[3.0, 4.0],
+        )
+        .unwrap();
         assert_eq!(s.open, [1.0, 2.0]);
         assert_eq!(s.high, [5.0, 6.0]);
         assert_eq!(s.low, [0.5, 1.5]);
@@ -292,12 +326,22 @@ mod tests {
     fn sanitize_point_rejects_bad_ticks() {
         assert!(sanitize_point(f64::NAN, [1.0, 1.0, 1.0, 1.0]).is_none());
         assert!(sanitize_point(1.0, [1.0, f64::INFINITY, 1.0, 1.0]).is_none());
-        assert_eq!(sanitize_point(1.5, [1.0, 2.0, 0.5, 1.5]), Some((1, [1.0, 2.0, 0.5, 1.5])));
+        assert_eq!(
+            sanitize_point(1.5, [1.0, 2.0, 0.5, 1.5]),
+            Some((1, [1.0, 2.0, 0.5, 1.5]))
+        );
     }
 
     #[test]
     fn owned_clean_input_avoids_repair_path() {
-        let s = sanitize_ohlc_owned(vec![1.0, 2.0], vec![1.0, 2.0], vec![2.0, 3.0], vec![0.0, 1.0], vec![1.5, 2.5]).unwrap();
+        let s = sanitize_ohlc_owned(
+            vec![1.0, 2.0],
+            vec![1.0, 2.0],
+            vec![2.0, 3.0],
+            vec![0.0, 1.0],
+            vec![1.5, 2.5],
+        )
+        .unwrap();
         assert!(s.report.is_clean());
         assert_eq!(s.times, [1, 2]);
     }

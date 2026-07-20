@@ -49,8 +49,7 @@ pub fn build_bars(items: &[BarItem], params: &BarsParams, out: &mut Vec<Prim>) {
         bar_width
     };
 
-    let draw_open_close =
-        bar_line_width <= bar_width && params.bar_spacing >= (1.5 * hpr).floor();
+    let draw_open_close = bar_line_width <= bar_width && params.bar_spacing >= (1.5 * hpr).floor();
 
     for bar in items {
         let body_width_half = (bar_line_width as f64 * 0.5).floor() as i32;
@@ -68,7 +67,12 @@ pub fn build_bars(items: &[BarItem], params: &BarsParams, out: &mut Vec<Prim>) {
         let body_height = (body_bottom - body_top).max(bar_line_width);
 
         out.push(Prim::Rect {
-            rect: IRect { x: body_left, y: body_top, w: body_width, h: body_height },
+            rect: IRect {
+                x: body_left,
+                y: body_top,
+                w: body_width,
+                h: body_height,
+            },
             color: bar.color,
         });
 
@@ -122,7 +126,14 @@ mod tests {
     const C: Color = Color::rgb(0x26, 0xa6, 0x9a);
 
     fn bar(x: f64) -> BarItem {
-        BarItem { x, open_y: 50.0, high_y: 20.0, low_y: 60.0, close_y: 30.0, color: C }
+        BarItem {
+            x,
+            open_y: 50.0,
+            high_y: 20.0,
+            low_y: 60.0,
+            close_y: 30.0,
+            color: C,
+        }
     }
 
     fn params(bar_spacing: f64, dpr: f64) -> BarsParams {
@@ -155,13 +166,37 @@ mod tests {
         assert_eq!(rs.len(), 3); // body + open tick + close tick
 
         // body: center 100, half 0 -> x=100 w=1; top = 20, bottom = 60, h = 40
-        assert_eq!(rs[0], IRect { x: 100, y: 20, w: 1, h: 40 });
+        assert_eq!(
+            rs[0],
+            IRect {
+                x: 100,
+                y: 20,
+                w: 1,
+                h: 40
+            }
+        );
 
         // side width = ceil(3*1.5) = 5
         // open tick: from 95 to body_left(100) exclusive -> w=5, at open_y=50
-        assert_eq!(rs[1], IRect { x: 95, y: 50, w: 5, h: 1 });
+        assert_eq!(
+            rs[1],
+            IRect {
+                x: 95,
+                y: 50,
+                w: 5,
+                h: 1
+            }
+        );
         // close tick: from body_right+1 (101) to 105 -> w=5, at close_y=30
-        assert_eq!(rs[2], IRect { x: 101, y: 30, w: 5, h: 1 });
+        assert_eq!(
+            rs[2],
+            IRect {
+                x: 101,
+                y: 30,
+                w: 5,
+                h: 1
+            }
+        );
     }
 
     #[test]
@@ -190,7 +225,14 @@ mod tests {
     #[test]
     fn ticks_clamped_inside_body() {
         // open beyond low: clamped to body bottom
-        let item = BarItem { x: 100.0, open_y: 60.0, high_y: 20.0, low_y: 60.0, close_y: 20.0, color: C };
+        let item = BarItem {
+            x: 100.0,
+            open_y: 60.0,
+            high_y: 20.0,
+            low_y: 60.0,
+            close_y: 20.0,
+            color: C,
+        };
         let mut out = Vec::new();
         build_bars(&[item], &params(10.0, 1.0), &mut out);
         let rs = rects(&out);

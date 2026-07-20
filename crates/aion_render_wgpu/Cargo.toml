@@ -12,3 +12,6 @@ bytemuck = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 aion_engine = { path = "../aion_engine" }
+
+[lints]
+workspace = true

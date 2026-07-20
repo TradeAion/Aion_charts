@@ -10,7 +10,9 @@ pub struct PercentageFormatter {
 
 impl Default for PercentageFormatter {
     fn default() -> Self {
-        Self { inner: PriceFormatter::new(100, 1.0) }
+        Self {
+            inner: PriceFormatter::new(100, 1.0),
+        }
     }
 }
 

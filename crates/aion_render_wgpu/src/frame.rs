@@ -39,10 +39,19 @@ pub struct MsaaTarget {
 }
 
 impl MsaaTarget {
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, width: u32, height: u32) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) -> Self {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("msaa_target"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: SAMPLE_COUNT,
             dimension: wgpu::TextureDimension::D2,
@@ -51,11 +60,21 @@ impl MsaaTarget {
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        Self { view, width, height }
+        Self {
+            view,
+            width,
+            height,
+        }
     }
 
     /// Recreates the target if the size changed.
-    pub fn ensure(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat, width: u32, height: u32) {
+    pub fn ensure(
+        &mut self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) {
         if self.width != width || self.height != height {
             *self = Self::new(device, format, width, height);
         }
@@ -104,21 +123,42 @@ pub fn render_frame(
     let buffers: Vec<GroupBuffers> = groups
         .iter()
         .map(|g| GroupBuffers {
-            under_quad: (!g.under_quads.is_empty())
-                .then(|| (vbuf(bytemuck::cast_slice(&g.under_quads), "under_quads"), g.under_quads.len() as u32)),
-            fill: (!g.fill_tris.is_empty())
-                .then(|| (vbuf(bytemuck::cast_slice(&g.fill_tris), "fill"), g.fill_tris.len() as u32)),
-            stroke: (!g.stroke_tris.is_empty())
-                .then(|| (vbuf(bytemuck::cast_slice(&g.stroke_tris), "stroke"), g.stroke_tris.len() as u32)),
-            quad: (!g.quads.is_empty())
-                .then(|| (vbuf(bytemuck::cast_slice(&g.quads), "quads"), g.quads.len() as u32)),
-            tex: (!g.tex_quads.is_empty())
-                .then(|| (vbuf(bytemuck::cast_slice(&g.tex_quads), "tex"), g.tex_quads.len() as u32)),
+            under_quad: (!g.under_quads.is_empty()).then(|| {
+                (
+                    vbuf(bytemuck::cast_slice(&g.under_quads), "under_quads"),
+                    g.under_quads.len() as u32,
+                )
+            }),
+            fill: (!g.fill_tris.is_empty()).then(|| {
+                (
+                    vbuf(bytemuck::cast_slice(&g.fill_tris), "fill"),
+                    g.fill_tris.len() as u32,
+                )
+            }),
+            stroke: (!g.stroke_tris.is_empty()).then(|| {
+                (
+                    vbuf(bytemuck::cast_slice(&g.stroke_tris), "stroke"),
+                    g.stroke_tris.len() as u32,
+                )
+            }),
+            quad: (!g.quads.is_empty()).then(|| {
+                (
+                    vbuf(bytemuck::cast_slice(&g.quads), "quads"),
+                    g.quads.len() as u32,
+                )
+            }),
+            tex: (!g.tex_quads.is_empty()).then(|| {
+                (
+                    vbuf(bytemuck::cast_slice(&g.tex_quads), "tex"),
+                    g.tex_quads.len() as u32,
+                )
+            }),
         })
         .collect();
 
-    let mut encoder =
-        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("frame"),
+    });
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("frame_pass"),

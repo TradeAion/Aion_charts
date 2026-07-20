@@ -130,22 +130,13 @@ impl Default for GridLineOptions {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GridOptions {
     #[serde(rename = "vertLines")]
     pub vert_lines: GridLineOptions,
     #[serde(rename = "horzLines")]
     pub horz_lines: GridLineOptions,
-}
-
-impl Default for GridOptions {
-    fn default() -> Self {
-        Self {
-            vert_lines: GridLineOptions::default(),
-            horz_lines: GridLineOptions::default(),
-        }
-    }
 }
 
 /// One crosshair line (`api/options/crosshair-options-defaults.ts`).

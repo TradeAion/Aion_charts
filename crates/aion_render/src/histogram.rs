@@ -36,12 +36,12 @@ struct ColumnCoords {
 
 fn precalculate_columns(items: &[HistogramItem], params: &HistogramParams) -> Vec<ColumnCoords> {
     let pixel_ratio = params.horizontal_pixel_ratio;
-    let spacing = if (params.bar_spacing * pixel_ratio).ceil() as i32 <= SHOW_SPACING_MINIMAL_BAR_WIDTH
-    {
-        0
-    } else {
-        1i32.max(pixel_ratio.floor() as i32)
-    };
+    let spacing =
+        if (params.bar_spacing * pixel_ratio).ceil() as i32 <= SHOW_SPACING_MINIMAL_BAR_WIDTH {
+            0
+        } else {
+            1i32.max(pixel_ratio.floor() as i32)
+        };
     let column_width = (params.bar_spacing * pixel_ratio).round() as i32 - spacing;
 
     let mut columns: Vec<ColumnCoords> = items
@@ -152,7 +152,12 @@ mod tests {
     const C: Color = Color::rgb(0x26, 0xa6, 0x9a);
 
     fn item(x: f64, y: f64, time: i64) -> HistogramItem {
-        HistogramItem { x, y, time, color: C }
+        HistogramItem {
+            x,
+            y,
+            time,
+            color: C,
+        }
     }
 
     fn params(bar_spacing: f64, dpr: f64, base: f64) -> HistogramParams {
@@ -201,8 +206,9 @@ mod tests {
     fn adjacent_columns_have_uniform_gaps() {
         // fractional spacing at dpr 1 forces rounding jitter that the alignment pass fixes
         let spacing = 6.3;
-        let items: Vec<HistogramItem> =
-            (0..20).map(|i| item(50.0 + i as f64 * spacing, 30.0, i as i64)).collect();
+        let items: Vec<HistogramItem> = (0..20)
+            .map(|i| item(50.0 + i as f64 * spacing, 30.0, i as i64))
+            .collect();
         let mut out = Vec::new();
         build_histogram(&items, &params(spacing, 1.0, 90.0), &mut out);
         let rs = rects(&out);
@@ -215,8 +221,9 @@ mod tests {
     #[test]
     fn tiny_spacing_no_gaps() {
         // bar spacing 1 at dpr 1 -> ceil(1) <= 1 -> spacing 0, columns touch
-        let items: Vec<HistogramItem> =
-            (0..10).map(|i| item(50.0 + i as f64, 30.0, i as i64)).collect();
+        let items: Vec<HistogramItem> = (0..10)
+            .map(|i| item(50.0 + i as f64, 30.0, i as i64))
+            .collect();
         let mut out = Vec::new();
         build_histogram(&items, &params(1.0, 1.0, 90.0), &mut out);
         let rs = rects(&out);

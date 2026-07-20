@@ -1347,6 +1347,7 @@ impl ChartEngine {
         }
     }
 
+    #[allow(clippy::too_many_arguments)] // mirrors the LWC renderer-data signature
     fn build_candles_frame(
         &self,
         rs: ResolvedSeries,
@@ -1399,6 +1400,7 @@ impl ChartEngine {
         );
     }
 
+    #[allow(clippy::too_many_arguments)] // mirrors the LWC renderer-data signature
     fn build_bars_frame(
         &self,
         rs: ResolvedSeries,
@@ -1446,6 +1448,7 @@ impl ChartEngine {
         );
     }
 
+    #[allow(clippy::too_many_arguments)] // mirrors the LWC renderer-data signature
     fn build_histogram_frame(
         &self,
         rs: ResolvedSeries,
@@ -1512,6 +1515,7 @@ impl ChartEngine {
         );
     }
 
+    #[allow(clippy::too_many_arguments)] // mirrors the LWC renderer-data signature
     fn build_line_frame(
         &self,
         rs: ResolvedSeries,
@@ -1591,6 +1595,7 @@ impl ChartEngine {
         }
     }
 
+    #[allow(clippy::too_many_arguments)] // mirrors the LWC renderer-data signature
     fn build_baseline_frame(
         &self,
         rs: ResolvedSeries,
