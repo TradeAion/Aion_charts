@@ -698,6 +698,18 @@ Progress is appended here as phases land (newest last).
   pixel ratio. The existing seven-case matrix remains green and unchanged at its current rounded
   primitive positions, which narrows the remaining measured gap to browser compositor/text/AA
   behavior rather than a pane-scale coordinate error.
+- 2026-07-20 — **Engineering-hygiene pass.** (1) Default crosshair mode is now Normal — a
+  deliberate divergence from LWC's Magnet default. (2) Production paths no longer carry abortable
+  panics: invariant expects/unwraps in the scale cores, plot list, data layer, tick-span
+  decomposition, frame conflation, and the wasm render path degrade gracefully instead of killing
+  the wasm instance. (3) Lint enforcement: rustfmt normalization, `[workspace.lints]` (unsafe
+  forbidden), clippy clean on native + wasm32, eslint on the package. (4) The four oversized
+  files were split mechanically — `aion_engine/lib.rs` → indicators/price-scale/series-query/tests
+  modules, `frame.rs` → a `frame/` directory (axis, conflation, crosshair, series_geometry),
+  `aion_wasm/chart.rs` → `chart/{inner_api,inner_render}`, and the package `index.ts` →
+  types/impl/gestures. (5) GitHub Actions CI: fmt + clippy + workspace tests (goldens included),
+  package lint/build/typecheck, and the Playwright runtime/parity suite in Chromium. All 190 Rust
+  tests and the seven-case browser matrix stayed green throughout.
 
 ## 11. Revised execution order
 
