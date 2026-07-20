@@ -7,6 +7,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # rust-toolchain.toml pins the Windows MSVC host for local development; on Linux runners the
+  # plain stable toolchain (installed below) must win instead.
+  RUSTUP_TOOLCHAIN: stable
 
 jobs:
   rust:
