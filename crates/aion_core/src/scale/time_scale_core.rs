@@ -352,11 +352,15 @@ impl TimeScaleCore {
     }
 
     pub fn scale_to(&mut self, x: Coordinate) {
-        let Some(start_state) = self.common_transition_start_state else { return };
+        // Both are set together in `start_scale`; bail if the pair desynced.
+        let (Some(start_state), Some(scale_start_point)) =
+            (self.common_transition_start_state, self.scale_start_point)
+        else {
+            return;
+        };
 
         let start_length_from_right = clamp(self.width - x, 0.0, self.width);
-        let current_length_from_right =
-            clamp(self.width - self.scale_start_point.expect("scale started"), 0.0, self.width);
+        let current_length_from_right = clamp(self.width - scale_start_point, 0.0, self.width);
         if start_length_from_right == 0.0 || current_length_from_right == 0.0 {
             return;
         }
@@ -386,14 +390,15 @@ impl TimeScaleCore {
     }
 
     pub fn scroll_to(&mut self, x: Coordinate) {
-        let Some(scroll_start_point) = self.scroll_start_point else { return };
+        // Both are set together in `start_scroll`; bail if the pair desynced.
+        let (Some(scroll_start_point), Some(start_state)) =
+            (self.scroll_start_point, self.common_transition_start_state)
+        else {
+            return;
+        };
 
         let shift_in_logical = (scroll_start_point - x) / self.bar_spacing;
-        self.right_offset = self
-            .common_transition_start_state
-            .expect("scroll started")
-            .right_offset
-            + shift_in_logical;
+        self.right_offset = start_state.right_offset + shift_in_logical;
 
         self.correct_offset();
     }

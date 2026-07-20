@@ -103,7 +103,12 @@ impl PlotList {
                     col.push(v);
                 }
             }
-            _ => panic!("cannot update older data: index {index} < last"),
+            _ => {
+                // Out-of-order updates are routed to the rebuild path by `DataLayer::update`;
+                // reaching this arm is an internal ordering bug. Ignore rather than poison the
+                // whole chart (a panic aborts the wasm instance).
+                debug_assert!(false, "cannot update older data: index {index} < last");
+            }
         }
     }
 
@@ -235,8 +240,9 @@ impl PlotList {
         }
         let plot = plot as usize;
 
-        let first_index = self.first_index().expect("not empty");
-        let last_index = self.last_index().expect("not empty");
+        let (Some(first_index), Some(last_index)) = (self.first_index(), self.last_index()) else {
+            return None;
+        };
 
         let s = start.max(first_index);
         let e = end.min(last_index);

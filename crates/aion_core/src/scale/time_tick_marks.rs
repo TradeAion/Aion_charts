@@ -159,7 +159,10 @@ impl TimeTickMarks {
             let marks = self.build_impl(max_indexes_per_mark);
             self.cache = Some((max_indexes_per_mark, marks));
         }
-        &self.cache.as_ref().expect("just built").1
+        match self.cache.as_ref() {
+            Some((_, marks)) => marks,
+            None => &[],
+        }
     }
 
     fn build_impl(&self, max_indexes_per_mark: i64) -> Vec<TickMark> {

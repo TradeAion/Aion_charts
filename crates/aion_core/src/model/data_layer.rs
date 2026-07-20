@@ -166,7 +166,17 @@ impl DataLayer {
             let indices: Vec<TimePointIndex> = s
                 .times
                 .iter()
-                .map(|t| merged.binary_search(t).expect("series time in merged") as TimePointIndex)
+                .map(|t| {
+                    // `merged_times` is the union of all series' times, so every series time is
+                    // found by construction. Fall back to the insertion point (nearest index)
+                    // instead of panicking so an invariant break degrades instead of aborting;
+                    // the insertion point also keeps `indices` aligned with the value columns.
+                    let index = merged.binary_search(t).unwrap_or_else(|pos| {
+                        debug_assert!(false, "series time {t} missing from merged time points");
+                        pos.min(merged.len().saturating_sub(1))
+                    });
+                    index as TimePointIndex
+                })
                 .collect();
             s.plot.set_data(
                 indices,

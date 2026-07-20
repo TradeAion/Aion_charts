@@ -1827,7 +1827,9 @@ impl ChartInner {
                 prims_to_instances(&pane_frame.main, &mut group.quads);
             }
             let groups = &self.gpu_groups[..];
-            let gfx = self.gfx.as_mut().expect("checked above");
+            let Some(gfx) = self.gfx.as_mut() else {
+                return Err(JsValue::from_str("WebGPU state disappeared mid-render"));
+            };
             gfx.msaa.ensure(
                 &gfx.device,
                 gfx.config.format,

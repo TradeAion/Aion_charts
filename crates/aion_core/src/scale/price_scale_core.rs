@@ -314,7 +314,7 @@ impl PriceScaleCore {
             logical
         };
 
-        let range = self.price_range.as_ref().expect("not empty");
+        let Some(range) = self.price_range.as_ref() else { return 0.0 };
         let inv_coordinate = self.bottom_margin_px()
             + (self.internal_height() - 1.0) * (logical - range.min_value()) / range.length();
         self.inverted_coordinate(inv_coordinate)
@@ -326,7 +326,7 @@ impl PriceScaleCore {
         }
 
         let inv_coordinate = self.inverted_coordinate(coordinate);
-        let range = self.price_range.as_ref().expect("not empty");
+        let Some(range) = self.price_range.as_ref() else { return 0.0 };
         let logical = range.min_value()
             + range.length()
                 * ((inv_coordinate - self.bottom_margin_px()) / (self.internal_height() - 1.0));
@@ -373,7 +373,7 @@ impl PriceScaleCore {
             return;
         }
         let bh = self.bottom_margin_px();
-        let range = self.price_range.as_ref().expect("not empty");
+        let Some(range) = self.price_range.as_ref() else { return };
         let min = range.min_value();
         let max = range.max_value();
         let ih = self.internal_height() - 1.0;
@@ -429,7 +429,8 @@ impl PriceScaleCore {
 
         let mut scale_coeff =
             (scale_start_point + (self.height - 1.0) * 0.2) / (x + (self.height - 1.0) * 0.2);
-        let mut new_price_range = self.price_range_snapshot.expect("scale started");
+        // Set together with `scale_start_point` in `start_scale`; bail if the pair desynced.
+        let Some(mut new_price_range) = self.price_range_snapshot else { return };
 
         scale_coeff = scale_coeff.max(0.1);
         new_price_range.scale_around_center(scale_coeff);
@@ -466,15 +467,19 @@ impl PriceScaleCore {
         }
         let Some(scroll_start_point) = self.scroll_start_point else { return };
 
-        let price_units_per_pixel =
-            self.price_range.expect("not empty").length() / (self.internal_height() - 1.0);
+        // Both are set alongside `scroll_start_point` in `start_scroll`; bail if desynced.
+        let (Some(price_range), Some(mut new_price_range)) =
+            (self.price_range, self.price_range_snapshot)
+        else {
+            return;
+        };
+        let price_units_per_pixel = price_range.length() / (self.internal_height() - 1.0);
         let mut pixel_delta = x - scroll_start_point;
         if self.is_inverted() {
             pixel_delta = -pixel_delta;
         }
 
         let price_delta = pixel_delta * price_units_per_pixel;
-        let mut new_price_range = self.price_range_snapshot.expect("scroll started");
         new_price_range.shift(price_delta);
         self.price_range = Some(new_price_range);
     }
@@ -608,7 +613,7 @@ impl PriceScaleCore {
             return 0.0;
         }
         let inv_coordinate = self.inverted_coordinate(coordinate);
-        let range = self.price_range.as_ref().expect("not empty");
+        let Some(range) = self.price_range.as_ref() else { return 0.0 };
         // LWC's builder converters go through _coordinateToLogical which applies fromLog;
         // rebuildTickMarks then walks in *price* space for log scales.
         let logical = range.min_value()

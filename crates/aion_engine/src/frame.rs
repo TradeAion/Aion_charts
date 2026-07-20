@@ -217,11 +217,9 @@ fn visible_line_rows(
     let mut bucket: Option<i64> = None;
 
     let flush = |bucket_rows: &mut Vec<usize>, out: &mut Vec<usize>| {
-        if bucket_rows.is_empty() {
+        let (Some(&first), Some(&last)) = (bucket_rows.first(), bucket_rows.last()) else {
             return;
-        }
-        let first = bucket_rows[0];
-        let last = *bucket_rows.last().unwrap();
+        };
         let mut low = first;
         let mut high = first;
         for &row in bucket_rows.iter().skip(1) {
@@ -303,11 +301,10 @@ fn visible_ohlc(
     for row in visible {
         let bucket = x_at(indices[row]).floor() as i64;
         if current_bucket.is_some_and(|previous| previous != bucket) {
-            out.push(
-                current
-                    .take()
-                    .expect("a populated bucket must have OHLC data"),
-            );
+            // `current` is always populated alongside `current_bucket` below.
+            if let Some(item) = current.take() {
+                out.push(item);
+            }
         }
 
         match current.as_mut() {

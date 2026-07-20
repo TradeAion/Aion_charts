@@ -19,7 +19,10 @@ impl PriceTickSpanCalculator {
         } else {
             let mut dividers = Vec::new();
             let mut base_rest = base;
-            while base_rest != 1 {
+            // LWC throws on a base with prime factors other than 2 and 5 (a user-supplied
+            // `min_move` like 0.03 produces one). A JS throw is catchable; a wasm panic aborts
+            // the whole chart, so stop decomposing instead and use the dividers found so far.
+            while base_rest != 1 && dividers.len() <= 100 {
                 if base_rest % 2 == 0 {
                     dividers.push(2.0);
                     base_rest /= 2;
@@ -28,10 +31,8 @@ impl PriceTickSpanCalculator {
                     dividers.push(2.5);
                     base_rest /= 5;
                 } else {
-                    panic!("unexpected base");
+                    break;
                 }
-
-                assert!(dividers.len() <= 100, "something wrong with base");
             }
             dividers
         };
