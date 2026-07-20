@@ -41,6 +41,22 @@
 
     <div class="group">
       <label><input type="checkbox" id="grid_toggle" checked> grid</label>
+      <label>color <input type="color" id="grid_color" value="#d6dcde"></label>
+      <label>style
+        <select id="grid_style">
+          <option value="0" selected>solid</option>
+          <option value="1">dotted</option>
+          <option value="2">dashed</option>
+          <option value="3">large dashed</option>
+          <option value="4">sparse dotted</option>
+        </select>
+      </label>
+      <label>theme
+        <select id="theme_select">
+          <option value="light" selected>light</option>
+          <option value="dark">dark</option>
+        </select>
+      </label>
     </div>
 
     <!-- candle/bar colors: body, wick, and border per direction + part visibility -->
@@ -82,6 +98,13 @@
       </label>
     </div>
 
+    <!-- price/time axis cosmetics: border (LWC borderColor/borderVisible) + text (textColor) -->
+    <div class="group">
+      <label>axis border <input type="color" id="axis_border_color" value="#f5f5f5"></label>
+      <label><input type="checkbox" id="axis_border_visible" checked> visible</label>
+      <label>axis text <input type="color" id="axis_text_color" value="#0a0a0a"></label>
+    </div>
+
     <span id="status"></span>
   </div>
   <div id="chart_container"><div id="legend">O — H — L — C —</div></div>
@@ -89,7 +112,7 @@
 <script type="module">
 // Built from the real package distribution. The demo build copies @aion/charts' published
 // artifacts; it does not compile or wire an engine of its own.
-import { create_chart } from "./dist/aion_charts.js";
+import { create_chart, theme_options, theme_palette } from "./dist/aion_charts.js";
 import { generate_fixture_data } from "./fixture_data.js";
 import { fixture_theme } from "./fixture_styles.js";
 import { marker_fixture, volume_fixture } from "./fixture_features.js";
@@ -158,6 +181,11 @@ if (parity_fixture !== null) {
     vertLines: { color: palette.grid },
     horzLines: { color: palette.grid },
   };
+  // Keep the cross-library fidelity gate pinned to LWC's axis-border default; the package
+  // theme palette (theme.ts) must not leak into the comparison.
+  chart_options.timeScale = { borderColor: "#2B2B43" };
+  chart_options.leftPriceScale = { ...(chart_options.leftPriceScale ?? {}), borderColor: "#2B2B43" };
+  chart_options.rightPriceScale = { ...(chart_options.rightPriceScale ?? {}), borderColor: "#2B2B43" };
 }
 if (runtime_test === "adapterFailure") chart_options.__simulate_webgpu_adapter_failure = true;
 if (query.get("forceFallbackAdapter") === "1") chart_options.__force_webgpu_fallback_adapter = true;
@@ -271,10 +299,17 @@ function apply_main_style() {
   main.apply_options(options);
 }
 
-document.getElementById("grid_toggle").addEventListener("change", (e) => {
-  const visible = e.target.checked;
-  chart.apply_options({ grid: { vertLines: { visible }, horzLines: { visible } } });
-});
+// Grid controls drive both families (vert + horz) at once; the engine stores them separately,
+// so a package consumer can style each family independently (LWC lineStyle 0–4).
+function apply_grid_style() {
+  const color = document.getElementById("grid_color").value;
+  const style = Number(document.getElementById("grid_style").value);
+  const visible = document.getElementById("grid_toggle").checked;
+  chart.apply_options({ grid: { vertLines: { color, style, visible }, horzLines: { color, style, visible } } });
+}
+document.getElementById("grid_toggle").addEventListener("change", apply_grid_style);
+document.getElementById("grid_color").addEventListener("input", apply_grid_style);
+document.getElementById("grid_style").addEventListener("change", apply_grid_style);
 
 document.getElementById("up_color").addEventListener("input", () => main.apply_options({ up_color: document.getElementById("up_color").value }));
 document.getElementById("down_color").addEventListener("input", () => main.apply_options({ down_color: document.getElementById("down_color").value }));
@@ -318,6 +353,33 @@ document.querySelectorAll('input[name="series"]').forEach((el) => {
 document.getElementById("cross_mode").addEventListener("change", (e) => {
   chart.apply_options({ crosshair: { mode: Number(e.target.value) } });
 });
+
+// One demo control drives all three axis strips (left/right price + time); the engine stores
+// them per strip, so a package consumer can also address each strip independently.
+function apply_axis_border() {
+  const borderColor = document.getElementById("axis_border_color").value;
+  const borderVisible = document.getElementById("axis_border_visible").checked;
+  chart.apply_options({
+    leftPriceScale: { borderColor, borderVisible },
+    rightPriceScale: { borderColor, borderVisible },
+    timeScale: { borderColor, borderVisible },
+  });
+}
+document.getElementById("axis_border_color").addEventListener("input", apply_axis_border);
+document.getElementById("axis_border_visible").addEventListener("change", apply_axis_border);
+document.getElementById("axis_text_color").addEventListener("input", (e) => {
+  chart.apply_options({ layout: { textColor: e.target.value } });
+});
+
+// Theme presets come from the package's style settings file (theme.ts); applying one maps its
+// tokens onto the chart options live (background + axis borders + axis text), then the pickers
+// are synced so the controls reflect the active palette.
+document.getElementById("theme_select").addEventListener("change", (e) => {
+  chart.apply_options(theme_options(e.target.value));
+  document.getElementById("axis_border_color").value = theme_palette(e.target.value).border;
+  document.getElementById("axis_text_color").value = theme_palette(e.target.value).text;
+  apply_axis_border();
+});
 sync_style_visibility("candlestick");
 
 // crosshair-move subscription → OHLC legend (the public event API)
@@ -334,7 +396,7 @@ chart.subscribe_click((params) => {
 
 if (runtime_test === "backendParity") {
   const { run_backend_parity } = await import("./runtime_tests.js");
-  const result = await run_backend_parity({ create_chart, chart, container, data, fixture: parity_fixture });
+  const result = await run_backend_parity({ create_chart, chart, container, data, fixture: parity_fixture, chart_options });
   window.__backend_parity_result = result;
   document.documentElement.dataset.backendParity = result.status;
   status.textContent = result.status === "passed"

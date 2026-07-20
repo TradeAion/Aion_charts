@@ -13,10 +13,11 @@
 //! Colors are kept as CSS strings (as in LWC); the render layer parses them. `LineStyle` is the
 //! numeric wire form LWC uses (0 Solid, 1 Dotted, 2 Dashed, 3 LargeDashed, 4 SparseDotted).
 //!
-//! Scope note: this covers the chart-level visual groups (layout, grid, crosshair) plus the
-//! top-level flags. Time-scale and price-scale options currently live in their own core structs
-//! (`TimeScaleOptions`, `PriceScaleCoreOptions`) and will be folded into this store in a later
-//! Phase B pass; per-series options land with the series work.
+//! Scope note: this covers the chart-level visual groups (layout, grid, crosshair), the axis
+//! strips' border cosmetics (`leftPriceScale`/`rightPriceScale`/`timeScale`), and the top-level
+//! flags. Time-scale and price-scale *behavioral* options currently live in their own core
+//! structs (`TimeScaleOptions`, `PriceScaleCoreOptions`) and will be folded into this store in a
+//! later Phase B pass; per-series options land with the series work.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -52,6 +53,9 @@ fn crosshair_color() -> String {
 }
 fn crosshair_label_bg() -> String {
     "#131722".into()
+}
+fn axis_border_color() -> String {
+    "#2B2B43".into()
 }
 fn default_font_family() -> String {
     // `helpers/make-font.ts` defaultFontFamily.
@@ -178,17 +182,48 @@ pub struct CrosshairOptions {
     pub mode: u8,
 }
 
-/// Chart-level visibility of a pane price-axis strip. Scale math and per-series scale options are
-/// owned by `PriceScaleCore`; this flag determines whether layout reserves and paints the strip.
+/// Chart-level options of a pane price-axis strip: visibility plus the LWC border cosmetics
+/// (`price-scale.options.ts`: `borderVisible`/`borderColor`). Scale math and per-series scale
+/// options are owned by `PriceScaleCore`; `visible` determines whether layout reserves and paints
+/// the strip.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PriceAxisOptions {
     pub visible: bool,
+    #[serde(rename = "borderVisible")]
+    pub border_visible: bool,
+    #[serde(rename = "borderColor")]
+    pub border_color: String,
 }
 
 impl PriceAxisOptions {
     fn visible(visible: bool) -> Self {
-        Self { visible }
+        Self {
+            visible,
+            border_visible: true,
+            border_color: axis_border_color(),
+        }
+    }
+}
+
+/// Time-axis border cosmetics (`time-scale.options.ts`: `borderVisible`/`borderColor`). The rest
+/// of the time-scale surface (bar spacing, offsets) lives in `TimeScaleCore` behind dedicated
+/// setters and folds into this store in a later pass.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TimeAxisOptions {
+    #[serde(rename = "borderVisible")]
+    pub border_visible: bool,
+    #[serde(rename = "borderColor")]
+    pub border_color: String,
+}
+
+impl Default for TimeAxisOptions {
+    fn default() -> Self {
+        Self {
+            border_visible: true,
+            border_color: axis_border_color(),
+        }
     }
 }
 
@@ -219,6 +254,8 @@ pub struct ChartOptions {
     pub left_price_scale: PriceAxisOptions,
     #[serde(rename = "rightPriceScale")]
     pub right_price_scale: PriceAxisOptions,
+    #[serde(rename = "timeScale")]
+    pub time_scale: TimeAxisOptions,
     #[serde(rename = "autoSize")]
     pub auto_size: bool,
     #[serde(rename = "hoveredSeriesOnTop")]
@@ -233,6 +270,7 @@ impl Default for ChartOptions {
             crosshair: CrosshairOptions::default(),
             left_price_scale: PriceAxisOptions::visible(false),
             right_price_scale: PriceAxisOptions::visible(true),
+            time_scale: TimeAxisOptions::default(),
             auto_size: false,
             hovered_series_on_top: true,
         }
@@ -332,6 +370,32 @@ mod tests {
         assert_eq!(o.crosshair.horz_line.label_background_color, "#131722");
         assert!(o.hovered_series_on_top);
         assert!(!o.auto_size);
+        // Axis border cosmetics (`#2B2B43` everywhere, all borders visible).
+        assert!(o.right_price_scale.visible);
+        assert!(!o.left_price_scale.visible);
+        assert!(o.right_price_scale.border_visible);
+        assert!(o.left_price_scale.border_visible);
+        assert_eq!(o.right_price_scale.border_color, "#2B2B43");
+        assert_eq!(o.left_price_scale.border_color, "#2B2B43");
+        assert!(o.time_scale.border_visible);
+        assert_eq!(o.time_scale.border_color, "#2B2B43");
+    }
+
+    #[test]
+    fn axis_border_patch_merges_without_touching_siblings() {
+        let mut store = ChartOptionsStore::new();
+        store.apply(&json!({
+            "rightPriceScale": { "borderColor": "#ff0000" },
+            "timeScale": { "borderVisible": false },
+        }));
+        let o = store.get();
+        assert_eq!(o.right_price_scale.border_color, "#ff0000");
+        // untouched siblings survive: strip visibility and the other border options
+        assert!(o.right_price_scale.visible);
+        assert!(o.right_price_scale.border_visible);
+        assert_eq!(o.left_price_scale.border_color, "#2B2B43");
+        assert!(!o.time_scale.border_visible);
+        assert_eq!(o.time_scale.border_color, "#2B2B43");
     }
 
     #[test]

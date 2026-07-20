@@ -723,6 +723,49 @@ Progress is appended here as phases land (newest last).
   `set_series_wick_visible`, `set_series_border_visible`) and adds demo pickers that pin an
   explicit color only once touched, preserving the body-color fallback until then.
 
+- 2026-07-20 — **Axis border cosmetics through the options store.** The axis overlay previously
+  painted every strip border from a hardcoded `#2B2B43`. `PriceAxisOptions` gains LWC's
+  `borderVisible`/`borderColor` and a new `timeScale` group carries the same pair for the time
+  axis (behavioral time-scale options stay in `TimeScaleCore` until the Phase B fold-in). The
+  host axis pass parses the per-strip colors with a default fallback; pane separators share the
+  time-scale border color and stay painted even when the time border is hidden. Defaults are
+  unchanged, so the parity matrix holds; browser-verified per-strip red-border probes (right
+  only → right+time → hidden → restored) all land on the expected pixel counts. Demo: one
+  color picker + visibility checkbox drives all three strips.
+
+- 2026-07-20 — **Package style settings file (`theme.ts`).** Product defaults no longer live in
+  hardcoded hex scattered across the stack: `packages/charts/src/theme.ts` holds the light/dark
+  token palettes (`background` = chart main bg, `border` = axis border color) and maps them onto
+  the options tree. Light: `oklch(1 0 0)` → `#ffffff` / border `#f5f5f5`. Dark: `oklch(0.145 0 0)`
+  → `#0a0a0b` / border `#16191f`. `create_chart` applies the selected theme under caller options
+  (engine deep-merge), so explicit leaves always win; `theme` is a package-level key stripped
+  before forwarding. The engine keeps LWC reference defaults (parity anchor); parity fixtures pin
+  `#2B2B43` borders explicitly, and `run_backend_parity` now passes the demo's full chart options
+  to its forced-Canvas2D twin instead of relying on defaults accidentally matching. Demo: theme
+  select applies a palette live and syncs the axis-border picker. Browser-verified: default light
+  borders `#f5f5f5` (1884 px), dark switch repaints bg `#0a0a0b` + borders `#16191f`, switching
+  back restores the light state exactly.
+
+- 2026-07-20 — **Theme text token + axis text control.** The platform stylesheet's `--foreground`
+  tokens joined `theme.ts` as the `text` token: light `oklch(0.145 0 0)` → `#0a0a0a`, dark
+  `oklch(0.985 0 0)` → `#fafafa`, mapped onto `layout.textColor` (the axis tick labels were
+  already store-driven, so no engine change was needed). oklch conversions now use the exact CSS
+  Color 4 path (OKLab → XYZ → sRGB), correcting the dark background `#0a0a0b` → `#0a0a0a`. Demo:
+  an axis-text color picker sits beside the border controls and the theme select syncs both
+  pickers. Browser-verified: 342 axis-text pixels track the active token exactly (light `#0a0a0a`
+  → dark `#fafafa` → picker `#ff0000` → restored), borders/background unchanged, all seven gates
+  green.
+
+- 2026-07-20 — **Grid line styles honored end-to-end.** `build_grid_frame` hardcoded
+  `LineStyle::Solid` even though the options store, the `Prim` lines, both executors' identical
+  dash-segment expansion, and the native `StrokeDash` path already carried the full LWC style
+  set. The builder now maps the stored `lineStyle` (0 solid … 4 sparse-dotted) per family, so
+  dotted/dashed/large-dashed/sparse-dotted render with the spec's §6 patterns; per-family colors
+  were already store-driven. New engine test pins style+color flow; browser probe shows textbook
+  duty cycles (solid 27,643 px → dotted/dashed/large ≈50% → sparse ≈20%), total recolor, clean
+  hide, exact restore. Demo: grid color picker + style select beside the visibility toggle.
+  Defaults unchanged (solid `#D6DCDE`), seven gates green.
+
 ## 11. Revised execution order
 
 The active plan is now different from the original scaffolding sequence. The earlier sequence is

@@ -569,3 +569,62 @@ fn axis_frame_owns_label_content_and_positions() {
     assert!(!axes.labels.is_empty());
     assert!(axes.labels.iter().any(|label| label.text.contains("11")));
 }
+
+#[test]
+fn grid_line_style_and_color_flow_from_options() {
+    let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+    chart
+        .set_series_data(
+            0,
+            &[1.0, 2.0, 3.0],
+            &[10.0, 11.0, 12.0],
+            &[9.0, 10.0, 11.0],
+            &[8.0, 9.0, 10.0],
+            &[9.5, 10.5, 11.5],
+        )
+        .unwrap();
+    chart.time_scale.set_width(760.0);
+    chart.fit_content();
+
+    // Default: solid grid in the under-paint bucket.
+    use aion_render::draw_list::Prim;
+    let mut frame = ChartFrame::default();
+    chart.build_frame_into(&mut frame);
+    let grid_lines: Vec<_> = frame.panes[0]
+        .under
+        .iter()
+        .filter(|p| matches!(p, Prim::VLine { .. } | Prim::HLine { .. }))
+        .collect();
+    assert!(!grid_lines.is_empty());
+    assert!(grid_lines.iter().all(|p| matches!(
+        p,
+        Prim::VLine {
+            style: LineStyle::Solid,
+            ..
+        } | Prim::HLine {
+            style: LineStyle::Solid,
+            ..
+        }
+    )));
+
+    // LWC numeric styles (2 dashed, 3 large-dashed) + per-family colors reach the frame.
+    chart
+        .options
+        .apply_str(
+            r##"{"grid": {
+                "vertLines": { "style": 2, "color": "#112233" },
+                "horzLines": { "style": 3, "color": "#445566" }
+            }}"##,
+        )
+        .unwrap();
+    chart.build_frame_into(&mut frame);
+    let under = &frame.panes[0].under;
+    assert!(under.iter().any(|p| matches!(
+        p,
+        Prim::VLine { style: LineStyle::Dashed, color, .. } if *color == Color::rgb(0x11, 0x22, 0x33)
+    )));
+    assert!(under.iter().any(|p| matches!(
+        p,
+        Prim::HLine { style: LineStyle::LargeDashed, color, .. } if *color == Color::rgb(0x44, 0x55, 0x66)
+    )));
+}

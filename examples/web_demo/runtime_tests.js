@@ -86,7 +86,7 @@ async function capture_presented_webgpu(container) {
  * supplied by the ordinary demo bootstrap, which ensures this gate exercises the same public path
  * as a consumer application.
  */
-export async function run_backend_parity({ create_chart, chart, container, data, fixture }) {
+export async function run_backend_parity({ create_chart, chart, container, data, fixture, chart_options }) {
   await wait_for_presentation();
   if (chart.backend() !== "webgpu") {
     return {
@@ -103,7 +103,10 @@ export async function run_backend_parity({ create_chart, chart, container, data,
   const public_screenshot = chart.take_screenshot();
   chart.remove();
 
-  const fallback_chart = await create_chart(container, { autoSize: false, backend: "canvas2d" });
+  // The forced-Canvas2D twin must receive the same visual options as the demo-bootstrapped chart;
+  // only the backend differs. (Historically this relied on the fixture palette matching engine
+  // defaults, which package theming would silently break.)
+  const fallback_chart = await create_chart(container, { ...chart_options, autoSize: false, backend: "canvas2d" });
   fallback_chart.resize(fixture.css_width, fixture.css_height, fixture.pixel_ratio);
   const fallback_main = fallback_chart.add_series("candlestick");
   fallback_main.set_data(data);

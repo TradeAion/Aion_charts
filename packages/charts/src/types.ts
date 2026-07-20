@@ -99,13 +99,21 @@ export interface chart_options {
   layout: { background: { type: string; color: string }; textColor: string; fontSize: number; fontFamily: string; attributionLogo: boolean };
   grid: { vertLines: grid_line_options; horzLines: grid_line_options };
   crosshair: { vertLine: Partial<grid_line_options>; horzLine: Partial<grid_line_options>; mode: number };
-  leftPriceScale: { visible: boolean };
-  rightPriceScale: { visible: boolean };
+  leftPriceScale: { visible: boolean; borderVisible: boolean; borderColor: string };
+  rightPriceScale: { visible: boolean; borderVisible: boolean; borderColor: string };
+  /** Time-axis strip cosmetics (LWC `timeScale.borderVisible`/`borderColor`). */
+  timeScale: { borderVisible: boolean; borderColor: string };
   /** Install a ResizeObserver so the chart tracks its container's size. Default `false` (LWC parity). */
   autoSize: boolean;
   hoveredSeriesOnTop: boolean;
   /** Backend override for capability testing; defaults to automatic WebGPU → Canvas2D fallback. */
   backend: "auto" | "canvas2d";
+  /**
+   * Default style preset from `theme.ts` (the package's style settings file), applied at
+   * creation *under* any explicit options. Default `"light"`. Package-level only — never
+   * forwarded to the engine.
+   */
+  theme: "light" | "dark";
 }
 
 /** Options accepted when adding a series. */

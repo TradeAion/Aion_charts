@@ -173,8 +173,22 @@ impl ChartInner {
         ctx.clear_rect(0.0, 0.0, bitmap_w, bitmap_h);
         let border_w = 1f64.max(dpr.floor());
 
-        ctx.set_fill_style_str(BORDER_CSS);
-        if self.left_axis_w > 0.0 {
+        // Axis borders come from the options store (LWC `borderColor`/`borderVisible` per strip);
+        // an unparseable color falls back to the LWC default.
+        let options = self.opts();
+        let fallback = Color::parse_css(BORDER_CSS).unwrap_or(Color::rgb(0x2b, 0x2b, 0x43));
+        let left_border = Color::parse_css(&options.left_price_scale.border_color)
+            .unwrap_or(fallback)
+            .to_hex();
+        let right_border = Color::parse_css(&options.right_price_scale.border_color)
+            .unwrap_or(fallback)
+            .to_hex();
+        let time_border = Color::parse_css(&options.time_scale.border_color)
+            .unwrap_or(fallback)
+            .to_hex();
+
+        if self.left_axis_w > 0.0 && options.left_price_scale.border_visible {
+            ctx.set_fill_style_str(&left_border);
             ctx.fill_rect(
                 (pane_left * dpr).round() - border_w,
                 0.0,
@@ -182,7 +196,8 @@ impl ChartInner {
                 (pane_h * dpr).round(),
             );
         }
-        if self.axis_w > 0.0 {
+        if self.axis_w > 0.0 && options.right_price_scale.border_visible {
+            ctx.set_fill_style_str(&right_border);
             ctx.fill_rect(
                 ((pane_left + pane_w) * dpr).round(),
                 0.0,
@@ -190,9 +205,15 @@ impl ChartInner {
                 (pane_h * dpr).round(),
             );
         }
-        ctx.fill_rect(0.0, (pane_h * dpr).round(), bitmap_w, border_w);
+        if options.time_scale.border_visible {
+            ctx.set_fill_style_str(&time_border);
+            ctx.fill_rect(0.0, (pane_h * dpr).round(), bitmap_w, border_w);
+        }
 
-        // separators between stacked panes (roadmap Phase B1): a border line at each pane boundary
+        // Separators between stacked panes (roadmap Phase B1): a border line at each pane
+        // boundary. They are horizontal rules like the time-axis border and share its color;
+        // they stay painted even when the time-axis border itself is hidden.
+        ctx.set_fill_style_str(&time_border);
         for separator in &axis_frame.separators {
             let y = (separator * dpr).round();
             ctx.fill_rect(

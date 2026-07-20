@@ -17,8 +17,10 @@
 import { create_chart as wasm_create_chart } from "../pkg/aion_wasm.js";
 
 export * from "./types.js";
+export * from "./theme.js";
 import { chart_impl } from "./impl.js";
 import { ensure_init } from "./impl.js";
+import { theme_options } from "./theme.js";
 import type { chart_api, chart_options, deep_partial } from "./types.js";
 
 // ---------------------------------------------------------------------------------------------
@@ -89,8 +91,13 @@ export async function create_chart(
     simulate_adapter_failure,
     force_fallback_adapter,
   );
-  if (options) {
-    wasm.apply_options(JSON.stringify(options));
+  // Default style settings first (theme.ts), explicit options second — the engine deep-merges
+  // successive patches, so caller options always win over the theme palette. `theme` is a
+  // package-level key and is not forwarded to the engine's options store.
+  const { theme, ...engine_options } = options ?? {};
+  wasm.apply_options(JSON.stringify(theme_options(theme ?? "light")));
+  if (Object.keys(engine_options).length > 0) {
+    wasm.apply_options(JSON.stringify(engine_options));
   }
   const auto_size = options?.autoSize === true;
   const chart = new chart_impl(wasm, container, gpu_pane, fallback_pane, overlay, auto_size);

@@ -21,6 +21,10 @@ impl ChartEngine {
         let grid = self.options.get().grid;
         let vert = css_color(&grid.vert_lines.color, GRID);
         let horz = css_color(&grid.horz_lines.color, GRID);
+        // LWC lineStyle (0 solid … 4 sparse-dotted); the backends expand dash patterns into
+        // segment rects identically (RENDERING_SPEC.md §6).
+        let vert_style = crate::line_style_from_u8(grid.vert_lines.style);
+        let horz_style = crate::line_style_from_u8(grid.horz_lines.style);
         let lw = 1f64.max(hpr.floor()) as i32;
         if grid.vert_lines.visible {
             for &(idx, _) in marks {
@@ -30,7 +34,7 @@ impl ChartEngine {
                         y0: top - lw,
                         y1: top + height + lw,
                         width: lw,
-                        style: LineStyle::Solid,
+                        style: vert_style,
                         color: vert,
                     });
                 }
@@ -43,7 +47,7 @@ impl ChartEngine {
                     x0: -lw,
                     x1: width + lw,
                     width: lw,
-                    style: LineStyle::Solid,
+                    style: horz_style,
                     color: horz,
                 });
             }
