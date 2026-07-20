@@ -183,7 +183,7 @@ pub struct CrosshairOptions {
     pub vert_line: CrosshairLineOptions,
     #[serde(rename = "horzLine")]
     pub horz_line: CrosshairLineOptions,
-    /// [`crosshair_mode`] value (default Magnet).
+    /// [`crosshair_mode`] value (default Normal — a deliberate divergence from LWC's Magnet).
     pub mode: u8,
 }
 
@@ -212,7 +212,7 @@ impl Default for CrosshairOptions {
         Self {
             vert_line: CrosshairLineOptions::default(),
             horz_line: CrosshairLineOptions::default(),
-            mode: crosshair_mode::MAGNET,
+            mode: crosshair_mode::NORMAL,
         }
     }
 }
@@ -335,7 +335,8 @@ mod tests {
         assert_eq!(o.layout.font_size, 12.0);
         assert_eq!(o.grid.vert_lines.color, "#D6DCDE");
         assert_eq!(o.grid.horz_lines.style, line_style::SOLID);
-        assert_eq!(o.crosshair.mode, crosshair_mode::MAGNET);
+        // Deliberate divergence from LWC: Aion defaults to Normal, not Magnet.
+        assert_eq!(o.crosshair.mode, crosshair_mode::NORMAL);
         assert_eq!(o.crosshair.vert_line.style, line_style::LARGE_DASHED);
         assert_eq!(o.crosshair.horz_line.label_background_color, "#131722");
         assert!(o.hovered_series_on_top);

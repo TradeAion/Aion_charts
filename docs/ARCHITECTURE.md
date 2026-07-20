@@ -426,7 +426,8 @@ labels, hit testing, click/crosshair subscriptions. Interaction parity tests.
 series (CPU-tessellated polyline stroke with round joins, gradient area fill, 4x MSAA for edge
 AA — pixel-aligned rects/text stay bit-identical), triangle pipeline, MSAA frame target,
 `update()` streaming path, new-bar shift, **magnet crosshair** (Normal/Magnet/MagnetOHLC/Hidden,
-default Magnet like LWC — snaps horizontal line to close/OHLC), **crosshair marker** (white halo
+default Normal — a deliberate divergence from LWC's Magnet default; Magnet/MagnetOHLC snap the
+horizontal line to close/OHLC when enabled), **crosshair marker** (white halo
 + series-color disc on line/area), **last-value price line + colored axis label** (dashed line
 to last close, contrast text), and viewport-bounded conflation for line/area/baseline, OHLC, and
 histogram series. The 1M load/streaming benchmark gate passes. Remaining: repeatable interaction

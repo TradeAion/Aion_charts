@@ -318,7 +318,7 @@ impl ChartEngine {
             series: vec![SeriesEntry::new(main, SeriesKind::Candlestick)],
             tick_marks: TimeTickMarks::new(),
             options: ChartOptionsStore::new(),
-            crosshair_mode: CrosshairMode::Magnet,
+            crosshair_mode: CrosshairMode::Normal,
             animation_time: 0.0,
             next_price_line_id: 1,
             time_visible: true,

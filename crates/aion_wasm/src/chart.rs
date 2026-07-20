@@ -88,10 +88,11 @@ struct MarkerInput {
 
 fn crosshair_mode_from_u8(mode: u8) -> CrosshairMode {
     match mode {
-        crosshair_mode::NORMAL => CrosshairMode::Normal,
+        crosshair_mode::MAGNET => CrosshairMode::Magnet,
         crosshair_mode::HIDDEN => CrosshairMode::Hidden,
         crosshair_mode::MAGNET_OHLC => CrosshairMode::MagnetOhlc,
-        _ => CrosshairMode::Magnet,
+        // Unknown wire values fall back to the default mode (Normal).
+        _ => CrosshairMode::Normal,
     }
 }
 
