@@ -148,6 +148,15 @@ pub struct SeriesEntry {
     pub line_color: Color,
     pub up_color: Option<Color>,
     pub down_color: Option<Color>,
+    /// Candlestick wick colors per direction; `None` falls back to the body color (LWC parity).
+    pub wick_up_color: Option<Color>,
+    pub wick_down_color: Option<Color>,
+    /// Candlestick border colors per direction; `None` falls back to the body color (LWC parity).
+    pub border_up_color: Option<Color>,
+    pub border_down_color: Option<Color>,
+    /// Candlestick part visibility; `None` = visible (LWC parity).
+    pub wick_visible: Option<bool>,
+    pub border_visible: Option<bool>,
     pub line_width: Option<f64>,
     pub area_top_color: Option<Color>,
     pub area_bottom_color: Option<Color>,
@@ -173,6 +182,12 @@ impl SeriesEntry {
             line_color: DEFAULT_LINE_COLOR,
             up_color: None,
             down_color: None,
+            wick_up_color: None,
+            wick_down_color: None,
+            border_up_color: None,
+            border_down_color: None,
+            wick_visible: None,
+            border_visible: None,
             line_width: None,
             area_top_color: None,
             area_bottom_color: None,

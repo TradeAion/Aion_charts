@@ -135,6 +135,18 @@ class series_impl implements series_api {
       // CSS strings passed through so the engine keeps alpha; empty = leave unchanged.
       this.chart.wasm.set_series_updown_colors(this.id, options.up_color ?? "", options.down_color ?? "");
     }
+    if (options.wick_up_color !== undefined || options.wick_down_color !== undefined) {
+      this.chart.wasm.set_series_wick_colors(this.id, options.wick_up_color ?? "", options.wick_down_color ?? "");
+    }
+    if (options.border_up_color !== undefined || options.border_down_color !== undefined) {
+      this.chart.wasm.set_series_border_colors(this.id, options.border_up_color ?? "", options.border_down_color ?? "");
+    }
+    if (options.wick_visible !== undefined) {
+      this.chart.wasm.set_series_wick_visible(this.id, options.wick_visible);
+    }
+    if (options.border_visible !== undefined) {
+      this.chart.wasm.set_series_border_visible(this.id, options.border_visible);
+    }
     if (options.line_width !== undefined) {
       this.chart.wasm.set_series_line_width(this.id, options.line_width);
     }

@@ -43,10 +43,16 @@
       <label><input type="checkbox" id="grid_toggle" checked> grid</label>
     </div>
 
-    <!-- candle/bar colors -->
+    <!-- candle/bar colors: body, wick, and border per direction + part visibility -->
     <div class="group" id="candle_style">
       <label>up <input type="color" id="up_color" value="#26a69a"></label>
       <label>down <input type="color" id="down_color" value="#ef5350"></label>
+      <label>wick up <input type="color" id="wick_up_color" value="#26a69a"></label>
+      <label>wick dn <input type="color" id="wick_down_color" value="#ef5350"></label>
+      <label>border up <input type="color" id="border_up_color" value="#26a69a"></label>
+      <label>border dn <input type="color" id="border_down_color" value="#ef5350"></label>
+      <label><input type="checkbox" id="wick_visible" checked> wicks</label>
+      <label><input type="checkbox" id="border_visible" checked> borders</label>
     </div>
 
     <!-- line/area stroke -->
@@ -240,17 +246,29 @@ function sync_style_visibility(kind) {
   document.getElementById("area_style").hidden = kind !== "area";
 }
 
+// Wick/border pickers pin an explicit color only once touched; until then the engine's
+// LWC-parity fallback keeps each wick/border following its direction's body color, so the
+// body pickers alone recolor the whole candle.
+const candle_part_touched = { wick_up: false, wick_down: false, border_up: false, border_down: false };
+
 // Re-apply the current control values to the main series (used after a type change).
 function apply_main_style() {
-  main.apply_options({
+  const options = {
     up_color: document.getElementById("up_color").value,
     down_color: document.getElementById("down_color").value,
+    wick_visible: document.getElementById("wick_visible").checked,
+    border_visible: document.getElementById("border_visible").checked,
     color: document.getElementById("line_color").value,
     line_width: Number(document.getElementById("line_width").value),
     area_top_color: document.getElementById("area_top").value,
     // fade the fill to fully-transparent at the base (standard area look)
     area_bottom_color: document.getElementById("area_top").value + "00",
-  });
+  };
+  if (candle_part_touched.wick_up) options.wick_up_color = document.getElementById("wick_up_color").value;
+  if (candle_part_touched.wick_down) options.wick_down_color = document.getElementById("wick_down_color").value;
+  if (candle_part_touched.border_up) options.border_up_color = document.getElementById("border_up_color").value;
+  if (candle_part_touched.border_down) options.border_down_color = document.getElementById("border_down_color").value;
+  main.apply_options(options);
 }
 
 document.getElementById("grid_toggle").addEventListener("change", (e) => {
@@ -260,6 +278,12 @@ document.getElementById("grid_toggle").addEventListener("change", (e) => {
 
 document.getElementById("up_color").addEventListener("input", () => main.apply_options({ up_color: document.getElementById("up_color").value }));
 document.getElementById("down_color").addEventListener("input", () => main.apply_options({ down_color: document.getElementById("down_color").value }));
+document.getElementById("wick_up_color").addEventListener("input", (e) => { candle_part_touched.wick_up = true; main.apply_options({ wick_up_color: e.target.value }); });
+document.getElementById("wick_down_color").addEventListener("input", (e) => { candle_part_touched.wick_down = true; main.apply_options({ wick_down_color: e.target.value }); });
+document.getElementById("border_up_color").addEventListener("input", (e) => { candle_part_touched.border_up = true; main.apply_options({ border_up_color: e.target.value }); });
+document.getElementById("border_down_color").addEventListener("input", (e) => { candle_part_touched.border_down = true; main.apply_options({ border_down_color: e.target.value }); });
+document.getElementById("wick_visible").addEventListener("change", (e) => main.apply_options({ wick_visible: e.target.checked }));
+document.getElementById("border_visible").addEventListener("change", (e) => main.apply_options({ border_visible: e.target.checked }));
 document.getElementById("line_color").addEventListener("input", () => main.apply_options({ color: document.getElementById("line_color").value }));
 document.getElementById("line_width").addEventListener("input", (e) => {
   document.getElementById("line_width_val").textContent = e.target.value;

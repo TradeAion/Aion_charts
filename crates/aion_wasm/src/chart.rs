@@ -544,6 +544,30 @@ impl AionChart {
             .set_series_updown_colors(id, up, down);
     }
 
+    /// Set candlestick wick colors per direction as CSS strings (empty string = keep current).
+    pub fn set_series_wick_colors(&mut self, id: u32, up: &str, down: &str) {
+        self.inner.borrow_mut().set_series_wick_colors(id, up, down);
+    }
+
+    /// Set candlestick border colors per direction as CSS strings (empty string = keep current).
+    pub fn set_series_border_colors(&mut self, id: u32, up: &str, down: &str) {
+        self.inner
+            .borrow_mut()
+            .set_series_border_colors(id, up, down);
+    }
+
+    /// Toggle candlestick wick visibility (default visible).
+    pub fn set_series_wick_visible(&mut self, id: u32, visible: bool) {
+        self.inner.borrow_mut().set_series_wick_visible(id, visible);
+    }
+
+    /// Toggle candlestick body-border visibility (default visible).
+    pub fn set_series_border_visible(&mut self, id: u32, visible: bool) {
+        self.inner
+            .borrow_mut()
+            .set_series_border_visible(id, visible);
+    }
+
     /// Set a line/area series' stroke width (css px).
     pub fn set_series_line_width(&mut self, id: u32, width: f64) {
         self.inner.borrow_mut().set_series_line_width(id, width);

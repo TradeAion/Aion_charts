@@ -171,6 +171,12 @@ struct ResolvedSeries {
     color: Color,
     up: Color,
     down: Color,
+    wick_up: Color,
+    wick_down: Color,
+    border_up: Color,
+    border_down: Color,
+    wick_visible: bool,
+    border_visible: bool,
     line_width: f64,
     area_top: Color,
     area_bottom: Color,
@@ -270,12 +276,21 @@ impl ChartEngine {
             let base_value = visible
                 .and_then(|(from, _)| self.series_base_value(s.id, from))
                 .unwrap_or(0.0);
+            let up = s.up_color.unwrap_or(UP);
+            let down = s.down_color.unwrap_or(DOWN);
             resolved.push(ResolvedSeries {
                 id: s.id,
                 kind: s.kind,
                 color: s.line_color,
-                up: s.up_color.unwrap_or(UP),
-                down: s.down_color.unwrap_or(DOWN),
+                up,
+                down,
+                // LWC parity: an unset wick/border color follows the body color of its direction.
+                wick_up: s.wick_up_color.unwrap_or(up),
+                wick_down: s.wick_down_color.unwrap_or(down),
+                border_up: s.border_up_color.unwrap_or(up),
+                border_down: s.border_down_color.unwrap_or(down),
+                wick_visible: s.wick_visible.unwrap_or(true),
+                border_visible: s.border_visible.unwrap_or(true),
                 line_width: s.line_width.unwrap_or(LINE_WIDTH),
                 area_top: s.area_top_color.unwrap_or(AREA_TOP),
                 area_bottom: s.area_bottom_color.unwrap_or(AREA_BOTTOM),

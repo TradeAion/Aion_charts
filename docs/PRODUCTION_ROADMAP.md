@@ -711,6 +711,18 @@ Progress is appended here as phases land (newest last).
   package lint/build/typecheck, and the Playwright runtime/parity suite in Chromium. All 190 Rust
   tests and the seven-case browser matrix stayed green throughout.
 
+- 2026-07-20 — **Candlestick per-part colors: wick/border up/down + part visibility.** Candlesticks
+  now expose the full LWC color surface: `wick_up_color`/`wick_down_color`,
+  `border_up_color`/`border_down_color`, and `wick_visible`/`border_visible` join
+  `up_color`/`down_color` in `series_options`. `SeriesEntry` carries the six optional overrides and
+  the frame resolver applies LWC fallback semantics — an unset wick/border color follows its
+  direction's body color and both parts default visible — so default rendering is unchanged (the
+  DPR-1/spacing-6 pane stays byte-identical to LWC 5.2; all seven browser gates green). The
+  renderer already had independent body/border/wick channels on `CandleItem`; this change plumbs
+  the engine → wasm → TS path (`set_series_wick_colors`, `set_series_border_colors`,
+  `set_series_wick_visible`, `set_series_border_visible`) and adds demo pickers that pin an
+  explicit color only once touched, preserving the body-color fallback until then.
+
 ## 11. Revised execution order
 
 The active plan is now different from the original scaffolding sequence. The earlier sequence is

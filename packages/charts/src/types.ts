@@ -116,6 +116,18 @@ export interface series_options {
   up_color: string;
   /** Candlestick/bar down (close < open) body color. */
   down_color: string;
+  /** Candlestick up-bar wick color. Until set, follows `up_color` (LWC parity). */
+  wick_up_color: string;
+  /** Candlestick down-bar wick color. Until set, follows `down_color`. */
+  wick_down_color: string;
+  /** Candlestick up-bar border color. Until set, follows `up_color` (LWC parity). */
+  border_up_color: string;
+  /** Candlestick down-bar border color. Until set, follows `down_color`. */
+  border_down_color: string;
+  /** Candlestick wick visibility (default true; ignored by bar series). */
+  wick_visible: boolean;
+  /** Candlestick body-border visibility (default true; ignored by bar series). */
+  border_visible: boolean;
   /** Line/area stroke width in css px (default 3). */
   line_width: number;
   /** Area fill color at the line (top of the gradient). */

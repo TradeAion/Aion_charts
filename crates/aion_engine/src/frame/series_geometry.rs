@@ -73,20 +73,16 @@ impl ChartEngine {
         let items = visible
             .into_iter()
             .map(|bar| {
-                let color = if bar.close >= bar.open {
-                    rs.up
-                } else {
-                    rs.down
-                };
+                let rising = bar.close >= bar.open;
                 CandleItem {
                     x: bar.x_px / hpr,
                     open_y: scale.price_to_coordinate(bar.open, rs.base_value),
                     high_y: scale.price_to_coordinate(bar.high, rs.base_value),
                     low_y: scale.price_to_coordinate(bar.low, rs.base_value),
                     close_y: scale.price_to_coordinate(bar.close, rs.base_value),
-                    body_color: color,
-                    border_color: color,
-                    wick_color: color,
+                    body_color: if rising { rs.up } else { rs.down },
+                    border_color: if rising { rs.border_up } else { rs.border_down },
+                    wick_color: if rising { rs.wick_up } else { rs.wick_down },
                 }
             })
             .collect::<Vec<_>>();
@@ -96,8 +92,8 @@ impl ChartEngine {
                 bar_spacing: self.time_scale.bar_spacing(),
                 horizontal_pixel_ratio: hpr,
                 vertical_pixel_ratio: vpr,
-                wick_visible: true,
-                border_visible: true,
+                wick_visible: rs.wick_visible,
+                border_visible: rs.border_visible,
             },
             out,
         );

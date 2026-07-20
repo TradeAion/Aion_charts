@@ -163,6 +163,46 @@ impl ChartInner {
         }
     }
 
+    /// Set candlestick wick colors per direction (CSS strings; empty/unparseable = keep current).
+    /// Until set, each wick follows its direction's body color (LWC parity).
+    pub fn set_series_wick_colors(&mut self, id: u32, up: &str, down: &str) {
+        if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
+            if let Some(c) = Color::parse_css(up) {
+                s.wick_up_color = Some(c);
+            }
+            if let Some(c) = Color::parse_css(down) {
+                s.wick_down_color = Some(c);
+            }
+        }
+    }
+
+    /// Set candlestick border colors per direction (CSS strings; empty/unparseable = keep current).
+    /// Until set, each border follows its direction's body color (LWC parity).
+    pub fn set_series_border_colors(&mut self, id: u32, up: &str, down: &str) {
+        if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
+            if let Some(c) = Color::parse_css(up) {
+                s.border_up_color = Some(c);
+            }
+            if let Some(c) = Color::parse_css(down) {
+                s.border_down_color = Some(c);
+            }
+        }
+    }
+
+    /// Toggle candlestick wick visibility (default visible; bars ignore this).
+    pub fn set_series_wick_visible(&mut self, id: u32, visible: bool) {
+        if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
+            s.wick_visible = Some(visible);
+        }
+    }
+
+    /// Toggle candlestick body-border visibility (default visible; bars ignore this).
+    pub fn set_series_border_visible(&mut self, id: u32, visible: bool) {
+        if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
+            s.border_visible = Some(visible);
+        }
+    }
+
     /// Set a line/area series' stroke width (css px; non-positive ignored).
     pub fn set_series_line_width(&mut self, id: u32, width: f64) {
         if width > 0.0 {
