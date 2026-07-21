@@ -8,11 +8,11 @@ import init, { AionChart } from "../pkg/aion_wasm.js";
 import { install_gestures } from "./gestures.js";
 import type {
   bars_info, chart_api, chart_options, data_changed_handler, dbl_click_handler,
-  deep_partial, logical_range, mismatch_direction, mouse_event_handler, mouse_event_params,
-  ohlc_data, pane_api, price_line_api, price_line_options, price_range, price_scale_api,
-  price_scale_options, series_api, series_data, series_kind, series_marker,
-  series_marker_options, series_options, single_value_data, time_range, time_scale_api,
-  time_scale_options, visible_logical_range_handler, visible_time_range_handler,
+  deep_partial, handle_scale_options, handle_scroll_options, localization_options, logical_range,
+  mismatch_direction, mouse_event_handler, mouse_event_params, ohlc_data, pane_api, price_line_api, price_line_options,
+  price_range, price_scale_api, price_scale_options, series_api, series_data, series_kind,
+  series_marker, series_marker_options, series_options, single_value_data, time, time_range,
+  time_scale_api, time_scale_options, visible_logical_range_handler, visible_time_range_handler,
 } from "./types.js";
 import { KIND_TO_U8, LINE_STYLE_TO_U8, LINE_TYPE_TO_U8 } from "./types.js";
 
@@ -42,6 +42,20 @@ function same_time_range(a: time_range | null, b: time_range | null): boolean {
 }
 
 /** Pack a data array into the six Float64Arrays the engine expects (single-value → o=h=l=c). */
+/**
+ * Convert a `time` input to the engine's UTC-seconds form. Business days and `"YYYY-MM-DD"` strings
+ * are taken at UTC midnight (matching LWC's `Date.UTC(...)/1000`). A malformed value yields `NaN`,
+ * which the engine's sanitizer drops as an invalid row.
+ */
+function time_to_utc_seconds(t: time): number {
+  if (typeof t === "number") return t;
+  if (typeof t === "string") {
+    const [y, m, d] = t.split("-").map(Number);
+    return Date.UTC(y ?? NaN, (m ?? 1) - 1, d ?? 1) / 1000;
+  }
+  return Date.UTC(t.year, t.month - 1, t.day) / 1000;
+}
+
 function pack(data: readonly series_data[]): {
   times: Float64Array;
   open: Float64Array;
@@ -57,7 +71,7 @@ function pack(data: readonly series_data[]): {
   const close = new Float64Array(n);
   for (let i = 0; i < n; i++) {
     const d = data[i] as series_data;
-    times[i] = d.time;
+    times[i] = time_to_utc_seconds(d.time);
     if ("value" in d) {
       open[i] = high[i] = low[i] = close[i] = d.value;
     } else {
@@ -96,6 +110,7 @@ function parse_rgb(css: string): [number, number, number] | null {
 
 class series_impl implements series_api {
   private readonly data_changed_subs = new Set<data_changed_handler>();
+  private removed = false;
 
   constructor(
     readonly id: number,
@@ -103,7 +118,17 @@ class series_impl implements series_api {
     private readonly chart: chart_impl,
   ) {}
 
+  /** Called by `chart_impl.remove_series`; makes every subsequent method on this handle throw. */
+  mark_removed(): void {
+    this.removed = true;
+    this.data_changed_subs.clear();
+  }
+  private assert_live(): void {
+    if (this.removed) throw new Error("aion: this series has been removed from the chart");
+  }
+
   set_data(data: readonly series_data[]): void {
+    this.assert_live();
     const p = pack(data);
     this.chart.wasm.set_series_data_typed(this.id, p.times, p.open, p.high, p.low, p.close);
     this.chart.repaint();
@@ -111,17 +136,19 @@ class series_impl implements series_api {
   }
 
   update(point: series_data): void {
+    this.assert_live();
     const o = "value" in point ? point.value : point.open;
     const h = "value" in point ? point.value : point.high;
     const l = "value" in point ? point.value : point.low;
     const c = "value" in point ? point.value : point.close;
     // Series-scoped streaming: append a new time point or replace the last on this series.
-    this.chart.wasm.update_series_bar(this.id, point.time, o, h, l, c);
+    this.chart.wasm.update_series_bar(this.id, time_to_utc_seconds(point.time), o, h, l, c);
     this.chart.repaint();
     for (const handler of this.data_changed_subs) handler("update");
   }
 
   apply_options(options: Partial<series_options>): void {
+    this.assert_live();
     if (options.color !== undefined) {
       const rgb = parse_rgb(options.color);
       if (rgb) {
@@ -136,10 +163,12 @@ class series_impl implements series_api {
       this.chart.wasm.set_series_updown_colors(this.id, options.up_color ?? "", options.down_color ?? "");
     }
     if (options.wick_up_color !== undefined || options.wick_down_color !== undefined) {
-      this.chart.wasm.set_series_wick_colors(this.id, options.wick_up_color ?? "", options.wick_down_color ?? "");
+      // Pass each direction through unchanged: undefined = keep, "" = clear (follow body), CSS = pin.
+      // (A plain `?? ""` here would wrongly clear the direction the caller left unspecified.)
+      this.chart.wasm.set_series_wick_colors(this.id, options.wick_up_color, options.wick_down_color);
     }
     if (options.border_up_color !== undefined || options.border_down_color !== undefined) {
-      this.chart.wasm.set_series_border_colors(this.id, options.border_up_color ?? "", options.border_down_color ?? "");
+      this.chart.wasm.set_series_border_colors(this.id, options.border_up_color, options.border_down_color);
     }
     if (options.wick_visible !== undefined) {
       this.chart.wasm.set_series_wick_visible(this.id, options.wick_visible);
@@ -188,6 +217,7 @@ class series_impl implements series_api {
   }
 
   set_type(kind: series_kind): void {
+    this.assert_live();
     if (this.id === 0) {
       this.chart.wasm.set_series_type(KIND_TO_U8[kind]);
     } else {
@@ -197,11 +227,13 @@ class series_impl implements series_api {
   }
 
   move_to_pane(pane_index: number, stretch = 1): void {
+    this.assert_live();
     this.chart.wasm.set_series_pane(this.id, pane_index, stretch);
     this.chart.repaint();
   }
 
   create_price_line(options: price_line_options): price_line_api {
+    this.assert_live();
     const rgb = parse_rgb(options.color ?? "#2196f3") ?? [0x21, 0x96, 0xf3];
     const style = LINE_STYLE_TO_U8[options.line_style ?? "solid"];
     const id = this.chart.wasm.create_price_line(
@@ -226,10 +258,14 @@ class series_impl implements series_api {
   }
 
   set_markers(markers: readonly series_marker[], options?: Partial<series_marker_options>): void {
+    this.assert_live();
     if (options?.auto_scale !== undefined) {
       this.chart.wasm.set_series_markers_auto_scale(this.id, options.auto_scale);
     }
-    this.chart.wasm.set_series_markers(this.id, JSON.stringify(markers));
+    // Normalize marker times to UTC seconds so business-day/string forms match their data points
+    // (the engine's marker JSON expects a numeric time).
+    const normalized = markers.map((mk) => ({ ...mk, time: time_to_utc_seconds(mk.time) }));
+    this.chart.wasm.set_series_markers(this.id, JSON.stringify(normalized));
     this.chart.repaint();
   }
 
@@ -317,6 +353,17 @@ class time_scale_impl implements time_scale_api {
   apply_options(options: Partial<time_scale_options>): void {
     if (options.bar_spacing !== undefined) this.chart.wasm.set_bar_spacing(options.bar_spacing);
     if (options.right_offset !== undefined) this.chart.wasm.set_right_offset(options.right_offset);
+    if (options.min_bar_spacing !== undefined) this.chart.wasm.set_min_bar_spacing(options.min_bar_spacing);
+    if (options.time_visible !== undefined) this.chart.wasm.set_time_visible(options.time_visible);
+    if (options.seconds_visible !== undefined) this.chart.wasm.set_seconds_visible(options.seconds_visible);
+    if (options.fix_left_edge !== undefined) this.chart.wasm.set_fix_left_edge(options.fix_left_edge);
+    if (options.fix_right_edge !== undefined) this.chart.wasm.set_fix_right_edge(options.fix_right_edge);
+    if (options.lock_visible_time_range_on_resize !== undefined)
+      this.chart.wasm.set_lock_visible_time_range_on_resize(options.lock_visible_time_range_on_resize);
+    if (options.right_bar_stays_on_scroll !== undefined)
+      this.chart.wasm.set_right_bar_stays_on_scroll(options.right_bar_stays_on_scroll);
+    if (options.tick_mark_formatter !== undefined)
+      this.chart.wasm.set_tick_mark_formatter(options.tick_mark_formatter);
     this.chart.repaint();
   }
   options(): time_scale_options {
@@ -461,8 +508,41 @@ class pane_impl implements pane_api {
   }
 }
 
+/** Gesture toggles resolved to concrete booleans the recognizer reads on each event. */
+export interface resolved_gestures {
+  pan: boolean;
+  wheel_zoom: boolean;
+  pinch_zoom: boolean;
+  axis_dblclick_reset: boolean;
+}
+
+function resolve_scroll(v: boolean | handle_scroll_options): boolean {
+  if (typeof v === "boolean") return v;
+  // A single pan action backs both mouse-drag and touch-drag; enabled unless every drag is off.
+  return (v.pressed_mouse_move ?? true) || (v.horz_touch_drag ?? true) || (v.vert_touch_drag ?? true);
+}
+
+function apply_scale(v: boolean | handle_scale_options, cfg: resolved_gestures): void {
+  if (typeof v === "boolean") {
+    cfg.wheel_zoom = v;
+    cfg.pinch_zoom = v;
+    cfg.axis_dblclick_reset = v;
+    return;
+  }
+  // Object form merges over the current config (LWC applyOptions semantics).
+  cfg.wheel_zoom = v.mouse_wheel ?? cfg.wheel_zoom;
+  cfg.pinch_zoom = v.pinch ?? cfg.pinch_zoom;
+  cfg.axis_dblclick_reset = v.axis_double_click_reset ?? cfg.axis_dblclick_reset;
+}
+
 export class chart_impl implements chart_api {
   private next_extra_series = false;
+  private readonly gestures_cfg: resolved_gestures = {
+    pan: true,
+    wheel_zoom: true,
+    pinch_zoom: true,
+    axis_dblclick_reset: true,
+  };
   private readonly ts = new time_scale_impl(this);
   private observer: ResizeObserver | null = null;
   private detach_gestures: (() => void) | null = null;
@@ -588,6 +668,19 @@ export class chart_impl implements chart_api {
     return series;
   }
 
+  remove_series(series: series_api): void {
+    const impl = this.series_by_id.get(series.id);
+    // Ignore a foreign handle or one already removed (idempotent, matching LWC leniency).
+    if (!impl) return;
+    if (series.id === 0) {
+      throw new Error("aion: the primary series cannot be removed");
+    }
+    if (!this.wasm.remove_series(series.id)) return;
+    impl.mark_removed();
+    this.series_by_id.delete(series.id);
+    this.repaint();
+  }
+
   private indicator_series(id: number, options?: Partial<series_options>): series_api {
     if (id === 0xffffffff) throw new Error("aion: invalid indicator configuration");
     const series = new series_impl(id, "line", this);
@@ -688,8 +781,40 @@ export class chart_impl implements chart_api {
   }
 
   apply_options(options: deep_partial<chart_options>): void {
-    this.wasm.apply_options(JSON.stringify(options));
+    // handle_scroll / handle_scale (gestures) and localization (JS callbacks) are package-level;
+    // intercept and strip them so only engine-owned, JSON-serializable options reach the wasm store.
+    const { handle_scroll, handle_scale, localization, ...engine_options } =
+      options as deep_partial<chart_options> & {
+        handle_scroll?: boolean | handle_scroll_options;
+        handle_scale?: boolean | handle_scale_options;
+        localization?: localization_options;
+      };
+    if (handle_scroll !== undefined || handle_scale !== undefined) {
+      this.apply_gesture_options(handle_scroll, handle_scale);
+    }
+    if (localization !== undefined) this.apply_localization(localization);
+    this.wasm.apply_options(JSON.stringify(engine_options));
     this.repaint();
+  }
+
+  /** Install the host price/time formatters (LWC `localization`). Callbacks cross into wasm. */
+  apply_localization(loc: localization_options): void {
+    if (loc.price_formatter !== undefined) this.wasm.set_price_formatter(loc.price_formatter);
+    if (loc.time_formatter !== undefined) this.wasm.set_time_formatter(loc.time_formatter);
+  }
+
+  /** Resolve and store `handle_scroll` / `handle_scale`; the recognizer reads the result live. */
+  apply_gesture_options(
+    scroll?: boolean | handle_scroll_options,
+    scale?: boolean | handle_scale_options,
+  ): void {
+    if (scroll !== undefined) this.gestures_cfg.pan = resolve_scroll(scroll);
+    if (scale !== undefined) apply_scale(scale, this.gestures_cfg);
+  }
+
+  /** Current resolved gesture toggles (read by the gesture recognizer). */
+  gesture_config(): resolved_gestures {
+    return this.gestures_cfg;
   }
 
   options(): unknown {

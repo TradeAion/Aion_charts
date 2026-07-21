@@ -17,13 +17,18 @@ impl ChartInner {
         // ---- layout (price axis width negotiated against the price labels) ----
         self.recompute_layout(false);
 
-        // time tick marks: built once (needs &mut), shared by GPU grid + 2D labels
-        let pixels_per_character = (FONT_SIZE + 4.0) * 5.0 / 8.0;
+        // time tick marks: built once (needs &mut), shared by GPU grid + 2D labels.
+        // Font comes from `layout` (LWC `fontSize`/`fontFamily`): it drives the tick-density
+        // estimate, host text measurement, and glyph drawing so all three agree.
+        let layout = self.opts().layout;
+        let font_size = layout.font_size;
+        let font_family = layout.font_family;
+        let pixels_per_character = (font_size + 4.0) * 5.0 / 8.0;
         let max_label_width = pixels_per_character * TICK_MARK_MAX_CHARS;
         let axis_ctx = &self.axis_ctx;
         let dpr = self.dpr;
         self.axis_frame = self.engine.build_axis_frame(max_label_width, |text| {
-            measure_text_ctx(axis_ctx, dpr, text)
+            measure_text_ctx(axis_ctx, dpr, &font_family, font_size, text)
         });
 
         // ---- GPU: one scissored draw group per stacked pane ----
@@ -155,8 +160,12 @@ impl ChartInner {
     pub(super) fn compute_price_axis_width(&mut self, target: PriceScaleTarget) -> f64 {
         let axis_ctx = self.axis_ctx.clone();
         let dpr = self.dpr;
-        self.engine
-            .optimal_price_axis_width_for(target, |text| measure_text_ctx(&axis_ctx, dpr, text))
+        let layout = self.opts().layout;
+        let font_size = layout.font_size;
+        let font_family = layout.font_family;
+        self.engine.optimal_price_axis_width_for(target, |text| {
+            measure_text_ctx(&axis_ctx, dpr, &font_family, font_size, text)
+        })
     }
 
     // ---- Canvas2D axis overlay ----
@@ -211,9 +220,12 @@ impl ChartInner {
         }
 
         // Separators between stacked panes (roadmap Phase B1): a border line at each pane
-        // boundary. They are horizontal rules like the time-axis border and share its color;
-        // they stay painted even when the time-axis border itself is hidden.
-        ctx.set_fill_style_str(&time_border);
+        // boundary in the LWC `layout.panes.separatorColor`; painted regardless of the time-axis
+        // border's visibility since they are functional dividers, not axis chrome.
+        let separator_color = Color::parse_css(&options.layout.panes.separator_color)
+            .unwrap_or(fallback)
+            .to_hex();
+        ctx.set_fill_style_str(&separator_color);
         for separator in &axis_frame.separators {
             let y = (separator * dpr).round();
             ctx.fill_rect(
@@ -224,11 +236,22 @@ impl ChartInner {
             );
         }
 
-        self.draw_axis_labels(axis_frame, dpr)?;
+        self.draw_axis_labels(
+            axis_frame,
+            dpr,
+            &options.layout.font_family,
+            options.layout.font_size,
+        )?;
         Ok(())
     }
 
-    fn draw_axis_labels(&self, axis_frame: &AxisFrame, dpr: f64) -> Result<(), JsValue> {
+    fn draw_axis_labels(
+        &self,
+        axis_frame: &AxisFrame,
+        dpr: f64,
+        font_family: &str,
+        font_size: f64,
+    ) -> Result<(), JsValue> {
         let ctx = &self.axis_ctx;
 
         // Z-order matters: boxed labels (last value, price lines, crosshair) must fully cover any
@@ -239,6 +262,8 @@ impl ChartInner {
         self.draw_axis_label_texts(
             axis_frame.labels.iter().filter(|l| l.background.is_none()),
             dpr,
+            font_family,
+            font_size,
         )?;
         for label in axis_frame.labels.iter().filter(|l| l.background.is_some()) {
             if let Some((x, y, w, h, color)) = label.background {
@@ -251,18 +276,20 @@ impl ChartInner {
                     (h * dpr).round(),
                 );
             }
-            self.draw_axis_label_texts(std::iter::once(label), dpr)?;
+            self.draw_axis_label_texts(std::iter::once(label), dpr, font_family, font_size)?;
         }
         Ok(())
     }
 
     /// Draws label glyphs in media-coordinate space: the context is scaled by DPR while the font
-    /// remains 12 CSS px. Using an independently hinted 12*dpr bitmap font is observably
-    /// different at fractional DPR even when every logical coordinate is identical.
+    /// stays at the configured CSS px size. Using an independently hinted size*dpr bitmap font is
+    /// observably different at fractional DPR even when every logical coordinate is identical.
     fn draw_axis_label_texts<'l>(
         &self,
         labels: impl Iterator<Item = &'l AxisLabel>,
         dpr: f64,
+        font_family: &str,
+        font_size: f64,
     ) -> Result<(), JsValue> {
         let ctx = &self.axis_ctx;
         ctx.save();
@@ -274,9 +301,9 @@ impl ChartInner {
         let mut draw_result = Ok(());
         for label in labels {
             ctx.set_font(&if label.bold {
-                format!("bold {FONT_SIZE}px {FONT_FAMILY}")
+                format!("bold {font_size}px {font_family}")
             } else {
-                format!("{FONT_SIZE}px {FONT_FAMILY}")
+                format!("{font_size}px {font_family}")
             });
             ctx.set_text_align(match label.align {
                 AxisTextAlign::Left => "left",
@@ -339,7 +366,13 @@ impl ChartInner {
     }
 }
 
-fn measure_text_ctx(ctx: &CanvasRenderingContext2d, dpr: f64, text: &str) -> f64 {
-    ctx.set_font(&format!("{}px {FONT_FAMILY}", FONT_SIZE * dpr));
+fn measure_text_ctx(
+    ctx: &CanvasRenderingContext2d,
+    dpr: f64,
+    font_family: &str,
+    font_size: f64,
+    text: &str,
+) -> f64 {
+    ctx.set_font(&format!("{}px {font_family}", font_size * dpr));
     ctx.measure_text(text).map(|m| m.width()).unwrap_or(0.0) / dpr
 }

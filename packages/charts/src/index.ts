@@ -21,7 +21,7 @@ export * from "./theme.js";
 import { chart_impl } from "./impl.js";
 import { ensure_init } from "./impl.js";
 import { theme_options } from "./theme.js";
-import type { chart_api, chart_options, deep_partial } from "./types.js";
+import type { chart_api, chart_options, deep_partial, localization_options } from "./types.js";
 
 // ---------------------------------------------------------------------------------------------
 // Entry point
@@ -92,15 +92,24 @@ export async function create_chart(
     force_fallback_adapter,
   );
   // Default style settings first (theme.ts), explicit options second — the engine deep-merges
-  // successive patches, so caller options always win over the theme palette. `theme` is a
-  // package-level key and is not forwarded to the engine's options store.
-  const { theme, ...engine_options } = options ?? {};
+  // successive patches, so caller options always win over the theme palette. `theme`,
+  // `handle_scroll`, and `handle_scale` are package-level keys and are not forwarded to the
+  // engine's options store (gestures live entirely in TS).
+  const { theme, handle_scroll, handle_scale, localization, ...engine_options } = options ?? {};
   wasm.apply_options(JSON.stringify(theme_options(theme ?? "light")));
   if (Object.keys(engine_options).length > 0) {
     wasm.apply_options(JSON.stringify(engine_options));
   }
   const auto_size = options?.autoSize === true;
   const chart = new chart_impl(wasm, container, gpu_pane, fallback_pane, overlay, auto_size);
+  if (handle_scroll !== undefined || handle_scale !== undefined) {
+    chart.apply_gesture_options(handle_scroll, handle_scale);
+  }
+  if (localization !== undefined) {
+    // deep_partial recurses into the callback signatures; the fields are already optional, so the
+    // concrete localization_options shape is what apply_localization expects.
+    chart.apply_localization(localization as localization_options);
+  }
   chart.render();
   return chart;
 }

@@ -5,7 +5,7 @@
 
 use aion_core::format::percentage_formatter::PercentageFormatter;
 use aion_core::format::time_formatter::{
-    format_crosshair_time, format_tick_label, weight_to_tick_mark_type,
+    format_crosshair_time, format_tick_label, weight_to_tick_mark_type, TickMarkType,
 };
 use aion_core::model::magnet::{magnet_snap, CrosshairMode};
 use aion_core::model::plot_list::{MismatchDirection, PlotList, PlotValueIndex};
@@ -44,6 +44,8 @@ const BASELINE_TOP_FILL: Color = Color::rgba(0x26, 0xa6, 0x9a, 0x48);
 const BASELINE_BOTTOM_FILL: Color = Color::rgba(0xef, 0x53, 0x50, 0x48);
 const LINE_WIDTH: f64 = 3.0;
 const CROSSHAIR_COLOR: Color = Color::rgb(0x95, 0x98, 0xa1);
+/// LWC crosshair label background default (`#131722`); fallback when the option is unparseable.
+const CROSSHAIR_LABEL_BG: Color = Color::rgb(0x13, 0x17, 0x22);
 const CROSSHAIR_MARKER_RADIUS: f64 = 4.0;
 const CROSSHAIR_MARKER_BORDER_WIDTH: f64 = 2.0;
 const MARKER_BORDER_COLOR: Color = Color::rgb(0xff, 0xff, 0xff);

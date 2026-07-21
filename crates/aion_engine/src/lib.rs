@@ -35,6 +35,12 @@ use aion_core::TimePointIndex;
 use aion_render::color::Color;
 use aion_render::draw_list::{LineStyle, LineType};
 
+/// Host formatting callbacks (LWC localization / `tickMarkFormatter`). Each returns `None` to fall
+/// back to the built-in formatter. Boxed so the headless engine carries them without a js dependency.
+pub type PriceFormatterFn = Box<dyn Fn(f64) -> Option<String>>;
+pub type TickMarkFormatterFn = Box<dyn Fn(i64, u8) -> Option<String>>;
+pub type TimeFormatterFn = Box<dyn Fn(i64) -> Option<String>>;
+
 const DEFAULT_LINE_COLOR: Color = Color::rgb(0x21, 0x96, 0xf3);
 /// Default media-coordinate height of the horizontal axis. Hosts use this value during layout;
 /// it is engine policy rather than a browser/demo constant.
@@ -172,6 +178,11 @@ pub struct SeriesEntry {
     pub price_lines: Vec<PriceLine>,
     pub markers: Vec<Marker>,
     pub markers_auto_scale: bool,
+    /// Tombstone flag (LWC `removeSeries`). `SeriesId` is a positional index into the data layer
+    /// and this vector, so a removed series keeps its slot (data emptied, hidden) rather than being
+    /// compacted; every other series keeps its id. Removed slots are inert in every draw/scale path
+    /// because they carry no data and are not visible.
+    pub removed: bool,
 }
 
 impl SeriesEntry {
@@ -203,6 +214,7 @@ impl SeriesEntry {
             price_lines: Vec::new(),
             markers: Vec::new(),
             markers_auto_scale: true,
+            removed: false,
         }
     }
 }
@@ -298,6 +310,9 @@ pub struct ChartEngine {
     pub animation_time: f64,
     pub next_price_line_id: u32,
     pub time_visible: bool,
+    /// LWC `timeScale.secondsVisible` — include seconds in axis/crosshair time labels when
+    /// `time_visible` is set. Defaults to false (LWC default).
+    pub seconds_visible: bool,
     pub css_width: f64,
     pub css_height: f64,
     pub dpr: f64,
@@ -311,6 +326,14 @@ pub struct ChartEngine {
     indicators: Vec<IndicatorBinding>,
     synced_points_len: usize,
     synced_last_time: Option<i64>,
+    /// Optional host formatting callbacks (LWC `localization.priceFormatter`/`timeFormatter` and
+    /// `timeScale.tickMarkFormatter`). The engine stays headless — the host supplies plain boxed
+    /// closures; each returns `None` to fall back to the built-in formatter (e.g. the callback
+    /// threw at the boundary). Kept as trait objects, so `ChartEngine` is intentionally not
+    /// `Clone`/`Debug`/`Send`.
+    price_formatter_fn: Option<PriceFormatterFn>,
+    tick_mark_formatter_fn: Option<TickMarkFormatterFn>,
+    time_formatter_fn: Option<TimeFormatterFn>,
 }
 
 impl ChartEngine {
@@ -329,6 +352,7 @@ impl ChartEngine {
             animation_time: 0.0,
             next_price_line_id: 1,
             time_visible: true,
+            seconds_visible: false,
             css_width,
             css_height,
             dpr,
@@ -341,7 +365,29 @@ impl ChartEngine {
             indicators: Vec::new(),
             synced_points_len: 0,
             synced_last_time: None,
+            price_formatter_fn: None,
+            tick_mark_formatter_fn: None,
+            time_formatter_fn: None,
         }
+    }
+
+    /// Install (or clear with `None`) the host price formatter (LWC `localization.priceFormatter`).
+    /// Applied to non-percentage price labels; a `None` return from the callback falls back to the
+    /// built-in formatter.
+    pub fn set_price_formatter(&mut self, f: Option<PriceFormatterFn>) {
+        self.price_formatter_fn = f;
+    }
+
+    /// Install (or clear) the host time-axis tick formatter (LWC `timeScale.tickMarkFormatter`).
+    /// The callback receives the UTC-second timestamp and the tick-mark type (0 Year, 1 Month,
+    /// 2 DayOfMonth, 3 Time, 4 TimeWithSeconds).
+    pub fn set_tick_mark_formatter(&mut self, f: Option<TickMarkFormatterFn>) {
+        self.tick_mark_formatter_fn = f;
+    }
+
+    /// Install (or clear) the host crosshair time formatter (LWC `localization.timeFormatter`).
+    pub fn set_time_formatter(&mut self, f: Option<TimeFormatterFn>) {
+        self.time_formatter_fn = f;
     }
 
     /// Add a series to the headless chart. The returned id is stable for the instance lifetime.
@@ -349,6 +395,50 @@ impl ChartEngine {
         let id = self.data.add_series();
         self.series.push(SeriesEntry::new(id, kind));
         id
+    }
+
+    /// Remove a series (LWC `removeSeries`). The primary series (id 0) anchors the crosshair,
+    /// last-value badge, and pulse, so it cannot be removed — `remove_series(0)` returns false, as
+    /// does an unknown or already-removed id. Any indicators bound to (or derived from) the series
+    /// are dropped with it. Returns true if a live series was removed.
+    ///
+    /// The slot is tombstoned rather than compacted: `SeriesId` is a positional index into the
+    /// data layer and the series list (`series[rs.id]` is used directly), so compaction would
+    /// invalidate every other id. The emptied, hidden slot is inert in all draw/scale paths.
+    pub fn remove_series(&mut self, id: SeriesId) -> bool {
+        if id == 0 || !self.series.iter().any(|s| s.id == id && !s.removed) {
+            return false;
+        }
+        // Drop indicator bindings touching this series and collect their output series to tombstone
+        // alongside it (a removed source leaves no derived data behind).
+        let mut tombstones = self.drop_indicators_touching(id);
+        tombstones.push(id);
+        for rid in tombstones {
+            if let Some(entry) = self.series.iter_mut().find(|s| s.id == rid) {
+                entry.removed = true;
+                entry.visible = false;
+                entry.price_lines.clear();
+                entry.markers.clear();
+            }
+            // Empty the data slot; this rebuilds the merged time points so the removed series'
+            // timestamps leave the shared time axis.
+            self.data.set_data(
+                rid,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            );
+        }
+        self.sync_time_points();
+        true
+    }
+
+    /// Whether `id` names a tombstoned (removed) series. Data mutations on such a slot are ignored
+    /// so a removed series can never be silently revived.
+    pub fn is_series_removed(&self, id: SeriesId) -> bool {
+        self.series.iter().any(|s| s.id == id && s.removed)
     }
 
     /// Toggle a series without destroying its data or indicator binding.
@@ -372,6 +462,9 @@ impl ChartEngine {
 
     /// Apply one streaming OHLC update after validating its time and values.
     pub fn update_series_bar(&mut self, id: SeriesId, time: f64, values: [f64; 4]) -> bool {
+        if self.is_series_removed(id) {
+            return false;
+        }
         let Some((time, values)) = sanitize_point(time, values) else {
             return false;
         };
@@ -392,6 +485,11 @@ impl ChartEngine {
         low: &[f64],
         close: &[f64],
     ) -> Result<ValidationReport, ValidationError> {
+        // A removed slot must stay empty; ignore the data (the TS series handle rejects the call
+        // before it reaches here, so this is defense-in-depth) and report a clean no-op.
+        if self.is_series_removed(id) {
+            return Ok(ValidationReport::default());
+        }
         let sanitized = sanitize_ohlc(times, open, high, low, close)?;
         let report = sanitized.report.clone();
         self.data.set_data(
@@ -418,6 +516,9 @@ impl ChartEngine {
         low: Vec<f64>,
         close: Vec<f64>,
     ) {
+        if self.is_series_removed(id) {
+            return;
+        }
         self.data.set_data(id, times, open, high, low, close);
         self.sync_time_points();
         self.recompute_indicators();
@@ -440,6 +541,41 @@ impl ChartEngine {
         if offset.is_finite() {
             self.time_scale.set_right_offset(offset);
         }
+    }
+
+    /// LWC `timeScale.timeVisible`: show the time of day in axis/crosshair labels.
+    pub fn set_time_visible(&mut self, visible: bool) {
+        self.time_visible = visible;
+    }
+
+    /// LWC `timeScale.secondsVisible`: include seconds when `time_visible` is set.
+    pub fn set_seconds_visible(&mut self, visible: bool) {
+        self.seconds_visible = visible;
+    }
+
+    /// LWC `timeScale.minBarSpacing`.
+    pub fn set_min_bar_spacing(&mut self, spacing: f64) {
+        self.time_scale.set_min_bar_spacing(spacing);
+    }
+
+    /// LWC `timeScale.fixLeftEdge`.
+    pub fn set_fix_left_edge(&mut self, fix: bool) {
+        self.time_scale.set_fix_left_edge(fix);
+    }
+
+    /// LWC `timeScale.fixRightEdge`.
+    pub fn set_fix_right_edge(&mut self, fix: bool) {
+        self.time_scale.set_fix_right_edge(fix);
+    }
+
+    /// LWC `timeScale.lockVisibleTimeRangeOnResize`.
+    pub fn set_lock_visible_time_range_on_resize(&mut self, lock: bool) {
+        self.time_scale.set_lock_visible_time_range_on_resize(lock);
+    }
+
+    /// LWC `timeScale.rightBarStaysOnScroll`.
+    pub fn set_right_bar_stays_on_scroll(&mut self, stays: bool) {
+        self.time_scale.set_right_bar_stays_on_scroll(stays);
     }
 
     pub fn bar_spacing(&self) -> f64 {

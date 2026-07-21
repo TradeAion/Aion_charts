@@ -47,6 +47,23 @@ impl ChartEngine {
         self.add_indicator(source, IndicatorKind::Bollinger { period, deviation }, 3)
     }
 
+    /// Drop every indicator binding that reads from or writes to `id`, returning the output series
+    /// ids those bindings owned so the caller can tombstone them alongside `id`. Used by
+    /// `remove_series`: removing a source drops its derived indicators; removing an indicator's own
+    /// output series drops the whole binding (and its sibling outputs).
+    pub(crate) fn drop_indicators_touching(&mut self, id: SeriesId) -> Vec<SeriesId> {
+        let mut dropped_outputs = Vec::new();
+        self.indicators.retain(|binding| {
+            if binding.source == id || binding.outputs.contains(&id) {
+                dropped_outputs.extend(binding.outputs.iter().copied());
+                false
+            } else {
+                true
+            }
+        });
+        dropped_outputs
+    }
+
     fn add_indicator(
         &mut self,
         source: SeriesId,

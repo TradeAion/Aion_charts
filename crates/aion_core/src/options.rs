@@ -87,6 +87,23 @@ impl Default for BackgroundOptions {
     }
 }
 
+/// `layout.panes` — stacked-pane chrome (`layout-options-defaults.ts` v5: `separatorColor`;
+/// `separatorHoverColor`/`enableResize` are not modeled yet).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PanesOptions {
+    #[serde(rename = "separatorColor")]
+    pub separator_color: String,
+}
+
+impl Default for PanesOptions {
+    fn default() -> Self {
+        Self {
+            separator_color: axis_border_color(),
+        }
+    }
+}
+
 /// `layout` — background, text, font (`api/options/layout-options-defaults.ts`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -100,6 +117,7 @@ pub struct LayoutOptions {
     pub font_family: String,
     #[serde(rename = "attributionLogo")]
     pub attribution_logo: bool,
+    pub panes: PanesOptions,
 }
 
 impl Default for LayoutOptions {
@@ -110,6 +128,7 @@ impl Default for LayoutOptions {
             font_size: 12.0,
             font_family: default_font_family(),
             attribution_logo: true,
+            panes: PanesOptions::default(),
         }
     }
 }

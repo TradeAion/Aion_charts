@@ -5,10 +5,36 @@ use super::*;
 impl ChartEngine {
     pub(super) fn format_scale_value(&self, scale: &PriceScaleCore, value: f64) -> String {
         if scale.mode() == PriceScaleMode::Percentage {
-            PercentageFormatter::default().format(value)
-        } else {
-            self.price_formatter.format(value)
+            // Percentage mode has its own formatter; the host price formatter does not apply here
+            // (matching LWC, where percentage display is independent of `priceFormatter`).
+            return PercentageFormatter::default().format(value);
         }
+        if let Some(f) = &self.price_formatter_fn {
+            if let Some(s) = f(value) {
+                return s;
+            }
+        }
+        self.price_formatter.format(value)
+    }
+
+    /// Time-axis tick label, honoring a host `tickMarkFormatter` when installed.
+    pub(super) fn format_time_tick(&self, ts: i64, kind: TickMarkType) -> String {
+        if let Some(f) = &self.tick_mark_formatter_fn {
+            if let Some(s) = f(ts, kind as u8) {
+                return s;
+            }
+        }
+        format_tick_label(ts, kind)
+    }
+
+    /// Crosshair time label, honoring a host `timeFormatter` when installed.
+    pub(super) fn format_crosshair_ts(&self, ts: i64) -> String {
+        if let Some(f) = &self.time_formatter_fn {
+            if let Some(s) = f(ts) {
+                return s;
+            }
+        }
+        format_crosshair_time(ts, self.time_visible, self.seconds_visible)
     }
 
     /// Build backend-neutral axis label decisions. The host supplies only font measurement; all
@@ -24,8 +50,6 @@ impl ChartEngine {
         let visible = self.visible_range_for_frame();
         let text_color = Color::parse_css(&self.options.get().layout.text_color)
             .unwrap_or(Color::rgb(0x19, 0x19, 0x19));
-        let label_bg = Color::rgb(0x13, 0x17, 0x22);
-        let white = Color::rgb(0xff, 0xff, 0xff);
         let options = self.options.get();
         let right_text_x = self.pane_left + self.pane_w + 5.0 + 5.0;
         let left_text_x = (self.pane_left - 5.0 - 5.0).max(0.0);
@@ -78,11 +102,12 @@ impl ChartEngine {
                     continue;
                 }
                 let ts = times[index as usize];
-                let kind = weight_to_tick_mark_type(weight, self.time_visible, false);
+                let kind =
+                    weight_to_tick_mark_type(weight, self.time_visible, self.seconds_visible);
                 out.labels.push(AxisLabel {
-                    text: format_tick_label(ts, kind),
+                    text: self.format_time_tick(ts, kind),
                     x: self.pane_left + self.time_scale.index_to_coordinate(index),
-                    y: self.pane_h + 1.0 + 5.0 + 3.0 + 12.0 / 2.0,
+                    y: self.pane_h + 1.0 + 5.0 + 3.0 + options.layout.font_size / 2.0,
                     color: text_color,
                     align: AxisTextAlign::Center,
                     midpoint: AxisTextMidpoint::None,
@@ -94,7 +119,7 @@ impl ChartEngine {
         }
         self.append_price_line_labels(&mut out.labels, &measure);
         self.append_last_value_label(&mut out.labels, &measure);
-        self.append_crosshair_labels(&mut out.labels, &measure, label_bg, white);
+        self.append_crosshair_labels(&mut out.labels, &measure);
         out.separators = self
             .panes
             .iter()
@@ -231,6 +256,7 @@ impl ChartEngine {
     where
         F: Fn(&str) -> f64,
     {
+        let font_size = self.options.get().layout.font_size;
         for (pi, pane) in self.panes.iter().enumerate() {
             for s in &self.series {
                 if s.pane_index.min(self.panes.len() - 1) != pi {
@@ -258,7 +284,7 @@ impl ChartEngine {
                         line.title.clone()
                     };
                     let width = 1.0 + 5.0 + 5.0 + 5.0 + measure(&text);
-                    let height = 12.0 + 2.5 * 2.0;
+                    let height = font_size + 2.5 * 2.0;
                     let (x, align, background_x) = if target == PriceScaleTarget::Left {
                         (
                             self.pane_left - 10.0,
@@ -320,7 +346,7 @@ impl ChartEngine {
         };
         let text = self.format_scale_value(scale, scale.price_to_logical_value(close, base_value));
         let width = 1.0 + 5.0 + 5.0 + 5.0 + measure(&text);
-        let height = 12.0 + 2.5 * 2.0;
+        let height = self.options.get().layout.font_size + 2.5 * 2.0;
         let (x, align, background_x) = if target == PriceScaleTarget::Left {
             (
                 self.pane_left - 10.0,
@@ -346,13 +372,8 @@ impl ChartEngine {
         });
     }
 
-    pub(super) fn append_crosshair_labels<F>(
-        &self,
-        labels: &mut Vec<AxisLabel>,
-        measure: &F,
-        bg: Color,
-        white: Color,
-    ) where
+    pub(super) fn append_crosshair_labels<F>(&self, labels: &mut Vec<AxisLabel>, measure: &F)
+    where
         F: Fn(&str) -> f64,
     {
         let Some((x_css, y_css)) = self.crosshair else {
@@ -366,80 +387,93 @@ impl ChartEngine {
         {
             return;
         }
-        if let Some(pi) = self
-            .panes
-            .iter()
-            .position(|p| y_css >= p.top && y_css <= p.top + p.height)
-        {
-            let series = self
-                .series
+        // Price-axis label tracks the horizontal line (LWC `horzLine`); time-axis label tracks the
+        // vertical line (LWC `vertLine`). Each carries its own `labelVisible`/`labelBackgroundColor`,
+        // and the text color is the LWC contrast pick against that background.
+        let options = self.options.get();
+        let font_size = options.layout.font_size;
+        let ch = options.crosshair;
+        if ch.horz_line.label_visible {
+            if let Some(pi) = self
+                .panes
                 .iter()
-                .find(|series| series.pane_index == pi && !series.overlay && series.visible);
-            let target = series
-                .map(series_scale_target)
-                .unwrap_or(PriceScaleTarget::Right);
-            let scale = pane_scale(&self.panes[pi], target);
-            if !scale.is_empty() {
-                let base_value = series
-                    .and_then(|series| self.series_base_value(series.id, from))
-                    .unwrap_or(0.0);
-                let (price, snap_y) = if pi == 0 {
-                    self.crosshair_snap(x_css, y_css, from, to)
-                } else {
-                    (scale.coordinate_to_price(y_css, base_value), y_css)
-                };
-                let text =
-                    self.format_scale_value(scale, scale.price_to_logical_value(price, base_value));
-                let width = 1.0 + 5.0 + 5.0 + 5.0 + measure(&text);
-                let height = 12.0 + 2.5 * 2.0;
-                let (label_x, align, background_x) = if target == PriceScaleTarget::Left {
-                    (
-                        self.pane_left - 10.0,
-                        AxisTextAlign::Right,
-                        self.pane_left - width,
-                    )
-                } else {
-                    (
-                        self.pane_left + self.pane_w + 10.0,
-                        AxisTextAlign::Left,
-                        self.pane_left + self.pane_w,
-                    )
-                };
-                labels.push(AxisLabel {
-                    text,
-                    x: label_x,
-                    y: snap_y,
-                    color: white,
-                    align,
-                    midpoint: AxisTextMidpoint::Label,
-                    bold: false,
-                    background: Some((background_x, snap_y - height / 2.0, width, height, bg)),
-                });
+                .position(|p| y_css >= p.top && y_css <= p.top + p.height)
+            {
+                let series = self
+                    .series
+                    .iter()
+                    .find(|series| series.pane_index == pi && !series.overlay && series.visible);
+                let target = series
+                    .map(series_scale_target)
+                    .unwrap_or(PriceScaleTarget::Right);
+                let scale = pane_scale(&self.panes[pi], target);
+                if !scale.is_empty() {
+                    let base_value = series
+                        .and_then(|series| self.series_base_value(series.id, from))
+                        .unwrap_or(0.0);
+                    let (price, snap_y) = if pi == 0 {
+                        self.crosshair_snap(x_css, y_css, from, to)
+                    } else {
+                        (scale.coordinate_to_price(y_css, base_value), y_css)
+                    };
+                    let text = self
+                        .format_scale_value(scale, scale.price_to_logical_value(price, base_value));
+                    let width = 1.0 + 5.0 + 5.0 + 5.0 + measure(&text);
+                    let height = font_size + 2.5 * 2.0;
+                    let (label_x, align, background_x) = if target == PriceScaleTarget::Left {
+                        (
+                            self.pane_left - 10.0,
+                            AxisTextAlign::Right,
+                            self.pane_left - width,
+                        )
+                    } else {
+                        (
+                            self.pane_left + self.pane_w + 10.0,
+                            AxisTextAlign::Left,
+                            self.pane_left + self.pane_w,
+                        )
+                    };
+                    let label_bg =
+                        css_color(&ch.horz_line.label_background_color, CROSSHAIR_LABEL_BG);
+                    labels.push(AxisLabel {
+                        text,
+                        x: label_x,
+                        y: snap_y,
+                        color: label_bg.contrast_text(),
+                        align,
+                        midpoint: AxisTextMidpoint::Label,
+                        bold: false,
+                        background: Some((
+                            background_x,
+                            snap_y - height / 2.0,
+                            width,
+                            height,
+                            label_bg,
+                        )),
+                    });
+                }
             }
         }
-        if x_css <= self.pane_w {
+        if ch.vert_line.label_visible && x_css <= self.pane_w {
             let index = self.snapped_crosshair_index(x_css, from, to);
-            let text = format_crosshair_time(
-                self.data.merged_times()[index as usize],
-                self.time_visible,
-                false,
-            );
+            let text = self.format_crosshair_ts(self.data.merged_times()[index as usize]);
             let width = measure(&text) + 9.0 * 2.0;
-            let height = 12.0 + 3.0 + 3.0;
+            let height = font_size + 3.0 + 3.0;
             let x = self.pane_left + self.time_scale.index_to_coordinate(index);
             let box_x = (x - width / 2.0).clamp(
                 self.pane_left,
                 (self.pane_left + self.pane_w - width).max(self.pane_left),
             );
+            let label_bg = css_color(&ch.vert_line.label_background_color, CROSSHAIR_LABEL_BG);
             labels.push(AxisLabel {
                 text,
                 x: box_x + width / 2.0,
                 y: self.pane_h + 1.0 + height / 2.0,
-                color: white,
+                color: label_bg.contrast_text(),
                 align: AxisTextAlign::Center,
                 midpoint: AxisTextMidpoint::StableTime,
                 bold: false,
-                background: Some((box_x, self.pane_h + 1.0, width, height, bg)),
+                background: Some((box_x, self.pane_h + 1.0, width, height, label_bg)),
             });
         }
     }

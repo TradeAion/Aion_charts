@@ -10,18 +10,36 @@
 /** A series kind. Maps to the engine's numeric kind at the boundary. */
 export type series_kind = "candlestick" | "bar" | "line" | "area" | "histogram" | "baseline";
 
-/** OHLC bar for candlestick/bar series. `time` is UTC seconds. */
+/** Calendar day (LWC `BusinessDay`), interpreted at UTC midnight. `month`/`day` are 1-based. */
+export interface business_day {
+  year: number;
+  month: number;
+  day: number;
+}
+
+/**
+ * A point in time (LWC `Time`). Accepted forms at the input boundary:
+ * - `number` — UTC timestamp in seconds since the epoch;
+ * - `business_day` — `{ year, month, day }`, taken at UTC midnight;
+ * - `string` — `"YYYY-MM-DD"`, taken at UTC midnight.
+ *
+ * The engine stores UTC seconds; business-day/string inputs are converted at the boundary. Values
+ * the engine returns (e.g. `data()`, crosshair params) are always the numeric UTC-seconds form.
+ */
+export type time = number | business_day | string;
+
+/** OHLC bar for candlestick/bar series. */
 export interface ohlc_data {
-  time: number;
+  time: time;
   open: number;
   high: number;
   low: number;
   close: number;
 }
 
-/** Single-value point for line/area/histogram series. `time` is UTC seconds. */
+/** Single-value point for line/area/histogram series. */
 export interface single_value_data {
-  time: number;
+  time: time;
   value: number;
 }
 
@@ -71,6 +89,23 @@ export interface time_scale_options {
   bar_spacing: number;
   /** Empty logical bars between the final data point and the right edge. */
   right_offset: number;
+  /** Minimum bar spacing in CSS pixels (LWC `minBarSpacing`, default 0.5). */
+  min_bar_spacing?: number;
+  /** Show the time of day (not just the date) in axis/crosshair labels (LWC `timeVisible`). */
+  time_visible?: boolean;
+  /** Include seconds when the time is shown (LWC `secondsVisible`). */
+  seconds_visible?: boolean;
+  /** Prevent scrolling past the first data point on the left (LWC `fixLeftEdge`). */
+  fix_left_edge?: boolean;
+  /** Prevent scrolling past the last data point on the right (LWC `fixRightEdge`). */
+  fix_right_edge?: boolean;
+  /** Keep the visible range constant across chart resizes (LWC `lockVisibleTimeRangeOnResize`). */
+  lock_visible_time_range_on_resize?: boolean;
+  /** Keep the right-most bar pinned to the right edge while scrolling (LWC `rightBarStaysOnScroll`). */
+  right_bar_stays_on_scroll?: boolean;
+  /** Custom time-axis tick formatter (LWC `tickMarkFormatter`). Receives `(timeSeconds, tickMarkType)`
+   *  where tickMarkType is 0 Year, 1 Month, 2 DayOfMonth, 3 Time, 4 TimeWithSeconds. */
+  tick_mark_formatter?: (time: number, tick_mark_type: number) => string;
 }
 
 export interface price_scale_options {
@@ -95,8 +130,36 @@ export interface grid_line_options {
   style: number;
   visible: boolean;
 }
+/** Custom label formatters (LWC `localization`). Each receives numbers and returns a string. */
+export interface localization_options {
+  /** Format any non-percentage price label (axis ticks, last-value badge, crosshair, price lines). */
+  price_formatter?: (price: number) => string;
+  /** Format the crosshair time label. Receives the UTC-second timestamp. */
+  time_formatter?: (time: number) => string;
+}
+
+/** Pan/scroll gesture toggles (LWC `handleScroll`). `false` disables all panning. */
+export interface handle_scroll_options {
+  /** Drag inside the pane to pan the time scale. */
+  pressed_mouse_move?: boolean;
+  /** Horizontal one-finger touch drag pans the time scale. */
+  horz_touch_drag?: boolean;
+  /** Vertical one-finger touch drag participates in panning. */
+  vert_touch_drag?: boolean;
+}
+
+/** Zoom/scale gesture toggles (LWC `handleScale`). `false` disables all zooming. */
+export interface handle_scale_options {
+  /** Mouse-wheel zoom on the pane. */
+  mouse_wheel?: boolean;
+  /** Two-finger touch pinch zoom. */
+  pinch?: boolean;
+  /** Double-clicking a price/time axis resets it. */
+  axis_double_click_reset?: boolean;
+}
+
 export interface chart_options {
-  layout: { background: { type: string; color: string }; textColor: string; fontSize: number; fontFamily: string; attributionLogo: boolean };
+  layout: { background: { type: string; color: string }; textColor: string; fontSize: number; fontFamily: string; attributionLogo: boolean; panes: { separatorColor: string } };
   grid: { vertLines: grid_line_options; horzLines: grid_line_options };
   crosshair: { vertLine: Partial<grid_line_options>; horzLine: Partial<grid_line_options>; mode: number };
   leftPriceScale: { visible: boolean; borderVisible: boolean; borderColor: string };
@@ -106,6 +169,12 @@ export interface chart_options {
   /** Install a ResizeObserver so the chart tracks its container's size. Default `false` (LWC parity). */
   autoSize: boolean;
   hoveredSeriesOnTop: boolean;
+  /** Custom label formatters (LWC `localization`). Package-level; carries JS callbacks. */
+  localization: localization_options;
+  /** Enable/disable panning gestures (LWC `handleScroll`). Default `true`. Package-level. */
+  handle_scroll: boolean | handle_scroll_options;
+  /** Enable/disable zoom gestures (LWC `handleScale`). Default `true`. Package-level. */
+  handle_scale: boolean | handle_scale_options;
   /** Backend override for capability testing; defaults to automatic WebGPU → Canvas2D fallback. */
   backend: "auto" | "canvas2d";
   /**
@@ -124,13 +193,14 @@ export interface series_options {
   up_color: string;
   /** Candlestick/bar down (close < open) body color. */
   down_color: string;
-  /** Candlestick up-bar wick color. Until set, follows `up_color` (LWC parity). */
+  /** Candlestick up-bar wick color. Until set, follows `up_color` (LWC parity). Pass `""` to
+   *  clear a previously-pinned color and go back to following the body color. */
   wick_up_color: string;
-  /** Candlestick down-bar wick color. Until set, follows `down_color`. */
+  /** Candlestick down-bar wick color. Until set, follows `down_color`. `""` clears the override. */
   wick_down_color: string;
-  /** Candlestick up-bar border color. Until set, follows `up_color` (LWC parity). */
+  /** Candlestick up-bar border color. Until set, follows `up_color` (LWC parity). `""` clears it. */
   border_up_color: string;
-  /** Candlestick down-bar border color. Until set, follows `down_color`. */
+  /** Candlestick down-bar border color. Until set, follows `down_color`. `""` clears the override. */
   border_down_color: string;
   /** Candlestick wick visibility (default true; ignored by bar series). */
   wick_visible: boolean;
@@ -208,8 +278,8 @@ export interface price_line_api {
 
 /** A per-bar marker on a series (roadmap Phase B4). Mirrors lightweight-charts `SeriesMarker`. */
 export interface series_marker {
-  /** Bar time (must match a data point's time). */
-  time: number;
+  /** Bar time (must match a data point's time). Accepts the same forms as data `time`. */
+  time: time;
   /** Placement relative to the bar. LWC names are canonical; short aliases remain compatible. */
   position?: "aboveBar" | "belowBar" | "inBar" | "above" | "below";
   /** Marker shape. Default `"circle"`. */
@@ -332,6 +402,12 @@ export interface chart_api {
   /** Active pane backend: `webgpu` when available, otherwise the shared `canvas2d` fallback. */
   backend(): "webgpu" | "canvas2d";
   add_series(kind: series_kind, options?: Partial<series_options>): series_api;
+  /**
+   * Remove a series (and any indicators derived from it). No-op for an already-removed or
+   * foreign handle. The primary series (the first one created, engine id 0) anchors the crosshair
+   * and last-value badge and cannot be removed — attempting to throws.
+   */
+  remove_series(series: series_api): void;
   /** Add a Rust-native simple moving-average line derived from an existing series. */
   add_sma(source: series_api, period: number, options?: Partial<series_options>): series_api;
   /** Add a Rust-native exponential moving-average line derived from an existing series. */

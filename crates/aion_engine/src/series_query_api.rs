@@ -33,7 +33,7 @@ impl ChartEngine {
     pub fn series_kind(&self, id: SeriesId) -> Option<SeriesKind> {
         self.series
             .iter()
-            .find(|series| series.id == id)
+            .find(|series| series.id == id && !series.removed)
             .map(|series| series.kind)
     }
 

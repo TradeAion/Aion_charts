@@ -36,6 +36,8 @@ export function install_gestures(chart: chart_impl): () => void {
   };
 
   const on_wheel = (e: WheelEvent) => {
+    // Wheel zoom disabled (handle_scale.mouse_wheel): let the page handle the wheel normally.
+    if (!chart.gesture_config().wheel_zoom) return;
     e.preventDefault();
     const delta_y = -(e.deltaY / 100);
     if (delta_y !== 0) {
@@ -67,8 +69,11 @@ export function install_gestures(chart: chart_impl): () => void {
       }
     }
     if (pointers.size === 1) {
-      dragging = true;
-      wasm.scroll_start(p.x);
+      // Panning disabled (handle_scroll): still track the pointer for crosshair, just don't scroll.
+      if (chart.gesture_config().pan) {
+        dragging = true;
+        wasm.scroll_start(p.x);
+      }
     } else if (pointers.size === 2) {
       dragging = false;
       wasm.scroll_end();
@@ -98,7 +103,7 @@ export function install_gestures(chart: chart_impl): () => void {
       const [a, b] = [...pointers.values()];
       const dist = Math.hypot(a!.x - b!.x, a!.y - b!.y);
       const mid = (a!.x + b!.x) / 2;
-      if (pinch_dist > 0 && dist > 0) {
+      if (pinch_dist > 0 && dist > 0 && chart.gesture_config().pinch_zoom) {
         const zoom_scale = Math.max(-1, Math.min(1, (dist - pinch_dist) / 40));
         if (zoom_scale !== 0) wasm.zoom(mid, zoom_scale);
       }
@@ -133,7 +138,8 @@ export function install_gestures(chart: chart_impl): () => void {
     const p = local_xy(e);
     chart.emit_dbl_click(p.x, p.y);
     // LWC parity: double-clicking an axis strip resets that axis; the pane itself only emits
-    // the subscription event and never moves the view.
+    // the subscription event and never moves the view. Gated by handle_scale.axis_double_click_reset.
+    if (!chart.gesture_config().axis_dblclick_reset) return;
     const rect = overlay.getBoundingClientRect();
     const on_time_axis = p.y > rect.height - wasm.time_scale_height();
     const on_price_axis = p.x < 0 || p.x > wasm.time_scale_width();

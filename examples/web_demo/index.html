@@ -96,6 +96,31 @@
           <option value="2">hidden</option>
         </select>
       </label>
+      <label>color <input type="color" id="cross_color" value="#9598a1"></label>
+      <label>w <input type="range" id="cross_width" min="1" max="4" step="1" value="1"><span id="cross_width_val">1</span></label>
+      <label>style
+        <select id="cross_style">
+          <option value="0">solid</option>
+          <option value="1">dotted</option>
+          <option value="2">dashed</option>
+          <option value="3" selected>large dashed</option>
+          <option value="4">sparse dotted</option>
+        </select>
+      </label>
+      <label>label bg <input type="color" id="cross_label_bg" value="#131722"></label>
+      <label><input type="checkbox" id="cross_label_visible" checked> labels</label>
+    </div>
+
+    <!-- axis text font (LWC layout.fontFamily/fontSize, engine store-driven) -->
+    <div class="group">
+      <label>font
+        <select id="font_family">
+          <option value="-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif" selected>system</option>
+          <option value="monospace">monospace</option>
+          <option value="Georgia, serif">serif</option>
+        </select>
+      </label>
+      <label>size <input type="range" id="font_size" min="9" max="20" step="1" value="12"><span id="font_size_val">12</span></label>
     </div>
 
     <!-- price/time axis cosmetics: border (LWC borderColor/borderVisible) + text (textColor) -->
@@ -103,6 +128,7 @@
       <label>axis border <input type="color" id="axis_border_color" value="#f5f5f5"></label>
       <label><input type="checkbox" id="axis_border_visible" checked> visible</label>
       <label>axis text <input type="color" id="axis_text_color" value="#0a0a0a"></label>
+      <label>separator <input type="color" id="pane_separator_color" value="#2b2b43"></label>
     </div>
 
     <span id="status"></span>
@@ -338,7 +364,8 @@ document.getElementById("vol_toggle").addEventListener("change", (e) => {
     vol_series = chart.add_series("histogram", { overlay: true, scale_margins: { top: 0.82, bottom: 0 }, histogram_updown: true });
     vol_series.set_data(volume_data);
   } else if (!e.target.checked && vol_series !== null) {
-    vol_series.set_data([]);
+    // Exercises the real remove_series API (tombstones the engine slot, not just clears data).
+    chart.remove_series(vol_series);
     vol_series = null;
   }
 });
@@ -352,6 +379,45 @@ document.querySelectorAll('input[name="series"]').forEach((el) => {
 });
 document.getElementById("cross_mode").addEventListener("change", (e) => {
   chart.apply_options({ crosshair: { mode: Number(e.target.value) } });
+});
+
+// Crosshair cosmetics drive both lines at once; the engine stores them per line (LWC parity).
+function apply_crosshair_style() {
+  const color = document.getElementById("cross_color").value;
+  const width = Number(document.getElementById("cross_width").value);
+  const style = Number(document.getElementById("cross_style").value);
+  const labelBackgroundColor = document.getElementById("cross_label_bg").value;
+  const labelVisible = document.getElementById("cross_label_visible").checked;
+  chart.apply_options({
+    crosshair: {
+      vertLine: { color, width, style, labelBackgroundColor, labelVisible },
+      horzLine: { color, width, style, labelBackgroundColor, labelVisible },
+    },
+  });
+}
+document.getElementById("cross_color").addEventListener("input", apply_crosshair_style);
+document.getElementById("cross_width").addEventListener("input", (e) => {
+  document.getElementById("cross_width_val").textContent = e.target.value;
+  apply_crosshair_style();
+});
+document.getElementById("cross_style").addEventListener("change", apply_crosshair_style);
+document.getElementById("cross_label_bg").addEventListener("input", apply_crosshair_style);
+document.getElementById("cross_label_visible").addEventListener("change", apply_crosshair_style);
+
+function apply_font() {
+  chart.apply_options({
+    layout: {
+      fontFamily: document.getElementById("font_family").value,
+      fontSize: Number(document.getElementById("font_size").value),
+    },
+  });
+  document.getElementById("font_size_val").textContent = document.getElementById("font_size").value;
+}
+document.getElementById("font_family").addEventListener("change", apply_font);
+document.getElementById("font_size").addEventListener("input", apply_font);
+
+document.getElementById("pane_separator_color").addEventListener("input", (e) => {
+  chart.apply_options({ layout: { panes: { separatorColor: e.target.value } } });
 });
 
 // One demo control drives all three axis strips (left/right price + time); the engine stores

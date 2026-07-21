@@ -250,6 +250,43 @@ impl TimeScaleCore {
         self.correct_offset();
     }
 
+    // --- option mutation (LWC `applyOptions({ timeScale })`) ---
+
+    /// Minimum bar spacing in CSS px (LWC `minBarSpacing`, default 0.5). Ignored if non-positive.
+    /// Re-clamps the current spacing/offset against the new floor.
+    pub fn set_min_bar_spacing(&mut self, min_bar_spacing: f64) {
+        if min_bar_spacing.is_finite() && min_bar_spacing > 0.0 {
+            self.options.min_bar_spacing = min_bar_spacing;
+            self.correct_bar_spacing();
+            self.correct_offset();
+        }
+    }
+
+    /// LWC `fixLeftEdge`: prevent scrolling past the first data point on the left.
+    pub fn set_fix_left_edge(&mut self, fix: bool) {
+        self.options.fix_left_edge = fix;
+        self.do_fix_left_edge();
+        self.correct_bar_spacing();
+        self.correct_offset();
+    }
+
+    /// LWC `fixRightEdge`: prevent scrolling past the last data point on the right.
+    pub fn set_fix_right_edge(&mut self, fix: bool) {
+        self.options.fix_right_edge = fix;
+        self.correct_offset();
+    }
+
+    /// LWC `lockVisibleTimeRangeOnResize`: keep the visible range constant across width changes by
+    /// rescaling bar spacing (applied on the next `set_width`).
+    pub fn set_lock_visible_time_range_on_resize(&mut self, lock: bool) {
+        self.options.lock_visible_time_range_on_resize = lock;
+    }
+
+    /// LWC `rightBarStaysOnScroll`.
+    pub fn set_right_bar_stays_on_scroll(&mut self, stays: bool) {
+        self.options.right_bar_stays_on_scroll = stays;
+    }
+
     fn max_bar_spacing(&self) -> f64 {
         if self.options.max_bar_spacing > 0.0 {
             self.options.max_bar_spacing

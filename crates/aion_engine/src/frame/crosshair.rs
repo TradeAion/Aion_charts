@@ -26,18 +26,25 @@ impl ChartEngine {
         }
         let index = self.snapped_crosshair_index(x_css, from, to);
         let snapped_x = self.time_scale.index_to_coordinate(index);
-        let line_width = 1f64.max(hpr.floor()) as i32;
         let ch = self.options.get().crosshair;
         let vert_color = css_color(&ch.vert_line.color, CROSSHAIR_COLOR);
         let horz_color = css_color(&ch.horz_line.color, CROSSHAIR_COLOR);
+        // LWC lineWidth is in CSS px; generalize the crisp "1 CSS px" rule (grid uses the same
+        // `max(1, floor(ratio))`) so width 1 keeps today's output. Vertical lines take the
+        // horizontal ratio for thickness, horizontal lines the vertical ratio. Style is the LWC
+        // lineStyle u8 (default LargeDashed), expanded to a dash pattern by the backends.
+        let vert_width = 1f64.max((ch.vert_line.width * hpr).floor()) as i32;
+        let horz_width = 1f64.max((ch.horz_line.width * vpr).floor()) as i32;
+        let vert_style = crate::line_style_from_u8(ch.vert_line.style);
+        let horz_style = crate::line_style_from_u8(ch.horz_line.style);
         let pane = &self.panes[pane_index];
         if ch.vert_line.visible {
             out.push(Prim::VLine {
                 x: (snapped_x * hpr).round() as i32,
                 y0: (pane.top * vpr).round() as i32,
                 y1: ((pane.top + pane.height) * vpr).round() as i32,
-                width: line_width,
-                style: LineStyle::LargeDashed,
+                width: vert_width,
+                style: vert_style,
                 color: vert_color,
             });
         }
@@ -54,8 +61,8 @@ impl ChartEngine {
                 y: (snap_y * vpr).round() as i32,
                 x0: 0,
                 x1: pane_w_px,
-                width: line_width,
-                style: LineStyle::LargeDashed,
+                width: horz_width,
+                style: horz_style,
                 color: horz_color,
             });
         }

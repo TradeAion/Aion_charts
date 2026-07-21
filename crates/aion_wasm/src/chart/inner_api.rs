@@ -10,6 +10,12 @@ impl ChartInner {
         id as u32
     }
 
+    /// Remove a series and any indicators derived from it. Returns true if a live, non-primary
+    /// series was removed. The primary series (id 0) cannot be removed.
+    pub fn remove_series(&mut self, id: u32) -> bool {
+        self.engine.remove_series(id as SeriesId)
+    }
+
     pub fn add_sma(&mut self, source_id: u32, period: u32) -> u32 {
         self.engine
             .add_sma(source_id as SeriesId, period as usize)
@@ -140,6 +146,9 @@ impl ChartInner {
         }
     }
 
+    /// Shared override-slot update for the candle part colors: `None` keeps the current value,
+    /// `Some("")` clears the override (the part falls back to its direction's body color), and
+    /// `Some(css)` pins a parsed color (unparseable strings are ignored, keeping the old value).
     /// Sets a series' line/area color (overrides the kind default).
     pub fn set_series_color(&mut self, id: u32, r: u8, g: u8, b: u8) {
         if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
@@ -163,29 +172,20 @@ impl ChartInner {
         }
     }
 
-    /// Set candlestick wick colors per direction (CSS strings; empty/unparseable = keep current).
-    /// Until set, each wick follows its direction's body color (LWC parity).
-    pub fn set_series_wick_colors(&mut self, id: u32, up: &str, down: &str) {
+    /// Set candlestick wick colors per direction. `undefined` = keep current, `""` = clear the
+    /// override (back to following the direction's body color), a CSS color = pin it.
+    pub fn set_series_wick_colors(&mut self, id: u32, up: Option<String>, down: Option<String>) {
         if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
-            if let Some(c) = Color::parse_css(up) {
-                s.wick_up_color = Some(c);
-            }
-            if let Some(c) = Color::parse_css(down) {
-                s.wick_down_color = Some(c);
-            }
+            crate::color_policy::update_color_slot(&mut s.wick_up_color, up);
+            crate::color_policy::update_color_slot(&mut s.wick_down_color, down);
         }
     }
 
-    /// Set candlestick border colors per direction (CSS strings; empty/unparseable = keep current).
-    /// Until set, each border follows its direction's body color (LWC parity).
-    pub fn set_series_border_colors(&mut self, id: u32, up: &str, down: &str) {
+    /// Set candlestick border colors per direction; same keep/clear/pin contract as the wicks.
+    pub fn set_series_border_colors(&mut self, id: u32, up: Option<String>, down: Option<String>) {
         if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
-            if let Some(c) = Color::parse_css(up) {
-                s.border_up_color = Some(c);
-            }
-            if let Some(c) = Color::parse_css(down) {
-                s.border_down_color = Some(c);
-            }
+            crate::color_policy::update_color_slot(&mut s.border_up_color, up);
+            crate::color_policy::update_color_slot(&mut s.border_down_color, down);
         }
     }
 
@@ -453,7 +453,81 @@ impl ChartInner {
     }
 
     pub fn set_time_visible(&mut self, visible: bool) {
+        // The host copy governs whether the time-axis strip is reserved in layout; the engine copy
+        // governs whether tick/crosshair labels include the time of day.
         self.time_visible = visible;
+        self.engine.set_time_visible(visible);
+    }
+
+    /// LWC `timeScale.secondsVisible`: include seconds in time labels when the time is shown.
+    pub fn set_seconds_visible(&mut self, visible: bool) {
+        self.engine.set_seconds_visible(visible);
+    }
+
+    /// LWC `timeScale.minBarSpacing`.
+    pub fn set_min_bar_spacing(&mut self, spacing: f64) {
+        self.engine.set_min_bar_spacing(spacing);
+    }
+
+    /// LWC `timeScale.fixLeftEdge`.
+    pub fn set_fix_left_edge(&mut self, fix: bool) {
+        self.engine.set_fix_left_edge(fix);
+    }
+
+    /// LWC `timeScale.fixRightEdge`.
+    pub fn set_fix_right_edge(&mut self, fix: bool) {
+        self.engine.set_fix_right_edge(fix);
+    }
+
+    /// LWC `timeScale.lockVisibleTimeRangeOnResize`.
+    pub fn set_lock_visible_time_range_on_resize(&mut self, lock: bool) {
+        self.engine.set_lock_visible_time_range_on_resize(lock);
+    }
+
+    /// LWC `timeScale.rightBarStaysOnScroll`.
+    pub fn set_right_bar_stays_on_scroll(&mut self, stays: bool) {
+        self.engine.set_right_bar_stays_on_scroll(stays);
+    }
+
+    /// Install/clear the host price formatter (LWC `localization.priceFormatter`). The JS callback
+    /// receives the numeric price and returns a string; a throw or non-string result falls back to
+    /// the built-in formatter.
+    pub fn set_price_formatter(&mut self, f: Option<js_sys::Function>) {
+        self.engine.set_price_formatter(f.map(|func| {
+            Box::new(move |price: f64| {
+                func.call1(&JsValue::NULL, &JsValue::from_f64(price))
+                    .ok()
+                    .and_then(|v| v.as_string())
+            }) as PriceFormatterFn
+        }));
+    }
+
+    /// Install/clear the host time-axis tick formatter (LWC `timeScale.tickMarkFormatter`). The JS
+    /// callback receives `(timeSeconds, tickMarkType)`.
+    pub fn set_tick_mark_formatter(&mut self, f: Option<js_sys::Function>) {
+        self.engine.set_tick_mark_formatter(f.map(|func| {
+            Box::new(move |ts: i64, tick_type: u8| {
+                func.call2(
+                    &JsValue::NULL,
+                    &JsValue::from_f64(ts as f64),
+                    &JsValue::from_f64(tick_type as f64),
+                )
+                .ok()
+                .and_then(|v| v.as_string())
+            }) as TickMarkFormatterFn
+        }));
+    }
+
+    /// Install/clear the host crosshair time formatter (LWC `localization.timeFormatter`). The JS
+    /// callback receives the UTC-second timestamp.
+    pub fn set_time_formatter(&mut self, f: Option<js_sys::Function>) {
+        self.engine.set_time_formatter(f.map(|func| {
+            Box::new(move |ts: i64| {
+                func.call1(&JsValue::NULL, &JsValue::from_f64(ts as f64))
+                    .ok()
+                    .and_then(|v| v.as_string())
+            }) as TimeFormatterFn
+        }));
     }
 
     /// 0 = normal, 1 = magnet (LWC default), 2 = hidden, 3 = magnet OHLC.

@@ -39,8 +39,8 @@ use aion_core::options::{crosshair_mode, ChartOptions};
 use aion_core::scale::price_scale_core::PriceScaleMode;
 use aion_engine::{
     line_style_from_u8, marker_pos, marker_shape, AxisFrame, AxisLabel, AxisTextAlign,
-    AxisTextMidpoint, ChartEngine, Marker, Pane, PriceLine, PriceScaleTarget, SeriesKind,
-    TIME_AXIS_HEIGHT,
+    AxisTextMidpoint, ChartEngine, Marker, Pane, PriceFormatterFn, PriceLine, PriceScaleTarget,
+    SeriesKind, TickMarkFormatterFn, TimeFormatterFn, TIME_AXIS_HEIGHT,
 };
 use aion_render::canvas2d::{execute as execute_canvas2d, Canvas2d, Viewport as CanvasViewport};
 use aion_render::color::Color;
@@ -68,12 +68,8 @@ const BORDER_CSS: &str = "#2B2B43";
 
 // Crosshair marker (line/area) — line-series.ts defaults.
 
-/// LWC default font stack (`helpers/make-font.ts` / layout defaults).
-const FONT_FAMILY: &str =
-    "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
-
-/// Axis metrics (RENDERING_SPEC.md §10, §11), font size 12.
-const FONT_SIZE: f64 = 12.0;
+/// Axis metrics (RENDERING_SPEC.md §10, §11). Font size and family are read per-frame from
+/// `layout.fontSize`/`layout.fontFamily` (see `inner_render`); this caps tick-label width in chars.
 const TICK_MARK_MAX_CHARS: f64 = 8.0;
 
 /// JSON shape accepted from the JS boundary for `set_series_markers`.
@@ -443,6 +439,12 @@ impl AionChart {
         self.inner.borrow_mut().add_series(kind)
     }
 
+    /// Remove a series (and any indicators derived from it). Returns true if a live, non-primary
+    /// series was removed; the primary series (id 0) cannot be removed.
+    pub fn remove_series(&mut self, id: u32) -> bool {
+        self.inner.borrow_mut().remove_series(id)
+    }
+
     /// Add a Rust-native simple moving-average line derived from `source_id`.
     pub fn add_sma(&mut self, source_id: u32, period: u32) -> u32 {
         self.inner.borrow_mut().add_sma(source_id, period)
@@ -544,13 +546,14 @@ impl AionChart {
             .set_series_updown_colors(id, up, down);
     }
 
-    /// Set candlestick wick colors per direction as CSS strings (empty string = keep current).
-    pub fn set_series_wick_colors(&mut self, id: u32, up: &str, down: &str) {
+    /// Set candlestick wick colors per direction. `undefined` = keep current, `""` = clear the
+    /// override (follow the direction's body color), a CSS color = pin it.
+    pub fn set_series_wick_colors(&mut self, id: u32, up: Option<String>, down: Option<String>) {
         self.inner.borrow_mut().set_series_wick_colors(id, up, down);
     }
 
-    /// Set candlestick border colors per direction as CSS strings (empty string = keep current).
-    pub fn set_series_border_colors(&mut self, id: u32, up: &str, down: &str) {
+    /// Set candlestick border colors per direction; same keep/clear/pin contract as the wicks.
+    pub fn set_series_border_colors(&mut self, id: u32, up: Option<String>, down: Option<String>) {
         self.inner
             .borrow_mut()
             .set_series_border_colors(id, up, down);
@@ -706,6 +709,53 @@ impl AionChart {
 
     pub fn set_time_visible(&mut self, visible: bool) {
         self.inner.borrow_mut().set_time_visible(visible);
+    }
+
+    /// LWC `timeScale.secondsVisible`: include seconds in time labels.
+    pub fn set_seconds_visible(&mut self, visible: bool) {
+        self.inner.borrow_mut().set_seconds_visible(visible);
+    }
+
+    /// LWC `timeScale.minBarSpacing` (CSS px).
+    pub fn set_min_bar_spacing(&mut self, spacing: f64) {
+        self.inner.borrow_mut().set_min_bar_spacing(spacing);
+    }
+
+    /// LWC `timeScale.fixLeftEdge`.
+    pub fn set_fix_left_edge(&mut self, fix: bool) {
+        self.inner.borrow_mut().set_fix_left_edge(fix);
+    }
+
+    /// LWC `timeScale.fixRightEdge`.
+    pub fn set_fix_right_edge(&mut self, fix: bool) {
+        self.inner.borrow_mut().set_fix_right_edge(fix);
+    }
+
+    /// LWC `timeScale.lockVisibleTimeRangeOnResize`.
+    pub fn set_lock_visible_time_range_on_resize(&mut self, lock: bool) {
+        self.inner
+            .borrow_mut()
+            .set_lock_visible_time_range_on_resize(lock);
+    }
+
+    /// LWC `timeScale.rightBarStaysOnScroll`.
+    pub fn set_right_bar_stays_on_scroll(&mut self, stays: bool) {
+        self.inner.borrow_mut().set_right_bar_stays_on_scroll(stays);
+    }
+
+    /// LWC `localization.priceFormatter`: `(price: number) => string`. Pass `null` to clear.
+    pub fn set_price_formatter(&mut self, f: Option<js_sys::Function>) {
+        self.inner.borrow_mut().set_price_formatter(f);
+    }
+
+    /// LWC `timeScale.tickMarkFormatter`: `(timeSeconds, tickMarkType) => string`. `null` clears.
+    pub fn set_tick_mark_formatter(&mut self, f: Option<js_sys::Function>) {
+        self.inner.borrow_mut().set_tick_mark_formatter(f);
+    }
+
+    /// LWC `localization.timeFormatter`: `(timeSeconds: number) => string`. Pass `null` to clear.
+    pub fn set_time_formatter(&mut self, f: Option<js_sys::Function>) {
+        self.inner.borrow_mut().set_time_formatter(f);
     }
 
     /// 0 = normal, 1 = magnet (LWC default), 2 = hidden, 3 = magnet OHLC.
