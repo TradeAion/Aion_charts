@@ -5,6 +5,7 @@
 
 // @ts-ignore -- pkg is a build artifact, present after build:wasm
 import init, { AionChart } from "../pkg/aion_wasm.js";
+
 import { install_gestures } from "./gestures.js";
 import type {
   bars_info, chart_api, chart_options, data_changed_handler, dbl_click_handler,
@@ -13,7 +14,7 @@ import type {
   mismatch_direction, mouse_event_handler, mouse_event_params, ohlc_data, pane_api, price_line_api, price_line_options,
   price_range, price_scale_api, price_scale_options, series_api, series_data, series_kind,
   series_marker, series_marker_options, series_options, single_value_data, time, time_range,
-  time_scale_api, time_scale_options, visible_logical_range_handler, visible_time_range_handler,
+  time_scale_api, time_scale_options, tracking_mode_options, visible_logical_range_handler, visible_time_range_handler,
 } from "./types.js";
 import { KIND_TO_U8, LINE_STYLE_TO_U8, LINE_TYPE_TO_U8 } from "./types.js";
 
@@ -509,25 +510,31 @@ class pane_impl implements pane_api {
   }
 }
 
-/** Gesture toggles resolved to concrete booleans the recognizer reads on each event. */
+/** Gesture toggles resolved to concrete values the recognizer reads on each event. */
 export interface resolved_gestures {
   pan: boolean;
   pan_horz_touch: boolean;
   pan_vert_touch: boolean;
+  wheel_scroll: boolean;
   wheel_zoom: boolean;
   pinch_zoom: boolean;
-  axis_dblclick_reset: boolean;
+  axis_dblclick_reset_time: boolean;
+  axis_dblclick_reset_price: boolean;
   axis_scale_price: boolean;
   axis_scale_time: boolean;
   kinetic_touch: boolean;
   kinetic_mouse: boolean;
+  panes_resize: boolean;
+  tracking_exit_mode: "on_next_tap" | "on_touch_end";
 }
 
 function apply_scroll(v: boolean | handle_scroll_options, cfg: resolved_gestures): void {
   if (typeof v === "boolean") {
+    // LWC migrateHandleScaleScrollOptions: a boolean expands to all four scroll flags.
     cfg.pan = v;
     cfg.pan_horz_touch = v;
     cfg.pan_vert_touch = v;
+    cfg.wheel_scroll = v;
     return;
   }
   // Object form merges over the current config; `pan` (the mouse-drag / generic pan) tracks
@@ -535,13 +542,16 @@ function apply_scroll(v: boolean | handle_scroll_options, cfg: resolved_gestures
   cfg.pan = v.pressed_mouse_move ?? cfg.pan;
   cfg.pan_horz_touch = v.horz_touch_drag ?? cfg.pan_horz_touch;
   cfg.pan_vert_touch = v.vert_touch_drag ?? cfg.pan_vert_touch;
+  cfg.wheel_scroll = v.mouse_wheel ?? cfg.wheel_scroll;
 }
 
 function apply_scale(v: boolean | handle_scale_options, cfg: resolved_gestures): void {
   if (typeof v === "boolean") {
+    // LWC migrateHandleScaleScrollOptions: a boolean expands to every scale flag.
     cfg.wheel_zoom = v;
     cfg.pinch_zoom = v;
-    cfg.axis_dblclick_reset = v;
+    cfg.axis_dblclick_reset_time = v;
+    cfg.axis_dblclick_reset_price = v;
     cfg.axis_scale_price = v;
     cfg.axis_scale_time = v;
     return;
@@ -549,7 +559,15 @@ function apply_scale(v: boolean | handle_scale_options, cfg: resolved_gestures):
   // Object form merges over the current config (LWC applyOptions semantics).
   cfg.wheel_zoom = v.mouse_wheel ?? cfg.wheel_zoom;
   cfg.pinch_zoom = v.pinch ?? cfg.pinch_zoom;
-  cfg.axis_dblclick_reset = v.axis_double_click_reset ?? cfg.axis_dblclick_reset;
+  const adr = v.axis_double_click_reset;
+  if (typeof adr === "boolean") {
+    // LWC migrateHandleScaleScrollOptions: a boolean expands to both axes.
+    cfg.axis_dblclick_reset_time = adr;
+    cfg.axis_dblclick_reset_price = adr;
+  } else if (adr) {
+    cfg.axis_dblclick_reset_time = adr.time ?? cfg.axis_dblclick_reset_time;
+    cfg.axis_dblclick_reset_price = adr.price ?? cfg.axis_dblclick_reset_price;
+  }
   const apm = v.axis_pressed_mouse_move;
   if (typeof apm === "boolean") {
     cfg.axis_scale_price = apm;
@@ -570,19 +588,27 @@ function apply_kinetic(v: boolean | kinetic_scroll_options, cfg: resolved_gestur
   cfg.kinetic_mouse = v.mouse ?? cfg.kinetic_mouse;
 }
 
+function apply_tracking(v: tracking_mode_options, cfg: resolved_gestures): void {
+  cfg.tracking_exit_mode = v.exit_mode ?? cfg.tracking_exit_mode;
+}
+
 export class chart_impl implements chart_api {
   private next_extra_series = false;
   private readonly gestures_cfg: resolved_gestures = {
     pan: true,
     pan_horz_touch: true,
     pan_vert_touch: true,
+    wheel_scroll: true,
     wheel_zoom: true,
     pinch_zoom: true,
-    axis_dblclick_reset: true,
+    axis_dblclick_reset_time: true,
+    axis_dblclick_reset_price: true,
     axis_scale_price: true,
     axis_scale_time: true,
     kinetic_touch: true,
     kinetic_mouse: false,
+    panes_resize: true,
+    tracking_exit_mode: "on_next_tap",
   };
   private a11y_live: HTMLElement | null = null;
   private readonly ts = new time_scale_impl(this);
@@ -835,17 +861,31 @@ export class chart_impl implements chart_api {
   }
 
   apply_options(options: deep_partial<chart_options>): void {
-    // handle_scroll / handle_scale (gestures) and localization (JS callbacks) are package-level;
-    // intercept and strip them so only engine-owned, JSON-serializable options reach the wasm store.
-    const { handle_scroll, handle_scale, kinetic_scroll, localization, ...engine_options } =
+    // handle_scroll / handle_scale / kinetic_scroll / tracking_mode (gestures), the pane-resize
+    // toggle, and localization (JS callbacks) are package-level; intercept and strip them so only
+    // engine-owned, JSON-serializable options reach the wasm store.
+    const { handle_scroll, handle_scale, kinetic_scroll, tracking_mode, localization, ...rest } =
       options as deep_partial<chart_options> & {
         handle_scroll?: boolean | handle_scroll_options;
         handle_scale?: boolean | handle_scale_options;
         kinetic_scroll?: boolean | kinetic_scroll_options;
+        tracking_mode?: tracking_mode_options;
         localization?: localization_options;
       };
-    if (handle_scroll !== undefined || handle_scale !== undefined || kinetic_scroll !== undefined) {
-      this.apply_gesture_options(handle_scroll, handle_scale, kinetic_scroll);
+    let engine_options: Record<string, unknown> = rest;
+    // layout.panes.enableResize (LWC) drives the separator drag here, not the engine; strip it
+    // alongside the other gesture keys before forwarding.
+    const panes = (rest.layout as { panes?: { enableResize?: boolean } } | undefined)?.panes;
+    if (panes?.enableResize !== undefined) {
+      const { enableResize, ...panes_rest } = panes;
+      engine_options = { ...rest, layout: { ...(rest.layout as object), panes: panes_rest } };
+      this.gestures_cfg.panes_resize = enableResize;
+    }
+    if (
+      handle_scroll !== undefined || handle_scale !== undefined || kinetic_scroll !== undefined ||
+      tracking_mode !== undefined
+    ) {
+      this.apply_gesture_options(handle_scroll, handle_scale, kinetic_scroll, tracking_mode);
     }
     if (localization !== undefined) this.apply_localization(localization);
     this.wasm.apply_options(JSON.stringify(engine_options));
@@ -863,10 +903,28 @@ export class chart_impl implements chart_api {
     scroll?: boolean | handle_scroll_options,
     scale?: boolean | handle_scale_options,
     kinetic?: boolean | kinetic_scroll_options,
+    tracking?: tracking_mode_options,
   ): void {
     if (scroll !== undefined) apply_scroll(scroll, this.gestures_cfg);
     if (scale !== undefined) apply_scale(scale, this.gestures_cfg);
     if (kinetic !== undefined) apply_kinetic(kinetic, this.gestures_cfg);
+    if (tracking !== undefined) apply_tracking(tracking, this.gestures_cfg);
+    this.sync_interaction_disabled();
+  }
+
+  /** Resolve the LWC `layout.panes.enableResize` toggle (separator drag + hover cursor). */
+  apply_panes_resize(enabled: boolean): void {
+    this.gestures_cfg.panes_resize = enabled;
+  }
+
+  /** Mirror the engine's master interaction switch: off only when every scroll+scale flag is. */
+  private sync_interaction_disabled(): void {
+    const c = this.gestures_cfg;
+    const all_off =
+      !c.pan && !c.pan_horz_touch && !c.pan_vert_touch && !c.wheel_scroll && !c.wheel_zoom &&
+      !c.pinch_zoom && !c.axis_dblclick_reset_time && !c.axis_dblclick_reset_price &&
+      !c.axis_scale_time && !c.axis_scale_price;
+    this.wasm.set_interaction_disabled(all_off);
   }
 
   /** Set up the accessible wrapper: focusable role on the overlay + an aria-live status region. */

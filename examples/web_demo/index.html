@@ -140,11 +140,11 @@
       <label>size <input type="range" id="wm_size" min="16" max="160" step="4" value="72"><span id="wm_size_val">72</span></label>
     </div>
 
-    <!-- interaction toggles: axis drag-to-scale, kinetic scroll -->
-    <div class="group" id="interaction_group" title="Drag a price/time axis to scale it; flick to coast; keyboard: arrows pan, +/- zoom, Home fit, Esc clear">
+    <!-- interaction toggles: axis drag-to-scale, mouse kinetic (off by default, LWC parity) -->
+    <div class="group" id="interaction_group" title="Drag a price/time axis to scale it; keyboard: arrows pan (Ctrl = fast), +/- zoom, Home fit, Esc clear">
       <label><input type="checkbox" id="axis_scale_toggle" checked> axis drag-scale</label>
-      <label><input type="checkbox" id="kinetic_toggle" checked> kinetic scroll</label>
-      <span class="hint">drag axes · flick · keys: ←→ +/- Home Esc</span>
+      <label><input type="checkbox" id="kinetic_toggle"> mouse kinetic</label>
+      <span class="hint">drag axes · Ctrl+←→ fast scroll · flick coasts on touch</span>
     </div>
 
     <span id="status"></span>
@@ -483,18 +483,19 @@ document.getElementById("wm_size").addEventListener("input", (e) => {
   apply_watermark();
 });
 
-// ---- interaction toggles: axis drag-to-scale + kinetic scroll (kinetic also enabled for mouse
-// here so it can be flicked on desktop; the library default is touch-only). ----
+// ---- interaction toggles: axis drag-to-scale + mouse kinetic. LWC/TradingView defaults:
+// coasting is a touch behavior (kineticScroll.mouse = false), so mouse kinetic is OFF here by
+// default; the checkbox exists to demo it. Touch kinetic stays on regardless (LWC parity).
 function apply_interaction() {
-  const kinetic = document.getElementById("kinetic_toggle").checked;
+  const mouse_kinetic = document.getElementById("kinetic_toggle").checked;
   chart.apply_options({
     handle_scale: { axis_pressed_mouse_move: document.getElementById("axis_scale_toggle").checked },
-    kinetic_scroll: { touch: kinetic, mouse: kinetic },
+    kinetic_scroll: { touch: true, mouse: mouse_kinetic },
   });
 }
 document.getElementById("axis_scale_toggle").addEventListener("change", apply_interaction);
 document.getElementById("kinetic_toggle").addEventListener("change", apply_interaction);
-apply_interaction(); // enable mouse kinetic up front so it is testable on desktop
+apply_interaction();
 
 // Theme presets come from the package's style settings file (theme.ts); applying one maps its
 // tokens onto the chart options live (background + axis borders + axis text), then the pickers

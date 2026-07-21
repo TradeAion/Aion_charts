@@ -773,6 +773,12 @@ impl AionChart {
         self.inner.borrow_mut().set_right_bar_stays_on_scroll(stays);
     }
 
+    /// Push the host's "all scaling and scrolling disabled" aggregate (LWC
+    /// `_isAllScalingAndScrollingDisabled`): forces fix-edge semantics on the time scale.
+    pub fn set_interaction_disabled(&mut self, disabled: bool) {
+        self.inner.borrow_mut().set_interaction_disabled(disabled);
+    }
+
     /// LWC `localization.priceFormatter`: `(price: number) => string`. Pass `null` to clear.
     pub fn set_price_formatter(&mut self, f: Option<js_sys::Function>) {
         self.inner.borrow_mut().set_price_formatter(f);

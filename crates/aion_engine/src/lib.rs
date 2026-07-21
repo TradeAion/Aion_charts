@@ -578,6 +578,12 @@ impl ChartEngine {
         self.time_scale.set_right_bar_stays_on_scroll(stays);
     }
 
+    /// Host-pushed "all scaling and scrolling disabled" aggregate (LWC
+    /// `_isAllScalingAndScrollingDisabled`): forces fix-edge semantics on the time scale.
+    pub fn set_interaction_disabled(&mut self, disabled: bool) {
+        self.time_scale.set_interaction_disabled(disabled);
+    }
+
     pub fn bar_spacing(&self) -> f64 {
         self.time_scale.bar_spacing()
     }

@@ -796,6 +796,65 @@ Progress is appended here as phases land (newest last).
   crosshair 858→3456 px at width 4, label bg recolor+hide, separator recolor, wick pin/unpin
   14969→0).
 
+- 2026-07-21 — **Watermark (LWC v4 shape).** `watermark` options group (visible/text/color/
+  fontSize/fontFamily/fontStyle/horzAlign/vertAlign; default color `rgba(0,0,0,0)` exactly like
+  LWC) flows through the options store with a camelCase merge test. Rendering is deliberately on
+  the shared 2D overlay *above* the series — the one text path that stays pixel-identical across
+  the WebGPU and Canvas2D pane backends (behind-series placement needs the GPU glyph-atlas text
+  path, tracked under the plugin platform); media-coordinate drawing keeps it crisp at fractional
+  DPR, and the CSS color is passed through verbatim so alpha survives. Demo: visibility/text/
+  color/size controls (50%-alpha overlay tint). Browser-verified: control wiring (2363 px at
+  ~50% alpha), full-alpha paint, alignment bbox center→top-left moves, total recolor, clean
+  hide. All ten browser gates green.
+
+- 2026-07-21 — **Performance gate: both production targets PASS.** The roadmap's two perf targets
+  are now measured by a dedicated headless harness (`crates/aion_native/examples/perf_gate.rs`,
+  deterministic fixtures, warm-up, report-only with `AION_PERF_STRICT=1` as an opt-in hard gate).
+  On the dev machine: **Target A** — `build_frame` at 10 series × 50k bars = **2.37 ms** against
+  the 16.67 ms 60fps budget (~7× headroom, viewport conflation doing its job); **Target B** —
+  1,000,000-bar `set_series_data` = **245.3 ms** against the 300 ms budget (~18% headroom; the
+  number to watch on slower hardware). Wired into CI as a report-only step after the test suite.
+  Remaining perf work: browser-side present-time measurement and a hard CI gate once thresholds
+  prove stable across runners.
+
+- 2026-07-21 — **Interaction parity fixes, proven against LWC source.** The initial axis-drag
+  implementation used guessed incremental `exp(dx*K)` models. Ground truth was established two
+  ways: the LWC 5.2.0 source (local `tmp/lightweight-charts` checkout) and empirical probes of the
+  pinned reference build. Findings and fixes: (1) **Keyboard scroll was inverted** — ArrowLeft
+  showed newer data; TradingView's Left means back-in-time. The engine's `rightOffset` sign was
+  already LWC-consistent (larger = newer), so only the key mapping changed: Left = older, Right =
+  newer, Ctrl/Shift = 10-bar step, eased over ~160 ms for the platform's smooth keyboard feel
+  (mirrors LWC's `scrollToOffsetAnimated`). (2) **Time-axis drag was inverted** — drag right
+  zoomed in; LWC zooms *out*. Replaced with an exact port of `TimeScale.scaleTo` (start-relative
+  ratio of distances-from-right). (3) **Price-axis drag direction was correct but the model was
+  wrong** (~5x oversensitive incremental exp); replaced with an exact port of `PriceScale.scaleTo`
+  (drag-start snapshot scaled around center, `(startY + (h-1)*0.2)/(currentY + (h-1)*0.2)`, min
+  0.1), now also a no-op in percentage/indexed modes like LWC. Probes show measured coefficients
+  matching the LWC formulas to 9–10 significant digits; all ten browser gates, oxlint, and tsc
+  stay green. Wheel-over-axis behavior was checked too — LWC 5.2 zooms *time* there, which we
+  already match.
+
+- 2026-07-21 — **Free 2D dragging: vertical price pan.** The pane drag only scrolled time, so the
+  chart felt vertically locked. LWC pans both axes in one drag (`pane-widget.ts` →
+  `scrollPriceTo` + `scrollTimeTo`), and `PriceScale.scrollTo` shifts the press-time range
+  snapshot by `dy * span/(h-1)` (drag down = range up, candles follow the cursor). That formula
+  is now ported into the recognizer with a deliberate TradingView-flavored extension: where LWC
+  no-ops under autoscale, the first drag captures the autoscale-resolved range and turns it
+  manual (the TradingView feel the user expects); double-clicking the axis re-enables autoscale
+  as before. Touch honors `vert_touch_drag`; inverted scales flip the delta like LWC. Probe:
+  60 px drag shifts the range by 2.3493337717350755 vs the formula's 2.3493337717350555 (13
+  significant digits), the reverse drag restores the exact original range, and a diagonal drag
+  pans time and price in one motion. All ten browser gates, oxlint, and tsc green.
+
+- 2026-07-21 — **Kinetic default corrected to LWC parity.** The package already defaulted to
+  LWC's `kineticScroll: { touch: true, mouse: false }`, but the demo force-enabled mouse coasting
+  via a checked-by-default toggle. TradingView's feel is: normal drags stop dead on release, and
+  the smooth-scroll sensation comes from the keyboard (Ctrl+←/→, which now eases ~160 ms). The
+  demo toggle is now **"mouse kinetic", off by default**, leaving touch coasting on per LWC.
+  Probe: a mouse flick leaves the scroll position bit-identical 600 ms after release by default,
+  coasts when the toggle is on (160.95 → 300.40), and Ctrl+ArrowLeft eases exactly 10 bars
+  older.
+
 ## 11. Revised execution order
 
 The active plan is now different from the original scaffolding sequence. The earlier sequence is

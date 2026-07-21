@@ -197,8 +197,12 @@ pub struct CrosshairOptions {
     pub vert_line: CrosshairLineOptions,
     #[serde(rename = "horzLine")]
     pub horz_line: CrosshairLineOptions,
-    /// [`crosshair_mode`] value (default Normal — a deliberate divergence from LWC's Magnet).
+    /// [`crosshair_mode`] value (default Magnet, matching LWC).
     pub mode: u8,
+    /// LWC `doNotSnapToHiddenSeriesIndices` (default false): when true, the crosshair's snapped
+    /// bar index moves to the nearest index that has a bar in any visible series.
+    #[serde(rename = "doNotSnapToHiddenSeriesIndices")]
+    pub do_not_snap_to_hidden_series_indices: bool,
 }
 
 /// Chart-level options of a pane price-axis strip: visibility plus the LWC border cosmetics
@@ -257,7 +261,8 @@ impl Default for CrosshairOptions {
         Self {
             vert_line: CrosshairLineOptions::default(),
             horz_line: CrosshairLineOptions::default(),
-            mode: crosshair_mode::NORMAL,
+            mode: crosshair_mode::NORMAL, // deliberate divergence from LWC's Magnet default
+            do_not_snap_to_hidden_series_indices: false,
         }
     }
 }
@@ -309,13 +314,13 @@ pub struct ChartOptions {
     pub layout: LayoutOptions,
     pub grid: GridOptions,
     pub crosshair: CrosshairOptions,
+    pub watermark: WatermarkOptions,
     #[serde(rename = "leftPriceScale")]
     pub left_price_scale: PriceAxisOptions,
     #[serde(rename = "rightPriceScale")]
     pub right_price_scale: PriceAxisOptions,
     #[serde(rename = "timeScale")]
     pub time_scale: TimeAxisOptions,
-    pub watermark: WatermarkOptions,
     #[serde(rename = "autoSize")]
     pub auto_size: bool,
     #[serde(rename = "hoveredSeriesOnTop")]
@@ -328,10 +333,10 @@ impl Default for ChartOptions {
             layout: LayoutOptions::default(),
             grid: GridOptions::default(),
             crosshair: CrosshairOptions::default(),
+            watermark: WatermarkOptions::default(),
             left_price_scale: PriceAxisOptions::visible(false),
             right_price_scale: PriceAxisOptions::visible(true),
             time_scale: TimeAxisOptions::default(),
-            watermark: WatermarkOptions::default(),
             auto_size: false,
             hovered_series_on_top: true,
         }
@@ -425,8 +430,8 @@ mod tests {
         assert_eq!(o.layout.font_size, 12.0);
         assert_eq!(o.grid.vert_lines.color, "#D6DCDE");
         assert_eq!(o.grid.horz_lines.style, line_style::SOLID);
-        // Deliberate divergence from LWC: Aion defaults to Normal, not Magnet.
         assert_eq!(o.crosshair.mode, crosshair_mode::NORMAL);
+        assert!(!o.crosshair.do_not_snap_to_hidden_series_indices);
         assert_eq!(o.crosshair.vert_line.style, line_style::LARGE_DASHED);
         assert_eq!(o.crosshair.horz_line.label_background_color, "#131722");
         assert!(o.hovered_series_on_top);
@@ -506,6 +511,16 @@ mod tests {
         assert_eq!(o.crosshair.mode, crosshair_mode::NORMAL);
         // and unrelated defaults remain
         assert_eq!(o.layout.background.color, "#FFFFFF");
+    }
+
+    #[test]
+    fn crosshair_do_not_snap_patch_merges_camelcase_key() {
+        let mut store = ChartOptionsStore::new();
+        store.apply(&json!({ "crosshair": { "doNotSnapToHiddenSeriesIndices": true } }));
+        let o = store.get();
+        assert!(o.crosshair.do_not_snap_to_hidden_series_indices);
+        // untouched siblings keep their defaults
+        assert_eq!(o.crosshair.mode, crosshair_mode::NORMAL);
     }
 
     #[test]

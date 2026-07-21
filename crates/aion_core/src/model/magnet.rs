@@ -32,6 +32,25 @@ pub fn magnet_snap(cursor_coord: f64, candidates: &[(f64, f64)]) -> Option<f64> 
         .map(|&(price, _)| price)
 }
 
+/// Port of the candidate pick in `Magnet.align` (model/magnet.ts:80-83): candidates are y
+/// coordinates, each converted on its own series' price scale; the one nearest the cursor
+/// coordinate wins and is returned as a *coordinate* (the caller converts it back to a price
+/// on the pane's default scale). Ties resolve to the earliest candidate, matching LWC's stable
+/// sort. Returns `None` when there are no candidates (caller keeps the raw cursor price).
+pub fn magnet_snap_coordinate(cursor_coord: f64, candidates: &[f64]) -> Option<f64> {
+    let mut best: Option<f64> = None;
+    for &candidate in candidates {
+        let nearer = match best {
+            Some(b) => (candidate - cursor_coord).abs() < (b - cursor_coord).abs(),
+            None => true,
+        };
+        if nearer {
+            best = Some(candidate);
+        }
+    }
+    best
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -53,5 +72,22 @@ mod tests {
     #[test]
     fn empty_candidates() {
         assert_eq!(magnet_snap(50.0, &[]), None);
+    }
+
+    #[test]
+    fn coordinate_pick_returns_the_winning_coordinate() {
+        // cursor at y=100 across two series' scales: 98 beats 105 and 160
+        assert_eq!(
+            magnet_snap_coordinate(100.0, &[105.0, 40.0, 160.0, 98.0]),
+            Some(98.0)
+        );
+        assert_eq!(magnet_snap_coordinate(50.0, &[200.0]), Some(200.0));
+        assert_eq!(magnet_snap_coordinate(50.0, &[]), None);
+    }
+
+    #[test]
+    fn coordinate_pick_tie_goes_to_the_earliest_candidate() {
+        // equidistant candidates: LWC's stable sort keeps the first inserted
+        assert_eq!(magnet_snap_coordinate(100.0, &[90.0, 110.0]), Some(90.0));
     }
 }

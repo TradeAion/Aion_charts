@@ -376,15 +376,13 @@ impl ChartEngine {
     where
         F: Fn(&str) -> f64,
     {
-        let Some((x_css, y_css)) = self.crosshair else {
+        let Some((x_css, y_css)) = self.clamped_crosshair() else {
             return;
         };
         let Some((from, to)) = self.visible_range_for_frame() else {
             return;
         };
-        if self.crosshair_mode == CrosshairMode::Hidden
-            || self.data.plot(self.series[0].id).is_empty()
-        {
+        if self.crosshair_mode == CrosshairMode::Hidden {
             return;
         }
         // Price-axis label tracks the horizontal line (LWC `horzLine`); time-axis label tracks the
@@ -411,11 +409,7 @@ impl ChartEngine {
                     let base_value = series
                         .and_then(|series| self.series_base_value(series.id, from))
                         .unwrap_or(0.0);
-                    let (price, snap_y) = if pi == 0 {
-                        self.crosshair_snap(x_css, y_css, from, to)
-                    } else {
-                        (scale.coordinate_to_price(y_css, base_value), y_css)
-                    };
+                    let (price, snap_y) = self.crosshair_snap(pi, x_css, y_css, from, to);
                     let text = self
                         .format_scale_value(scale, scale.price_to_logical_value(price, base_value));
                     let width = 1.0 + 5.0 + 5.0 + 5.0 + measure(&text);

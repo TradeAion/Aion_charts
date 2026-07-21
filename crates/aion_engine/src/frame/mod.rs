@@ -7,7 +7,7 @@ use aion_core::format::percentage_formatter::PercentageFormatter;
 use aion_core::format::time_formatter::{
     format_crosshair_time, format_tick_label, weight_to_tick_mark_type, TickMarkType,
 };
-use aion_core::model::magnet::{magnet_snap, CrosshairMode};
+use aion_core::model::magnet::{magnet_snap_coordinate, CrosshairMode};
 use aion_core::model::plot_list::{MismatchDirection, PlotList, PlotValueIndex};
 use aion_core::model::price_range::PriceRange;
 use aion_core::scale::price_scale_core::{PriceScaleCore, PriceScaleMode};

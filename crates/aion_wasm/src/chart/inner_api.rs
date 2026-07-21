@@ -489,6 +489,12 @@ impl ChartInner {
         self.engine.set_right_bar_stays_on_scroll(stays);
     }
 
+    /// Host-pushed "all scaling and scrolling disabled" aggregate (LWC
+    /// `_isAllScalingAndScrollingDisabled`): forces fix-edge semantics on the time scale.
+    pub fn set_interaction_disabled(&mut self, disabled: bool) {
+        self.engine.set_interaction_disabled(disabled);
+    }
+
     /// Install/clear the host price formatter (LWC `localization.priceFormatter`). The JS callback
     /// receives the numeric price and returns a string; a throw or non-string result falls back to
     /// the built-in formatter.

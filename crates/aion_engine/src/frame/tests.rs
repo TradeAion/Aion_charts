@@ -159,3 +159,253 @@ fn histogram_conflation_preserves_largest_magnitude_and_source_row() {
         ]
     );
 }
+
+fn crosshair_chart() -> ChartEngine {
+    let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+    chart.series[0].kind = SeriesKind::Line;
+    chart
+        .set_series_data(
+            0,
+            &[1.0, 2.0, 3.0],
+            &[10.0, 11.0, 12.0],
+            &[11.0, 12.0, 13.0],
+            &[9.0, 10.0, 11.0],
+            &[10.5, 11.5, 12.5],
+        )
+        .unwrap();
+    chart.time_scale.set_width(800.0);
+    chart.fit_content();
+    chart
+}
+
+#[test]
+fn crosshair_clamps_into_pane_instead_of_vanishing() {
+    let mut chart = crosshair_chart();
+    // LWC pane-widget.ts:714-719: out-of-range positions clamp instead of hiding the crosshair.
+    chart.crosshair = Some((10_000.0, 10_000.0));
+    assert_eq!(chart.clamped_crosshair(), Some((799.0, 499.0)));
+    let frame = chart.build_frame();
+    assert!(frame.panes[0]
+        .main
+        .iter()
+        .any(|p| matches!(p, Prim::VLine { .. })));
+    assert!(frame.panes[0].main.iter().any(|p| matches!(
+        p,
+        Prim::HLine {
+            style: LineStyle::LargeDashed,
+            ..
+        }
+    )));
+
+    chart.crosshair = Some((-50.0, -50.0));
+    assert_eq!(chart.clamped_crosshair(), Some((0.0, 0.0)));
+    let frame = chart.build_frame();
+    assert!(frame.panes[0]
+        .main
+        .iter()
+        .any(|p| matches!(p, Prim::VLine { .. })));
+
+    // Hidden mode still suppresses the crosshair entirely.
+    chart.crosshair_mode = CrosshairMode::Hidden;
+    let frame = chart.build_frame();
+    assert!(!frame.panes[0]
+        .main
+        .iter()
+        .any(|p| matches!(p, Prim::VLine { .. })));
+}
+
+#[test]
+fn crosshair_draws_without_a_primary_series() {
+    let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+    // The primary series (id 0) stays empty; a secondary line series carries the data.
+    let secondary = chart.add_series(SeriesKind::Line);
+    chart
+        .set_series_data(
+            secondary,
+            &[1.0, 2.0, 3.0],
+            &[10.0, 11.0, 12.0],
+            &[10.0, 11.0, 12.0],
+            &[10.0, 11.0, 12.0],
+            &[10.0, 11.0, 12.0],
+        )
+        .unwrap();
+    chart.time_scale.set_width(800.0);
+    chart.fit_content();
+    chart.crosshair = Some((200.0, 120.0));
+
+    let frame = chart.build_frame();
+    assert!(frame.panes[0]
+        .main
+        .iter()
+        .any(|p| matches!(p, Prim::VLine { .. })));
+    assert!(frame.panes[0].main.iter().any(|p| matches!(
+        p,
+        Prim::HLine {
+            style: LineStyle::LargeDashed,
+            ..
+        }
+    )));
+
+    // The time label needs only the time scale; the price label comes off the containing pane's
+    // default scale (the secondary series' right scale here).
+    let axis = chart.build_axis_frame(80.0, |t| t.len() as f64 * 7.0);
+    assert!(axis
+        .labels
+        .iter()
+        .any(|l| l.midpoint == AxisTextMidpoint::StableTime));
+    assert!(axis.labels.iter().any(|l| l.background.is_some()));
+}
+
+#[test]
+fn magnet_snaps_across_all_visible_series_on_the_pane() {
+    let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+    chart.crosshair_mode = CrosshairMode::Magnet;
+    chart
+        .set_series_data(
+            0,
+            &[1.0, 2.0, 3.0],
+            &[99.0, 100.0, 101.0],
+            &[99.0, 100.0, 101.0],
+            &[99.0, 100.0, 101.0],
+            &[99.0, 100.0, 101.0],
+        )
+        .unwrap();
+    let other = chart.add_series(SeriesKind::Line);
+    chart
+        .set_series_data(
+            other,
+            &[1.0, 2.0, 3.0],
+            &[109.0, 110.0, 111.0],
+            &[109.0, 110.0, 111.0],
+            &[109.0, 110.0, 111.0],
+            &[109.0, 110.0, 111.0],
+        )
+        .unwrap();
+    let left = chart.add_series(SeriesKind::Line);
+    chart
+        .set_series_data(
+            left,
+            &[1.0, 2.0, 3.0],
+            &[490.0, 500.0, 510.0],
+            &[490.0, 500.0, 510.0],
+            &[490.0, 500.0, 510.0],
+            &[490.0, 500.0, 510.0],
+        )
+        .unwrap();
+    chart.set_series_price_scale(left, PriceScaleTarget::Left);
+    chart.time_scale.set_width(800.0);
+    chart.fit_content();
+    chart.build_frame();
+    let (from, to) = chart.visible_range_for_frame().unwrap();
+    let right = pane_scale(&chart.panes[0], PriceScaleTarget::Right);
+    let base = chart.series_base_value(0, from).unwrap();
+    let x = chart.time_scale.index_to_coordinate(1);
+
+    // Same-scale pick: the old primary-only magnet could only snap to the primary's 100.
+    let y110 = right.price_to_coordinate(110.0, base);
+    let (price, snapped_y) = chart.crosshair_snap(0, x, y110, from, to);
+    assert_eq!(snapped_y, y110);
+    assert!((price - 110.0).abs() < 1e-9);
+
+    // Cross-scale pick: the left-scale series' bar converts on its own scale; the winning
+    // coordinate converts back to a price on the pane's default (right) scale.
+    let left_scale = pane_scale(&chart.panes[0], PriceScaleTarget::Left);
+    let left_base = chart.series_base_value(left, from).unwrap();
+    let y500 = left_scale.price_to_coordinate(500.0, left_base);
+    let expected_on_default = right.coordinate_to_price(y500, base);
+    let (price, snapped_y) = chart.crosshair_snap(0, x, y500, from, to);
+    assert_eq!(snapped_y, y500);
+    assert!((price - expected_on_default).abs() < 1e-9);
+    assert!((price - 500.0).abs() > 1.0); // not the left-scale price
+}
+
+#[test]
+fn magnet_ohlc_picks_nearest_of_open_high_low_close() {
+    let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+    chart.crosshair_mode = CrosshairMode::MagnetOhlc;
+    chart
+        .set_series_data(
+            0,
+            &[1.0, 2.0, 3.0],
+            &[10.0, 20.0, 30.0],
+            &[15.0, 28.0, 35.0],
+            &[8.0, 12.0, 25.0],
+            &[12.0, 24.0, 33.0],
+        )
+        .unwrap();
+    chart.time_scale.set_width(800.0);
+    chart.fit_content();
+    chart.build_frame();
+    let (from, to) = chart.visible_range_for_frame().unwrap();
+    let scale = pane_scale(&chart.panes[0], PriceScaleTarget::Right);
+    let base = chart.series_base_value(0, from).unwrap();
+    let x = chart.time_scale.index_to_coordinate(1);
+
+    // Bar 1: open 20, high 28, low 12, close 24 — cursor nearest the high picks 28.
+    let y28 = scale.price_to_coordinate(28.0, base);
+    let (price, _) = chart.crosshair_snap(0, x, y28, from, to);
+    assert!((price - 28.0).abs() < 1e-9);
+    // Cursor nearest the low picks 12.
+    let y12 = scale.price_to_coordinate(12.0, base);
+    let (price, _) = chart.crosshair_snap(0, x, y12, from, to);
+    assert!((price - 12.0).abs() < 1e-9);
+}
+
+#[test]
+fn normal_mode_keeps_the_raw_cursor_price() {
+    let mut chart = crosshair_chart();
+    chart.crosshair_mode = CrosshairMode::Normal;
+    chart.build_frame();
+    let (from, to) = chart.visible_range_for_frame().unwrap();
+    let scale = pane_scale(&chart.panes[0], PriceScaleTarget::Right);
+    let base = chart.series_base_value(0, from).unwrap();
+    let x = chart.time_scale.index_to_coordinate(1);
+    let (price, snapped_y) = chart.crosshair_snap(0, x, 120.0, from, to);
+    assert_eq!(snapped_y, 120.0);
+    assert!((price - scale.coordinate_to_price(120.0, base)).abs() < 1e-9);
+}
+
+#[test]
+fn do_not_snap_to_hidden_series_indices_moves_to_a_visible_bar() {
+    let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+    // Primary (visible) bars sit at merged indices 0, 1, 3; a hidden series owns index 2.
+    chart
+        .set_series_data(
+            0,
+            &[1.0, 2.0, 4.0],
+            &[10.0, 11.0, 12.0],
+            &[10.0, 11.0, 12.0],
+            &[10.0, 11.0, 12.0],
+            &[10.0, 11.0, 12.0],
+        )
+        .unwrap();
+    let hidden = chart.add_series(SeriesKind::Line);
+    chart
+        .set_series_data(hidden, &[3.0], &[20.0], &[20.0], &[20.0], &[20.0])
+        .unwrap();
+    chart.set_series_visible(hidden, false);
+    chart.time_scale.set_width(800.0);
+    chart.fit_content();
+    let (from, to) = chart.visible_range_for_frame().unwrap();
+    assert_eq!((from, to), (0, 3));
+    let x2 = chart.time_scale.index_to_coordinate(2);
+
+    // Default (off): the snapped index stays on the hidden-only bar.
+    assert_eq!(chart.snapped_crosshair_index(x2, from, to), 2);
+
+    // On: it moves to the nearest visible-series bar; the tie resolves left (LWC `indexOf(min)`).
+    chart
+        .options
+        .apply_str(r#"{"crosshair":{"doNotSnapToHiddenSeriesIndices":true}}"#)
+        .unwrap();
+    assert_eq!(chart.snapped_crosshair_index(x2, from, to), 1);
+
+    // The drawn vertical line follows the moved index.
+    chart.crosshair = Some((x2, 120.0));
+    let frame = chart.build_frame();
+    let expected_x = chart.time_scale.index_to_coordinate(1).round() as i32;
+    assert!(frame.panes[0]
+        .main
+        .iter()
+        .any(|p| matches!(p, Prim::VLine { x, .. } if *x == expected_x)));
+}

@@ -21,7 +21,7 @@ export * from "./theme.js";
 import { chart_impl } from "./impl.js";
 import { ensure_init } from "./impl.js";
 import { theme_options } from "./theme.js";
-import type { chart_api, chart_options, deep_partial, localization_options } from "./types.js";
+import type { chart_api, chart_options, deep_partial, localization_options, tracking_mode_options } from "./types.js";
 
 // ---------------------------------------------------------------------------------------------
 // Entry point
@@ -53,7 +53,8 @@ export async function create_chart(
     c.style.width = "100%";
     c.style.height = "100%";
     c.style.display = "block";
-    (c.style as CSSStyleDeclaration & { touchAction: string }).touchAction = "none";
+    // No `touch-action: none` (LWC parity): the recognizer uses non-passive touch listeners and
+    // conditionally preventDefaults, so a drag the chart doesn't own scrolls the page.
   }
   overlay.style.cursor = "crosshair";
   container.appendChild(gpu_pane);
@@ -93,18 +94,35 @@ export async function create_chart(
   );
   // Default style settings first (theme.ts), explicit options second — the engine deep-merges
   // successive patches, so caller options always win over the theme palette. `theme`,
-  // `handle_scroll`, and `handle_scale` are package-level keys and are not forwarded to the
-  // engine's options store (gestures live entirely in TS).
-  const { theme, handle_scroll, handle_scale, kinetic_scroll, localization, ...engine_options } =
-    options ?? {};
+  // `handle_scroll`, `handle_scale`, `kinetic_scroll`, `tracking_mode`, and
+  // `layout.panes.enableResize` are package-level keys and are not forwarded to the engine's
+  // options store (gestures live entirely in TS).
+  const { theme, handle_scroll, handle_scale, kinetic_scroll, tracking_mode, localization, ...rest } =
+    (options ?? {}) as deep_partial<chart_options> & {
+      tracking_mode?: tracking_mode_options;
+    };
+  let engine_options: Record<string, unknown> = rest;
+  let panes_resize: boolean | undefined;
+  const panes = (rest.layout as { panes?: { enableResize?: boolean } } | undefined)?.panes;
+  if (panes?.enableResize !== undefined) {
+    const { enableResize, ...panes_rest } = panes;
+    engine_options = { ...rest, layout: { ...(rest.layout as object), panes: panes_rest } };
+    panes_resize = enableResize;
+  }
   wasm.apply_options(JSON.stringify(theme_options(theme ?? "light")));
   if (Object.keys(engine_options).length > 0) {
     wasm.apply_options(JSON.stringify(engine_options));
   }
   const auto_size = options?.autoSize === true;
   const chart = new chart_impl(wasm, container, gpu_pane, fallback_pane, overlay, auto_size);
-  if (handle_scroll !== undefined || handle_scale !== undefined || kinetic_scroll !== undefined) {
-    chart.apply_gesture_options(handle_scroll, handle_scale, kinetic_scroll);
+  if (
+    handle_scroll !== undefined || handle_scale !== undefined || kinetic_scroll !== undefined ||
+    tracking_mode !== undefined
+  ) {
+    chart.apply_gesture_options(handle_scroll, handle_scale, kinetic_scroll, tracking_mode);
+  }
+  if (panes_resize !== undefined) {
+    chart.apply_panes_resize(panes_resize);
   }
   if (localization !== undefined) {
     // deep_partial recurses into the callback signatures; the fields are already optional, so the

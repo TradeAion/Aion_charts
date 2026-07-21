@@ -40,15 +40,22 @@ pane index from `pane_separator_ys()`.
 **On pointerdown over an axis** → enter an `axis_drag` mode instead of `scroll_start`:
 `{ kind: "price" | "time", pane, target, last: {x,y}, range }`.
 
-**Price-axis drag (vertical)** — driven entirely by existing handles:
-1. On start, read `price_scale_visible_range(pane, target)` → `[from, to]` (autoscale-resolved).
-2. On move, `factor = exp(dy * K)` (sign/`K` tuned to LWC feel: drag down = zoom out); scale the range
-   about its center: `half' = half * factor`; `set_price_scale_visible_range(pane, target, mid-half', mid+half')`
-   — which flips the scale to manual (matching LWC).
+**Price-axis drag (vertical)** — ported from `PriceScale.scaleTo` (model/price-scale.ts):
+1. On start, read `price_scale_visible_range(pane, target)` → `[from, to]` snapshot (skipping the
+   drag entirely in percentage / indexed-to-100 modes, like LWC).
+2. On move, `coeff = max(0.1, (startY + (h-1)*0.2) / (currentY + (h-1)*0.2))` with both Ys
+   measured **up from the pane bottom**; scale the *snapshot* around its center:
+   `half' = half * coeff`; `set_price_scale_visible_range(pane, target, mid-half', mid+half')`
+   — which flips the scale to manual (matching LWC). Drag down = zoom out.
 
-**Time-axis drag (horizontal)** — `set_bar_spacing(bar_spacing() * exp(dx * K))`, anchored so the bar
-under the press stays put (or repeated `zoom(anchor_x, scale)`), clamped by the existing
-min/max bar-spacing rules.
+**Time-axis drag (horizontal)** — ported from `TimeScale.scaleTo` (model/time-scale.ts):
+`spacing = startSpacing * clamp(paneW - x, 0, paneW) / clamp(paneW - xStart, 0, paneW)` — a
+start-relative ratio of distances from the pane's right edge (drag right = zoom out), clamped by
+the existing min/max bar-spacing rules.
+
+**Keyboard** — TradingView semantics on top of LWC's `rightOffset` (larger = newer view):
+`ArrowLeft` steps older, `ArrowRight` newer, Ctrl/Shift = 10-bar step, eased over ~160 ms for
+the platform's smooth feel (LWC's own keyboard-lessness means the mapping lives in the host).
 
 **Cursor feedback** — extend the hover branch: `ns-resize` over a price axis, `ew-resize` over the
 time axis, `row-resize` over separators, else `crosshair`.

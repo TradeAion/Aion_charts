@@ -11,17 +11,13 @@ impl ChartEngine {
         vpr: f64,
         out: &mut Vec<Prim>,
     ) {
-        let Some((x_css, y_css)) = self.crosshair else {
+        let Some((x_css, y_css)) = self.clamped_crosshair() else {
             return;
         };
         let Some((from, to)) = self.visible_range_for_frame() else {
             return;
         };
-        if self.crosshair_mode == aion_core::model::magnet::CrosshairMode::Hidden
-            || x_css > self.pane_w
-            || y_css > self.pane_h
-            || self.data.plot(self.series[0].id).is_empty()
-        {
+        if self.crosshair_mode == CrosshairMode::Hidden {
             return;
         }
         let index = self.snapped_crosshair_index(x_css, from, to);
@@ -51,11 +47,7 @@ impl ChartEngine {
         if self.pane_at_y(y_css) != Some(pane_index) {
             return;
         }
-        let snap_y = if pane_index == 0 {
-            self.crosshair_snap(x_css, y_css, from, to).1
-        } else {
-            y_css
-        };
+        let snap_y = self.crosshair_snap(pane_index, x_css, y_css, from, to).1;
         if ch.horz_line.visible {
             out.push(Prim::HLine {
                 y: (snap_y * vpr).round() as i32,
@@ -104,6 +96,17 @@ impl ChartEngine {
         }
     }
 
+    /// LWC `PaneWidget._setCrosshairPosition` (pane-widget.ts:714-719) clamps the cursor into
+    /// the pane instead of dropping the crosshair: x into `[0, width - 1]`, y into
+    /// `[0, height - 1]` (height = the full stacked-pane region).
+    pub(super) fn clamped_crosshair(&self) -> Option<(f64, f64)> {
+        let (x, y) = self.crosshair?;
+        Some((
+            x.clamp(0.0, (self.pane_w - 1.0).max(0.0)),
+            y.clamp(0.0, (self.pane_h - 1.0).max(0.0)),
+        ))
+    }
+
     pub(super) fn pane_at_y(&self, y: f64) -> Option<usize> {
         self.panes
             .iter()
@@ -111,40 +114,138 @@ impl ChartEngine {
     }
 
     pub(super) fn snapped_crosshair_index(&self, x_css: f64, from: i64, to: i64) -> i64 {
-        self.time_scale.coordinate_to_index(x_css).clamp(from, to)
+        let index = self.time_scale.coordinate_to_index(x_css).clamp(from, to);
+        self.snap_index_to_visible_series(index)
     }
 
-    pub(super) fn crosshair_snap(&self, x_css: f64, y_css: f64, from: i64, to: i64) -> (f64, f64) {
-        let index = self.snapped_crosshair_index(x_css, from, to);
-        let plot = self.data.plot(self.series[0].id);
-        let base_value = self
-            .series_base_value(self.series[0].id, from)
+    /// LWC `Crosshair.snapToVisibleSeriesIfNeeded` (model/crosshair.ts:273-316): with
+    /// `doNotSnapToHiddenSeriesIndices` set, move the snapped index to the nearest bar index
+    /// held by any visible series (min |Δx|, ties to the left like LWC's `indexOf(min)`).
+    /// Default off — the index is unchanged.
+    fn snap_index_to_visible_series(&self, index: i64) -> i64 {
+        if !self
+            .options
+            .get()
+            .crosshair
+            .do_not_snap_to_hidden_series_indices
+        {
+            return index;
+        }
+        let mut closest_left: Option<i64> = None;
+        let mut closest_right: Option<i64> = None;
+        for s in &self.series {
+            if !s.visible {
+                continue;
+            }
+            let plot = self.data.plot(s.id);
+            if let Some(row) = plot.search(index, MismatchDirection::NearestLeft) {
+                let candidate = plot.indices()[row];
+                if candidate == index {
+                    return index; // already snapped
+                }
+                closest_left = Some(closest_left.map_or(candidate, |l: i64| l.max(candidate)));
+            }
+            if let Some(row) = plot.search(index, MismatchDirection::NearestRight) {
+                let candidate = plot.indices()[row];
+                if candidate == index {
+                    return index; // already snapped
+                }
+                closest_right = Some(closest_right.map_or(candidate, |r: i64| r.min(candidate)));
+            }
+        }
+        let x = self.time_scale.index_to_coordinate(index);
+        let mut best = index;
+        let mut best_dist = f64::INFINITY;
+        for candidate in [closest_left, closest_right].into_iter().flatten() {
+            let dist = (x - self.time_scale.index_to_coordinate(candidate)).abs();
+            if dist < best_dist {
+                best_dist = dist;
+                best = candidate;
+            }
+        }
+        best
+    }
+
+    /// The pane's default price scale (LWC `Pane.defaultPriceScale`): the scale of the first
+    /// visible, non-overlay series on the pane, else the pane's right scale. Returns the scale
+    /// and its base (first) value for coordinate conversion.
+    pub(super) fn pane_default_scale(
+        &self,
+        pane_index: usize,
+        from: i64,
+    ) -> (&PriceScaleCore, f64) {
+        let series = self.series.iter().find(|s| {
+            s.visible && !s.overlay && s.pane_index.min(self.panes.len() - 1) == pane_index
+        });
+        let target = series
+            .map(series_scale_target)
+            .unwrap_or(PriceScaleTarget::Right);
+        let base_value = series
+            .and_then(|s| self.series_base_value(s.id, from))
             .unwrap_or(0.0);
-        let scale = pane_scale(&self.panes[0], series_scale_target(&self.series[0]));
-        let row = plot.search(index, MismatchDirection::NearestLeft);
-        let Some(row) = row else {
-            return (scale.coordinate_to_price(y_css, base_value), y_css);
+        (pane_scale(&self.panes[pane_index], target), base_value)
+    }
+
+    /// Port of LWC `Magnet.align` (model/magnet.ts:30-86): in Magnet modes the horizontal line
+    /// snaps to the OHLC candidate — gathered from every visible, non-overlay series on the pane
+    /// with a bar exactly at the snapped index — nearest the cursor in *pixel* space (each
+    /// candidate converted on its own series' scale, so log modes compare correctly), then
+    /// converted back to a price on the pane's default scale. Normal/Hidden mode, or no
+    /// candidates, keeps the raw cursor price.
+    pub(super) fn crosshair_snap(
+        &self,
+        pane_index: usize,
+        x_css: f64,
+        y_css: f64,
+        from: i64,
+        to: i64,
+    ) -> (f64, f64) {
+        let index = self.snapped_crosshair_index(x_css, from, to);
+        let (default_scale, default_base) = self.pane_default_scale(pane_index, from);
+        let price = default_scale.coordinate_to_price(y_css, default_base);
+        if matches!(
+            self.crosshair_mode,
+            CrosshairMode::Normal | CrosshairMode::Hidden
+        ) {
+            return (price, y_css);
+        }
+        let keys: &[PlotValueIndex] = match self.crosshair_mode {
+            // LWC magnetOHLCPlotRowKeys vs magnetPlotRowKeys (magnet.ts:13-21)
+            CrosshairMode::MagnetOhlc => &[
+                PlotValueIndex::Open,
+                PlotValueIndex::High,
+                PlotValueIndex::Low,
+                PlotValueIndex::Close,
+            ],
+            _ => &[PlotValueIndex::Close],
         };
-        let close = plot.value_at(row, PlotValueIndex::Close);
-        let price = match self.crosshair_mode {
-            aion_core::model::magnet::CrosshairMode::Normal
-            | aion_core::model::magnet::CrosshairMode::Hidden => {
-                return (scale.coordinate_to_price(y_css, base_value), y_css)
+        let mut candidates = Vec::new();
+        for s in &self.series {
+            if !s.visible || s.overlay || s.pane_index.min(self.panes.len() - 1) != pane_index {
+                continue;
             }
-            aion_core::model::magnet::CrosshairMode::Magnet => close,
-            aion_core::model::magnet::CrosshairMode::MagnetOhlc => {
-                let open = plot.value_at(row, PlotValueIndex::Open);
-                let high = plot.value_at(row, PlotValueIndex::High);
-                let low = plot.value_at(row, PlotValueIndex::Low);
-                let candidates = [
-                    (open, scale.price_to_coordinate(open, base_value)),
-                    (high, scale.price_to_coordinate(high, base_value)),
-                    (low, scale.price_to_coordinate(low, base_value)),
-                    (close, scale.price_to_coordinate(close, base_value)),
-                ];
-                magnet_snap(y_css, &candidates).unwrap_or(close)
+            let scale = pane_scale(&self.panes[pane_index], series_scale_target(s));
+            if scale.is_empty() {
+                continue;
             }
-        };
-        (price, scale.price_to_coordinate(price, base_value))
+            let plot = self.data.plot(s.id);
+            let Some(row) = plot.search(index, MismatchDirection::None) else {
+                continue;
+            };
+            let Some(base_value) = self.series_base_value(s.id, from) else {
+                continue;
+            };
+            candidates.extend(
+                keys.iter()
+                    .map(|&key| scale.price_to_coordinate(plot.value_at(row, key), base_value)),
+            );
+        }
+        match magnet_snap_coordinate(y_css, &candidates) {
+            Some(nearest) => (
+                default_scale.coordinate_to_price(nearest, default_base),
+                nearest,
+            ),
+            None => (price, y_css),
+        }
     }
 }

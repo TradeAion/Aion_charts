@@ -138,10 +138,12 @@ export interface localization_options {
   time_formatter?: (time: number) => string;
 }
 
-/** Pan/scroll gesture toggles (LWC `handleScroll`). `false` disables all panning. */
+/** Pan/scroll gesture toggles (LWC `handleScroll`). `false` disables all scrolling. */
 export interface handle_scroll_options {
   /** Drag inside the pane to pan the time scale. */
   pressed_mouse_move?: boolean;
+  /** Horizontal wheel/trackpad scroll pans the time scale (LWC `handleScroll.mouseWheel`). */
+  mouse_wheel?: boolean;
   /** Horizontal one-finger touch drag pans the time scale. */
   horz_touch_drag?: boolean;
   /** Vertical one-finger touch drag participates in panning. */
@@ -154,8 +156,11 @@ export interface handle_scale_options {
   mouse_wheel?: boolean;
   /** Two-finger touch pinch zoom. */
   pinch?: boolean;
-  /** Double-clicking a price/time axis resets it. */
-  axis_double_click_reset?: boolean;
+  /**
+   * Double-clicking a price/time axis resets it (LWC `handleScale.axisDoubleClickReset`).
+   * `true`/`false` toggles both axes; the object form toggles each independently.
+   */
+  axis_double_click_reset?: boolean | { time?: boolean; price?: boolean };
   /**
    * Press-and-drag on an axis strip scales it (LWC `axisPressedMouseMove`): vertical drag on a
    * price axis scales that price scale (disabling autoscale), horizontal drag on the time axis
@@ -172,8 +177,34 @@ export interface kinetic_scroll_options {
   mouse?: boolean;
 }
 
+/** Crosshair "tracking mode" behavior on touch (LWC `trackingMode`). Package-level. */
+export interface tracking_mode_options {
+  /**
+   * How tracking mode exits (LWC `trackingMode.exitMode`). `"on_touch_end"` (LWC
+   * `TrackingModeExitMode.OnTouchEnd`) clears the crosshair when the finger lifts;
+   * `"on_next_tap"` (default, LWC `TrackingModeExitMode.OnNextTap`) keeps it until the next
+   * tap ends.
+   */
+  exit_mode?: "on_next_tap" | "on_touch_end";
+}
+
 export interface chart_options {
-  layout: { background: { type: string; color: string }; textColor: string; fontSize: number; fontFamily: string; attributionLogo: boolean; panes: { separatorColor: string } };
+  layout: {
+    background: { type: string; color: string };
+    textColor: string;
+    fontSize: number;
+    fontFamily: string;
+    attributionLogo: boolean;
+    panes: {
+      separatorColor: string;
+      /**
+       * Allow dragging pane separators to resize panes (LWC `layout.panes.enableResize`,
+       * default `true`). Package-level: drives the separator drag and its hover cursor; it is
+       * stripped before options reach the engine.
+       */
+      enableResize: boolean;
+    };
+  };
   grid: { vertLines: grid_line_options; horzLines: grid_line_options };
   crosshair: { vertLine: Partial<grid_line_options>; horzLine: Partial<grid_line_options>; mode: number };
   leftPriceScale: { visible: boolean; borderVisible: boolean; borderColor: string };
@@ -207,6 +238,8 @@ export interface chart_options {
   handle_scale: boolean | handle_scale_options;
   /** Momentum scroll after a pan flick (LWC `kineticScroll`). Default touch-only. Package-level. */
   kinetic_scroll: boolean | kinetic_scroll_options;
+  /** Touch crosshair tracking-mode behavior (LWC `trackingMode`). Package-level. */
+  tracking_mode: tracking_mode_options;
   /** Backend override for capability testing; defaults to automatic WebGPU → Canvas2D fallback. */
   backend: "auto" | "canvas2d";
   /**

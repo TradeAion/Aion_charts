@@ -589,6 +589,34 @@ fn time_scale_option_setters_are_headless_and_clamp() {
 }
 
 #[test]
+fn interaction_disabled_flag_reaches_the_time_scale() {
+    let mut chart = ChartEngine::new(300.0, 200.0, 1.0);
+    chart
+        .set_series_data(
+            0,
+            &[10.0, 20.0, 30.0],
+            &[1.0, 2.0, 3.0],
+            &[1.0, 2.0, 3.0],
+            &[1.0, 2.0, 3.0],
+            &[1.0, 2.0, 3.0],
+        )
+        .unwrap();
+    chart.time_scale.set_width(300.0);
+    chart.fit_content();
+    chart.set_bar_spacing(10.0);
+
+    // LWC `_isAllScalingAndScrollingDisabled`: with the flag pushed, the scale behaves as if
+    // both edges were fixed — future whitespace clamps away like fixRightEdge.
+    chart.set_interaction_disabled(true);
+    chart.set_right_offset(5.0);
+    assert_eq!(chart.right_offset(), 0.0);
+    chart.set_interaction_disabled(false);
+    chart.set_bar_spacing(10.0); // the flag's fix-both-edges pass raised the spacing floor
+    chart.set_right_offset(5.0);
+    assert_eq!(chart.right_offset(), 5.0);
+}
+
+#[test]
 fn remove_series_tombstones_slot_and_drops_derived_indicators() {
     let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
     chart

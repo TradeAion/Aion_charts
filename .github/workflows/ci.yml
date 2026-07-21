@@ -30,6 +30,8 @@ jobs:
         run: cargo clippy -p aion_wasm --target wasm32-unknown-unknown -- -D warnings
       - name: tests (includes golden-image regression)
         run: cargo test --workspace
+      - name: perf gate (report-only; AION_PERF_STRICT=1 makes it a hard gate)
+        run: cargo run -p aion_native --example perf_gate --release
 
   package:
     name: TypeScript package (lint, typecheck, build)
