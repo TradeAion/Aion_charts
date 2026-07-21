@@ -22,13 +22,11 @@
     "build:types": "tsc --declaration --emitDeclarationOnly --outDir dist --noEmit false",
     "build:copy-wasm": "node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});fs.copyFileSync('pkg/aion_wasm_bg.wasm','dist/aion_wasm_bg.wasm')\"",
     "build": "npm run build:wasm && npm run build:js && npm run build:types && npm run build:copy-wasm",
-    "lint": "eslint src"
+    "lint": "oxlint src"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
     "esbuild": "^0.24.0",
-    "eslint": "^10.7.0",
-    "typescript": "^5.6.0",
-    "typescript-eslint": "^8.64.0"
+    "oxlint": "^1.74.0",
+    "typescript": "^7.0.2"
   }
 }

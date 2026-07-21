@@ -766,6 +766,16 @@ Progress is appended here as phases land (newest last).
   hide, exact restore. Demo: grid color picker + style select beside the visibility toggle.
   Defaults unchanged (solid `#D6DCDE`), seven gates green.
 
+- 2026-07-20 — **TypeScript 7 (native) + lint toolchain swap.** The package compiler moved from
+  5.9 to `typescript@7.0.2` (native port). Two adaptations were required: TS 7's TS5011 strictness
+  needs an explicit `rootDir: "src"` for declaration emit, and `typescript-eslint` is fatally
+  incompatible with TS 7's API shim (require-time crash; every 8.x release peer-caps at `<6.1.0`)
+  — so the lint gate was ported to **oxlint** (`typescript/no-explicit-any`,
+  `typescript/ban-ts-comment`, `typescript/no-unused-vars`, verified firing on probes) with
+  `eslint.config.mjs` replaced by `.oxlintrc.json`. Removing typescript-eslint also cleared the
+  peer conflict, so plain `npm ci` works with no overrides. Verified: `npm ci`, lint, `tsc
+  --noEmit`, declaration build, demo build, and all seven browser gates green on TS 7.
+
 ## 11. Revised execution order
 
 The active plan is now different from the original scaffolding sequence. The earlier sequence is

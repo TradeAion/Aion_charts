@@ -7,6 +7,8 @@
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
     "noEmit": true,
+    // TS 7 (TS5011) requires an explicit rootDir for declaration emit instead of inferring it.
+    "rootDir": "src",
     "types": []
   },
   "include": ["src"]

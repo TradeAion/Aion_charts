@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript"],
+  "ignorePatterns": ["dist/**", "pkg/**", "node_modules/**"],
+  "rules": {
+    "typescript/no-explicit-any": "error",
+    "typescript/ban-ts-comment": ["error", { "ts-ignore": "allow-with-description" }],
+    "typescript/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }]
+  }
+}
