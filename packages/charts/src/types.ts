@@ -156,6 +156,20 @@ export interface handle_scale_options {
   pinch?: boolean;
   /** Double-clicking a price/time axis resets it. */
   axis_double_click_reset?: boolean;
+  /**
+   * Press-and-drag on an axis strip scales it (LWC `axisPressedMouseMove`): vertical drag on a
+   * price axis scales that price scale (disabling autoscale), horizontal drag on the time axis
+   * scales bar spacing. `true`/`false` toggles both; the object form toggles each independently.
+   */
+  axis_pressed_mouse_move?: boolean | { time?: boolean; price?: boolean };
+}
+
+/** Momentum ("kinetic") scroll after a pan flick (LWC `kineticScroll`). */
+export interface kinetic_scroll_options {
+  /** Coast after a one-finger touch flick. Default `true`. */
+  touch?: boolean;
+  /** Coast after a mouse-drag flick. Default `false`. */
+  mouse?: boolean;
 }
 
 export interface chart_options {
@@ -166,6 +180,22 @@ export interface chart_options {
   rightPriceScale: { visible: boolean; borderVisible: boolean; borderColor: string };
   /** Time-axis strip cosmetics (LWC `timeScale.borderVisible`/`borderColor`). */
   timeScale: { borderVisible: boolean; borderColor: string };
+  /**
+   * Large text label painted inside the pane (LWC v4 `watermark`). `color` is any CSS color
+   * (include alpha for a faint mark; the default is fully transparent). Aion draws it on the shared
+   * overlay above the series — a deliberate divergence needed to stay pixel-identical across the
+   * WebGPU and Canvas2D backends.
+   */
+  watermark: {
+    visible: boolean;
+    text: string;
+    color: string;
+    fontSize: number;
+    fontFamily: string;
+    fontStyle: string;
+    horzAlign: "left" | "center" | "right";
+    vertAlign: "top" | "center" | "bottom";
+  };
   /** Install a ResizeObserver so the chart tracks its container's size. Default `false` (LWC parity). */
   autoSize: boolean;
   hoveredSeriesOnTop: boolean;
@@ -175,6 +205,8 @@ export interface chart_options {
   handle_scroll: boolean | handle_scroll_options;
   /** Enable/disable zoom gestures (LWC `handleScale`). Default `true`. Package-level. */
   handle_scale: boolean | handle_scale_options;
+  /** Momentum scroll after a pan flick (LWC `kineticScroll`). Default touch-only. Package-level. */
+  kinetic_scroll: boolean | kinetic_scroll_options;
   /** Backend override for capability testing; defaults to automatic WebGPU → Canvas2D fallback. */
   backend: "auto" | "canvas2d";
   /**

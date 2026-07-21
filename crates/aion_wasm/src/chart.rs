@@ -35,7 +35,7 @@ use aion_core::model::data_layer::SeriesId;
 use aion_core::model::data_validation::sanitize_ohlc;
 use aion_core::model::magnet::CrosshairMode;
 use aion_core::model::plot_list::{MismatchDirection, PlotValueIndex};
-use aion_core::options::{crosshair_mode, ChartOptions};
+use aion_core::options::{crosshair_mode, ChartOptions, WatermarkOptions};
 use aion_core::scale::price_scale_core::PriceScaleMode;
 use aion_engine::{
     line_style_from_u8, marker_pos, marker_shape, AxisFrame, AxisLabel, AxisTextAlign,
@@ -222,13 +222,36 @@ pub struct AionChart {
 /// "thicker" 1px wicks. `devicePixelContentBoxSize` is the exact integer count. Returns `None`
 /// when the browser lacks the API (Safari < 16.4), so the caller can fall back to the approx.
 fn device_pixel_box(entry: &web_sys::ResizeObserverEntry) -> Option<(f64, f64)> {
-    let arr = entry.device_pixel_content_box_size();
+    // Read the property reflectively: on WebKit it is absent, and the typed getter would yield an
+    // `undefined` that panics when indexed. Reflect returns a plain `undefined` JsValue instead,
+    // which is not an `Array`, so we cleanly fall back to `None`.
+    let value = js_sys::Reflect::get(entry, &"devicePixelContentBoxSize".into()).ok()?;
+    let arr = value.dyn_ref::<js_sys::Array>()?;
     let first = arr.get(0);
     if first.is_undefined() {
         return None;
     }
     let size = first.dyn_into::<web_sys::ResizeObserverSize>().ok()?;
     Some((size.inline_size(), size.block_size()))
+}
+
+/// Whether this engine exposes `ResizeObserverEntry.devicePixelContentBoxSize` (Chromium/Firefox,
+/// not Safari/WebKit). Observing with the `device-pixel-content-box` option *throws* on engines
+/// that lack it, so we feature-detect and fall back to a plain content-box observation there.
+fn supports_device_pixel_content_box() -> bool {
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let Ok(ctor) = js_sys::Reflect::get(&window, &"ResizeObserverEntry".into()) else {
+        return false;
+    };
+    if ctor.is_undefined() {
+        return false;
+    }
+    let Ok(proto) = js_sys::Reflect::get(&ctor, &"prototype".into()) else {
+        return false;
+    };
+    js_sys::Reflect::has(&proto, &"devicePixelContentBoxSize".into()).unwrap_or(false)
 }
 
 fn set_backend_visibility(
@@ -405,10 +428,17 @@ impl AionChart {
         }) as Box<dyn FnMut(js_sys::Array)>);
 
         let observer = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref())?;
-        // Observe the device-pixel-content-box so the callback also fires on DPR changes.
-        let opts = web_sys::ResizeObserverOptions::new();
-        opts.set_box(web_sys::ResizeObserverBoxOptions::DevicePixelContentBox);
-        observer.observe_with_options(&container, &opts);
+        // Prefer the device-pixel-content-box (fires on DPR changes and is crisp at fractional
+        // ratios). Safari/WebKit lacks it and *throws* if asked, so fall back to a plain content-box
+        // observation there — the callback already degrades to round(css*dpr) when the exact box is
+        // unavailable.
+        if supports_device_pixel_content_box() {
+            let opts = web_sys::ResizeObserverOptions::new();
+            opts.set_box(web_sys::ResizeObserverBoxOptions::DevicePixelContentBox);
+            observer.observe_with_options(&container, &opts);
+        } else {
+            observer.observe(&container);
+        }
 
         // Size once now so the first paint is correct even before the observer first fires.
         let rect = container.get_bounding_client_rect();

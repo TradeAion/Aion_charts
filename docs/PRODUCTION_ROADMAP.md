@@ -776,6 +776,26 @@ Progress is appended here as phases land (newest last).
   peer conflict, so plain `npm ci` works with no overrides. Verified: `npm ci`, lint, `tsc
   --noEmit`, declaration build, demo build, and all seven browser gates green on TS 7.
 
+- 2026-07-20 — **Honoredness sweep + Bucket-2 breadth lands; loose ends closed.** A parallel
+  session delivered: `layout.fontSize`/`fontFamily` honored by every host text path (was
+  hardcoded consts), crosshair per-line `style`/`width` honored (was hardcoded LargeDashed/1px),
+  crosshair `labelVisible`/`labelBackgroundColor` honored per line (was hardcoded `#131722`),
+  `remove_series` (engine tombstones + derived-indicator cleanup + handle invalidation),
+  timeScale breadth (`min_bar_spacing`, `fix_left/right_edge`,
+  `lock_visible_time_range_on_resize`, `right_bar_stays_on_scroll`, `seconds_visible`), host
+  formatter callbacks (`price_formatter_fn`/`time_formatter_fn`/`tick_mark_formatter_fn`),
+  `handle_scroll`/`handle_scale` gesture toggles, business-day times at the boundary, the
+  plugin-platform design doc, and cross-browser smoke tests (chromium/firefox/webkit Canvas2D).
+  This session verified all of it against the full gate suite (fmt, clippy native+wasm32, 16 test
+  suites, oxlint, tsc7, build, 10/10 browser tests) and closed the remaining gaps: `layout.panes.
+  separatorColor` is now actually consumed by the axis pass, the candle wick/border **unpin**
+  path is complete end-to-end (`undefined` keeps, `""` resets to follow-body), and the demo
+  gained controls for crosshair cosmetics (color/width/style/label bg/labels), font family+size,
+  separator color, a candle "reset parts" button, and a volume toggle that now exercises the real
+  `remove_series`. E2E probes proved every path (font 327→1711 px at size 20, family swap,
+  crosshair 858→3456 px at width 4, label bg recolor+hide, separator recolor, wick pin/unpin
+  14969→0).
+
 ## 11. Revised execution order
 
 The active plan is now different from the original scaffolding sequence. The earlier sequence is

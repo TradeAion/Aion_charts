@@ -262,6 +262,46 @@ impl Default for CrosshairOptions {
     }
 }
 
+/// `watermark` — a large text label painted inside the pane (`api/options/watermark`, LWC v4
+/// shape). Aion draws it on the shared Canvas2D overlay above the series (a deliberate divergence
+/// from LWC's behind-series placement: it is the only text path that stays pixel-identical across
+/// the WebGPU and Canvas2D pane backends). Colors are CSS strings so alpha is preserved verbatim.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WatermarkOptions {
+    pub visible: bool,
+    pub text: String,
+    /// CSS color (default fully transparent, matching LWC — a watermark shows only once colored).
+    pub color: String,
+    #[serde(rename = "fontSize")]
+    pub font_size: f64,
+    #[serde(rename = "fontFamily")]
+    pub font_family: String,
+    #[serde(rename = "fontStyle")]
+    pub font_style: String,
+    /// `"left" | "center" | "right"`.
+    #[serde(rename = "horzAlign")]
+    pub horz_align: String,
+    /// `"top" | "center" | "bottom"`.
+    #[serde(rename = "vertAlign")]
+    pub vert_align: String,
+}
+
+impl Default for WatermarkOptions {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            text: String::new(),
+            color: "rgba(0, 0, 0, 0)".into(),
+            font_size: 48.0,
+            font_family: default_font_family(),
+            font_style: String::new(),
+            horz_align: "center".into(),
+            vert_align: "center".into(),
+        }
+    }
+}
+
 /// Chart-level options (`api/options/chart-options-defaults.ts`, visual subset).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -275,6 +315,7 @@ pub struct ChartOptions {
     pub right_price_scale: PriceAxisOptions,
     #[serde(rename = "timeScale")]
     pub time_scale: TimeAxisOptions,
+    pub watermark: WatermarkOptions,
     #[serde(rename = "autoSize")]
     pub auto_size: bool,
     #[serde(rename = "hoveredSeriesOnTop")]
@@ -290,6 +331,7 @@ impl Default for ChartOptions {
             left_price_scale: PriceAxisOptions::visible(false),
             right_price_scale: PriceAxisOptions::visible(true),
             time_scale: TimeAxisOptions::default(),
+            watermark: WatermarkOptions::default(),
             auto_size: false,
             hovered_series_on_top: true,
         }
@@ -398,6 +440,28 @@ mod tests {
         assert_eq!(o.left_price_scale.border_color, "#2B2B43");
         assert!(o.time_scale.border_visible);
         assert_eq!(o.time_scale.border_color, "#2B2B43");
+        // Watermark defaults: hidden, transparent, 48px centered (LWC v4).
+        assert!(!o.watermark.visible);
+        assert_eq!(o.watermark.color, "rgba(0, 0, 0, 0)");
+        assert_eq!(o.watermark.font_size, 48.0);
+        assert_eq!(o.watermark.horz_align, "center");
+        assert_eq!(o.watermark.vert_align, "center");
+    }
+
+    #[test]
+    fn watermark_patch_merges_camelcase_keys() {
+        let mut store = ChartOptionsStore::new();
+        store.apply(&json!({
+            "watermark": { "visible": true, "text": "AION", "fontSize": 64, "horzAlign": "left" },
+        }));
+        let o = store.get();
+        assert!(o.watermark.visible);
+        assert_eq!(o.watermark.text, "AION");
+        assert_eq!(o.watermark.font_size, 64.0);
+        assert_eq!(o.watermark.horz_align, "left");
+        // untouched siblings keep their defaults
+        assert_eq!(o.watermark.vert_align, "center");
+        assert_eq!(o.watermark.color, "rgba(0, 0, 0, 0)");
     }
 
     #[test]

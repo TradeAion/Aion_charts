@@ -182,9 +182,12 @@ impl ChartInner {
         ctx.clear_rect(0.0, 0.0, bitmap_w, bitmap_h);
         let border_w = 1f64.max(dpr.floor());
 
+        let options = self.opts();
+        // Watermark paints first so it sits below the axis borders, labels, and crosshair chrome.
+        self.draw_watermark(&options.watermark, dpr)?;
+
         // Axis borders come from the options store (LWC `borderColor`/`borderVisible` per strip);
         // an unparseable color falls back to the LWC default.
-        let options = self.opts();
         let fallback = Color::parse_css(BORDER_CSS).unwrap_or(Color::rgb(0x2b, 0x2b, 0x43));
         let left_border = Color::parse_css(&options.left_price_scale.border_color)
             .unwrap_or(fallback)
@@ -243,6 +246,43 @@ impl ChartInner {
             options.layout.font_size,
         )?;
         Ok(())
+    }
+
+    /// Paint the `watermark` label onto the overlay, anchored inside the pane per `horzAlign`/
+    /// `vertAlign`. Drawn in media coordinates (context scaled by DPR) like the axis labels; the
+    /// CSS color string is passed through verbatim so alpha is preserved.
+    fn draw_watermark(&self, wm: &WatermarkOptions, dpr: f64) -> Result<(), JsValue> {
+        if !wm.visible || wm.text.is_empty() {
+            return Ok(());
+        }
+        let ctx = &self.axis_ctx;
+        ctx.save();
+        if let Err(error) = ctx.scale(dpr, dpr) {
+            ctx.restore();
+            return Err(error);
+        }
+        let font = if wm.font_style.is_empty() {
+            format!("{}px {}", wm.font_size, wm.font_family)
+        } else {
+            format!("{} {}px {}", wm.font_style, wm.font_size, wm.font_family)
+        };
+        ctx.set_font(&font);
+        ctx.set_fill_style_str(&wm.color);
+        let (x, align) = match wm.horz_align.as_str() {
+            "left" => (self.pane_left, "left"),
+            "right" => (self.pane_left + self.pane_w, "right"),
+            _ => (self.pane_left + self.pane_w / 2.0, "center"),
+        };
+        let (y, baseline) = match wm.vert_align.as_str() {
+            "top" => (0.0, "top"),
+            "bottom" => (self.pane_h, "bottom"),
+            _ => (self.pane_h / 2.0, "middle"),
+        };
+        ctx.set_text_align(align);
+        ctx.set_text_baseline(baseline);
+        let result = ctx.fill_text(&wm.text, x, y).map(|_| ());
+        ctx.restore();
+        result
     }
 
     fn draw_axis_labels(

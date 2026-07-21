@@ -1,4 +1,4 @@
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 
 const port = Number.parseInt(process.env.AION_TEST_PORT ?? "4174", 10);
 
@@ -10,24 +10,45 @@ export default defineConfig({
   outputDir: "test-results",
   use: {
     baseURL: `http://127.0.0.1:${port}`,
-    channel: "chromium",
     viewport: { width: 1280, height: 720 },
     deviceScaleFactor: 1.5,
     colorScheme: "light",
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
-    launchOptions: {
-      args: [
-        "--enable-unsafe-webgpu",
-        "--use-webgpu-adapter=swiftshader",
-        "--enable-dawn-features=allow_unsafe_apis",
-        "--disable-dawn-features=use_dxc",
-        "--enable-webgpu-developer-features",
-        "--use-gpu-in-tests",
-        "--enable-accelerated-2d-canvas",
-      ],
-    },
   },
+  projects: [
+    {
+      // Chromium runs the full suite: the WebGPU backend (SwiftShader adapter) plus the shared
+      // Canvas2D-fallback smoke. The WebGPU launch flags are Chromium-specific.
+      name: "chromium",
+      use: {
+        channel: "chromium",
+        launchOptions: {
+          args: [
+            "--enable-unsafe-webgpu",
+            "--use-webgpu-adapter=swiftshader",
+            "--enable-dawn-features=allow_unsafe_apis",
+            "--disable-dawn-features=use_dxc",
+            "--enable-webgpu-developer-features",
+            "--use-gpu-in-tests",
+            "--enable-accelerated-2d-canvas",
+          ],
+        },
+      },
+    },
+    {
+      // Firefox and WebKit have no headless WebGPU here, so they run only the Canvas2D-fallback
+      // smoke — confirming the library loads and renders on those engines.
+      name: "firefox",
+      use: { ...devices["Desktop Firefox"] },
+      testMatch: /cross-browser\.spec\.mjs/,
+    },
+    {
+      name: "webkit",
+      use: { ...devices["Desktop Safari"] },
+      testMatch: /cross-browser\.spec\.mjs/,
+    },
+  ],
   webServer: {
     command: "node test_server.mjs",
     url: `http://127.0.0.1:${port}`,

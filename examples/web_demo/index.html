@@ -69,6 +69,7 @@
       <label>border dn <input type="color" id="border_down_color" value="#ef5350"></label>
       <label><input type="checkbox" id="wick_visible" checked> wicks</label>
       <label><input type="checkbox" id="border_visible" checked> borders</label>
+      <button id="candle_parts_reset" type="button" title="Reset wick/border colors to follow the body colors">reset parts</button>
     </div>
 
     <!-- line/area stroke -->
@@ -129,6 +130,21 @@
       <label><input type="checkbox" id="axis_border_visible" checked> visible</label>
       <label>axis text <input type="color" id="axis_text_color" value="#0a0a0a"></label>
       <label>separator <input type="color" id="pane_separator_color" value="#2b2b43"></label>
+    </div>
+
+    <!-- watermark (LWC v4 shape) -->
+    <div class="group" id="watermark_group">
+      <label><input type="checkbox" id="wm_visible"> watermark</label>
+      <label>text <input type="text" id="wm_text" value="AION" size="6"></label>
+      <label>color <input type="color" id="wm_color" value="#b0b8c4"></label>
+      <label>size <input type="range" id="wm_size" min="16" max="160" step="4" value="72"><span id="wm_size_val">72</span></label>
+    </div>
+
+    <!-- interaction toggles: axis drag-to-scale, kinetic scroll -->
+    <div class="group" id="interaction_group" title="Drag a price/time axis to scale it; flick to coast; keyboard: arrows pan, +/- zoom, Home fit, Esc clear">
+      <label><input type="checkbox" id="axis_scale_toggle" checked> axis drag-scale</label>
+      <label><input type="checkbox" id="kinetic_toggle" checked> kinetic scroll</label>
+      <span class="hint">drag axes · flick · keys: ←→ +/- Home Esc</span>
     </div>
 
     <span id="status"></span>
@@ -345,6 +361,18 @@ document.getElementById("border_up_color").addEventListener("input", (e) => { ca
 document.getElementById("border_down_color").addEventListener("input", (e) => { candle_part_touched.border_down = true; main.apply_options({ border_down_color: e.target.value }); });
 document.getElementById("wick_visible").addEventListener("change", (e) => main.apply_options({ wick_visible: e.target.checked }));
 document.getElementById("border_visible").addEventListener("change", (e) => main.apply_options({ border_visible: e.target.checked }));
+// Unpin every part override ("" = clear back to follow-body) and re-sync pickers to the body
+// colors the parts now follow.
+document.getElementById("candle_parts_reset").addEventListener("click", () => {
+  candle_part_touched.wick_up = candle_part_touched.wick_down = candle_part_touched.border_up = candle_part_touched.border_down = false;
+  main.apply_options({ wick_up_color: "", wick_down_color: "", border_up_color: "", border_down_color: "" });
+  const up = document.getElementById("up_color").value;
+  const down = document.getElementById("down_color").value;
+  document.getElementById("wick_up_color").value = up;
+  document.getElementById("border_up_color").value = up;
+  document.getElementById("wick_down_color").value = down;
+  document.getElementById("border_down_color").value = down;
+});
 document.getElementById("line_color").addEventListener("input", () => main.apply_options({ color: document.getElementById("line_color").value }));
 document.getElementById("line_width").addEventListener("input", (e) => {
   document.getElementById("line_width_val").textContent = e.target.value;
@@ -436,6 +464,37 @@ document.getElementById("axis_border_visible").addEventListener("change", apply_
 document.getElementById("axis_text_color").addEventListener("input", (e) => {
   chart.apply_options({ layout: { textColor: e.target.value } });
 });
+
+// ---- watermark (LWC v4 shape) — drawn on the overlay above the series ----
+function apply_watermark() {
+  chart.apply_options({ watermark: {
+    visible: document.getElementById("wm_visible").checked,
+    text: document.getElementById("wm_text").value,
+    // append ~50% alpha so the watermark reads as a faint overlay rather than covering the candles
+    color: document.getElementById("wm_color").value + "80",
+    fontSize: Number(document.getElementById("wm_size").value),
+  } });
+}
+document.getElementById("wm_visible").addEventListener("change", apply_watermark);
+document.getElementById("wm_text").addEventListener("input", apply_watermark);
+document.getElementById("wm_color").addEventListener("input", apply_watermark);
+document.getElementById("wm_size").addEventListener("input", (e) => {
+  document.getElementById("wm_size_val").textContent = e.target.value;
+  apply_watermark();
+});
+
+// ---- interaction toggles: axis drag-to-scale + kinetic scroll (kinetic also enabled for mouse
+// here so it can be flicked on desktop; the library default is touch-only). ----
+function apply_interaction() {
+  const kinetic = document.getElementById("kinetic_toggle").checked;
+  chart.apply_options({
+    handle_scale: { axis_pressed_mouse_move: document.getElementById("axis_scale_toggle").checked },
+    kinetic_scroll: { touch: kinetic, mouse: kinetic },
+  });
+}
+document.getElementById("axis_scale_toggle").addEventListener("change", apply_interaction);
+document.getElementById("kinetic_toggle").addEventListener("change", apply_interaction);
+apply_interaction(); // enable mouse kinetic up front so it is testable on desktop
 
 // Theme presets come from the package's style settings file (theme.ts); applying one maps its
 // tokens onto the chart options live (background + axis borders + axis text), then the pickers

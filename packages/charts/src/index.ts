@@ -95,15 +95,16 @@ export async function create_chart(
   // successive patches, so caller options always win over the theme palette. `theme`,
   // `handle_scroll`, and `handle_scale` are package-level keys and are not forwarded to the
   // engine's options store (gestures live entirely in TS).
-  const { theme, handle_scroll, handle_scale, localization, ...engine_options } = options ?? {};
+  const { theme, handle_scroll, handle_scale, kinetic_scroll, localization, ...engine_options } =
+    options ?? {};
   wasm.apply_options(JSON.stringify(theme_options(theme ?? "light")));
   if (Object.keys(engine_options).length > 0) {
     wasm.apply_options(JSON.stringify(engine_options));
   }
   const auto_size = options?.autoSize === true;
   const chart = new chart_impl(wasm, container, gpu_pane, fallback_pane, overlay, auto_size);
-  if (handle_scroll !== undefined || handle_scale !== undefined) {
-    chart.apply_gesture_options(handle_scroll, handle_scale);
+  if (handle_scroll !== undefined || handle_scale !== undefined || kinetic_scroll !== undefined) {
+    chart.apply_gesture_options(handle_scroll, handle_scale, kinetic_scroll);
   }
   if (localization !== undefined) {
     // deep_partial recurses into the callback signatures; the fields are already optional, so the

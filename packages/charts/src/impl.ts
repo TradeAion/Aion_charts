@@ -8,7 +8,8 @@ import init, { AionChart } from "../pkg/aion_wasm.js";
 import { install_gestures } from "./gestures.js";
 import type {
   bars_info, chart_api, chart_options, data_changed_handler, dbl_click_handler,
-  deep_partial, handle_scale_options, handle_scroll_options, localization_options, logical_range,
+  deep_partial, handle_scale_options, handle_scroll_options, kinetic_scroll_options,
+  localization_options, logical_range,
   mismatch_direction, mouse_event_handler, mouse_event_params, ohlc_data, pane_api, price_line_api, price_line_options,
   price_range, price_scale_api, price_scale_options, series_api, series_data, series_kind,
   series_marker, series_marker_options, series_options, single_value_data, time, time_range,
@@ -511,15 +512,29 @@ class pane_impl implements pane_api {
 /** Gesture toggles resolved to concrete booleans the recognizer reads on each event. */
 export interface resolved_gestures {
   pan: boolean;
+  pan_horz_touch: boolean;
+  pan_vert_touch: boolean;
   wheel_zoom: boolean;
   pinch_zoom: boolean;
   axis_dblclick_reset: boolean;
+  axis_scale_price: boolean;
+  axis_scale_time: boolean;
+  kinetic_touch: boolean;
+  kinetic_mouse: boolean;
 }
 
-function resolve_scroll(v: boolean | handle_scroll_options): boolean {
-  if (typeof v === "boolean") return v;
-  // A single pan action backs both mouse-drag and touch-drag; enabled unless every drag is off.
-  return (v.pressed_mouse_move ?? true) || (v.horz_touch_drag ?? true) || (v.vert_touch_drag ?? true);
+function apply_scroll(v: boolean | handle_scroll_options, cfg: resolved_gestures): void {
+  if (typeof v === "boolean") {
+    cfg.pan = v;
+    cfg.pan_horz_touch = v;
+    cfg.pan_vert_touch = v;
+    return;
+  }
+  // Object form merges over the current config; `pan` (the mouse-drag / generic pan) tracks
+  // pressed_mouse_move, and the touch axes track their own flags.
+  cfg.pan = v.pressed_mouse_move ?? cfg.pan;
+  cfg.pan_horz_touch = v.horz_touch_drag ?? cfg.pan_horz_touch;
+  cfg.pan_vert_touch = v.vert_touch_drag ?? cfg.pan_vert_touch;
 }
 
 function apply_scale(v: boolean | handle_scale_options, cfg: resolved_gestures): void {
@@ -527,22 +542,49 @@ function apply_scale(v: boolean | handle_scale_options, cfg: resolved_gestures):
     cfg.wheel_zoom = v;
     cfg.pinch_zoom = v;
     cfg.axis_dblclick_reset = v;
+    cfg.axis_scale_price = v;
+    cfg.axis_scale_time = v;
     return;
   }
   // Object form merges over the current config (LWC applyOptions semantics).
   cfg.wheel_zoom = v.mouse_wheel ?? cfg.wheel_zoom;
   cfg.pinch_zoom = v.pinch ?? cfg.pinch_zoom;
   cfg.axis_dblclick_reset = v.axis_double_click_reset ?? cfg.axis_dblclick_reset;
+  const apm = v.axis_pressed_mouse_move;
+  if (typeof apm === "boolean") {
+    cfg.axis_scale_price = apm;
+    cfg.axis_scale_time = apm;
+  } else if (apm) {
+    cfg.axis_scale_price = apm.price ?? cfg.axis_scale_price;
+    cfg.axis_scale_time = apm.time ?? cfg.axis_scale_time;
+  }
+}
+
+function apply_kinetic(v: boolean | kinetic_scroll_options, cfg: resolved_gestures): void {
+  if (typeof v === "boolean") {
+    cfg.kinetic_touch = v;
+    cfg.kinetic_mouse = v;
+    return;
+  }
+  cfg.kinetic_touch = v.touch ?? cfg.kinetic_touch;
+  cfg.kinetic_mouse = v.mouse ?? cfg.kinetic_mouse;
 }
 
 export class chart_impl implements chart_api {
   private next_extra_series = false;
   private readonly gestures_cfg: resolved_gestures = {
     pan: true,
+    pan_horz_touch: true,
+    pan_vert_touch: true,
     wheel_zoom: true,
     pinch_zoom: true,
     axis_dblclick_reset: true,
+    axis_scale_price: true,
+    axis_scale_time: true,
+    kinetic_touch: true,
+    kinetic_mouse: false,
   };
+  private a11y_live: HTMLElement | null = null;
   private readonly ts = new time_scale_impl(this);
   private observer: ResizeObserver | null = null;
   private detach_gestures: (() => void) | null = null;
@@ -576,6 +618,7 @@ export class chart_impl implements chart_api {
     window.addEventListener("aion-chart-backend-lost", this.backend_loss_handler);
     this.last_visible_logical_range = this.read_visible_logical_range();
     this.last_visible_time_range = this.read_visible_time_range();
+    this.init_accessibility();
     this.detach_gestures = install_gestures(this);
     if (auto_size) {
       this.wasm.enable_auto_resize(container);
@@ -769,9 +812,20 @@ export class chart_impl implements chart_api {
   }
   /** Emit a click event (called by the gesture recognizer). */
   emit_click(x: number, y: number): void {
+    // A click/tap is a discrete, intentional action, so it is a good moment to announce the point
+    // to assistive tech (unlike mouse hover, which would flood the live region).
+    this.announce(x, y);
     if (this.click_subs.size === 0) return;
     const params = this.build_params(x, y);
     for (const h of this.click_subs) h(params);
+  }
+
+  /** Announce the current visible time range to assistive tech (used after keyboard navigation). */
+  announce_view(): void {
+    if (!this.a11y_live) return;
+    const r = this.wasm.visible_time_range();
+    this.a11y_live.textContent =
+      r.length === 2 ? `Showing time ${r[0]} to ${r[1]}` : "No data";
   }
 
   emit_dbl_click(x: number, y: number): void {
@@ -783,14 +837,15 @@ export class chart_impl implements chart_api {
   apply_options(options: deep_partial<chart_options>): void {
     // handle_scroll / handle_scale (gestures) and localization (JS callbacks) are package-level;
     // intercept and strip them so only engine-owned, JSON-serializable options reach the wasm store.
-    const { handle_scroll, handle_scale, localization, ...engine_options } =
+    const { handle_scroll, handle_scale, kinetic_scroll, localization, ...engine_options } =
       options as deep_partial<chart_options> & {
         handle_scroll?: boolean | handle_scroll_options;
         handle_scale?: boolean | handle_scale_options;
+        kinetic_scroll?: boolean | kinetic_scroll_options;
         localization?: localization_options;
       };
-    if (handle_scroll !== undefined || handle_scale !== undefined) {
-      this.apply_gesture_options(handle_scroll, handle_scale);
+    if (handle_scroll !== undefined || handle_scale !== undefined || kinetic_scroll !== undefined) {
+      this.apply_gesture_options(handle_scroll, handle_scale, kinetic_scroll);
     }
     if (localization !== undefined) this.apply_localization(localization);
     this.wasm.apply_options(JSON.stringify(engine_options));
@@ -803,13 +858,55 @@ export class chart_impl implements chart_api {
     if (loc.time_formatter !== undefined) this.wasm.set_time_formatter(loc.time_formatter);
   }
 
-  /** Resolve and store `handle_scroll` / `handle_scale`; the recognizer reads the result live. */
+  /** Resolve and store the gesture toggles; the recognizer reads the result live. */
   apply_gesture_options(
     scroll?: boolean | handle_scroll_options,
     scale?: boolean | handle_scale_options,
+    kinetic?: boolean | kinetic_scroll_options,
   ): void {
-    if (scroll !== undefined) this.gestures_cfg.pan = resolve_scroll(scroll);
+    if (scroll !== undefined) apply_scroll(scroll, this.gestures_cfg);
     if (scale !== undefined) apply_scale(scale, this.gestures_cfg);
+    if (kinetic !== undefined) apply_kinetic(kinetic, this.gestures_cfg);
+  }
+
+  /** Set up the accessible wrapper: focusable role on the overlay + an aria-live status region. */
+  private init_accessibility(): void {
+    this.container.setAttribute("role", "group");
+    if (!this.container.hasAttribute("aria-label")) {
+      this.container.setAttribute("aria-label", "Financial chart");
+    }
+    this.overlay.tabIndex = 0;
+    this.overlay.setAttribute("role", "application");
+    this.overlay.setAttribute(
+      "aria-label",
+      "Chart. Arrow keys pan, plus and minus zoom, Home fits content, Escape clears the crosshair.",
+    );
+    const live = this.container.ownerDocument.createElement("div");
+    live.setAttribute("aria-live", "polite");
+    live.setAttribute("role", "status");
+    // Visually hidden but available to assistive tech.
+    live.style.cssText =
+      "position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;";
+    this.container.appendChild(live);
+    this.a11y_live = live;
+  }
+
+  /** Update the aria-live region with a compact description of the point under the cursor. */
+  announce(x: number, y: number): void {
+    if (!this.a11y_live) return;
+    const params = this.build_params(x, y);
+    if (params.time === null || params.series_data.size === 0) return;
+    const parts = [];
+    for (const [, point] of params.series_data) {
+      parts.push("value" in point ? `${point.value}` : `O ${point.open} H ${point.high} L ${point.low} C ${point.close}`);
+    }
+    this.a11y_live.textContent = `Time ${params.time}: ${parts.join("; ")}`;
+  }
+
+  /** Whether the user has requested reduced motion (gates kinetic scroll). */
+  prefers_reduced_motion(): boolean {
+    return this.container.ownerDocument.defaultView?.matchMedia?.("(prefers-reduced-motion: reduce)")
+      .matches === true;
   }
 
   /** Current resolved gesture toggles (read by the gesture recognizer). */
