@@ -10,10 +10,10 @@ import { install_gestures } from "./gestures.js";
 import type {
   bars_info, chart_api, chart_options, data_changed_handler, dbl_click_handler,
   deep_partial, handle_scale_options, handle_scroll_options, kinetic_scroll_options,
-  localization_options, logical_range,
+  last_value_data, localization_options, logical_range,
   mismatch_direction, mouse_event_handler, mouse_event_params, ohlc_data, pane_api, price_line_api, price_line_options,
   price_range, price_scale_api, price_scale_options, series_api, series_data, series_kind,
-  series_marker, series_marker_options, series_options, single_value_data, time, time_range,
+  series_marker, series_marker_options, series_options, single_value_data, size_change_handler, time, time_range,
   time_scale_api, time_scale_options, tracking_mode_options, visible_logical_range_handler, visible_time_range_handler,
 } from "./types.js";
 import { KIND_TO_U8, LINE_STYLE_TO_U8, LINE_TYPE_TO_U8 } from "./types.js";
@@ -23,10 +23,15 @@ import { KIND_TO_U8, LINE_STYLE_TO_U8, LINE_TYPE_TO_U8 } from "./types.js";
 // ---------------------------------------------------------------------------------------------
 
 let init_promise: Promise<unknown> | null = null;
-/** Instantiate the wasm module once per page. */
-export function ensure_init(): Promise<unknown> {
+/**
+ * Instantiate the wasm module once per page. `wasm_url` overrides the default asset resolution
+ * (`new URL("aion_wasm_bg.wasm", import.meta.url)` beside the bundle) — the escape hatch for
+ * bundlers that relocate the JS away from the .wasm (e.g. Vite's dev pre-bundler). Only the
+ * first call's argument takes effect.
+ */
+export function ensure_init(wasm_url?: string | URL): Promise<unknown> {
   if (init_promise === null) {
-    init_promise = init();
+    init_promise = wasm_url !== undefined ? init(wasm_url) : init();
   }
   return init_promise;
 }
@@ -41,6 +46,69 @@ function same_logical_range(a: logical_range | null, b: logical_range | null): b
 
 function same_time_range(a: time_range | null, b: time_range | null): boolean {
   return a === b || (a !== null && b !== null && a.from === b.from && a.to === b.to);
+}
+
+/** Duration of the animated `scroll_to_position` ease (matches the LWC smooth-scroll feel). */
+const SCROLL_ANIM_MS = 300;
+
+/**
+ * Series style keys without a dedicated wasm setter, forwarded to `series_apply_options_json`
+ * as one snake_case JSON patch (the engine ignores unknown keys).
+ */
+const SERIES_JSON_OPTION_KEYS = [
+  "last_value_visible",
+  "price_line_visible",
+  "price_line_source",
+  "price_line_width",
+  "price_line_color",
+  "price_line_style",
+  "line_style",
+  "line_visible",
+  "point_markers_radius",
+  "crosshair_marker_visible",
+  "crosshair_marker_radius",
+  "crosshair_marker_border_color",
+  "crosshair_marker_background_color",
+  "crosshair_marker_border_width",
+  "top_fill_color1",
+  "top_fill_color2",
+  "top_line_color",
+  "top_line_width",
+  "top_line_style",
+  "bottom_fill_color1",
+  "bottom_fill_color2",
+  "bottom_line_color",
+  "bottom_line_width",
+  "bottom_line_style",
+  "base",
+  "invert_filled_area",
+  "open_visible",
+  "thin_bars",
+] as const;
+
+/**
+ * Price-scale style keys without a dedicated wasm setter, forwarded to
+ * `price_scale_apply_options_json` as one snake_case JSON patch (the engine ignores unknown keys).
+ */
+const PRICE_SCALE_JSON_OPTION_KEYS = [
+  "align_labels",
+  "ticks_visible",
+  "entire_text_only",
+  "minimum_width",
+  "text_color",
+] as const;
+
+/** Engine kind ordinal → public kind name (index-aligned with `KIND_TO_U8`). */
+const KIND_NAMES = ["candlestick", "bar", "line", "area", "histogram", "baseline"] as const;
+
+/**
+ * Index of the stacked pane containing CSS-y `y`, counted from the pane separators (shared by
+ * the gesture recognizer and the mouse-event params).
+ */
+export function pane_index_of_y(separator_ys: Float64Array, y: number): number {
+  let pane = 0;
+  for (const sy of separator_ys) if (y > sy) pane += 1;
+  return pane;
 }
 
 /** Pack a data array into the six Float64Arrays the engine expects (single-value → o=h=l=c). */
@@ -64,6 +132,9 @@ function pack(data: readonly series_data[]): {
   high: Float64Array;
   low: Float64Array;
   close: Float64Array;
+  body_colors?: Uint32Array;
+  wick_colors?: Uint32Array;
+  border_colors?: Uint32Array;
 } {
   const n = data.length;
   const times = new Float64Array(n);
@@ -71,32 +142,51 @@ function pack(data: readonly series_data[]): {
   const high = new Float64Array(n);
   const low = new Float64Array(n);
   const close = new Float64Array(n);
+  // Per-point color channels (LWC `color`/`wickColor`/`borderColor` on data items). A channel is
+  // only allocated when at least one item carries the field; rows without it pad as 0, which the
+  // engine treats as "no override" within a passed channel.
+  let body_colors: Uint32Array | undefined;
+  let wick_colors: Uint32Array | undefined;
+  let border_colors: Uint32Array | undefined;
   for (let i = 0; i < n; i++) {
     const d = data[i] as series_data;
     times[i] = time_to_utc_seconds(d.time);
     if ("value" in d) {
       open[i] = high[i] = low[i] = close[i] = d.value;
-    } else {
+      body_colors = pack_color_channel(body_colors, n, i, d.color);
+    } else if ("open" in d) {
       open[i] = d.open;
       high[i] = d.high;
       low[i] = d.low;
       close[i] = d.close;
+      body_colors = pack_color_channel(body_colors, n, i, d.color);
+      wick_colors = pack_color_channel(wick_colors, n, i, d.wick_color);
+      border_colors = pack_color_channel(border_colors, n, i, d.border_color);
+    } else {
+      // Whitespace (LWC `WhitespaceData`): an explicit empty slot, packed all-NaN. The engine
+      // keeps the row as whitespace instead of dropping it.
+      open[i] = high[i] = low[i] = close[i] = NaN;
     }
   }
-  return { times, open, high, low, close };
+  return { times, open, high, low, close, body_colors, wick_colors, border_colors };
 }
 
-/** Parse a CSS hex or rgb()/rgba() color to 8-bit channels (mirrors the Rust `Color::parse_css`). */
-function parse_rgb(css: string): [number, number, number] | null {
+/** Parse a CSS hex or rgb()/rgba() color to 8-bit RGBA channels (mirrors the Rust `Color::parse_css`). */
+function parse_rgba(css: string): [number, number, number, number] | null {
   const s = css.trim();
   if (s.startsWith("#")) {
     const h = s.slice(1);
     const expand = (c: string) => parseInt(c + c, 16);
     if (h.length === 3 || h.length === 4) {
-      return [expand(h[0]!), expand(h[1]!), expand(h[2]!)];
+      return [expand(h[0]!), expand(h[1]!), expand(h[2]!), h.length === 4 ? expand(h[3]!) : 255];
     }
     if (h.length === 6 || h.length === 8) {
-      return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+      return [
+        parseInt(h.slice(0, 2), 16),
+        parseInt(h.slice(2, 4), 16),
+        parseInt(h.slice(4, 6), 16),
+        h.length === 8 ? parseInt(h.slice(6, 8), 16) : 255,
+      ];
     }
     return null;
   }
@@ -104,10 +194,59 @@ function parse_rgb(css: string): [number, number, number] | null {
   if (m) {
     const parts = m[1]!.split(",").map((p) => parseFloat(p.trim()));
     if (parts.length >= 3 && parts.every((p) => !Number.isNaN(p))) {
-      return [Math.round(parts[0]!), Math.round(parts[1]!), Math.round(parts[2]!)];
+      const alpha = parts.length >= 4 ? Math.round(parts[3]! * 255) : 255;
+      return [Math.round(parts[0]!), Math.round(parts[1]!), Math.round(parts[2]!), alpha];
     }
   }
   return null;
+}
+
+/** Parse a CSS hex or rgb()/rgba() color to 8-bit channels (mirrors the Rust `Color::parse_css`). */
+function parse_rgb(css: string): [number, number, number] | null {
+  const rgba = parse_rgba(css);
+  return rgba === null || rgba.slice(0, 3).some(Number.isNaN) ? null : [rgba[0], rgba[1], rgba[2]];
+}
+
+/**
+ * Parse a CSS color to the engine's packed per-point color word, 0xRRGGBBAA (alpha preserved).
+ * Returns `null` for unparseable input; callers warn and skip that item's color, matching how
+ * the engine sanitizer warns on bad data.
+ */
+function parse_css_to_u32(css: string): number | null {
+  const rgba = parse_rgba(css);
+  if (rgba === null || rgba.some(Number.isNaN)) return null;
+  return ((rgba[0] << 24) | (rgba[1] << 16) | (rgba[2] << 8) | rgba[3]) >>> 0;
+}
+
+/**
+ * Fold one data item's optional per-point color field into a channel array, allocating it lazily
+ * on first use. The engine treats a channel as present only when the array is passed, and every
+ * row of a passed channel as a custom color — so rows without the field pad as 0, which the
+ * engine reads as "no override" (0x00000000 would otherwise be a valid transparent-black).
+ * Unparseable colors warn and pad as 0, matching the engine sanitizer's warn-and-skip.
+ */
+function pack_color_channel(
+  channel: Uint32Array | undefined,
+  n: number,
+  i: number,
+  css: string | undefined,
+): Uint32Array | undefined {
+  const packed = point_color_to_u32(css);
+  if (packed === undefined) return channel;
+  const out = channel ?? new Uint32Array(n);
+  out[i] = packed;
+  return out;
+}
+
+/** Parse an optional per-point color field to 0xRRGGBBAA; `undefined` = no custom color. */
+function point_color_to_u32(css: string | undefined): number | undefined {
+  if (css === undefined) return undefined;
+  const packed = parse_css_to_u32(css);
+  if (packed === null) {
+    console.warn(`aion: ignoring unparseable data point color "${css}"`);
+    return undefined;
+  }
+  return packed;
 }
 
 class series_impl implements series_api {
@@ -133,29 +272,60 @@ class series_impl implements series_api {
     this.assert_live();
     const p = pack(data);
     this.chart.wasm.set_series_data_typed(this.id, p.times, p.open, p.high, p.low, p.close);
+    // set_series_data resets point colors, so per-point channels must be applied after it.
+    if (p.body_colors !== undefined || p.wick_colors !== undefined || p.border_colors !== undefined) {
+      this.chart.wasm.set_series_point_colors(this.id, p.body_colors, p.wick_colors, p.border_colors);
+    }
     this.chart.repaint();
     for (const handler of this.data_changed_subs) handler("full");
   }
 
   update(point: series_data): void {
     this.assert_live();
-    const o = "value" in point ? point.value : point.open;
-    const h = "value" in point ? point.value : point.high;
-    const l = "value" in point ? point.value : point.low;
-    const c = "value" in point ? point.value : point.close;
+    // A whitespace point (`{time}` only) streams as an all-NaN bar; the engine keeps the slot.
+    const o = "value" in point ? point.value : "open" in point ? point.open : NaN;
+    const h = "value" in point ? point.value : "high" in point ? point.high : NaN;
+    const l = "value" in point ? point.value : "low" in point ? point.low : NaN;
+    const c = "value" in point ? point.value : "close" in point ? point.close : NaN;
+    // undefined = no custom color; on a replace of the last bar this also clears a previously
+    // set custom color for that channel. Whitespace points carry no color channels.
+    const body = "value" in point || "open" in point ? point_color_to_u32(point.color) : undefined;
+    const wick = "open" in point ? point_color_to_u32(point.wick_color) : undefined;
+    const border = "open" in point ? point_color_to_u32(point.border_color) : undefined;
     // Series-scoped streaming: append a new time point or replace the last on this series.
-    this.chart.wasm.update_series_bar(this.id, time_to_utc_seconds(point.time), o, h, l, c);
+    this.chart.wasm.update_series_bar_styled(
+      this.id, time_to_utc_seconds(point.time), o, h, l, c, body, wick, border,
+    );
     this.chart.repaint();
     for (const handler of this.data_changed_subs) handler("update");
+  }
+
+  pop(count = 1): void {
+    this.assert_live();
+    this.chart.wasm.series_pop(this.id, count);
+    this.chart.repaint();
+    // Like set_data, popping is a full-range change, not an incremental update.
+    for (const handler of this.data_changed_subs) handler("full");
+  }
+
+  last_value_data(global_last = false): last_value_data | null {
+    this.assert_live();
+    const json = this.chart.wasm.series_last_value_data(this.id, global_last);
+    return json === "" ? null : JSON.parse(json) as last_value_data;
+  }
+
+  price_formatter(): (price: number) => string {
+    this.assert_live();
+    const wasm = this.chart.wasm;
+    const id = this.id;
+    return (price: number) => wasm.series_format_price(id, price);
   }
 
   apply_options(options: Partial<series_options>): void {
     this.assert_live();
     if (options.color !== undefined) {
-      const rgb = parse_rgb(options.color);
-      if (rgb) {
-        this.chart.wasm.set_series_color(this.id, rgb[0], rgb[1], rgb[2]);
-      }
+      // CSS string passed through verbatim so the engine keeps any alpha channel.
+      this.chart.wasm.set_series_color_css(this.id, options.color);
     }
     if (options.visible !== undefined) {
       this.chart.wasm.set_series_visible(this.id, options.visible);
@@ -215,7 +385,37 @@ class series_impl implements series_api {
       this.chart.wasm.set_series_last_price_animation(this.id, options.last_price_animation);
       this.chart.sync_animation();
     }
+    if (options.price_format !== undefined) {
+      const pf = options.price_format;
+      if (pf.type === "custom") {
+        // The callback crosses into wasm; min_move (when given) rides the JSON patch.
+        this.chart.wasm.set_series_price_formatter(this.id, pf.formatter);
+        if (pf.min_move !== undefined) {
+          this.chart.wasm.series_apply_price_format_json(
+            this.id, JSON.stringify({ type: "custom", min_move: pf.min_move }),
+          );
+        }
+      } else {
+        this.chart.wasm.series_apply_price_format_json(
+          this.id, JSON.stringify({ type: pf.type, precision: pf.precision, min_move: pf.min_move }),
+        );
+      }
+    }
+    // Style keys without a dedicated setter go to the engine as a single JSON patch.
+    const json_patch: Record<string, unknown> = {};
+    for (const key of SERIES_JSON_OPTION_KEYS) {
+      const value = options[key];
+      if (value !== undefined) json_patch[key] = value;
+    }
+    if (Object.keys(json_patch).length > 0) {
+      this.chart.wasm.series_apply_options_json(this.id, JSON.stringify(json_patch));
+    }
     this.chart.repaint();
+  }
+
+  options(): series_options {
+    this.assert_live();
+    return JSON.parse(this.chart.wasm.series_options_json(this.id)) as series_options;
   }
 
   set_type(kind: series_kind): void {
@@ -248,6 +448,15 @@ class series_impl implements series_api {
       style,
       options.title ?? "",
     );
+    // Extras the positional constructor doesn't take go through the JSON patch path.
+    const extras: Partial<price_line_options> = {};
+    if (options.line_visible !== undefined) extras.line_visible = options.line_visible;
+    if (options.axis_label_visible !== undefined) extras.axis_label_visible = options.axis_label_visible;
+    if (options.axis_label_color !== undefined) extras.axis_label_color = options.axis_label_color;
+    if (options.axis_label_text_color !== undefined) extras.axis_label_text_color = options.axis_label_text_color;
+    if (Object.keys(extras).length > 0) {
+      this.chart.wasm.price_line_apply_options(id, JSON.stringify(extras));
+    }
     this.chart.repaint();
     const chart = this.chart;
     return {
@@ -255,6 +464,13 @@ class series_impl implements series_api {
       remove() {
         chart.wasm.remove_price_line(id);
         chart.repaint();
+      },
+      apply_options(patch: Partial<price_line_options>) {
+        chart.wasm.price_line_apply_options(id, JSON.stringify(patch));
+        chart.repaint();
+      },
+      options() {
+        return JSON.parse(chart.wasm.price_line_options_json(id)) as price_line_options;
       },
     };
   }
@@ -292,16 +508,15 @@ class series_impl implements series_api {
   private unpack_point(values: Float64Array | number[], offset = 0): series_data | null {
     if (values.length < offset + 5) return null;
     const time = values[offset]!;
-    if (this.series_type() === "candlestick" || this.series_type() === "bar") {
-      return {
-        time,
-        open: values[offset + 1]!,
-        high: values[offset + 2]!,
-        low: values[offset + 3]!,
-        close: values[offset + 4]!,
-      };
+    const [o, h, l, c] = [values[offset + 1]!, values[offset + 2]!, values[offset + 3]!, values[offset + 4]!];
+    // A whitespace row round-trips all-NaN; return it as `{time}` with no value keys.
+    if (Number.isNaN(o) && Number.isNaN(h) && Number.isNaN(l) && Number.isNaN(c)) {
+      return { time };
     }
-    return { time, value: values[offset + 4]! };
+    if (this.series_type() === "candlestick" || this.series_type() === "bar") {
+      return { time, open: o, high: h, low: l, close: c };
+    }
+    return { time, value: c };
   }
   data_by_index(logical_index: number, mismatch_direction: mismatch_direction = 0): series_data | null {
     return this.unpack_point(
@@ -319,8 +534,7 @@ class series_impl implements series_api {
   }
   series_type(): series_kind {
     const kind = this.chart.wasm.series_kind(this.id) ?? KIND_TO_U8[this.kind];
-    return (["candlestick", "bar", "line", "area", "histogram", "baseline"] as const)[kind]
-      ?? "candlestick";
+    return KIND_NAMES[kind] ?? "candlestick";
   }
   subscribe_data_changed(handler: data_changed_handler): void {
     this.data_changed_subs.add(handler);
@@ -331,31 +545,59 @@ class series_impl implements series_api {
 }
 
 class time_scale_impl implements time_scale_api {
+  /** Invalidation token: each new scroll call or user gesture supersedes an in-flight animation. */
+  private scroll_anim_token = 0;
+
   constructor(private readonly chart: chart_impl) {}
 
   scroll_position(): number {
     return this.chart.wasm.scroll_position();
   }
-  scroll_to_position(position: number, _animated: boolean): void {
-    this.chart.wasm.scroll_to_position(position);
-    this.chart.repaint();
+  /** Invalidate any in-flight animated scroll (a new scroll call or user gesture takes over). */
+  cancel_scroll_animation(): void {
+    this.scroll_anim_token += 1;
+  }
+  scroll_to_position(position: number, animated: boolean): void {
+    const token = ++this.scroll_anim_token;
+    if (!animated || this.chart.prefers_reduced_motion()) {
+      this.chart.wasm.scroll_to_position(position);
+      this.chart.repaint();
+      return;
+    }
+    const start = this.chart.wasm.scroll_position();
+    if (start === position) return;
+    const t0 = performance.now();
+    const step = () => {
+      if (token !== this.scroll_anim_token) return; // superseded mid-flight
+      const t = Math.min(1, (performance.now() - t0) / SCROLL_ANIM_MS);
+      const eased = 1 - Math.pow(1 - t, 3); // cubic ease-out
+      this.chart.wasm.scroll_to_position(start + (position - start) * eased);
+      this.chart.repaint();
+      if (t < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
   }
   scroll_to_real_time(): void {
+    this.cancel_scroll_animation();
     this.chart.wasm.scroll_to_real_time();
     this.chart.repaint();
   }
   reset_time_scale(): void {
+    this.cancel_scroll_animation();
     this.chart.wasm.reset_time_scale();
     this.chart.repaint();
   }
   fit_content(): void {
+    this.cancel_scroll_animation();
     this.chart.wasm.fit_content();
     this.chart.repaint();
   }
   apply_options(options: Partial<time_scale_options>): void {
-    if (options.bar_spacing !== undefined) this.chart.wasm.set_bar_spacing(options.bar_spacing);
-    if (options.right_offset !== undefined) this.chart.wasm.set_right_offset(options.right_offset);
+  if (options.bar_spacing !== undefined) this.chart.wasm.apply_bar_spacing_option(options.bar_spacing);
+  if (options.right_offset !== undefined) this.chart.wasm.apply_right_offset_option(options.right_offset);
     if (options.min_bar_spacing !== undefined) this.chart.wasm.set_min_bar_spacing(options.min_bar_spacing);
+    if (options.max_bar_spacing !== undefined) this.chart.wasm.set_max_bar_spacing(options.max_bar_spacing);
+    if (options.right_offset_pixels !== undefined) this.chart.wasm.set_right_offset_pixels(options.right_offset_pixels);
     if (options.time_visible !== undefined) this.chart.wasm.set_time_visible(options.time_visible);
     if (options.seconds_visible !== undefined) this.chart.wasm.set_seconds_visible(options.seconds_visible);
     if (options.fix_left_edge !== undefined) this.chart.wasm.set_fix_left_edge(options.fix_left_edge);
@@ -364,21 +606,30 @@ class time_scale_impl implements time_scale_api {
       this.chart.wasm.set_lock_visible_time_range_on_resize(options.lock_visible_time_range_on_resize);
     if (options.right_bar_stays_on_scroll !== undefined)
       this.chart.wasm.set_right_bar_stays_on_scroll(options.right_bar_stays_on_scroll);
+    if (options.shift_visible_range_on_new_bar !== undefined)
+      this.chart.wasm.set_shift_visible_range_on_new_bar(options.shift_visible_range_on_new_bar);
+    if (options.allow_shift_visible_range_on_whitespace_replacement !== undefined)
+      this.chart.wasm.set_allow_shift_visible_range_on_whitespace_replacement(
+        options.allow_shift_visible_range_on_whitespace_replacement,
+      );
+    if (options.ticks_visible !== undefined) this.chart.wasm.set_time_ticks_visible(options.ticks_visible);
+    if (options.minimum_height !== undefined) this.chart.wasm.set_time_axis_minimum_height(options.minimum_height);
+    if (options.tick_mark_max_character_length !== undefined)
+      this.chart.wasm.set_tick_mark_max_character_length(options.tick_mark_max_character_length);
+    if (options.visible !== undefined) this.chart.wasm.set_time_axis_visible(options.visible);
     if (options.tick_mark_formatter !== undefined)
       this.chart.wasm.set_tick_mark_formatter(options.tick_mark_formatter);
     this.chart.repaint();
   }
   options(): time_scale_options {
-    return {
-      bar_spacing: this.chart.wasm.bar_spacing(),
-      right_offset: this.chart.wasm.right_offset(),
-    };
+    return JSON.parse(this.chart.wasm.time_scale_options_json()) as time_scale_options;
   }
   get_visible_logical_range(): logical_range | null {
     const r = this.chart.wasm.visible_logical_range();
     return r.length === 2 ? { from: r[0]!, to: r[1]! } : null;
   }
   set_visible_logical_range(range: logical_range): void {
+    this.cancel_scroll_animation();
     this.chart.wasm.set_visible_logical_range(range.from, range.to);
     this.chart.repaint();
   }
@@ -387,6 +638,7 @@ class time_scale_impl implements time_scale_api {
     return r.length === 2 ? { from: r[0]!, to: r[1]! } : null;
   }
   set_visible_range(range: time_range): void {
+    this.cancel_scroll_animation();
     this.chart.wasm.set_visible_time_range(range.from, range.to);
     this.chart.repaint();
   }
@@ -401,6 +653,12 @@ class time_scale_impl implements time_scale_api {
   }
   unsubscribe_visible_time_range_change(handler: visible_time_range_handler): void {
     this.chart.unsubscribe_visible_time_range_change(handler);
+  }
+  subscribe_size_change(handler: size_change_handler): void {
+    this.chart.subscribe_size_change(handler);
+  }
+  unsubscribe_size_change(handler: size_change_handler): void {
+    this.chart.unsubscribe_size_change(handler);
   }
   time_to_coordinate(time: number): number | null {
     return undef_to_null(this.chart.wasm.time_to_coordinate(time));
@@ -452,20 +710,20 @@ class price_scale_impl implements price_scale_api {
         options.scale_margins.bottom ?? current.bottom,
       );
     }
+    // Style keys without a dedicated setter go to the engine as a single JSON patch.
+    const json_patch: Record<string, unknown> = {};
+    for (const key of PRICE_SCALE_JSON_OPTION_KEYS) {
+      const value = options[key];
+      if (value !== undefined) json_patch[key] = value;
+    }
+    if (Object.keys(json_patch).length > 0) {
+      this.chart.wasm.price_scale_apply_options_json(this.pane, this.target, JSON.stringify(json_patch));
+    }
     this.chart.repaint();
   }
 
   options(): price_scale_options {
-    const margins = this.chart.wasm.price_scale_margins(this.pane, this.target);
-    return {
-      mode: (this.chart.wasm.price_scale_mode(this.pane, this.target) ?? 0) as 0 | 1 | 2 | 3,
-      auto_scale: this.chart.wasm.price_scale_auto_scale(this.pane, this.target) ?? false,
-      invert_scale: this.chart.wasm.price_scale_inverted(this.pane, this.target) ?? false,
-      scale_margins: {
-        top: margins.length === 2 ? margins[0]! : 0,
-        bottom: margins.length === 2 ? margins[1]! : 0,
-      },
-    };
+    return JSON.parse(this.chart.wasm.price_scale_options_json(this.pane, this.target)) as price_scale_options;
   }
 
   width(): number {
@@ -489,7 +747,7 @@ class price_scale_impl implements price_scale_api {
 }
 
 class pane_impl implements pane_api {
-  constructor(private readonly chart: chart_impl, private readonly index: number) {}
+  constructor(private readonly chart: chart_impl, private index: number) {}
 
   pane_index(): number {
     return this.index;
@@ -507,6 +765,34 @@ class pane_impl implements pane_api {
   set_stretch_factor(factor: number): void {
     this.chart.wasm.set_pane_stretch(this.index, factor);
     this.chart.repaint();
+  }
+  move_to(target: number): boolean {
+    // The engine answers false for a rejected move (e.g. a stale index after remove_pane);
+    // on success this handle follows the pane to its new index.
+    if (!this.chart.wasm.pane_move_to(this.index, target)) return false;
+    this.index = target;
+    this.chart.repaint();
+    return true;
+  }
+  preserve_empty_pane(): boolean {
+    // The engine answers false for a stale index (e.g. after remove_pane).
+    return this.chart.wasm.pane_preserve_empty(this.index);
+  }
+  set_preserve_empty_pane(flag: boolean): void {
+    this.chart.wasm.pane_set_preserve_empty(this.index, flag);
+    this.chart.repaint();
+  }
+  get_series(): series_api[] {
+    // Live handles from the engine's id list (empty for a stale index after remove_pane).
+    const ids = this.chart.wasm.pane_series_ids(this.index);
+    const out: series_api[] = [];
+    for (const id of ids) {
+      out.push(this.chart.series_handle(id));
+    }
+    return out;
+  }
+  price_scale(id: "left" | "right" | ""): price_scale_api {
+    return this.chart.price_scale(id, this.index);
   }
 }
 
@@ -621,8 +907,14 @@ export class chart_impl implements chart_api {
   private readonly dbl_click_subs = new Set<dbl_click_handler>();
   private readonly visible_logical_range_subs = new Set<visible_logical_range_handler>();
   private readonly visible_time_range_subs = new Set<visible_time_range_handler>();
+  private readonly size_change_subs = new Set<size_change_handler>();
   private last_visible_logical_range: logical_range | null;
   private last_visible_time_range: time_range | null;
+  private last_ts_width: number;
+  private last_ts_height: number;
+  private auto_size: boolean;
+  /** Crosshair position tracked TS-side (for crosshair-less screenshots); `null` when hidden. */
+  private last_crosshair: { x: number; y: number } | null = null;
   private readonly backend_runtime_id: number;
   private anim_frame: number | null = null;
   private readonly backend_loss_handler = (event: Event): void => {
@@ -644,6 +936,9 @@ export class chart_impl implements chart_api {
     window.addEventListener("aion-chart-backend-lost", this.backend_loss_handler);
     this.last_visible_logical_range = this.read_visible_logical_range();
     this.last_visible_time_range = this.read_visible_time_range();
+    this.last_ts_width = this.wasm.time_scale_width();
+    this.last_ts_height = this.wasm.time_scale_height();
+    this.auto_size = auto_size;
     this.init_accessibility();
     this.detach_gestures = install_gestures(this);
     if (auto_size) {
@@ -685,6 +980,17 @@ export class chart_impl implements chart_api {
     if (time_changed) {
       for (const handler of this.visible_time_range_subs) {
         handler(time ? { ...time } : null);
+      }
+    }
+
+    // Size-change diff (LWC `subscribeSizeChange`), fired on change only.
+    const width = this.wasm.time_scale_width();
+    const height = this.wasm.time_scale_height();
+    if (width !== this.last_ts_width || height !== this.last_ts_height) {
+      this.last_ts_width = width;
+      this.last_ts_height = height;
+      for (const handler of this.size_change_subs) {
+        handler(width, height);
       }
     }
   }
@@ -741,13 +1047,41 @@ export class chart_impl implements chart_api {
     const impl = this.series_by_id.get(series.id);
     // Ignore a foreign handle or one already removed (idempotent, matching LWC leniency).
     if (!impl) return;
-    if (series.id === 0) {
-      throw new Error("aion: the primary series cannot be removed");
-    }
+    // The engine tombstones the primary series (id 0) safely, so no id is refused here.
     if (!this.wasm.remove_series(series.id)) return;
     impl.mark_removed();
     this.series_by_id.delete(series.id);
     this.repaint();
+  }
+
+  series_order(): series_api[] {
+    const ids = JSON.parse(this.wasm.series_order_json()) as number[];
+    // Only ids with a live TS handle are returned; a series the package no longer tracks is skipped.
+    return ids
+      .map((id) => this.series_by_id.get(id))
+      .filter((s): s is series_impl => s !== undefined);
+  }
+
+  /**
+   * The live handle for an engine series id: the registered handle when one exists, otherwise a
+   * fresh handle adopted into the registry (the way `panes()`/`price_scale()` build handles on
+   * demand). Backs `pane_api.get_series`.
+   */
+  series_handle(id: number): series_impl {
+    let series = this.series_by_id.get(id);
+    if (series === undefined) {
+      const kind = this.wasm.series_kind(id) ?? KIND_TO_U8.candlestick;
+      series = new series_impl(id, KIND_NAMES[kind] ?? "candlestick", this);
+      this.series_by_id.set(id, series);
+    }
+    return series;
+  }
+
+  set_series_order(ordered: series_api[]): boolean {
+    const ids = new Uint32Array(ordered.map((s) => s.id));
+    if (!this.wasm.set_series_order(ids)) return false;
+    this.repaint();
+    return true;
   }
 
   private indicator_series(id: number, options?: Partial<series_options>): series_api {
@@ -802,6 +1136,28 @@ export class chart_impl implements chart_api {
   unsubscribe_visible_time_range_change(handler: visible_time_range_handler): void {
     this.visible_time_range_subs.delete(handler);
   }
+  subscribe_size_change(handler: size_change_handler): void {
+    this.size_change_subs.add(handler);
+  }
+  unsubscribe_size_change(handler: size_change_handler): void {
+    this.size_change_subs.delete(handler);
+  }
+
+  /** Invalidate any in-flight animated `scroll_to_position` (user gestures take over scrolling). */
+  cancel_scroll_animation(): void {
+    this.ts.cancel_scroll_animation();
+  }
+
+  /**
+   * Which pane contains the pane-origin CSS point (x, y), or `null` when it falls on an axis
+   * strip (price/time) or outside the pane area. Backs `mouse_event_params.pane_index`.
+   */
+  pane_index_at(x: number, y: number): number | null {
+    if (x < 0 || x > this.wasm.time_scale_width()) return null;
+    const pane_bottom = this.overlay.getBoundingClientRect().height - this.wasm.time_scale_height();
+    if (y < 0 || y > pane_bottom) return null;
+    return pane_index_of_y(this.wasm.pane_separator_ys(), y);
+  }
 
   /** Build event params for a cursor at (x, y) in pane CSS px. */
   private build_params(x: number, y: number): mouse_event_params {
@@ -821,19 +1177,23 @@ export class chart_impl implements chart_api {
           : { time: t, value: c },
       );
     }
-    return { time, logical, point: { x, y }, series_data };
+    return { time, logical, point: { x, y }, pane_index: this.pane_index_at(x, y), series_data };
   }
 
   /** Emit a crosshair-move event (called by the gesture recognizer). */
   emit_crosshair(x: number, y: number): void {
+    this.last_crosshair = { x, y };
     if (this.crosshair_subs.size === 0) return;
     const params = this.build_params(x, y);
     for (const h of this.crosshair_subs) h(params);
   }
   /** Emit the "cursor left the chart" crosshair event (empty params). */
   emit_crosshair_left(): void {
+    this.last_crosshair = null;
     if (this.crosshair_subs.size === 0) return;
-    const params: mouse_event_params = { time: null, logical: null, point: null, series_data: new Map() };
+    const params: mouse_event_params = {
+      time: null, logical: null, point: null, pane_index: null, series_data: new Map(),
+    };
     for (const h of this.crosshair_subs) h(params);
   }
   /** Emit a click event (called by the gesture recognizer). */
@@ -888,14 +1248,39 @@ export class chart_impl implements chart_api {
       this.apply_gesture_options(handle_scroll, handle_scale, kinetic_scroll, tracking_mode);
     }
     if (localization !== undefined) this.apply_localization(localization);
+    // autoSize stays in `rest` (the engine stores it); the active flag is tracked TS-side.
+    if (options.autoSize !== undefined) this.set_auto_size(options.autoSize);
     this.wasm.apply_options(JSON.stringify(engine_options));
     this.repaint();
+  }
+
+  /**
+   * LWC `autoSize`: enabling hands sizing to the engine's ResizeObserver; the flag is tracked
+   * TS-side for `auto_size_active()`. The engine has no disable hook yet, so turning it off is
+   * tracked here only (the engine keeps observing until teardown).
+   */
+  private set_auto_size(on: boolean): void {
+    if (on && !this.auto_size && !this.removed) {
+      this.wasm.enable_auto_resize(this.container);
+    }
+    this.auto_size = on;
+  }
+
+  auto_size_active(): boolean {
+    return this.auto_size;
+  }
+
+  chart_element(): HTMLElement {
+    return this.container;
   }
 
   /** Install the host price/time formatters (LWC `localization`). Callbacks cross into wasm. */
   apply_localization(loc: localization_options): void {
     if (loc.price_formatter !== undefined) this.wasm.set_price_formatter(loc.price_formatter);
     if (loc.time_formatter !== undefined) this.wasm.set_time_formatter(loc.time_formatter);
+    if (loc.locale !== undefined) this.wasm.set_locale(loc.locale);
+    if (loc.date_format !== undefined) this.wasm.set_date_format(loc.date_format);
+    this.repaint();
   }
 
   /** Resolve and store the gesture toggles; the recognizer reads the result live. */
@@ -998,11 +1383,48 @@ export class chart_impl implements chart_api {
     return out;
   }
 
+  add_pane(preserve_empty = false): pane_api {
+    const index = this.wasm.add_pane(preserve_empty);
+    this.repaint();
+    return new pane_impl(this, index);
+  }
+
+  remove_pane(index: number): boolean {
+    if (!this.wasm.remove_pane(index)) return false;
+    this.repaint();
+    return true;
+  }
+
+  swap_panes(first: number, second: number): boolean {
+    if (!this.wasm.swap_panes(first, second)) return false;
+    this.repaint();
+    return true;
+  }
+
   price_to_coordinate(price: number): number | null {
     return undef_to_null(this.wasm.price_to_coordinate(price));
   }
   coordinate_to_price(y: number): number | null {
     return undef_to_null(this.wasm.coordinate_to_price(y));
+  }
+
+  set_crosshair_position(price: number, time: time, series: series_api): void {
+    const seconds = time_to_utc_seconds(time);
+    // false = the engine refused the position (e.g. unknown series); LWC throws, we no-op.
+    if (!this.wasm.set_crosshair_position(price, seconds, series.id)) return;
+    this.repaint();
+    // Emit the crosshair-move at the coordinates the position resolved to, on the given series'
+    // own price scale.
+    const x = undef_to_null(this.wasm.time_to_coordinate(seconds));
+    const y = undef_to_null(this.wasm.series_price_to_coordinate(series.id, price));
+    if (x === null || y === null) return;
+    this.emit_crosshair(x, y);
+  }
+
+  clear_crosshair_position(): void {
+    this.wasm.clear_crosshair_position();
+    this.repaint();
+    this.emit_crosshair_left();
   }
 
   resize(width: number, height: number, dpr?: number): void {
@@ -1014,12 +1436,19 @@ export class chart_impl implements chart_api {
     this.repaint();
   }
 
-  take_screenshot(): HTMLCanvasElement {
+  take_screenshot(add_top_layer = true, include_crosshair = true): HTMLCanvasElement {
     // Browser WebGPU canvases are presentable but are not synchronously readable through
     // CanvasRenderingContext2D.drawImage (Chromium returns transparent pixels). Repaint the current
     // engine frame, then execute that same retained frame through the already-warm Canvas2D pane.
     // This keeps the LWC-style synchronous API deterministic without duplicating chart state.
     this.repaint();
+    // Hiding the crosshair for the capture is a clear → snapshot → restore cycle; the whole call
+    // is synchronous, so the on-screen canvases never present the crosshair-less frame.
+    const restore = include_crosshair ? null : this.last_crosshair;
+    if (restore !== null) {
+      this.wasm.clear_crosshair();
+      this.wasm.render();
+    }
     this.wasm.render_canvas2d_snapshot();
     const output = document.createElement("canvas");
     output.width = this.overlay.width;
@@ -1027,7 +1456,13 @@ export class chart_impl implements chart_api {
     const ctx = output.getContext("2d");
     if (ctx === null) throw new Error("aion: screenshot Canvas2D context is unavailable");
     ctx.drawImage(this.fallback_pane, 0, 0);
-    ctx.drawImage(this.overlay, 0, 0);
+    if (add_top_layer) {
+      ctx.drawImage(this.overlay, 0, 0);
+    }
+    if (restore !== null) {
+      this.wasm.set_crosshair(restore.x, restore.y);
+      this.repaint();
+    }
     return output;
   }
 

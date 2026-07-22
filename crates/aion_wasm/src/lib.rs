@@ -45,6 +45,7 @@ mod smoke {
         let points = [[20.0f32, 80.0], [50.0, 30.0], [80.0, 60.0], [110.0, 20.0]];
         let prims = [
             Prim::Background {
+                rect: [0.0, 0.0, w, h],
                 gradient: Gradient {
                     top: Color::rgb(0xff, 0xff, 0xff),
                     bottom: Color::rgb(0xe8, 0xf0, 0xff),

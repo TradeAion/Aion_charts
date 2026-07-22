@@ -15,7 +15,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 authors = ["Aion Charts"]
-repository = ""
+repository = "https://github.com/TradeAion/Aion_charts"
 
 # Shared lint policy; every crate opts in via `[lints] workspace = true`.
 # CI enforces clippy with `-D warnings` on top of this.

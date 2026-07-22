@@ -163,6 +163,49 @@ impl PlotList {
         self.values[plot as usize][row]
     }
 
+    /// Whether `row` is a whitespace row (an LWC `{time}`-only item, data-consumer.ts
+    /// `isWhitespaceData`): the boundary convention is that all four values are NaN — a real
+    /// bar never has all four NaN, and single-value series alias the one value into every
+    /// column, so a NaN value is whitespace there too. Whitespace rows occupy their time
+    /// point (they keep the axis slot and stay aligned with the per-point color channels)
+    /// but draw nothing and are skipped by autoscale and last-value tracking.
+    pub fn is_whitespace_row(&self, row: usize) -> bool {
+        self.values.iter().all(|col| col[row].is_nan())
+    }
+
+    /// Row of the last non-whitespace bar at or left of `index`, or `None` when every bar
+    /// at or left of it is whitespace (or there is no bar at all). LWC's whitespace-filtered
+    /// plot list makes `search(NearestLeft)` land on the last real bar directly
+    /// (series.ts `lastValueData`); here the whitespace rows are in the list, so scan past
+    /// them to the same effect.
+    pub fn last_non_whitespace_row(&self, index: TimePointIndex) -> Option<usize> {
+        let mut row = self.search(index, MismatchDirection::NearestLeft)?;
+        loop {
+            if !self.is_whitespace_row(row) {
+                return Some(row);
+            }
+            if row == 0 {
+                return None;
+            }
+            row -= 1;
+        }
+    }
+
+    /// Row of the first non-whitespace bar at or right of `index` (the mirror of
+    /// [`last_non_whitespace_row`], for first-value/base-value selection).
+    pub fn first_non_whitespace_row(&self, index: TimePointIndex) -> Option<usize> {
+        let mut row = self.search(index, MismatchDirection::NearestRight)?;
+        loop {
+            if !self.is_whitespace_row(row) {
+                return Some(row);
+            }
+            row += 1;
+            if row >= self.indices.len() {
+                return None;
+            }
+        }
+    }
+
     /// Row offsets `[start, end)` whose merged index lies in the inclusive range `[from, to]`.
     /// Used to slice a (possibly sparse) series to the visible window for rendering.
     pub fn visible_rows(&self, from: TimePointIndex, to: TimePointIndex) -> std::ops::Range<usize> {
@@ -434,5 +477,57 @@ mod tests {
             .unwrap();
         assert_eq!(mm.max, 6.0); // only index 10 in range
         assert_eq!(pl.search(15, MismatchDirection::NearestLeft), Some(1));
+    }
+
+    #[test]
+    fn whitespace_rows_are_skipped_by_non_whitespace_searches() {
+        let mut pl = PlotList::new();
+        // bars at 0, 3; explicit whitespace rows at 1, 2 (all-NaN, LWC `{time}`-only items)
+        let nan = f64::NAN;
+        pl.set_data(
+            vec![0, 1, 2, 3],
+            vec![1.0, nan, nan, 4.0],
+            vec![1.0, nan, nan, 4.0],
+            vec![1.0, nan, nan, 4.0],
+            vec![1.0, nan, nan, 4.0],
+        );
+        assert!(pl.is_whitespace_row(1));
+        assert!(pl.is_whitespace_row(2));
+        assert!(!pl.is_whitespace_row(0));
+        assert!(!pl.is_whitespace_row(3));
+
+        // last-value tracking scans left past whitespace (series.ts lastValueData)
+        assert_eq!(pl.last_non_whitespace_row(3), Some(3));
+        assert_eq!(pl.last_non_whitespace_row(2), Some(0));
+        assert_eq!(pl.last_non_whitespace_row(10), Some(3));
+        // first-value selection scans right past whitespace
+        assert_eq!(pl.first_non_whitespace_row(0), Some(0));
+        assert_eq!(pl.first_non_whitespace_row(1), Some(3));
+        assert_eq!(pl.first_non_whitespace_row(-5), Some(0));
+        // min/max already ignores the NaN rows
+        let mm = pl
+            .min_max_on_range_cached(0, 3, &[PlotValueIndex::Close])
+            .unwrap();
+        assert_eq!(mm.min, 1.0);
+        assert_eq!(mm.max, 4.0);
+    }
+
+    #[test]
+    fn all_whitespace_list_has_no_non_whitespace_rows() {
+        let mut pl = PlotList::new();
+        let nan = f64::NAN;
+        pl.set_data(
+            vec![0, 1],
+            vec![nan, nan],
+            vec![nan, nan],
+            vec![nan, nan],
+            vec![nan, nan],
+        );
+        assert_eq!(pl.last_non_whitespace_row(1), None);
+        assert_eq!(pl.first_non_whitespace_row(0), None);
+        assert_eq!(
+            pl.min_max_on_range_cached(0, 1, &[PlotValueIndex::Close]),
+            None
+        );
     }
 }

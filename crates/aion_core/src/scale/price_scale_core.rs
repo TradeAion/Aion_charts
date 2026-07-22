@@ -31,6 +31,20 @@ pub struct PriceScaleCoreOptions {
     pub tick_mark_density: f64,
     /// Layout font size in px (used for tick mark height).
     pub font_size: f64,
+    /// LWC `alignLabels` (default true): push the axis' boxed labels apart so they cannot
+    /// overlap each other or leave the pane edge.
+    pub align_labels: bool,
+    /// LWC `ticksVisible` (default false): draw a small tick mark beside each axis label.
+    pub ticks_visible: bool,
+    /// LWC `entireTextOnly` (default false): skip top/bottom tick marks whose label text
+    /// would be clipped by the pane edge.
+    pub entire_text_only: bool,
+    /// LWC `minimumWidth` (default 0): floor for the axis strip width; the measured width
+    /// still wins when the labels need more room.
+    pub minimum_width: f64,
+    /// LWC `textColor` (default `None` = follow `layout.textColor`). Stored verbatim as a
+    /// CSS string; parsed at render time.
+    pub text_color: Option<String>,
 }
 
 impl Default for PriceScaleCoreOptions {
@@ -45,6 +59,12 @@ impl Default for PriceScaleCoreOptions {
             },
             tick_mark_density: 2.5,
             font_size: 12.0,
+            // LWC defaults (price-scale-options-defaults.ts).
+            align_labels: true,
+            ticks_visible: false,
+            entire_text_only: false,
+            minimum_width: 0.0,
+            text_color: None,
         }
     }
 }
@@ -146,6 +166,34 @@ impl PriceScaleCore {
 
     pub fn set_invert_scale(&mut self, inverted: bool) {
         self.options.invert_scale = inverted;
+    }
+
+    /// LWC `alignLabels` — gate the axis' label overlap resolution.
+    pub fn set_align_labels(&mut self, align: bool) {
+        self.options.align_labels = align;
+    }
+
+    /// LWC `ticksVisible` — draw small tick marks beside the axis labels.
+    pub fn set_ticks_visible(&mut self, visible: bool) {
+        self.options.ticks_visible = visible;
+    }
+
+    /// LWC `entireTextOnly` — skip corner tick marks whose label would be clipped.
+    pub fn set_entire_text_only(&mut self, entire: bool) {
+        self.options.entire_text_only = entire;
+    }
+
+    /// LWC `minimumWidth` — floor for the axis strip width (non-negative, finite).
+    pub fn set_minimum_width(&mut self, width: f64) {
+        if width.is_finite() && width >= 0.0 {
+            self.options.minimum_width = width;
+        }
+    }
+
+    /// LWC `textColor` — `None` follows `layout.textColor`; stored verbatim, parsed at
+    /// render time.
+    pub fn set_text_color(&mut self, css: Option<String>) {
+        self.options.text_color = css;
     }
 
     pub fn is_auto_scale(&self) -> bool {

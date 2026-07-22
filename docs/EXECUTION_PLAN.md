@@ -1,0 +1,201 @@
+# Aion Charts — Execution Plan
+
+Status legend: `[x]` done (with date) · `[ ]` pending. Ground truth: the full audit of
+2026-07-21 (engine vs LWC 5.2.0 feature parity, packaging, styling/control APIs). Companion to
+[ARCHITECTURE.md](ARCHITECTURE.md), [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md),
+[PLUGIN_PLATFORM_DESIGN.md](PLUGIN_PLATFORM_DESIGN.md).
+
+Goal: (1) make `@aion/charts` installable via `bun add` (primary) / `npm i` with no source clone
+or Rust toolchain, (2) close the enumerable LWC API-breadth gaps, (3) land the plugin platform.
+
+---
+
+## Phase 0 — Audit (ground truth)
+
+- [x] 2026-07-21 — Feature-parity audit vs LWC 5.2.0 (series, chart/time-scale/price-scale APIs, primitives, data model, localization).
+- [x] 2026-07-21 — Packaging audit (`npm pack --dry-run`; tarball is coherent but unpublished).
+- [x] 2026-07-21 — Styling & control-API audit (all wired surfaces verified against tests/probes).
+
+## Phase 1 — npm/bun publish readiness
+
+A consumer must get a working chart from the registry alone: bundled ESM + flat types + the wasm
+binary inside `dist/`, resolved relative to the bundle (`new URL(..., import.meta.url)`).
+
+- [x] 1.1 `LICENSE` (MIT) at repo root, copied into `packages/charts/` and `crates/aion_wasm/`
+      (silences the wasm-pack warning; npm auto-includes it from the package root). — 2026-07-21
+- [x] 1.2 `packages/charts/README.md` — install, quick start, async `create_chart` note, browser-only
+      note, Vite caveat. — 2026-07-21
+- [x] 1.3 `packages/charts/package.json` metadata: `license`, `author`, `repository` (with
+      `directory: "packages/charts"`), `bugs`, `homepage`, `keywords`, `engines`,
+      `publishConfig.access: "public"` (scoped `@aion/*` requires it). Also workspace
+      `Cargo.toml` repository URL. — 2026-07-21
+- [x] 1.4 `clean` + `prepublishOnly` scripts (kills stale `dist/src/*.d.ts` duplicates; guarantees a
+      fresh build at publish). Also excluded the broken-sourcemap `dist/index.js.map` from the
+      tarball. — 2026-07-21
+- [x] 1.5 Public wasm-URL override: `init_wasm(url?)` exported from `index.ts`, forwarding to
+      `ensure_init(url?)` in `impl.ts` — the documented escape hatch for Vite dev / custom asset
+      hosting. — 2026-07-21
+- [x] 1.6 Pack smoke test (`scripts/pack_smoke.mjs` + `test:pack` script): `npm pack` → install the
+      tarball into a scratch dir → assert the module imports and `dist/aion_wasm_bg.wasm` shipped.
+      Also runs in CI on every push. — 2026-07-21
+- [x] 1.7 Publish CI job in `.github/workflows/ci.yml` (tag-triggered `v*`, gated on rust+package+
+      browser jobs, `npm publish` with `publishConfig.access: public`, `NPM_TOKEN` secret).
+      — 2026-07-21
+- [x] 1.8 Verify: `npm run clean && npm run build`, `npm pack --dry-run` file list sane (10 files,
+      wasm 492 kB, README + LICENSE included), smoke test passes, typecheck/lint green. — 2026-07-21
+
+## Phase 2 — LWC API breadth (enumerable gaps, no structural work)
+
+Ordered by user impact. Each item = option/method + TS type + engine plumbing + test.
+
+### 2a. Surface corrections (small)
+- [x] 2.1 TS types: crosshair line `width`/`labelVisible`/`labelBackgroundColor` — new
+      `crosshair_line_options` (types.ts:134). — 2026-07-21
+- [x] 2.2 Series `color` keeps alpha — `set_series_color_css` wasm setter, CSS string threaded
+      end-to-end (impl.ts:172, inner_api.rs:162). — 2026-07-21
+- [x] 2.3 `series.options()` getter (all 20 fields via `series_options_json`);
+      `time_scale().options()` returns all 11 fields via `time_scale_options_json` (configured-option
+      semantics, LWC `restoreDefault` parity verified in the browser suite). — 2026-07-21
+- [x] 2.4 Price-line extras: `line_visible`, `axis_label_visible`, `axis_label_color`,
+      `axis_label_text_color` + `price_line.apply_options`/`options()` (engine price_line_api.rs,
+      rendering in series_geometry.rs/axis.rs). — 2026-07-21
+- [x] 2.5 Chart-JSON routing of `timeScale` behavioral options — `route_time_scale_patch`
+      (engine lib.rs) applies all 11 keys from the incoming patch only, LWC ordering. — 2026-07-21
+- [x] 2.6 Public `max_bar_spacing` / `right_offset_pixels` setters (wasm + TS handle). Also added
+      LWC-`applyOptions`-faithful `apply_bar_spacing_option`/`apply_right_offset_option` (write
+      option + apply live; gestures keep live-only `set_bar_spacing`). — 2026-07-21
+- [x] 2.7 `MouseEventParams.pane_index` (null on axis strips/outside). `hoveredSeries`/`sourceEvent`
+      deferred — needs the plugin platform's hit-testing (Phase 3). — 2026-07-21
+- [x] 2.8 `take_screenshot(add_top_layer?, include_crosshair?)`; animated `scroll_to_position`
+      (300 ms cubic ease-out, reduced-motion aware, cancelled by new scrolls/gestures);
+      `subscribe_size_change`/`unsubscribe_size_change` on the time-scale handle;
+      `auto_size_active()`; `chart_element()`. — 2026-07-21
+
+### 2b. Series styling
+- [x] 2.9 `last_value_visible` toggle + per-series last-value labels (every visible series, series-color
+      bg, LWC `_fixLabelOverlap` collision port; value tracks last *visible* bar like LWC
+      `lastValueData(false)`). — 2026-07-21
+- [x] 2.10 Built-in price-line family: `price_line_visible`, `price_line_source` (LastBar/LastVisible),
+      `price_line_width`, `price_line_color` ("" = follow series), `price_line_style` — rendered per
+      visible series, LWC defaults. — 2026-07-21
+- [x] 2.11 Line `line_style` (dash geometry frame-built via `dash_split` with LWC `getDashPattern`
+      patterns — pixel-identical backends by construction), `line_visible`, `point_markers_radius`
+      (auto = lineWidth/2+2), full `crosshair_marker_*` family on all visible line/area/baseline
+      series. — 2026-07-21
+- [x] 2.12 Baseline quadrant colors + gradients (`top/bottom_fill_color1/2`, `top/bottom_line_color`,
+      per-quadrant widths/styles — an intentional superset of LWC's shared width/style), through the
+      shared AreaFill gradient mechanism. — 2026-07-21
+- [x] 2.13 Per-data-point colors (candle/bar `color`/`wick_color`/`border_color`, histogram/line/area
+      `color`) — per-row RGBA channels in the data layer, aligned under dedupe/update/insert;
+      candle/bar/histogram overrides; line/area segment+marker color runs (LWC walk-line port);
+      0-sparse-channel = no-override. Pixel-verified live. — 2026-07-21
+  - [x] 2.13b Verbatim CSS strings for the older per-field color setters (up/down/wick/border/area/
+      `color`) — all nine slots now `Option<String>` with render-time parsing; round-trips verbatim.
+      — 2026-07-21
+- [x] 2.14 Histogram `base`; area `invert_filled_area`; bar `open_visible`/`thin_bars`. — 2026-07-21
+- [x] 2.15 Per-series `priceFormat` — price/volume/percent/custom kinds, per-series labels + ticks via
+      the scale's primary source, JS custom formatter fn with clearing, LWC-shaped options round-trip.
+      — 2026-07-21
+
+### 2c. Behavioral parity
+- [x] 2.16 `shift_visible_range_on_new_bar` / `allow_shift_visible_range_on_whitespace_replacement` —
+      `sync_time_points` ports LWC `ChartModel.updateTimeScale` (chart-model.ts:953-984): right-edge
+      follow + scrolled-back offset compensation (no drift), whitespace-replacement gating.
+      — 2026-07-21
+- [x] 2.17 Whitespace data items — all-NaN = explicit whitespace (kept, sorted/deduped, colors
+      carried); skipped by render/autoscale/magnet/last-value; `update({time})` replaces with
+      whitespace; `data()` returns `{time}`. — 2026-07-21
+- [x] 2.18 `series.pop(count)` (colors shift along), `series.last_value_data(global_last?)`
+      (whitespace-skipping), `series.price_formatter()` (resolved format chain). — 2026-07-21
+- [x] 2.19 `chart.set_crosshair_position(price, time, series)` (bar-exact, emits crosshair_move) +
+      `clear_crosshair_position()`. — 2026-07-21
+- [x] 2.20 `localization.locale` (js Intl month tables → engine formatter) + `localization.date_format`
+      (LWC token tokenizer incl. naive-quote parity for the default `dd MMM 'yy`). — 2026-07-21
+- [x] 2.21 Primary-series removal allowed (tombstone + first-live-series fallbacks);
+      `chart.series_order()` / `set_series_order()` (paint + hit order, permutation-validated).
+      — 2026-07-21
+
+### 2d. Panes & axes cosmetics
+- [x] 2.22 `add_pane`/`remove_pane`/`swap_panes`, `pane.move_to`, `pane.get_series`, per-pane
+      `price_scale`, `preserve_empty_pane` (LWC orphan-on-remove + pruning at LWC's two trigger
+      points). — 2026-07-21
+- [x] 2.23 Price scale: `align_labels`, `ticks_visible`, `entire_text_only`, `minimum_width`,
+      per-scale `text_color` (JSON applier + full getter + chart-group routing). Time scale:
+      `ticks_visible`, `minimum_height`, `tick_mark_max_character_length`, `visible` (whole strip —
+      cleanly split from the existing `time_visible` label flag). — 2026-07-21
+- [x] 2.24 Inert options resolution: `layout.background` vertical gradient (shared prim, per-pane
+      extent, both backends) and `panes.separator_hover_color` (LWC 9px hover band, gesture-driven)
+      now render. `attributionLogo` — **decided: deliberate no-op** (LWC licensing attribution,
+      not ours). `hoveredSeriesOnTop` — **deferred to Phase 3** (needs hit-testing).
+      — 2026-07-21
+
+## Phase 3 — Plugin platform (structural)
+
+Per [PLUGIN_PLATFORM_DESIGN.md](PLUGIN_PLATFORM_DESIGN.md) (design-complete, no code yet).
+
+- [ ] 3.1 Primitive attachment surface (`attachPrimitive`/`detachPrimitive` on series + panes,
+      lifecycle).
+- [ ] 3.2 `ISeriesPrimitive` view pipeline (pane/price-axis/time-axis views → draw-list Prims,
+      zOrder).
+- [ ] 3.3 `autoscaleInfo` + primitive hit-testing (`hoveredObjectId` in events).
+- [ ] 3.4 Custom series (`addCustomSeries`: `priceValueBuilder`, `isWhitespace`, conflation).
+- [ ] 3.5 Re-express markers + watermark as plugins on the platform (parity proof).
+
+## Phase 4 — Release
+
+- [ ] 4.1 Create `@aion` npm org; `NPM_TOKEN` repo secret.
+- [ ] 4.2 Tag `v0.1.0` → CI publishes; verify `bun add @aion/charts` (primary) and
+      `npm i @aion/charts` in a fresh Vite + webpack + plain-server consumer.
+- [ ] 4.3 Optional: React/Vue/Svelte thin wrappers (separate packages; framework-agnostic core
+      stays as-is).
+- [ ] 4.4 Docs: update root README install section; archive this plan's phases into
+      PRODUCTION_ROADMAP.md as they land.
+
+---
+
+## Progress log
+
+- 2026-07-21 — Plan created from the parity/packaging/API audit.
+- 2026-07-21 — **Phase 1 complete (1.1–1.8).** `@aion/charts` is publish-ready: LICENSE ×3, package
+  README, full metadata + `publishConfig.access: public`, clean/prepublish chain, `init_wasm(url?)`
+  Vite escape hatch, pack smoke test (local + CI), tag-triggered publish job. Tarball: 10 files,
+  314 kB packed, wasm 492 kB, imports cleanly. Remaining before 4.2 can ship: create the `@aion`
+  npm org and add the `NPM_TOKEN` repo secret (4.1). Next up: Phase 2a surface corrections.
+- 2026-07-21 — **Bun is the primary install method** (README/plan reordered; `bun add` verified
+  end-to-end against the packed tarball: install 295 ms, module imports, wasm ships).
+- 2026-07-21 — **Phase 2a complete (2.1–2.8).** One semantic fix surfaced by the browser suite:
+  `applyOptions({barSpacing/rightOffset})` now writes the configured option *and* applies it live
+  (LWC `restoreDefault` parity — options survive `reset_time_scale`); zoom/axis-drag stay live-only.
+  Two spec assertions updated to the corrected semantics. Gates: 150 cargo tests, clippy clean,
+  typecheck/lint green, pack smoke green, Playwright 10/10. Next up: Phase 2b series styling.
+- 2026-07-21 — **Phase 2b wave 1 complete (2.9–2.12, 2.14).** 28 new series style options end-to-end
+  (new `series_apply_options_json` wasm method; `series_options_json` round-trips all fields).
+  Rendering notes: dash strokes are frame-built geometry (backends stay 0-diff by construction);
+  last-value labels now per-series with LWC overlap resolution; last-price lines per-series; crosshair
+  marks on all line/area/baseline series. Demo volume fixture updated to match the LWC reference
+  (`price_line_visible/last_value_visible: false` — options that didn't exist when the fixture was
+  written). Gates: 164 cargo tests, clippy clean, typecheck/lint green, pack smoke green,
+  Playwright 10/10.
+- 2026-07-21 — **Phase 2b wave 2 complete (2.13, 2.15).** Per-data-point colors (data-layer RGBA
+  channels + per-kind render overrides + LWC walk-line segment semantics) and per-series
+  `price_format` (built-ins + JS custom formatter). Live probe verified: per-point pixels on
+  set/update/clear, candle channel rendering, format round-trips, custom-fn invocation and clearing.
+  One LWC-shape fix: volume format serializes as exactly `{type:"volume"}`. Gates: 186 cargo tests,
+  clippy clean workspace-wide, Playwright 10/10, pack smoke green. Next: Phase 2c behavioral parity.
+- 2026-07-21 — **Phase 2c complete (2.16–2.21 + 2.13b).** Shift-on-new-bar compensation, whitespace
+  data items, pop/lastValueData/priceFormatter, programmatic crosshair, locale+dateFormat,
+  primary-removal + series ordering, verbatim colors for the legacy setters. Live probe verified all
+  seven behaviors end-to-end; spec updated for the two new time-scale option fields. Gates: 215 cargo
+  tests, clippy clean workspace-wide, Playwright 10/10, pack smoke green. **Phase 2 (API breadth) is
+  now done except 2d.** Next: Phase 2d panes & axes cosmetics, then Phase 3 plugin platform.
+- 2026-07-21 — **Phase 2d complete; Phase 2 (API breadth) fully done.** Explicit pane management,
+  full price/time axis cosmetics, gradient background (both backends, pixel-identical), separator
+  hover band. `attributionLogo` decided deliberate no-op; `hoveredSeriesOnTop` deferred to Phase 3
+  (needs hit-testing). Live probe verified pane ops, scale round-trips, min-width/height floors,
+  strip collapse, gradient pixels, hover. Gates: 221 cargo tests, clippy clean workspace-wide,
+  Playwright 10/10 (spec updated for the four new time-scale fields), pack smoke green.
+  **Next: Phase 3 — plugin platform.**
+- 2026-07-21 — **Wave-1 verification pass.** Independent live-browser probe (defaults, apply→
+  options round-trips, render) caught a fidelity bug: new color options round-tripped normalized
+  (`#FF0000`→`#ff0000`) — fields were stored as parsed `Color`. Fixed to verbatim CSS strings with
+  render-time parsing (mirrors the `up_color` precedent); probe + 10/10 Playwright green after.

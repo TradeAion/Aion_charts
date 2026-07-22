@@ -122,8 +122,10 @@ pub enum Prim {
         c: [f32; 2],
         color: Color,
     },
-    /// Vertical gradient over the full target (pane background).
-    Background { gradient: Gradient },
+    /// Vertical gradient over `rect` (bitmap px) — the LWC `layout.background`
+    /// `VerticalGradient` painted per pane (pane-widget.ts `_drawBackground` spans the pane's
+    /// own bitmap, so a stacked pane each gets the full top→bottom ramp).
+    Background { rect: [f32; 4], gradient: Gradient },
     // Text runs come with the glyph engine in aion_render_wgpu; the IR slot is reserved so
     // layer ordering is stable.
     Text {

@@ -23,6 +23,15 @@ trajectory toward a full TradingView-class charting platform.
 
 Naming convention: **snake_case everywhere**, including the public TS API.
 
+## Install
+
+```sh
+bun add @aion/charts   # primary (Bun)
+npm install @aion/charts
+```
+
+The published package ships prebuilt JS + WASM — no Rust toolchain needed to consume it.
+
 ## Development
 
 ```sh

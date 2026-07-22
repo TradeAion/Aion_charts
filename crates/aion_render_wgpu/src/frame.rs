@@ -18,6 +18,10 @@ pub const SAMPLE_COUNT: u32 = 4;
 pub struct DrawGroup {
     /// x, y, w, h in bitmap px; None = full target.
     pub scissor: Option<[u32; 4]>,
+    /// Pane background gradient (LWC `layout.background` VerticalGradient), drawn first — below
+    /// the under-layer, since the grid lines it sits behind live there. A solid background
+    /// emits nothing: the pass clear color already covers it.
+    pub bg_tris: Vec<TriVertex>,
     /// Background rects drawn *below* the series (grid lines). Kept separate from `quads` because
     /// the fixed bucket order draws all tris (area fills / line strokes) between them and the
     /// foreground quads — so grid must live in its own under-layer or it paints over line/area.
@@ -86,6 +90,7 @@ impl MsaaTarget {
 }
 
 struct GroupBuffers {
+    bg: Option<(wgpu::Buffer, u32)>,
     under_quad: Option<(wgpu::Buffer, u32)>,
     fill: Option<(wgpu::Buffer, u32)>,
     stroke: Option<(wgpu::Buffer, u32)>,
@@ -123,6 +128,12 @@ pub fn render_frame(
     let buffers: Vec<GroupBuffers> = groups
         .iter()
         .map(|g| GroupBuffers {
+            bg: (!g.bg_tris.is_empty()).then(|| {
+                (
+                    vbuf(bytemuck::cast_slice(&g.bg_tris), "bg_tris"),
+                    g.bg_tris.len() as u32,
+                )
+            }),
             under_quad: (!g.under_quads.is_empty()).then(|| {
                 (
                     vbuf(bytemuck::cast_slice(&g.under_quads), "under_quads"),
@@ -190,6 +201,9 @@ pub fn render_frame(
             }
             pass.set_scissor_rect(sx, sy, sw, sh);
 
+            if let Some((b, n)) = &bufs.bg {
+                tri.draw(&mut pass, b, *n);
+            }
             if let Some((b, n)) = &bufs.under_quad {
                 quad.draw(&mut pass, b, *n);
             }

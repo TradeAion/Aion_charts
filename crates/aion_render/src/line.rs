@@ -44,6 +44,66 @@ fn color_to_rgba(c: Color) -> [f32; 4] {
     ]
 }
 
+/// Split a polyline into the solid sub-segments a dash pattern produces (port of the Canvas2D
+/// `setLineDash` walk: the pattern starts "on" at the first point and alternates on/off along
+/// the path, in the same units as `points`). Each returned run is a maximal "on" sub-polyline of
+/// two or more points; gap crossings close the current run. The frame builders emit each run as
+/// a solid stroke, so the WebGPU tessellator (which has no dash concept) and the Canvas2D path
+/// produce identical dash geometry by construction. `points` are expected already expanded
+/// ([`expand_line`]) so dashes follow the rendered path for stepped/curved lines.
+pub fn dash_split(points: &[LinePoint], pattern: &[f64]) -> Vec<Vec<LinePoint>> {
+    let mut runs: Vec<Vec<LinePoint>> = Vec::new();
+    if points.len() < 2 || pattern.is_empty() || pattern.iter().any(|&len| len <= 0.0) {
+        return runs;
+    }
+    let interp = |a: LinePoint, b: LinePoint, t: f64| LinePoint {
+        x: a.x + (b.x - a.x) * t,
+        y: a.y + (b.y - a.y) * t,
+    };
+    let near = |a: LinePoint, b: LinePoint| (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9;
+    let mut element = 0usize;
+    let mut element_left = pattern[0];
+    let mut on = true;
+    let mut run: Vec<LinePoint> = vec![points[0]];
+    for pair in points.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let seg_len = (b.x - a.x).hypot(b.y - a.y);
+        if seg_len < 1e-9 {
+            continue;
+        }
+        let mut t0 = 0.0f64;
+        while t0 < seg_len - 1e-9 {
+            let step = element_left.min(seg_len - t0);
+            let t1 = t0 + step;
+            if on {
+                let p0 = interp(a, b, t0 / seg_len);
+                let p1 = interp(a, b, t1 / seg_len);
+                if run.last().is_none_or(|&last| !near(last, p0)) {
+                    // A gap ended since the last "on" point: close the run and start a new one.
+                    if run.len() >= 2 {
+                        runs.push(std::mem::take(&mut run));
+                    } else {
+                        run.clear();
+                    }
+                    run.push(p0);
+                }
+                run.push(p1);
+            }
+            t0 = t1;
+            element_left -= step;
+            if element_left <= 1e-9 {
+                on = !on;
+                element = (element + 1) % pattern.len();
+                element_left = pattern[element];
+            }
+        }
+    }
+    if run.len() >= 2 {
+        runs.push(run);
+    }
+    runs
+}
+
 /// A tessellated stroke: triangle list of extruded segment quads + round joins.
 /// The backend applies 1px edge feathering for AA.
 #[derive(Default)]
@@ -249,9 +309,15 @@ pub fn build_area_fill(
     let top = color_to_rgba(top_color);
     let bottom = color_to_rgba(bottom_color);
 
-    // gradient factor 0 at top_coordinate (min y of points), 1 at bottom (base).
-    let top_coord = points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min) * vpr;
-    let span = (base as f64 - top_coord).max(1.0);
+    // Gradient factor 0 at the fill's geometric top (top color), 1 at its geometric base
+    // (bottom color). A normal fill spans [topmost point, base_y] below the line; an inverted
+    // one (LWC `invertFilledArea`, or a baseline segment under the base level) spans
+    // [base_y, lowest point] above the line. Both directions keep the top stop at the
+    // geometrically higher edge so the two backends shade identically.
+    let min_y = points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min) * vpr;
+    let max_y = points.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max) * vpr;
+    let top_coord = min_y.min(base as f64);
+    let span = (max_y.max(base as f64) - top_coord).max(1.0);
     let shade = |y: f32| -> [f32; 4] {
         let t = ((y as f64 - top_coord) / span).clamp(0.0, 1.0) as f32;
         [
@@ -600,5 +666,89 @@ mod tests {
         let rim = &v[1];
         let d = ((rim.x - 10.0).powi(2) + (rim.y - 20.0).powi(2)).sqrt();
         assert!((d - 4.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn dash_split_cuts_exact_on_segments() {
+        // [2 on, 2 off] over a 10px horizontal line: on-runs [0,2], [4,6], [8,10].
+        let pts = [LinePoint { x: 0.0, y: 0.0 }, LinePoint { x: 10.0, y: 0.0 }];
+        let runs = dash_split(&pts, &[2.0, 2.0]);
+        assert_eq!(runs.len(), 3);
+        let spans: Vec<(f64, f64)> = runs
+            .iter()
+            .map(|run| (run.first().unwrap().x, run.last().unwrap().x))
+            .collect();
+        assert_eq!(spans, vec![(0.0, 2.0), (4.0, 6.0), (8.0, 10.0)]);
+        // every run is a proper sub-polyline
+        assert!(runs.iter().all(|run| run.len() >= 2));
+    }
+
+    #[test]
+    fn dash_split_continues_the_pattern_across_vertices() {
+        // L-shaped path: 5px right then 5px down. Pattern [4 on, 4 off]: the first dash
+        // covers (0,0)->(4,0); the 4px gap wraps the corner (1px horizontal + 3px vertical),
+        // so the second run resumes at (5,3) and continues to (5,5) — the pattern never
+        // restarts at a vertex (LWC setLineDash semantics).
+        let pts = [
+            LinePoint { x: 0.0, y: 0.0 },
+            LinePoint { x: 5.0, y: 0.0 },
+            LinePoint { x: 5.0, y: 5.0 },
+        ];
+        let runs = dash_split(&pts, &[4.0, 4.0]);
+        assert_eq!(runs.len(), 2);
+        let r0 = &runs[0];
+        assert_eq!(r0.first().unwrap().x, 0.0);
+        assert_eq!(r0.first().unwrap().y, 0.0);
+        assert!((r0.last().unwrap().x - 4.0).abs() < 1e-9);
+        assert_eq!(r0.last().unwrap().y, 0.0);
+        let r1 = &runs[1];
+        assert!((r1.first().unwrap().x - 5.0).abs() < 1e-9);
+        assert!((r1.first().unwrap().y - 3.0).abs() < 1e-9);
+        assert!((r1.last().unwrap().y - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn dash_split_ends_mid_dash_without_trailing_run() {
+        // Path ends inside an "off" element: only the first dash is drawn.
+        let pts = [LinePoint { x: 0.0, y: 0.0 }, LinePoint { x: 3.0, y: 0.0 }];
+        let runs = dash_split(&pts, &[2.0, 2.0]);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].first().unwrap().x, 0.0);
+        assert_eq!(runs[0].last().unwrap().x, 2.0);
+    }
+
+    #[test]
+    fn dash_split_rejects_degenerate_input() {
+        let pts = [LinePoint { x: 0.0, y: 0.0 }, LinePoint { x: 3.0, y: 0.0 }];
+        assert!(dash_split(&pts, &[]).is_empty());
+        assert!(dash_split(&pts, &[2.0, 0.0]).is_empty());
+        assert!(dash_split(&pts[..1], &[2.0, 2.0]).is_empty());
+    }
+
+    #[test]
+    fn area_fill_shades_inverted_fill_from_base_to_line() {
+        // Inverted fill (base above the points): the top color sits at the base edge and the
+        // bottom color at the lowest line point — the reverse of the normal direction.
+        let pts = [
+            LinePoint { x: 0.0, y: 20.0 },
+            LinePoint { x: 10.0, y: 30.0 },
+        ];
+        let mut mesh = AreaMesh::default();
+        build_area_fill(
+            &pts,
+            5.0,
+            BLUE,
+            Color::rgba(0x21, 0x96, 0xf3, 0),
+            &params(1.0, 2.0),
+            &mut mesh,
+        );
+        assert_eq!(mesh.vertices.len(), 6);
+        let at_base = mesh.vertices.iter().find(|v| v.y == 5.0).unwrap();
+        assert!(at_base.color[3] > 0.9, "base edge keeps the top color");
+        let at_lowest = mesh.vertices.iter().find(|v| v.y == 30.0).unwrap();
+        assert!(
+            at_lowest.color[3] < 0.1,
+            "lowest line point fades to the bottom color"
+        );
     }
 }

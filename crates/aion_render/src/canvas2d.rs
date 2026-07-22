@@ -53,7 +53,8 @@ pub trait Canvas2d {
     fn fill(&mut self);
 }
 
-/// The viewport (bitmap px) — needed to size the `Background` gradient fill.
+/// The viewport (bitmap px). Carried for target context; every prim now owns its own extent
+/// (the `Background` gradient included), so the executor no longer consults it.
 #[derive(Clone, Copy, Debug)]
 pub struct Viewport {
     pub width: f32,
@@ -160,7 +161,7 @@ pub fn execute(
     prims: &[Prim],
     points: &[[f32; 2]],
     target: &mut impl Canvas2d,
-    viewport: Viewport,
+    _viewport: Viewport,
 ) {
     for prim in prims {
         match prim {
@@ -252,8 +253,8 @@ pub fn execute(
                     continue;
                 }
                 let expanded = expand_line(&pts, *line_type);
-                let (y_top, first_x, last_x) = area_extent(&expanded, *base_y);
-                target.set_fill_vgradient(y_top, *base_y, gradient.top, gradient.bottom);
+                let (y_top, y_bottom, first_x, last_x) = area_extent(&expanded, *base_y);
+                target.set_fill_vgradient(y_top, y_bottom, gradient.top, gradient.bottom);
                 target.begin_path();
                 trace_polyline(target, &pts, *line_type);
                 target.line_to(last_x, *base_y);
@@ -307,23 +308,35 @@ pub fn execute(
                     target.stroke();
                 }
             }
-            Prim::Background { gradient } => {
-                target.set_fill_vgradient(0.0, viewport.height, gradient.top, gradient.bottom);
-                target.fill_rect(0.0, 0.0, viewport.width, viewport.height);
+            Prim::Background { rect, gradient } => {
+                // LWC pane-widget.ts `_drawBackground`: the two-stop ramp spans the pane rect.
+                let [x, y, w, h] = *rect;
+                target.set_fill_vgradient(y, y + h, gradient.top, gradient.bottom);
+                target.fill_rect(x, y, w, h);
             }
             Prim::Text { .. } => {}
         }
     }
 }
 
-/// The topmost y of the polyline and its first/last x — the area fill spans from `base_y` up to
-/// the highest point.
-fn area_extent(pts: &[LinePoint], base_y: f32) -> (f32, f32, f32) {
+/// The fill's vertical gradient extent and its first/last x. The gradient runs from the
+/// geometrically highest edge (`y_top`) to the lowest (`y_bottom`): normally
+/// [topmost point, base_y], but inverted (LWC `invertFilledArea` / baseline segments under the
+/// base level) it runs [base_y, lowest point] — matching the per-vertex shading of the wgpu
+/// tessellator stop-for-stop.
+fn area_extent(pts: &[LinePoint], base_y: f32) -> (f32, f32, f32, f32) {
     let mut y_top = base_y;
+    let mut y_bottom = base_y;
     for p in pts {
         y_top = y_top.min(p.y as f32);
+        y_bottom = y_bottom.max(p.y as f32);
     }
-    (y_top, pts[0].x as f32, pts[pts.len() - 1].x as f32)
+    (
+        y_top,
+        y_bottom,
+        pts[0].x as f32,
+        pts[pts.len() - 1].x as f32,
+    )
 }
 
 /// Build a rounded-rect path (left-top, right-top, right-bottom, left-bottom radii).
@@ -619,14 +632,20 @@ mod tests {
     }
 
     #[test]
-    fn background_fills_full_viewport_with_gradient() {
+    fn background_fills_its_rect_with_a_gradient_spanning_it() {
         let g = Gradient {
             top: Color::rgb(1, 2, 3),
             bottom: Color::rgb(4, 5, 6),
         };
-        let ops = run(&[Prim::Background { gradient: g }], &[]);
-        assert_eq!(ops[0], "fill_grad 0 100 010203ff 040506ff");
-        assert_eq!(ops[1], "fill_rect 0 0 200 100");
+        let ops = run(
+            &[Prim::Background {
+                rect: [20.0, 10.0, 160.0, 60.0],
+                gradient: g,
+            }],
+            &[],
+        );
+        assert_eq!(ops[0], "fill_grad 10 70 010203ff 040506ff");
+        assert_eq!(ops[1], "fill_rect 20 10 160 60");
     }
 
     #[test]

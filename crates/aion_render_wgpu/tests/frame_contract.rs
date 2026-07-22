@@ -96,6 +96,10 @@ fn fixture() -> ChartEngine {
         width: 1,
         style: LineStyle::Dashed,
         title: "target".into(),
+        line_visible: true,
+        axis_label_visible: true,
+        axis_label_color: None,
+        axis_label_text_color: None,
     });
     let baseline = chart.add_series(SeriesKind::Baseline);
     chart

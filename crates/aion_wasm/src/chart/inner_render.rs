@@ -19,12 +19,14 @@ impl ChartInner {
 
         // time tick marks: built once (needs &mut), shared by GPU grid + 2D labels.
         // Font comes from `layout` (LWC `fontSize`/`fontFamily`): it drives the tick-density
-        // estimate, host text measurement, and glyph drawing so all three agree.
+        // estimate, host text measurement, and glyph drawing so all three agree. The label
+        // width cap is LWC `timeScale.tickMarkMaxCharacterLength` (default 8).
         let layout = self.opts().layout;
         let font_size = layout.font_size;
         let font_family = layout.font_family;
         let pixels_per_character = (font_size + 4.0) * 5.0 / 8.0;
-        let max_label_width = pixels_per_character * TICK_MARK_MAX_CHARS;
+        let max_label_width =
+            pixels_per_character * f64::from(self.engine.tick_mark_max_character_length);
         let axis_ctx = &self.axis_ctx;
         let dpr = self.dpr;
         self.axis_frame = self.engine.build_axis_frame(max_label_width, |text| {
@@ -53,12 +55,23 @@ impl ChartInner {
             self.gpu_groups.truncate(engine_frame.panes.len());
             for (group, pane_frame) in self.gpu_groups.iter_mut().zip(&engine_frame.panes) {
                 group.scissor = Some(pane_frame.scissor);
+                group.bg_tris.clear();
                 group.under_quads.clear();
                 group.fill_tris.clear();
                 group.stroke_tris.clear();
                 group.quads.clear();
                 group.tex_quads.clear();
                 // Convert the shared frame only at the WebGPU backend boundary.
+                // `under` geometry is the pane background gradient (LWC `layout.background`
+                // VerticalGradient); it tessellates into the below-grid bucket so the grid
+                // lines (under_quads) paint over it, matching the Canvas2D list order. The
+                // stroke sink is a formality — `under` carries no stroke prims.
+                geom_prims_to_tris(
+                    &pane_frame.under,
+                    &pane_frame.points,
+                    &mut group.bg_tris,
+                    &mut group.stroke_tris,
+                );
                 geom_prims_to_tris(
                     &pane_frame.main,
                     &pane_frame.points,
@@ -217,9 +230,46 @@ impl ChartInner {
                 (pane_h * dpr).round(),
             );
         }
-        if options.time_scale.border_visible {
+        if options.time_scale.border_visible && self.engine.time_axis_visible {
             ctx.set_fill_style_str(&time_border);
             ctx.fill_rect(0.0, (pane_h * dpr).round(), bitmap_w, border_w);
+        }
+
+        // LWC price-axis-widget.ts `_drawTickMarks`: 5 css px stubs from the pane edge into
+        // the strip at each tick coordinate, in the strip's border color, gated on
+        // `borderVisible && ticksVisible` (the engine already filtered on the latter).
+        let tick_len = (5.0 * dpr).round();
+        let tick_h = border_w;
+        let tick_off = (dpr * 0.5).floor();
+        let right_ticks = options.right_price_scale.border_visible;
+        let left_ticks = options.left_price_scale.border_visible;
+        for tick in &axis_frame.price_ticks {
+            let (color, x) = if tick.left {
+                if !left_ticks {
+                    continue;
+                }
+                (&left_border, ((pane_left - 5.0) * dpr).round())
+            } else {
+                if !right_ticks {
+                    continue;
+                }
+                (&right_border, ((pane_left + pane_w) * dpr).round())
+            };
+            ctx.set_fill_style_str(color);
+            ctx.fill_rect(x, (tick.y * dpr).round() - tick_off, tick_len, tick_h);
+        }
+
+        // LWC time-axis-widget.ts `_drawTickMarks`: 5 css px stubs down from the top of the
+        // time strip, in the time-scale border color, same border/visibility gating.
+        if options.time_scale.border_visible
+            && self.engine.time_ticks_visible
+            && self.engine.time_axis_visible
+        {
+            ctx.set_fill_style_str(&time_border);
+            let y0 = (pane_h * dpr).round();
+            for x in &axis_frame.time_ticks {
+                ctx.fill_rect((x * dpr).round() - tick_off, y0, tick_h, tick_len);
+            }
         }
 
         // Separators between stacked panes (roadmap Phase B1): a border line at each pane
@@ -236,6 +286,22 @@ impl ChartInner {
                 y,
                 (pane_w * dpr).round(),
                 (PANE_SEPARATOR * dpr).max(border_w),
+            );
+        }
+
+        // LWC pane-separator.ts hover handle (`top: -4px; height: 9px; width: 100%` over the
+        // 1px separator cell): a full-width 9 css px band centered on the separator, painted
+        // in `layout.panes.separatorHoverColor` while the host reports a hovered separator.
+        if let Some(separator) = axis_frame
+            .separator_hover
+            .and_then(|i| axis_frame.separators.get(i))
+        {
+            ctx.set_fill_style_str(&options.layout.panes.separator_hover_color);
+            ctx.fill_rect(
+                0.0,
+                ((separator - 4.0) * dpr).round(),
+                bitmap_w,
+                (9.0 * dpr).round(),
             );
         }
 
@@ -308,7 +374,8 @@ impl ChartInner {
         for label in axis_frame.labels.iter().filter(|l| l.background.is_some()) {
             if let Some((x, y, w, h, color)) = label.background {
                 // Backgrounds are bitmap-aligned geometry, matching LWC's bitmap-coordinate pass.
-                ctx.set_fill_style_str(&color.to_hex());
+                // `to_css` keeps alpha so custom (e.g. price-line) label colors stay translucent.
+                ctx.set_fill_style_str(&color.to_css());
                 ctx.fill_rect(
                     (x * dpr).round(),
                     (y * dpr).round(),
@@ -350,7 +417,7 @@ impl ChartInner {
                 AxisTextAlign::Right => "right",
                 AxisTextAlign::Center => "center",
             });
-            ctx.set_fill_style_str(&label.color.to_hex());
+            ctx.set_fill_style_str(&label.color.to_css());
             let metrics_text = match label.midpoint {
                 AxisTextMidpoint::None => None,
                 AxisTextMidpoint::Label => Some(label.text.as_str()),

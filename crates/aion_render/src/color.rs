@@ -103,6 +103,23 @@ impl Color {
     pub fn to_hex(&self) -> String {
         format!("#{:02x}{:02x}{:02x}", self.r(), self.g(), self.b())
     }
+
+    /// CSS color string that preserves alpha: `#rrggbb` when opaque, the functional
+    /// `rgba(r, g, b, a)` form otherwise (unlike `to_hex`, which always drops alpha).
+    /// Round-trips through [`Color::parse_css`].
+    pub fn to_css(&self) -> String {
+        if self.a() == 0xFF {
+            self.to_hex()
+        } else {
+            format!(
+                "rgba({},{},{},{})",
+                self.r(),
+                self.g(),
+                self.b(),
+                self.a() as f64 / 255.0
+            )
+        }
+    }
 }
 
 #[cfg(test)]
@@ -171,5 +188,19 @@ mod tests {
             Color::rgb(0, 0, 0)
         );
         assert_eq!(Color::rgb(0x26, 0xa6, 0x9a).to_hex(), "#26a69a");
+    }
+
+    #[test]
+    fn to_css_preserves_alpha_and_round_trips() {
+        // Opaque colors stay in the compact hex form.
+        assert_eq!(Color::rgb(0x26, 0xa6, 0x9a).to_css(), "#26a69a");
+        // Any alpha < 1 switches to the functional form with a 0..1 alpha.
+        let translucent = Color::rgba(0x26, 0xa6, 0x9a, 0x80);
+        assert_eq!(translucent.to_css(), "rgba(38,166,154,0.5019607843137255)");
+        // Every possible alpha byte survives the string round trip exactly.
+        for a in [0u8, 1, 0x80, 0xFE, 0xFF] {
+            let c = Color::rgba(10, 20, 30, a);
+            assert_eq!(Color::parse_css(&c.to_css()), Some(c));
+        }
     }
 }

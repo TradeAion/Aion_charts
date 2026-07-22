@@ -8,14 +8,37 @@
 //! scale even when their sample sets differ.
 
 use crate::helpers::algorithms::lower_bound;
+use crate::model::data_validation::is_whitespace_values;
 use crate::model::plot_list::PlotList;
 use crate::TimePointIndex;
 
 pub type SeriesId = usize;
 
+/// Per-data-item color channels (LWC data-item colors, model/series-bar-colorer.ts). `Body` is
+/// the candle/bar body color, the line/area stroke (LWC `lineColor` on area items) and point
+/// marker, and the histogram column color; `Wick`/`Border` are the candlestick parts
+/// (`wickColor`/`borderColor`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointColorChannel {
+    Body = 0,
+    Wick = 1,
+    Border = 2,
+}
+
+/// Number of [`PointColorChannel`] slots carried per row.
+pub const POINT_COLOR_CHANNELS: usize = 3;
+
+/// A `0` entry in a present channel means "no override at this row" (a fully transparent color
+/// is not renderable, so 0 is reserved as the absent marker).
+pub const POINT_COLOR_ABSENT: u32 = 0;
+
 struct RawSeries {
     times: Vec<i64>,
     values: [Vec<f64>; 4],
+    /// Per-row color overrides indexed by `PointColorChannel`. Each channel is either empty
+    /// (absent for the whole series) or aligned 1:1 with `times`; kept in lockstep with the
+    /// value columns across set_data/update so plot rows (which mirror raw rows) stay aligned.
+    point_colors: [Vec<u32>; POINT_COLOR_CHANNELS],
     /// Rebuilt against merged indices; keys are positions in `merged_times`.
     plot: PlotList,
 }
@@ -25,6 +48,7 @@ impl RawSeries {
         Self {
             times: Vec::new(),
             values: [vec![], vec![], vec![], vec![]],
+            point_colors: [vec![], vec![], vec![]],
             plot: PlotList::new(),
         }
     }
@@ -73,16 +97,49 @@ impl DataLayer {
     }
 
     /// Merged index of the last point that has data (the time-scale base index), or None.
+    /// Whitespace rows (LWC `{time}`-only items) occupy time points but carry no data, so —
+    /// like LWC's `_getBaseIndex` (data-layer.ts:495-510), which reads the whitespace-filtered
+    /// series rows — the base index is the last point holding a real bar in any series. When
+    /// every series' rows are whitespace the index is 0 (LWC's initialized `baseIndex`).
     pub fn base_index(&self) -> Option<TimePointIndex> {
         if self.merged_times.is_empty() {
-            None
-        } else {
-            Some(self.merged_times.len() as i64 - 1)
+            return None;
+        }
+        let mut last_data_time: Option<i64> = None;
+        for s in &self.series {
+            let row = s.times.len();
+            for row in (0..row).rev() {
+                let values = [
+                    s.values[0][row],
+                    s.values[1][row],
+                    s.values[2][row],
+                    s.values[3][row],
+                ];
+                if !is_whitespace_values(values) {
+                    last_data_time = Some(match last_data_time {
+                        Some(t) => t.max(s.times[row]),
+                        None => s.times[row],
+                    });
+                    break;
+                }
+            }
+        }
+        match last_data_time {
+            // The time came from a series, so it is in the merged union by construction; fall
+            // back to the insertion point instead of panicking if that invariant ever breaks.
+            Some(t) => Some(
+                self.merged_times
+                    .binary_search(&t)
+                    .unwrap_or_else(|pos| pos.min(self.merged_times.len() - 1))
+                    as TimePointIndex,
+            ),
+            None => Some(0),
         }
     }
 
     /// Full (re)assignment of a series' data. `times` must be ascending. Rebuilds the merged
-    /// time points and re-maps every series onto the new index space.
+    /// time points and re-maps every series onto the new index space. Resets the series'
+    /// per-point colors (the host re-installs them against the new rows afterwards).
     pub fn set_data(
         &mut self,
         id: SeriesId,
@@ -99,14 +156,76 @@ impl DataLayer {
         let s = &mut self.series[id];
         s.times = times;
         s.values = [open, high, low, close];
+        s.point_colors = [vec![], vec![], vec![]];
         self.rebuild_merged();
         self.reindex_all();
+    }
+
+    /// Install the series' per-row color channels (LWC data-item colors). Each channel is
+    /// `None`/empty for absent, or must match the series' row count exactly; a length mismatch
+    /// rejects the whole call (false, no partial state). Within a channel, a `0` entry means
+    /// "no override at this row" ([`POINT_COLOR_ABSENT`]).
+    pub fn set_point_colors(
+        &mut self,
+        id: SeriesId,
+        channels: [Option<Vec<u32>>; POINT_COLOR_CHANNELS],
+    ) -> bool {
+        let rows = self.series[id].times.len();
+        if channels
+            .iter()
+            .flatten()
+            .any(|channel| !channel.is_empty() && channel.len() != rows)
+        {
+            return false;
+        }
+        let s = &mut self.series[id];
+        for (slot, channel) in s.point_colors.iter_mut().zip(channels) {
+            *slot = channel.unwrap_or_default();
+        }
+        true
+    }
+
+    /// The per-point color override at `row` for `channel`, or `None` when the channel is
+    /// absent or the row carries [`POINT_COLOR_ABSENT`]. Plot rows mirror raw rows, so a plot
+    /// row offset indexes here directly.
+    pub fn point_color(&self, id: SeriesId, channel: PointColorChannel, row: usize) -> Option<u32> {
+        let s = self.series.get(id)?;
+        let channel = &s.point_colors[channel as usize];
+        if channel.is_empty() {
+            return None;
+        }
+        channel
+            .get(row)
+            .copied()
+            .filter(|&c| c != POINT_COLOR_ABSENT)
+    }
+
+    /// Whether the series has any per-point color channel installed.
+    pub fn has_point_colors(&self, id: SeriesId) -> bool {
+        self.series
+            .get(id)
+            .is_some_and(|s| s.point_colors.iter().any(|c| !c.is_empty()))
     }
 
     /// Streaming update of a series' last point: replaces the last bar or appends a new one.
     /// The fast path (append at a new global max time, or replace an existing point) avoids a
     /// full rebuild.
     pub fn update(&mut self, id: SeriesId, time: i64, values: [f64; 4]) {
+        self.update_styled(id, time, values, [None; POINT_COLOR_CHANNELS]);
+    }
+
+    /// [`update`] plus the target bar's per-point colors (LWC `series.update` with data-item
+    /// colors; `None` = no custom color for that channel). The color channels stay aligned
+    /// with the rows in every path: appended rows push, a replaced last bar takes the new
+    /// channels (a plain `update` clears that bar's overrides, matching LWC's whole-bar
+    /// replacement), and a mid-history insert splices.
+    pub fn update_styled(
+        &mut self,
+        id: SeriesId,
+        time: i64,
+        values: [f64; 4],
+        colors: [Option<u32>; POINT_COLOR_CHANNELS],
+    ) {
         let last_merged = self.merged_times.last().copied();
 
         // Case 1: brand-new global max time — appended at the end, no indices shift.
@@ -114,7 +233,7 @@ impl DataLayer {
             let new_index = self.merged_times.len() as TimePointIndex;
             self.merged_times.push(time);
             let s = &mut self.series[id];
-            push_raw(s, time, values);
+            push_raw(s, time, values, colors);
             s.plot.upsert_last(new_index, values);
             return;
         }
@@ -130,8 +249,13 @@ impl DataLayer {
                 for (col, v) in s.values.iter_mut().zip(values) {
                     col[row] = v;
                 }
+                for (channel, color) in s.point_colors.iter_mut().zip(colors) {
+                    if !channel.is_empty() {
+                        channel[row] = color.unwrap_or(POINT_COLOR_ABSENT);
+                    }
+                }
             } else {
-                push_raw(s, time, values);
+                push_raw(s, time, values, colors);
             }
             s.plot.upsert_last(pos as TimePointIndex, values);
             return;
@@ -144,14 +268,48 @@ impl DataLayer {
             for (col, v) in s.values.iter_mut().zip(values) {
                 col[insert] = v;
             }
+            for (channel, color) in s.point_colors.iter_mut().zip(colors) {
+                if !channel.is_empty() {
+                    channel[insert] = color.unwrap_or(POINT_COLOR_ABSENT);
+                }
+            }
         } else {
             s.times.insert(insert, time);
             for (col, v) in s.values.iter_mut().zip(values) {
                 col.insert(insert, v);
             }
+            for (channel, color) in s.point_colors.iter_mut().zip(colors) {
+                if !channel.is_empty() {
+                    channel.insert(insert, color.unwrap_or(POINT_COLOR_ABSENT));
+                }
+            }
         }
         self.rebuild_merged();
         self.reindex_all();
+    }
+
+    /// Remove the last `count` rows of a series (LWC `popSeriesData`, data-layer.ts:338-383):
+    /// `count` 0 is a no-op, larger counts clamp to the row count. Per-point color channels
+    /// truncate in lockstep with their rows, and the merged time points are rebuilt so times
+    /// no series occupies anymore leave the shared axis. Returns the new row count.
+    pub fn pop(&mut self, id: SeriesId, count: usize) -> usize {
+        let keep = self.series[id].times.len().saturating_sub(count);
+        let s = &mut self.series[id];
+        if keep == s.times.len() {
+            return keep;
+        }
+        s.times.truncate(keep);
+        for col in &mut s.values {
+            col.truncate(keep);
+        }
+        for channel in &mut s.point_colors {
+            if !channel.is_empty() {
+                channel.truncate(keep);
+            }
+        }
+        self.rebuild_merged();
+        self.reindex_all();
+        keep
     }
 
     fn rebuild_merged(&mut self) {
@@ -199,10 +357,20 @@ impl DataLayer {
     }
 }
 
-fn push_raw(s: &mut RawSeries, time: i64, values: [f64; 4]) {
+fn push_raw(
+    s: &mut RawSeries,
+    time: i64,
+    values: [f64; 4],
+    colors: [Option<u32>; POINT_COLOR_CHANNELS],
+) {
     s.times.push(time);
     for (col, v) in s.values.iter_mut().zip(values) {
         col.push(v);
+    }
+    for (channel, color) in s.point_colors.iter_mut().zip(colors) {
+        if !channel.is_empty() {
+            channel.push(color.unwrap_or(POINT_COLOR_ABSENT));
+        }
     }
 }
 
@@ -315,5 +483,159 @@ mod tests {
         assert_eq!(dl.merged_times(), &[] as &[i64]);
         assert_eq!(dl.base_index(), None);
         assert!(dl.plot(a).is_empty());
+    }
+
+    #[test]
+    fn point_colors_validate_lengths_and_clear() {
+        let mut dl = DataLayer::new();
+        let a = dl.add_series();
+        set(&mut dl, a, &[1, 2, 3], &[10.0, 20.0, 30.0]);
+        assert!(!dl.has_point_colors(a));
+
+        // A channel longer than the row count rejects the whole call (no partial state).
+        assert!(!dl.set_point_colors(a, [Some(vec![7, 8]), None, None]));
+        assert!(!dl.has_point_colors(a));
+
+        assert!(dl.set_point_colors(a, [Some(vec![11, 0, 33]), Some(vec![1, 2, 3]), None]));
+        assert!(dl.has_point_colors(a));
+        assert_eq!(dl.point_color(a, PointColorChannel::Body, 0), Some(11));
+        assert_eq!(dl.point_color(a, PointColorChannel::Body, 1), None); // 0 = absent
+        assert_eq!(dl.point_color(a, PointColorChannel::Body, 2), Some(33));
+        assert_eq!(dl.point_color(a, PointColorChannel::Wick, 1), Some(2));
+        assert_eq!(dl.point_color(a, PointColorChannel::Border, 1), None);
+
+        // None/empty channels clear.
+        assert!(dl.set_point_colors(a, [None, Some(vec![]), None]));
+        assert!(!dl.has_point_colors(a));
+    }
+
+    #[test]
+    fn set_data_resets_point_colors() {
+        let mut dl = DataLayer::new();
+        let a = dl.add_series();
+        set(&mut dl, a, &[1, 2], &[10.0, 20.0]);
+        assert!(dl.set_point_colors(a, [Some(vec![5, 6]), None, None]));
+        set(&mut dl, a, &[1, 2, 3], &[10.0, 20.0, 30.0]);
+        assert!(!dl.has_point_colors(a));
+        assert_eq!(dl.point_color(a, PointColorChannel::Body, 0), None);
+    }
+
+    #[test]
+    fn update_keeps_point_colors_aligned() {
+        let mut dl = DataLayer::new();
+        let a = dl.add_series();
+        set(&mut dl, a, &[1, 2, 3], &[10.0, 20.0, 30.0]);
+        assert!(dl.set_point_colors(a, [Some(vec![11, 22, 33]), None, None]));
+
+        // Append with a styled update: the new row carries its override.
+        dl.update_styled(a, 4, [40.0, 41.0, 39.0, 40.0], [Some(44), None, None]);
+        assert_eq!(dl.point_color(a, PointColorChannel::Body, 3), Some(44));
+
+        // Append with a plain update: the new row has no override, the channel stays aligned.
+        dl.update(a, 5, [50.0, 51.0, 49.0, 50.0]);
+        assert_eq!(dl.point_color(a, PointColorChannel::Body, 4), None);
+        assert_eq!(dl.point_color(a, PointColorChannel::Body, 3), Some(44));
+
+        // Replace-last with a plain update clears that bar's override (LWC whole-bar
+        // replacement); a styled replace sets it.
+        dl.update(a, 5, [55.0, 56.0, 54.0, 55.0]);
+        assert_eq!(dl.point_color(a, PointColorChannel::Body, 4), None);
+        dl.update_styled(a, 5, [55.0, 56.0, 54.0, 55.0], [Some(55), None, None]);
+        assert_eq!(dl.point_color(a, PointColorChannel::Body, 4), Some(55));
+    }
+
+    #[test]
+    fn pop_truncates_rows_colors_and_merged_times() {
+        let mut dl = DataLayer::new();
+        let a = dl.add_series();
+        let b = dl.add_series();
+        set(&mut dl, a, &[1, 2, 3, 4], &[10.0, 20.0, 30.0, 40.0]);
+        set(&mut dl, b, &[3, 4], &[90.0, 95.0]);
+        assert!(dl.set_point_colors(a, [Some(vec![11, 22, 33, 44]), None, None]));
+
+        // Clamp to the row count; colors shift along with their rows (LWC popSeriesData).
+        assert_eq!(dl.pop(a, 10), 0);
+        assert_eq!(dl.plot(a).indices(), &[] as &[i64]);
+        // A's times left the merged axis; B's remain.
+        assert_eq!(dl.merged_times(), &[3, 4]);
+        assert!(!dl.has_point_colors(a));
+
+        set(&mut dl, a, &[1, 2, 3, 4], &[10.0, 20.0, 30.0, 40.0]);
+        assert!(dl.set_point_colors(a, [Some(vec![11, 22, 33, 44]), None, None]));
+        assert_eq!(dl.pop(a, 0), 4); // count 0 is a no-op
+        assert_eq!(dl.pop(a, 2), 2);
+        assert_eq!(dl.plot(a).indices(), &[0, 1]);
+        assert_eq!(dl.point_color(a, PointColorChannel::Body, 0), Some(11));
+        assert_eq!(dl.point_color(a, PointColorChannel::Body, 1), Some(22));
+        assert_eq!(dl.point_color(a, PointColorChannel::Body, 2), None);
+        // shared times 3,4 survive through B
+        assert_eq!(dl.merged_times(), &[1, 2, 3, 4]);
+        assert_eq!(dl.pop(a, 5), 0);
+        assert_eq!(dl.merged_times(), &[3, 4]);
+    }
+
+    #[test]
+    fn whitespace_rows_stay_in_place_and_off_the_base_index() {
+        let mut dl = DataLayer::new();
+        let a = dl.add_series();
+        let nan = f64::NAN;
+        // bars at 1,2,4 and explicit whitespace rows at 3,5 (LWC `{time}`-only items)
+        dl.set_data(
+            a,
+            vec![1, 2, 3, 4, 5],
+            vec![10.0, 20.0, nan, 40.0, nan],
+            vec![10.0, 20.0, nan, 40.0, nan],
+            vec![10.0, 20.0, nan, 40.0, nan],
+            vec![10.0, 20.0, nan, 40.0, nan],
+        );
+        // the whitespace times occupy merged slots (LWC keeps the time-scale points)
+        assert_eq!(dl.merged_times(), &[1, 2, 3, 4, 5]);
+        assert_eq!(dl.plot(a).indices(), &[0, 1, 2, 3, 4]);
+        assert!(dl.plot(a).is_whitespace_row(2));
+        assert!(dl.plot(a).is_whitespace_row(4));
+        // base index = the last point with real data (LWC _getBaseIndex), not the trailing ws
+        assert_eq!(dl.base_index(), Some(3));
+    }
+
+    #[test]
+    fn whitespace_update_replaces_and_appends() {
+        let mut dl = DataLayer::new();
+        let a = dl.add_series();
+        let nan = f64::NAN;
+        set(&mut dl, a, &[1, 2, 3], &[10.0, 20.0, 30.0]);
+        // LWC `series.update` with a `{time}`-only item replaces the last bar with whitespace.
+        dl.update(a, 3, [nan; 4]);
+        assert!(dl.plot(a).is_whitespace_row(2));
+        assert_eq!(dl.base_index(), Some(1));
+        // a whitespace append creates a time point but does not move the base index
+        dl.update(a, 4, [nan; 4]);
+        assert_eq!(dl.merged_times(), &[1, 2, 3, 4]);
+        assert_eq!(dl.base_index(), Some(1));
+        // ...and a real bar at that whitespace time moves it again (the gated LWC shift case)
+        dl.update(a, 4, [40.0, 41.0, 39.0, 40.0]);
+        assert!(!dl.plot(a).is_whitespace_row(3));
+        assert_eq!(dl.base_index(), Some(3));
+    }
+
+    #[test]
+    fn mid_history_insert_splices_point_colors() {
+        let mut dl = DataLayer::new();
+        let a = dl.add_series();
+        set(&mut dl, a, &[1, 2, 4], &[10.0, 20.0, 40.0]);
+        assert!(dl.set_point_colors(a, [Some(vec![11, 22, 44]), None, None]));
+
+        // Insert a new bar at time 3 (mid-history rebuild): colors shift with the rows.
+        dl.update_styled(a, 3, [30.0, 31.0, 29.0, 30.0], [Some(33), None, None]);
+        assert_eq!(
+            (0..4)
+                .map(|row| dl.point_color(a, PointColorChannel::Body, row))
+                .collect::<Vec<_>>(),
+            vec![Some(11), Some(22), Some(33), Some(44)]
+        );
+
+        // Overwrite a mid-history bar with a plain update: only its override clears.
+        dl.update(a, 2, [20.0, 21.0, 19.0, 20.0]);
+        assert_eq!(dl.point_color(a, PointColorChannel::Body, 1), None);
+        assert_eq!(dl.point_color(a, PointColorChannel::Body, 2), Some(33));
     }
 }

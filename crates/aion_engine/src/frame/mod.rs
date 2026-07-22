@@ -4,9 +4,12 @@
 //! returned primitives into any raster backend, or inspect them in tests.
 
 use aion_core::format::percentage_formatter::PercentageFormatter;
+use aion_core::format::price_formatter::PriceFormatter;
 use aion_core::format::time_formatter::{
-    format_crosshair_time, format_tick_label, weight_to_tick_mark_type, TickMarkType,
+    format_crosshair_time_with, format_tick_label_with, weight_to_tick_mark_type, TickMarkType,
 };
+use aion_core::format::volume_formatter::VolumeFormatter;
+use aion_core::model::data_layer::{PointColorChannel, SeriesId};
 use aion_core::model::magnet::{magnet_snap_coordinate, CrosshairMode};
 use aion_core::model::plot_list::{MismatchDirection, PlotList, PlotValueIndex};
 use aion_core::model::price_range::PriceRange;
@@ -16,8 +19,11 @@ use aion_render::candles::{build_candles, CandleItem, CandlesParams};
 use aion_render::color::Color;
 use aion_render::draw_list::{Gradient, LineStyle, LineType, Prim};
 use aion_render::histogram::{build_histogram, HistogramItem, HistogramParams};
+use aion_render::line::{dash_split, expand_line, LinePoint};
 
-use crate::{ChartEngine, PriceScaleTarget, SeriesKind, PANE_SEPARATOR};
+use crate::{
+    ChartEngine, PriceFormatKind, PriceScaleTarget, SeriesKind, SeriesPriceFormat, PANE_SEPARATOR,
+};
 
 mod axis;
 mod conflation;
@@ -40,15 +46,17 @@ const VOLUME_UP: Color = Color::rgba(0x26, 0xa6, 0x9a, 0x80);
 const VOLUME_DOWN: Color = Color::rgba(0xef, 0x53, 0x50, 0x80);
 const BASELINE_TOP_LINE: Color = Color::rgb(0x26, 0xa6, 0x9a);
 const BASELINE_BOTTOM_LINE: Color = Color::rgb(0xef, 0x53, 0x50);
-const BASELINE_TOP_FILL: Color = Color::rgba(0x26, 0xa6, 0x9a, 0x48);
-const BASELINE_BOTTOM_FILL: Color = Color::rgba(0xef, 0x53, 0x50, 0x48);
-const LINE_WIDTH: f64 = 3.0;
+/// LWC baseline quadrant fill defaults (model/series/baseline-series.ts): two-stop gradients
+/// from the line to the baseline. Alphas are the CSS 0..1 values quantized to bytes
+/// (0.28 -> 71, 0.05 -> 13, matching `Color::parse_css`).
+const BASELINE_TOP_FILL1: Color = Color::rgba(0x26, 0xa6, 0x9a, 71);
+const BASELINE_TOP_FILL2: Color = Color::rgba(0x26, 0xa6, 0x9a, 13);
+const BASELINE_BOTTOM_FILL1: Color = Color::rgba(0xef, 0x53, 0x50, 13);
+const BASELINE_BOTTOM_FILL2: Color = Color::rgba(0xef, 0x53, 0x50, 71);
+pub(crate) const LINE_WIDTH: f64 = 3.0;
 const CROSSHAIR_COLOR: Color = Color::rgb(0x95, 0x98, 0xa1);
 /// LWC crosshair label background default (`#131722`); fallback when the option is unparseable.
 const CROSSHAIR_LABEL_BG: Color = Color::rgb(0x13, 0x17, 0x22);
-const CROSSHAIR_MARKER_RADIUS: f64 = 4.0;
-const CROSSHAIR_MARKER_BORDER_WIDTH: f64 = 2.0;
-const MARKER_BORDER_COLOR: Color = Color::rgb(0xff, 0xff, 0xff);
 
 fn ceiled_odd(value: f64) -> f64 {
     let ceiled = value.ceil() as i64;
@@ -164,6 +172,25 @@ pub struct AxisLabel {
 pub struct AxisFrame {
     pub labels: Vec<AxisLabel>,
     pub separators: Vec<f64>,
+    /// Price-axis tick stubs (LWC `ticksVisible`): 5 css px horizontal marks painted from the
+    /// pane edge into the axis strip at each tick coordinate, in the strip's border color.
+    /// Emitted only for scales whose `ticksVisible` option is on.
+    pub price_ticks: Vec<PriceAxisTick>,
+    /// Time-axis tick x positions (media px, relative to the chart origin) for the
+    /// `ticksVisible` stubs; empty while `timeScale.ticksVisible` is off.
+    pub time_ticks: Vec<f64>,
+    /// Index (into `separators`) of the hovered pane separator, if any — the host paints the
+    /// `layout.panes.separatorHoverColor` band over it (LWC pane-separator.ts).
+    pub separator_hover: Option<usize>,
+}
+
+/// One price-axis tick stub (LWC price-axis-widget.ts `_drawTickMarks`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PriceAxisTick {
+    /// Media-y of the tick mark (same coordinate as its label).
+    pub y: f64,
+    /// Which strip the tick belongs to (`true` = left axis, `false` = right).
+    pub left: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -180,14 +207,32 @@ struct ResolvedSeries {
     wick_visible: bool,
     border_visible: bool,
     line_width: f64,
+    line_style: LineStyle,
+    line_visible: bool,
     area_top: Color,
     area_bottom: Color,
+    invert_filled_area: bool,
     point_markers: bool,
+    point_markers_radius: Option<f64>,
     visible: bool,
-    baseline: Option<f64>,
     line_type: LineType,
+    open_visible: bool,
+    thin_bars: bool,
+    base: f64,
+    top_fill1: Color,
+    top_fill2: Color,
+    top_line: Color,
+    top_line_width: f64,
+    top_line_style: LineStyle,
+    bottom_fill1: Color,
+    bottom_fill2: Color,
+    bottom_line: Color,
+    bottom_line_width: f64,
+    bottom_line_style: LineStyle,
     scale_target: PriceScaleTarget,
-    pane: usize,
+    /// The pane this series renders on; `None` when its pane was removed (LWC `removePane`
+    /// orphans the pane's series) — it draws and scales nowhere until re-assigned.
+    pane: Option<usize>,
     base_value: f64,
 }
 
@@ -211,6 +256,115 @@ fn pane_scale(pane: &crate::Pane, target: PriceScaleTarget) -> &PriceScaleCore {
 
 fn css_color(value: &str, fallback: Color) -> Color {
     Color::parse_css(value).unwrap_or(fallback)
+}
+
+/// Resolve a verbatim CSS color slot at render time (the wave-1 pattern): the stored string
+/// parses, an unset slot or an unparseable string falls back to `fallback` (LWC's default —
+/// a user string the renderer cannot parse degrades to the default rather than vanishing).
+pub(crate) fn verbatim_color(value: &Option<String>, fallback: Color) -> Color {
+    value
+        .as_deref()
+        .and_then(Color::parse_css)
+        .unwrap_or(fallback)
+}
+
+impl ChartEngine {
+    /// The Baseline series' effective baseline price: the pinned `baseline_value` option, or
+    /// the visible-range close midpoint (the engine's auto mode when the option is unset).
+    /// Shared by the baseline geometry builder and the bar-color resolution so both agree on
+    /// which side of the baseline a bar sits.
+    pub(crate) fn resolved_baseline_price(&self, id: SeriesId, from: i64, to: i64) -> Option<f64> {
+        let series = self.series.iter().find(|s| s.id == id)?;
+        if let Some(price) = series.baseline {
+            return Some(price);
+        }
+        let plot = self.data.plot(id);
+        let close = plot.column(PlotValueIndex::Close);
+        let mut min = f64::INFINITY;
+        let mut max = f64::NEG_INFINITY;
+        let mut any = false;
+        for row in plot.visible_rows(from, to) {
+            let value = close[row];
+            if value.is_finite() {
+                min = min.min(value);
+                max = max.max(value);
+                any = true;
+            }
+        }
+        any.then_some((min + max) / 2.0)
+    }
+
+    /// LWC `SeriesBarColorer.barColor` (model/series-bar-colorer.ts) for the series' bar at
+    /// `row`: the color the built-in last-price line, the last-value axis label, and the
+    /// crosshair marker background all follow when their own color option is unset.
+    /// `baseline_price` is the resolved baseline for Baseline series (`None` for other kinds).
+    pub(crate) fn series_bar_color(
+        &self,
+        series: &crate::SeriesEntry,
+        row: usize,
+        baseline_price: Option<f64>,
+    ) -> Color {
+        let plot = self.data.plot(series.id);
+        // LWC data-item colors: a per-point `color` (area reads `lineColor`, mapped onto the
+        // body channel here) wins over the series-level resolution for every kind that reads
+        // it (bar/candlestick/line/area/histogram); Baseline's barColor ignores data-item
+        // colors (series-bar-colorer.ts Baseline arm).
+        if !matches!(series.kind, SeriesKind::Baseline) {
+            if let Some(c) = self
+                .data
+                .point_color(series.id, PointColorChannel::Body, row)
+            {
+                return Color(c);
+            }
+        }
+        match series.kind {
+            // A line_color still holding the default placeholder resolves to the kind default,
+            // exactly like the geometry builders.
+            SeriesKind::Line => verbatim_color(&series.line_color, crate::DEFAULT_LINE_COLOR),
+            SeriesKind::Area => {
+                let color = verbatim_color(&series.line_color, crate::DEFAULT_LINE_COLOR);
+                if color != LINE {
+                    color
+                } else {
+                    AREA_LINE
+                }
+            }
+            SeriesKind::Histogram => {
+                let color = verbatim_color(&series.line_color, crate::DEFAULT_LINE_COLOR);
+                if color != LINE {
+                    color
+                } else {
+                    HISTOGRAM
+                }
+            }
+            // LWC baseline colorer: top line color at/above the baseline, bottom below it.
+            SeriesKind::Baseline => {
+                let close = plot.value_at(row, PlotValueIndex::Close);
+                match baseline_price {
+                    Some(base) if close < base => series
+                        .bottom_line_color
+                        .as_deref()
+                        .and_then(Color::parse_css)
+                        .unwrap_or(BASELINE_BOTTOM_LINE),
+                    _ => series
+                        .top_line_color
+                        .as_deref()
+                        .and_then(Color::parse_css)
+                        .unwrap_or(BASELINE_TOP_LINE),
+                }
+            }
+            // LWC bar/candlestick colorer: up when open <= close.
+            SeriesKind::Candlestick | SeriesKind::Bar => {
+                let open = plot.value_at(row, PlotValueIndex::Open);
+                let close = plot.value_at(row, PlotValueIndex::Close);
+                if open <= close {
+                    verbatim_color(&series.up_color, UP)
+                } else {
+                    verbatim_color(&series.down_color, DOWN)
+                }
+            }
+        }
+    }
 }
 
 fn translate_prims_x(prims: &mut [Prim], dx: i32) {
@@ -274,34 +428,80 @@ impl ChartEngine {
         let pane_w_px = (self.pane_w * hpr).round().max(1.0) as u32;
         let pane_left_px = (self.pane_left * nominal_dpr).round().max(0.0) as u32;
         let mut resolved = Vec::with_capacity(self.series.len());
-        for s in &self.series {
+        // Paint in the chart's series order (LWC z-order, pane.ts orderedSources): ids run
+        // bottom to top so a later entry overpaints the earlier ones within its pane.
+        for &id in self.series_order() {
+            let s = &self.series[id];
             let base_value = visible
                 .and_then(|(from, _)| self.series_base_value(s.id, from))
                 .unwrap_or(0.0);
-            let up = s.up_color.unwrap_or(UP);
-            let down = s.down_color.unwrap_or(DOWN);
+            let up = verbatim_color(&s.up_color, UP);
+            let down = verbatim_color(&s.down_color, DOWN);
             resolved.push(ResolvedSeries {
                 id: s.id,
                 kind: s.kind,
-                color: s.line_color,
+                color: verbatim_color(&s.line_color, crate::DEFAULT_LINE_COLOR),
                 up,
                 down,
                 // LWC parity: an unset wick/border color follows the body color of its direction.
-                wick_up: s.wick_up_color.unwrap_or(up),
-                wick_down: s.wick_down_color.unwrap_or(down),
-                border_up: s.border_up_color.unwrap_or(up),
-                border_down: s.border_down_color.unwrap_or(down),
+                wick_up: verbatim_color(&s.wick_up_color, up),
+                wick_down: verbatim_color(&s.wick_down_color, down),
+                border_up: verbatim_color(&s.border_up_color, up),
+                border_down: verbatim_color(&s.border_down_color, down),
                 wick_visible: s.wick_visible.unwrap_or(true),
                 border_visible: s.border_visible.unwrap_or(true),
                 line_width: s.line_width.unwrap_or(LINE_WIDTH),
-                area_top: s.area_top_color.unwrap_or(AREA_TOP),
-                area_bottom: s.area_bottom_color.unwrap_or(AREA_BOTTOM),
+                line_style: crate::line_style_from_u8(s.line_style),
+                line_visible: s.line_visible,
+                area_top: verbatim_color(&s.area_top_color, AREA_TOP),
+                area_bottom: verbatim_color(&s.area_bottom_color, AREA_BOTTOM),
+                invert_filled_area: s.invert_filled_area,
                 point_markers: s.point_markers,
+                point_markers_radius: s.point_markers_radius,
                 visible: s.visible,
-                baseline: s.baseline,
                 line_type: s.line_type,
+                open_visible: s.open_visible,
+                thin_bars: s.thin_bars,
+                base: s.base,
+                // LWC baselineStyleDefaults; an unset quadrant line width follows the series'
+                // line width (LWC's single baseline lineWidth). Quadrant colors are verbatim
+                // CSS strings parsed here, with the LWC default when unset/unparseable.
+                top_fill1: s
+                    .top_fill_color1
+                    .as_deref()
+                    .and_then(Color::parse_css)
+                    .unwrap_or(BASELINE_TOP_FILL1),
+                top_fill2: s
+                    .top_fill_color2
+                    .as_deref()
+                    .and_then(Color::parse_css)
+                    .unwrap_or(BASELINE_TOP_FILL2),
+                top_line: s
+                    .top_line_color
+                    .as_deref()
+                    .and_then(Color::parse_css)
+                    .unwrap_or(BASELINE_TOP_LINE),
+                top_line_width: s.top_line_width.or(s.line_width).unwrap_or(LINE_WIDTH),
+                top_line_style: crate::line_style_from_u8(s.top_line_style),
+                bottom_fill1: s
+                    .bottom_fill_color1
+                    .as_deref()
+                    .and_then(Color::parse_css)
+                    .unwrap_or(BASELINE_BOTTOM_FILL1),
+                bottom_fill2: s
+                    .bottom_fill_color2
+                    .as_deref()
+                    .and_then(Color::parse_css)
+                    .unwrap_or(BASELINE_BOTTOM_FILL2),
+                bottom_line: s
+                    .bottom_line_color
+                    .as_deref()
+                    .and_then(Color::parse_css)
+                    .unwrap_or(BASELINE_BOTTOM_LINE),
+                bottom_line_width: s.bottom_line_width.or(s.line_width).unwrap_or(LINE_WIDTH),
+                bottom_line_style: crate::line_style_from_u8(s.bottom_line_style),
                 scale_target: series_scale_target(s),
-                pane: s.pane_index.min(pane_count - 1),
+                pane: (s.pane_index < pane_count).then_some(s.pane_index),
                 base_value,
             });
         }
@@ -322,6 +522,15 @@ impl ChartEngine {
             out.under.clear();
             out.main.clear();
             out.points.clear();
+            // LWC `layout.background` vertical gradient (pane-widget.ts `_drawBackground`):
+            // each pane paints its own two-stop gradient spanning its full height, behind
+            // the grid and the series. A solid background emits nothing (the backends' clear
+            // color already covers it).
+            if let Some(background) =
+                self.background_gradient_prim(pane_left_px, top_px, pane_w_px, height_px)
+            {
+                out.under.push(background);
+            }
             if let Some((from, to)) = visible {
                 self.build_grid_frame(
                     &mut out.under,
@@ -340,7 +549,7 @@ impl ChartEngine {
                     },
                 );
                 for rs in &resolved {
-                    if rs.pane != pi || !rs.visible {
+                    if rs.pane != Some(pi) || !rs.visible {
                         continue;
                     }
                     let scale = pane_scale(pane, rs.scale_target);
@@ -366,6 +575,7 @@ impl ChartEngine {
                             to,
                             hpr,
                             vpr,
+                            pane.top,
                             pane.top + pane.height,
                             &mut out.main,
                             &mut out.points,
@@ -385,8 +595,16 @@ impl ChartEngine {
                 }
                 self.build_markers_frame(pi, from, to, hpr, vpr, &mut out.main);
                 self.build_price_lines_frame(pi, &mut out.main, pane_w_px as i32, vpr);
+                self.build_last_value_line_frame(
+                    pi,
+                    from,
+                    to,
+                    &mut out.main,
+                    pane_w_px as i32,
+                    hpr,
+                    vpr,
+                );
                 if pi == 0 {
-                    self.build_last_value_line_frame(&mut out.main, pane_w_px as i32, vpr);
                     self.build_last_pulse_frame(&mut out.main, hpr, vpr);
                 }
             }
@@ -418,6 +636,25 @@ impl ChartEngine {
         self.layout_panes(self.pane_h);
     }
 
+    /// The pane's `layout.background` gradient prim (LWC VerticalGradient,
+    /// pane-widget.ts `_drawBackground`): a two-stop vertical gradient covering the pane's
+    /// bitmap rect. `None` for the solid variant — the backends' clear color paints that.
+    /// Accepts LWC's `"gradient"` wire value (and the `"vertical_gradient"` alias).
+    fn background_gradient_prim(&self, x: u32, y: u32, w: u32, h: u32) -> Option<Prim> {
+        let background = &self.options.get().layout.background;
+        if background.kind != "gradient" && background.kind != "vertical_gradient" {
+            return None;
+        }
+        let fallback = Color::rgb(0xff, 0xff, 0xff);
+        Some(Prim::Background {
+            rect: [x as f32, y as f32, w as f32, h as f32],
+            gradient: Gradient {
+                top: Color::parse_css(&background.top_color).unwrap_or(fallback),
+                bottom: Color::parse_css(&background.bottom_color).unwrap_or(fallback),
+            },
+        })
+    }
+
     fn visible_range_for_frame(&self) -> Option<(i64, i64)> {
         let n = self.data.merged_times().len() as i64;
         let r = self.time_scale.visible_strict_range()?;
@@ -444,10 +681,14 @@ impl ChartEngine {
         let mut overlay_marker_margins = vec![(0.0_f64, 0.0_f64); n];
         for s in &self.series {
             // Hidden series remain engine-owned so they can be toggled back on, but—matching
-            // LWC—they must not contribute to the active price-scale autoscale range.
+            // LWC—they must not contribute to the active price-scale autoscale range. A
+            // pane-less series (its pane was removed) scales nowhere either.
             if !s.visible {
                 continue;
             }
+            let Some(pane_index) = (s.pane_index < n).then_some(s.pane_index) else {
+                continue;
+            };
             let mm = self.data.plot_mut(s.id).min_max_on_range_cached(
                 from,
                 to,
@@ -456,7 +697,6 @@ impl ChartEngine {
             let Some(mm) = mm else {
                 continue;
             };
-            let pane_index = s.pane_index.min(n - 1);
             let Some(base_value) = self.series_base_value(s.id, from) else {
                 continue;
             };
@@ -544,7 +784,9 @@ impl ChartEngine {
     }
 
     fn time_marks_for_frame(&mut self) -> Vec<(i64, u8)> {
-        let max_width = (12.0 + 4.0) * 5.0 / 8.0 * 8.0;
+        // LWC time-scale.ts:635 — `(fontSize + 4) * 5 / 8 * tickMarkMaxCharacterLength` with
+        // the grid's fixed 12px estimate; the option widens/narrows the mark spacing.
+        let max_width = (12.0 + 4.0) * 5.0 / 8.0 * f64::from(self.tick_mark_max_character_length);
         self.time_marks(max_width)
     }
 

@@ -17,6 +17,14 @@ impl Default for PercentageFormatter {
 }
 
 impl PercentageFormatter {
+    /// A percentage formatter with a custom price scale (`10^precision` for `precision`
+    /// decimals; the default is 100 = 2 decimals).
+    pub fn with_price_scale(price_scale: i64) -> Self {
+        Self {
+            inner: PriceFormatter::new(price_scale, 1.0),
+        }
+    }
+
     pub fn format(&self, value: f64) -> String {
         format!("{}%", self.inner.format(value))
     }

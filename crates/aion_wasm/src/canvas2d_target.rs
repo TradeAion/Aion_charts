@@ -9,17 +9,7 @@ use web_sys::CanvasRenderingContext2d;
 
 /// CSS color string that preserves alpha (unlike `Color::to_hex`, which drops it).
 fn css(c: Color) -> String {
-    if c.a() == 0xFF {
-        format!("#{:02x}{:02x}{:02x}", c.r(), c.g(), c.b())
-    } else {
-        format!(
-            "rgba({},{},{},{})",
-            c.r(),
-            c.g(),
-            c.b(),
-            c.a() as f64 / 255.0
-        )
-    }
+    c.to_css()
 }
 
 /// Wraps a 2D canvas context as a [`Canvas2d`] target. Errors from fallible context calls

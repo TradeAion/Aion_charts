@@ -16,7 +16,12 @@ pub(super) fn visible_line_rows(
     hpr: f64,
     x_at: impl Fn(i64) -> f64,
 ) -> Vec<usize> {
-    let visible = plot.visible_rows(from, to);
+    // Whitespace rows (LWC `{time}`-only items) draw nothing: dropping them here leaves the
+    // surrounding real bars adjacent in the result, so the line connects across the gap
+    // exactly like LWC's whitespace-free plot list.
+    let visible = plot
+        .visible_rows(from, to)
+        .filter(|&row| !plot.is_whitespace_row(row));
     if bar_spacing * hpr >= 1.0 {
         return visible.collect();
     }
@@ -72,6 +77,10 @@ pub(super) struct VisibleOhlc {
     pub(super) high: f64,
     pub(super) low: f64,
     pub(super) close: f64,
+    /// Source row supplying the bar's identity fields (open/high/low/close + per-point colors):
+    /// the row itself at normal spacing, the bucket's last row (which owns the close) when
+    /// compressed.
+    pub(super) source_row: usize,
 }
 
 /// Aggregate source OHLC rows that share a physical x pixel.
@@ -92,7 +101,11 @@ pub(super) fn visible_ohlc(
     let high = plot.column(PlotValueIndex::High);
     let low = plot.column(PlotValueIndex::Low);
     let close = plot.column(PlotValueIndex::Close);
-    let visible = plot.visible_rows(from, to);
+    // Whitespace rows draw nothing (LWC's plot list omits them); a compressed bucket only
+    // ever aggregates real bars, so no NaN can leak into an extremum or the bucket close.
+    let visible = plot
+        .visible_rows(from, to)
+        .filter(|&row| !plot.is_whitespace_row(row));
 
     if bar_spacing * hpr >= 1.0 {
         return visible
@@ -102,6 +115,7 @@ pub(super) fn visible_ohlc(
                 high: high[row],
                 low: low[row],
                 close: close[row],
+                source_row: row,
             })
             .collect();
     }
@@ -123,6 +137,7 @@ pub(super) fn visible_ohlc(
                 item.high = item.high.max(high[row]);
                 item.low = item.low.min(low[row]);
                 item.close = close[row];
+                item.source_row = row;
             }
             None => {
                 current = Some(VisibleOhlc {
@@ -131,6 +146,7 @@ pub(super) fn visible_ohlc(
                     high: high[row],
                     low: low[row],
                     close: close[row],
+                    source_row: row,
                 });
             }
         }
@@ -164,7 +180,10 @@ pub(super) fn visible_histogram_rows(
 ) -> Vec<VisibleHistogramRow> {
     let indices = plot.indices();
     let close = plot.column(PlotValueIndex::Close);
-    let visible = plot.visible_rows(from, to);
+    // Whitespace rows draw nothing (LWC's plot list omits them).
+    let visible = plot
+        .visible_rows(from, to)
+        .filter(|&row| !plot.is_whitespace_row(row));
     if bar_spacing * hpr >= 1.0 {
         return visible
             .map(|source_row| VisibleHistogramRow {

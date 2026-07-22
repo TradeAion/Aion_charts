@@ -25,6 +25,7 @@ pub fn demo_scene() -> Scene {
 
     let mut prims: Vec<Prim> = Vec::new();
     prims.push(Prim::Background {
+        rect: [0.0, 0.0, w as f32, h as f32],
         gradient: Gradient {
             top: Color::rgb(0xff, 0xff, 0xff),
             bottom: Color::rgb(0xf0, 0xf4, 0xff),

@@ -12,6 +12,7 @@
  */
 
 import type { chart_impl } from "./impl.js";
+import { pane_index_of_y } from "./impl.js";
 
 const SLOP_MANHATTAN = 5; // px before a press becomes a drag (LWC CancelClick/CancelTapManhattanDistance)
 const SEP_HIT = 4; // css px hit tolerance around a pane boundary
@@ -136,6 +137,7 @@ export function install_gestures(chart: chart_impl): () => void {
   const pointers = new Map<number, { x: number; y: number }>();
   let dragging = false; // a time-scale scroll session is active (mouse or touch)
   let sep_drag: { index: number; last_y: number } | null = null;
+  let sep_hover = -1; // separator index last reported via set_separator_hover (-1 = none)
   let axis_drag: AxisDrag | null = null;
   let press_origin: { x: number; y: number } | null = null;
   let moved = false; // mouse press moved past the click slop (LWC _cancelClick)
@@ -189,6 +191,14 @@ export function install_gestures(chart: chart_impl): () => void {
     return -1;
   };
 
+  /** Report the hovered separator to the engine (-1 = none); repaint only when it changes. */
+  const set_sep_hover = (index: number) => {
+    if (index === sep_hover) return;
+    sep_hover = index;
+    wasm.set_separator_hover(index);
+    chart.repaint();
+  };
+
   /** Price-axis target under `p` (0 = right, 1 = left), or null if not over a price axis. */
   const price_axis_target_at = (p: { x: number; y: number }): number | null => {
     if (p.x < 0) return 1;
@@ -203,11 +213,7 @@ export function install_gestures(chart: chart_impl): () => void {
     if (is_time_axis(p)) return "time_axis";
     return "pane";
   };
-  const pane_of = (y: number): number => {
-    let pane = 0;
-    for (const sy of wasm.pane_separator_ys()) if (y > sy) pane += 1;
-    return pane;
-  };
+  const pane_of = (y: number): number => pane_index_of_y(wasm.pane_separator_ys(), y);
   /** Pane top offset and height in css px, derived from the separator positions. */
   const pane_geom = (index: number): { top: number; h: number } => {
     const seps = wasm.pane_separator_ys();
@@ -377,7 +383,11 @@ export function install_gestures(chart: chart_impl): () => void {
     // separator drag takes precedence over any pan/scale (LWC layout.panes.enableResize gates it)
     const si = separator_at(p.y);
     if (si >= 0) {
-      if (cfg.panes_resize) sep_drag = { index: si, last_y: p.y };
+      if (cfg.panes_resize) {
+        sep_drag = { index: si, last_y: p.y };
+        // The drag itself highlights the separator; clear the hover highlight.
+        set_sep_hover(-1);
+      }
       return "separator";
     }
     // axis drag-to-scale: price axis (vertical) / time axis (horizontal)
@@ -525,6 +535,8 @@ export function install_gestures(chart: chart_impl): () => void {
 
     // hover cursor feedback (no button pressed)
     if (pointers.size === 0) {
+      // Same gate as the row-resize cursor below: no hover highlight while resizing is off.
+      set_sep_hover(chart.gesture_config().panes_resize ? separator_at(p.y) : -1);
       overlay.style.cursor =
         separator_at(p.y) >= 0 && chart.gesture_config().panes_resize
           ? "row-resize"
@@ -594,6 +606,7 @@ export function install_gestures(chart: chart_impl): () => void {
     if (fires_touch_events(e)) return;
     // LWC `mouseLeaveEvent` hides the crosshair; an active captured drag is left alone.
     if (pointers.size > 0) return;
+    set_sep_hover(-1);
     wasm.clear_crosshair();
     chart.emit_crosshair_left();
     chart.repaint();
@@ -964,6 +977,8 @@ export function install_gestures(chart: chart_impl): () => void {
 
   let scroll_anim: number | null = null;
   const stop_scroll_anim = () => {
+    // A user gesture also supersedes an in-flight animated scroll_to_position.
+    chart.cancel_scroll_animation();
     if (scroll_anim !== null) {
       cancelAnimationFrame(scroll_anim);
       scroll_anim = null;

@@ -35,15 +35,44 @@ export interface ohlc_data {
   high: number;
   low: number;
   close: number;
+  /**
+   * Optional body color for this bar (LWC `BarData.color`/`CandlestickData.color`); when missed,
+   * the color from the series options is used. snake_case per the package API convention.
+   */
+  color?: string;
+  /**
+   * Optional wick color for this bar (LWC `CandlestickData.wickColor`); when missed, the color
+   * from the series options is used. snake_case per the package API convention.
+   */
+  wick_color?: string;
+  /**
+   * Optional border color for this bar (LWC `CandlestickData.borderColor`); when missed, the
+   * color from the series options is used. snake_case per the package API convention.
+   */
+  border_color?: string;
 }
 
 /** Single-value point for line/area/histogram series. */
 export interface single_value_data {
   time: time;
   value: number;
+  /**
+   * Optional color for this point (LWC `LineData.color`/`HistogramData.color`); when missed, the
+   * color from the series options is used.
+   */
+  color?: string;
 }
 
-export type series_data = ohlc_data | single_value_data;
+/**
+ * A whitespace point (LWC `WhitespaceData`): reserves a time slot without carrying a value.
+ * The engine keeps the row as an explicit empty slot instead of dropping it, so it can later be
+ * replaced by a real bar via {@link series_api.update}.
+ */
+export interface whitespace_data {
+  time: time;
+}
+
+export type series_data = ohlc_data | single_value_data | whitespace_data;
 
 /** Inclusive logical (bar-index) range. */
 export interface logical_range {
@@ -67,6 +96,17 @@ export type mismatch_direction = -1 | 0 | 1;
 export type data_changed_scope = "full" | "update";
 export type data_changed_handler = (scope: data_changed_scope) => void;
 
+/**
+ * The last value of a series as reported by the engine (cf. LWC `LastValueDataResult`, which
+ * instead returns `{ noData, price, color, ... }`). `formatted` is the value rendered with the
+ * series' price format; `time` is the UTC-second timestamp of the bar the value came from.
+ */
+export interface last_value_data {
+  value: number;
+  formatted: string;
+  time: number;
+}
+
 /** Parameters delivered to crosshair-move and click subscribers (mirrors LWC `MouseEventParams`). */
 export interface mouse_event_params {
   /** UTC seconds of the bar under the cursor, or `null` off the data. */
@@ -75,6 +115,8 @@ export interface mouse_event_params {
   logical: number | null;
   /** Cursor position in CSS px relative to the pane, or `null` when the cursor left the chart. */
   point: { x: number; y: number } | null;
+  /** Index of the pane under the cursor, or `null` over an axis strip or outside the panes. */
+  pane_index: number | null;
   /** Per-series value at the hovered bar, keyed by the series handle. */
   series_data: Map<series_api, ohlc_data | single_value_data>;
 }
@@ -83,6 +125,8 @@ export type mouse_event_handler = (params: mouse_event_params) => void;
 export type dbl_click_handler = (params: mouse_event_params) => void;
 export type visible_logical_range_handler = (range: logical_range | null) => void;
 export type visible_time_range_handler = (range: time_range | null) => void;
+/** Receives the time scale's new media size in px (LWC `SizeChangeEventHandler`). */
+export type size_change_handler = (width: number, height: number) => void;
 
 export interface time_scale_options {
   /** Distance between adjacent bars in CSS pixels. */
@@ -91,6 +135,10 @@ export interface time_scale_options {
   right_offset: number;
   /** Minimum bar spacing in CSS pixels (LWC `minBarSpacing`, default 0.5). */
   min_bar_spacing?: number;
+  /** Maximum bar spacing in CSS pixels (LWC `maxBarSpacing`); omit for unlimited. */
+  max_bar_spacing?: number;
+  /** Right margin after the last bar in CSS pixels (LWC `rightOffsetPixels`). */
+  right_offset_pixels?: number;
   /** Show the time of day (not just the date) in axis/crosshair labels (LWC `timeVisible`). */
   time_visible?: boolean;
   /** Include seconds when the time is shown (LWC `secondsVisible`). */
@@ -103,6 +151,36 @@ export interface time_scale_options {
   lock_visible_time_range_on_resize?: boolean;
   /** Keep the right-most bar pinned to the right edge while scrolling (LWC `rightBarStaysOnScroll`). */
   right_bar_stays_on_scroll?: boolean;
+  /**
+   * Shift the visible range to the right (into the future) by the number of new bars when new
+   * data is added. Only applies when the last bar is visible (LWC `shiftVisibleRangeOnNewBar`,
+   * default `true`).
+   */
+  shift_visible_range_on_new_bar?: boolean;
+  /**
+   * Allow the visible range to shift right when a new bar replaces an existing whitespace time
+   * point. Only applies when the last bar is visible and `shift_visible_range_on_new_bar` is
+   * enabled (LWC `allowShiftVisibleRangeOnWhitespaceReplacement`, default `false`).
+   */
+  allow_shift_visible_range_on_whitespace_replacement?: boolean;
+  /**
+   * Show the whole time-scale strip (LWC `timeScale.visible`, default `true`). Distinct from
+   * `time_visible`, which only controls whether the labels show the time of day.
+   */
+  visible?: boolean;
+  /** Draw small vertical lines on the time axis labels (LWC `ticksVisible`, default `false`). */
+  ticks_visible?: boolean;
+  /**
+   * Minimum height of the time scale in CSS px (LWC `minimumHeight`, default 0 = auto, i.e.
+   * ~28 px). Exceeded when the scale needs more space; useful to align horizontally stacked
+   * charts' scale heights.
+   */
+  minimum_height?: number;
+  /**
+   * Maximum tick-mark label length in characters, overriding the built-in cap
+   * (LWC `tickMarkMaxCharacterLength`, default 8).
+   */
+  tick_mark_max_character_length?: number;
   /** Custom time-axis tick formatter (LWC `tickMarkFormatter`). Receives `(timeSeconds, tickMarkType)`
    *  where tickMarkType is 0 Year, 1 Month, 2 DayOfMonth, 3 Time, 4 TimeWithSeconds. */
   tick_mark_formatter?: (time: number, tick_mark_type: number) => string;
@@ -114,6 +192,24 @@ export interface price_scale_options {
   auto_scale: boolean;
   invert_scale: boolean;
   scale_margins: { top: number; bottom: number };
+  /** Align price scale labels to prevent them from overlapping (LWC `alignLabels`, default `true`). */
+  align_labels?: boolean;
+  /** Draw small horizontal lines on the price axis labels (LWC `ticksVisible`, default `false`). */
+  ticks_visible?: boolean;
+  /**
+   * Show the top and bottom corner labels only when their text is fully visible
+   * (LWC `entireTextOnly`, default `false`).
+   */
+  entire_text_only?: boolean;
+  /**
+   * Minimum width of the price scale in CSS px (LWC `minimumWidth`, default 0 = auto). Exceeded
+   * when the scale needs more space; useful to align vertically stacked charts' scale widths.
+   */
+  minimum_width?: number;
+  /**
+   * Price scale text color (LWC `textColor`); when unset, the scale follows `layout.textColor`.
+   */
+  text_color?: string;
 }
 
 /** The visible raw-value range of a price scale. */
@@ -130,8 +226,36 @@ export interface grid_line_options {
   style: number;
   visible: boolean;
 }
+
+/**
+ * One crosshair line (LWC `CrosshairLineOptions`). `labelVisible`/`labelBackgroundColor` keep
+ * LWC's camelCase names, matching the engine's serde keys.
+ */
+export interface crosshair_line_options {
+  color?: string;
+  /** Stroke width in CSS px. */
+  width?: number;
+  /** Line style (`line_style` value; default LargeDashed). */
+  style?: number;
+  visible?: boolean;
+  /** Display the crosshair label on the relevant scale (LWC `labelVisible`, default `true`). */
+  labelVisible?: boolean;
+  /** Crosshair label background color (LWC `labelBackgroundColor`). */
+  labelBackgroundColor?: string;
+}
 /** Custom label formatters (LWC `localization`). Each receives numbers and returns a string. */
 export interface localization_options {
+  /**
+   * Current locale used to format dates. Uses the browser's language settings by default
+   * (LWC `localization.locale`, default `navigator.language`).
+   */
+  locale?: string;
+  /**
+   * Date formatting string. Can contain `yyyy`, `yy`, `MMMM`, `MMM`, `MM` and `dd` literals
+   * which will be replaced with the corresponding date's value. Ignored when `time_formatter`
+   * is specified (LWC `localization.dateFormat`, default `'dd MMM \'yy'`).
+   */
+  date_format?: string;
   /** Format any non-percentage price label (axis ticks, last-value badge, crosshair, price lines). */
   price_formatter?: (price: number) => string;
   /** Format the crosshair time label. Receives the UTC-second timestamp. */
@@ -177,6 +301,33 @@ export interface kinetic_scroll_options {
   mouse?: boolean;
 }
 
+/**
+ * Chart-level cosmetics of one visible price axis (LWC `leftPriceScale`/`rightPriceScale`).
+ * Keys keep LWC's camelCase names, matching the engine's serde keys; the engine routes them to
+ * the corresponding scale.
+ */
+export interface chart_price_scale_options {
+  visible: boolean;
+  borderVisible: boolean;
+  borderColor: string;
+  /** Align price scale labels to prevent them from overlapping (LWC `alignLabels`, default `true`). */
+  alignLabels?: boolean;
+  /** Draw small horizontal lines on the price axis labels (LWC `ticksVisible`, default `false`). */
+  ticksVisible?: boolean;
+  /**
+   * Show the top and bottom corner labels only when their text is fully visible
+   * (LWC `entireTextOnly`, default `false`).
+   */
+  entireTextOnly?: boolean;
+  /**
+   * Minimum width of the price scale in CSS px (LWC `minimumWidth`, default 0 = auto). Exceeded
+   * when the scale needs more space; useful to align vertically stacked charts' scale widths.
+   */
+  minimumWidth?: number;
+  /** Price scale text color (LWC `textColor`); when unset, the scale follows `layout.textColor`. */
+  textColor?: string;
+}
+
 /** Crosshair "tracking mode" behavior on touch (LWC `trackingMode`). Package-level. */
 export interface tracking_mode_options {
   /**
@@ -206,9 +357,9 @@ export interface chart_options {
     };
   };
   grid: { vertLines: grid_line_options; horzLines: grid_line_options };
-  crosshair: { vertLine: Partial<grid_line_options>; horzLine: Partial<grid_line_options>; mode: number };
-  leftPriceScale: { visible: boolean; borderVisible: boolean; borderColor: string };
-  rightPriceScale: { visible: boolean; borderVisible: boolean; borderColor: string };
+  crosshair: { vertLine: crosshair_line_options; horzLine: crosshair_line_options; mode: number };
+  leftPriceScale: chart_price_scale_options;
+  rightPriceScale: chart_price_scale_options;
   /** Time-axis strip cosmetics (LWC `timeScale.borderVisible`/`borderColor`). */
   timeScale: { borderVisible: boolean; borderColor: string };
   /**
@@ -307,6 +458,71 @@ export interface series_options {
   last_price_animation: boolean;
   /** Keep the series in the engine while toggling its visibility. */
   visible: boolean;
+  /** Show the last-value badge on the price scale (LWC `lastValueVisible`, default `true`). */
+  last_value_visible?: boolean;
+  /** Show the series price line at the last value (LWC `priceLineVisible`, default `true`). */
+  price_line_visible?: boolean;
+  /** Value the price line tracks (LWC `PriceLineSource`): 0 LastBar (default), 1 LastVisible. */
+  price_line_source?: 0 | 1;
+  /** Price line width in CSS px (LWC `priceLineWidth`, default 1). */
+  price_line_width?: number;
+  /** Price line color (LWC `priceLineColor`); default `""` follows the series color. */
+  price_line_color?: string;
+  /** Price line style, a `LINE_STYLE_TO_U8` value (LWC `priceLineStyle`, default 2 Dashed). */
+  price_line_style?: number;
+  /** Line stroke style 0-4, a `LINE_STYLE_TO_U8` value (LWC `lineStyle`, default 0 Solid). */
+  line_style?: number;
+  /** Draw the line itself on line/area/baseline series (LWC `lineVisible`, default `true`). */
+  line_visible?: boolean;
+  /** Point-marker disc radius in CSS px (LWC `pointMarkersRadius`); unset = auto. */
+  point_markers_radius?: number;
+  /** Show the crosshair marker on this series (LWC `crosshairMarkerVisible`, default `true`). */
+  crosshair_marker_visible?: boolean;
+  /** Crosshair marker radius in CSS px (LWC `crosshairMarkerRadius`, default 4). */
+  crosshair_marker_radius?: number;
+  /** Crosshair marker border color (LWC `crosshairMarkerBorderColor`, default `""` = none). */
+  crosshair_marker_border_color?: string;
+  /** Crosshair marker background color (LWC `crosshairMarkerBackgroundColor`, default `""` = none). */
+  crosshair_marker_background_color?: string;
+  /** Crosshair marker border width in CSS px (LWC `crosshairMarkerBorderWidth`, default 2). */
+  crosshair_marker_border_width?: number;
+  /** Baseline: first gradient fill color above the baseline (LWC `topFillColor1`). */
+  top_fill_color1?: string;
+  /** Baseline: second gradient fill color above the baseline (LWC `topFillColor2`). */
+  top_fill_color2?: string;
+  /** Baseline: line color above the baseline (LWC `topLineColor`). */
+  top_line_color?: string;
+  /** Baseline: line width above the baseline in CSS px (LWC `topLineWidth`). */
+  top_line_width?: number;
+  /** Baseline: line style above the baseline, a `LINE_STYLE_TO_U8` value (LWC `topLineStyle`). */
+  top_line_style?: number;
+  /** Baseline: first gradient fill color below the baseline (LWC `bottomFillColor1`). */
+  bottom_fill_color1?: string;
+  /** Baseline: second gradient fill color below the baseline (LWC `bottomFillColor2`). */
+  bottom_fill_color2?: string;
+  /** Baseline: line color below the baseline (LWC `bottomLineColor`). */
+  bottom_line_color?: string;
+  /** Baseline: line width below the baseline in CSS px (LWC `bottomLineWidth`). */
+  bottom_line_width?: number;
+  /** Baseline: line style below the baseline, a `LINE_STYLE_TO_U8` value (LWC `bottomLineStyle`). */
+  bottom_line_style?: number;
+  /** Histogram base value the bars grow from (LWC `base`, default 0). */
+  base?: number;
+  /** Area: invert the filled area (fill above the line) (LWC `invertFilledArea`, default `false`). */
+  invert_filled_area?: boolean;
+  /** Bar: draw the open tick on each bar (LWC `openVisible`, default `true`). */
+  open_visible?: boolean;
+  /** Bar: draw thin bars when the bar spacing is small (LWC `thinBars`, default `true`). */
+  thin_bars?: boolean;
+  /**
+   * Per-series price formatting (LWC `priceFormat`). Built-in types (`"price"`/`"volume"`/
+   * `"percent"`, LWC `PriceFormatBuiltIn`) take `precision` and `min_move` (LWC
+   * `precision`/`minMove`, snake_case per the package API convention); `"custom"` (LWC
+   * `PriceFormatCustom`) installs a JS formatter callback with an optional `min_move`.
+   */
+  price_format?:
+    | { type: "price" | "volume" | "percent"; precision?: number; min_move?: number }
+    | { type: "custom"; formatter: (price: number) => string; min_move?: number };
 }
 
 export const LINE_TYPE_TO_U8: Record<NonNullable<series_options["line_type"]>, number> = {
@@ -333,11 +549,23 @@ export interface price_line_options {
   line_style?: line_style;
   /** Axis label text; defaults to the formatted price. */
   title?: string;
+  /** Draw the line itself (LWC `lineVisible`, default `true`). */
+  line_visible?: boolean;
+  /** Show the price label on the axis (LWC `axisLabelVisible`, default `true`). */
+  axis_label_visible?: boolean;
+  /** Axis label background color; defaults to the line color (LWC `axisLabelColor`). */
+  axis_label_color?: string;
+  /** Axis label text color (LWC `axisLabelTextColor`). */
+  axis_label_text_color?: string;
 }
 
 /** A handle to a created price line. */
 export interface price_line_api {
   remove(): void;
+  /** Deep-merge a patch onto this line's options (LWC `IPriceLine.applyOptions`). */
+  apply_options(options: Partial<price_line_options>): void;
+  /** The current (deep-merged) options of this price line (LWC `IPriceLine.options`). */
+  options(): price_line_options;
   readonly id: number;
 }
 
@@ -379,8 +607,28 @@ export interface series_api {
   set_data(data: readonly series_data[]): void;
   /** Append a new point or replace the last one (streaming). */
   update(point: series_data): void;
+  /**
+   * Remove `count` data items from the end of the series (LWC `ISeriesApi.pop`, default
+   * `count: 1`). Divergence: LWC returns the removed items; here the engine drops them and the
+   * method returns nothing.
+   */
+  pop(count?: number): void;
+  /**
+   * The last value data of the series (LWC `ISeriesApi.lastValueData`). `global_last: false`
+   * reads the last value in the current visible range, `true` the absolute last value. Returns
+   * `null` when the series has no value.
+   */
+  last_value_data(global_last?: boolean): last_value_data | null;
+  /**
+   * The current price formatter of this series (LWC `ISeriesApi.priceFormatter`). Divergence:
+   * LWC returns an `IPriceFormatter` object with a `format` method; this snake_case API returns
+   * the bare format function `(price) => string`.
+   */
+  price_formatter(): (price: number) => string;
   /** Apply series options (currently: `color`). */
   apply_options(options: Partial<series_options>): void;
+  /** The current (deep-merged) options of this series (LWC `ISeriesApi.options`). */
+  options(): series_options;
   /** Change how the primary series is drawn (candlestick/bar/line/area/histogram). */
   set_type(kind: series_kind): void;
   /** Move this series into stacked pane `pane_index` (0 = price pane), creating it if needed. */
@@ -407,7 +655,10 @@ export interface series_api {
 export interface time_scale_api {
   /** Distance in logical bars between the latest point and the right edge. */
   scroll_position(): number;
-  /** Scroll to a logical right-edge position. Animation is currently applied immediately. */
+  /**
+   * Scroll to a logical right-edge position. `animated: true` eases over ~300 ms with a cubic
+   * ease-out (suppressed under prefers-reduced-motion); falsy applies immediately.
+   */
   scroll_to_position(position: number, animated: boolean): void;
   /** Return the latest point to the real-time edge. */
   scroll_to_real_time(): void;
@@ -426,6 +677,9 @@ export interface time_scale_api {
   /** Fire after the visible time range changes. */
   subscribe_visible_time_range_change(handler: visible_time_range_handler): void;
   unsubscribe_visible_time_range_change(handler: visible_time_range_handler): void;
+  /** Fire after the time scale's media size changes (LWC `subscribeSizeChange`). */
+  subscribe_size_change(handler: size_change_handler): void;
+  unsubscribe_size_change(handler: size_change_handler): void;
   time_to_coordinate(time: number): number | null;
   coordinate_to_time(x: number): number | null;
   logical_to_coordinate(logical: number): number | null;
@@ -461,6 +715,24 @@ export interface pane_api {
   get_stretch_factor(): number;
   /** Set this pane's relative stretch factor. */
   set_stretch_factor(factor: number): void;
+  /**
+   * Move this pane to the `target` index (LWC `IPaneApi.moveTo`). Returns `false` without
+   * changing anything when the engine rejects the move (e.g. a stale index after a removal).
+   * Divergence: LWC returns `void`.
+   */
+  move_to(target: number): boolean;
+  /** Whether this pane is kept while it has no series (LWC `IPaneApi.preserveEmptyPane`). */
+  preserve_empty_pane(): boolean;
+  /** Set whether to keep this pane while it has no series (LWC `IPaneApi.setPreserveEmptyPane`). */
+  set_preserve_empty_pane(flag: boolean): void;
+  /** The series attached to this pane, as live handles (LWC `IPaneApi.getSeries`). */
+  get_series(): series_api[];
+  /**
+   * This pane's price scale by id (LWC `IPaneApi.priceScale`): the visible `"left"`/`"right"`
+   * axis, or `""` for the overlay scale. Divergence: LWC throws on an unknown id; here the id is
+   * one of the three literals, so a scale always resolves.
+   */
+  price_scale(id: "left" | "right" | ""): price_scale_api;
 }
 
 export interface chart_api {
@@ -469,10 +741,21 @@ export interface chart_api {
   add_series(kind: series_kind, options?: Partial<series_options>): series_api;
   /**
    * Remove a series (and any indicators derived from it). No-op for an already-removed or
-   * foreign handle. The primary series (the first one created, engine id 0) anchors the crosshair
-   * and last-value badge and cannot be removed — attempting to throws.
+   * foreign handle. The primary series (the first one created, engine id 0) may also be removed;
+   * the engine tombstones it safely.
    */
   remove_series(series: series_api): void;
+  /**
+   * The chart's series in their engine (z-)order, as live handles. A series whose handle the
+   * package no longer tracks is omitted. Cf. LWC's per-series `ISeriesApi.seriesOrder`.
+   */
+  series_order(): series_api[];
+  /**
+   * Reorder the chart's series to match `ordered` (cf. LWC's per-series
+   * `ISeriesApi.setSeriesOrder`, elevated here to a whole-chart call). Returns `false` without
+   * changing anything when the engine rejects the order.
+   */
+  set_series_order(ordered: series_api[]): boolean;
   /** Add a Rust-native simple moving-average line derived from an existing series. */
   add_sma(source: series_api, period: number, options?: Partial<series_options>): series_api;
   /** Add a Rust-native exponential moving-average line derived from an existing series. */
@@ -485,8 +768,37 @@ export interface chart_api {
   price_scale(price_scale_id?: "left" | "right" | "", pane_index?: number): price_scale_api;
   /** The stacked panes, top to bottom (roadmap Phase B1). At least one always exists. */
   panes(): pane_api[];
+  /**
+   * Add a stacked pane (LWC `IChartApi.addPane`) and return the handle for the new (last) index.
+   * `preserve_empty` keeps the pane alive while it has no series (LWC `preserveEmptyPane`,
+   * default `false`).
+   */
+  add_pane(preserve_empty?: boolean): pane_api;
+  /**
+   * Remove the pane at `index` (LWC `IChartApi.removePane`). Returns `false` without changing
+   * anything when the engine refuses (e.g. an out-of-range index or the last pane). Divergence:
+   * LWC returns `void`. Pane handles are index-based — a removal shifts the indices of the panes
+   * below it, so re-fetch handles with {@link chart_api.panes} afterwards.
+   */
+  remove_pane(index: number): boolean;
+  /**
+   * Swap the panes at `first` and `second` (LWC `IChartApi.swapPanes`). Returns `false` without
+   * changing anything when the engine rejects the swap. Divergence: LWC returns `void`. Pane
+   * handles are index-based — re-fetch them with {@link chart_api.panes} afterwards.
+   */
+  swap_panes(first: number, second: number): boolean;
   price_to_coordinate(price: number): number | null;
   coordinate_to_price(y: number): number | null;
+  /**
+   * Set the crosshair position within the chart (LWC `IChartApi.setCrosshairPosition`). The
+   * crosshair normally follows the user's cursor; setting it explicitly is useful to synchronise
+   * the crosshairs of two separate charts. `time` accepts the same forms as data times.
+   * Divergence: LWC throws on an unknown series; here the call is a silent no-op when the
+   * position cannot be applied.
+   */
+  set_crosshair_position(price: number, time: time, series: series_api): void;
+  /** Clear the crosshair position within the chart (LWC `IChartApi.clearCrosshairPosition`). */
+  clear_crosshair_position(): void;
   /** Fire on every crosshair move (and once with `point: null` when the cursor leaves). */
   subscribe_crosshair_move(handler: mouse_event_handler): void;
   unsubscribe_crosshair_move(handler: mouse_event_handler): void;
@@ -506,8 +818,16 @@ export interface chart_api {
   resize(width: number, height: number, dpr?: number): void;
   /** Force a repaint. Normally unnecessary — mutating calls repaint themselves. */
   render(): void;
-  /** Snapshot the composed pane and axis layers at their current device-pixel resolution. */
-  take_screenshot(): HTMLCanvasElement;
+  /**
+   * Snapshot the composed pane and axis layers at their current device-pixel resolution.
+   * `add_top_layer: false` composites the pane only (no axis/input overlay);
+   * `include_crosshair: false` hides the crosshair for the capture (both default `true`).
+   */
+  take_screenshot(add_top_layer?: boolean, include_crosshair?: boolean): HTMLCanvasElement;
+  /** Whether the `autoSize` option is enabled and active (LWC `autoSizeActive`). */
+  auto_size_active(): boolean;
+  /** The container element passed to {@link create_chart} (LWC `chartElement`). */
+  chart_element(): HTMLElement;
   /** Tear down: remove canvases and listeners. */
   remove(): void;
 }

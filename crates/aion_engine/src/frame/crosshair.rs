@@ -58,37 +58,80 @@ impl ChartEngine {
                 color: horz_color,
             });
         }
-        if pane_index == 0 && matches!(self.series[0].kind, SeriesKind::Line | SeriesKind::Area) {
-            let plot = self.data.plot(self.series[0].id);
+        // LWC crosshair-marks-pane-view.ts: one mark per visible Line/Area/Baseline series
+        // holding a bar at the crosshair index, honoring the series' `crosshairMarker*`
+        // options (series.ts markerDataAtIndex).
+        let background = css_color(
+            &self.options.get().layout.background.color,
+            Color::rgb(0xff, 0xff, 0xff),
+        );
+        for series in &self.series {
+            if !series.visible
+                || !matches!(
+                    series.kind,
+                    SeriesKind::Line | SeriesKind::Area | SeriesKind::Baseline
+                )
+                || !series.crosshair_marker_visible
+            {
+                continue;
+            }
+            if series.pane_index != pane_index {
+                continue;
+            }
+            let plot = self.data.plot(series.id);
             let Some(row) = plot.search(index, MismatchDirection::None) else {
-                return;
+                continue;
             };
             let close = plot.value_at(row, PlotValueIndex::Close);
-            let base_value = self
-                .series_base_value(self.series[0].id, from)
-                .unwrap_or(0.0);
-            let scale = pane_scale(&self.panes[0], series_scale_target(&self.series[0]));
+            if !close.is_finite() {
+                continue;
+            }
+            let scale = pane_scale(pane, series_scale_target(series));
+            if scale.is_empty() {
+                continue;
+            }
+            let Some(base_value) = self.series_base_value(series.id, from) else {
+                continue;
+            };
+            let baseline = if series.kind == SeriesKind::Baseline {
+                self.resolved_baseline_price(series.id, from, to)
+            } else {
+                None
+            };
+            // LWC defaults: the background follows the bar color; the border falls back to the
+            // chart background color at the mark (crosshair-marks-pane-view.ts:97) — for the
+            // engine's solid background that is the layout background color. Pinned colors are
+            // verbatim CSS strings parsed here; unparseable strings fall back to the default.
+            let fill = series
+                .crosshair_marker_background_color
+                .as_deref()
+                .and_then(Color::parse_css)
+                .unwrap_or_else(|| self.series_bar_color(series, row, baseline));
+            let border = series
+                .crosshair_marker_border_color
+                .as_deref()
+                .and_then(Color::parse_css)
+                .unwrap_or(background);
             let cx = (snapped_x * hpr) as f32;
             let cy = (scale.price_to_coordinate(close, base_value) * vpr) as f32;
-            let fill = if self.series[0].kind == SeriesKind::Area {
-                AREA_LINE
-            } else {
-                LINE
-            };
-            let outer = ((CROSSHAIR_MARKER_RADIUS + CROSSHAIR_MARKER_BORDER_WIDTH) * vpr) as f32;
-            let inner = (CROSSHAIR_MARKER_RADIUS * vpr) as f32;
+            // LWC marks-renderer.ts: the border is a filled disc of radius + borderWidth under
+            // the background disc (drawn only when the border width is non-zero).
+            if series.crosshair_marker_border_width > 0.0 {
+                out.push(Prim::Circle {
+                    cx,
+                    cy,
+                    radius: ((series.crosshair_marker_radius
+                        + series.crosshair_marker_border_width)
+                        * vpr) as f32,
+                    fill: border,
+                    stroke_width: 0.0,
+                    stroke: border,
+                });
+            }
             out.push(Prim::Circle {
                 cx,
                 cy,
-                radius: outer,
-                fill: MARKER_BORDER_COLOR,
-                stroke_width: 0.0,
-                stroke: MARKER_BORDER_COLOR,
-            });
-            out.push(Prim::Circle {
-                cx,
-                cy,
-                radius: inner,
+                radius: (series.crosshair_marker_radius * vpr) as f32,
                 fill,
                 stroke_width: 0.0,
                 stroke: fill,
@@ -138,14 +181,15 @@ impl ChartEngine {
                 continue;
             }
             let plot = self.data.plot(s.id);
-            if let Some(row) = plot.search(index, MismatchDirection::NearestLeft) {
+            // Whitespace rows hold no bar (LWC's plot list omits them); scan past them.
+            if let Some(row) = plot.last_non_whitespace_row(index) {
                 let candidate = plot.indices()[row];
                 if candidate == index {
                     return index; // already snapped
                 }
                 closest_left = Some(closest_left.map_or(candidate, |l: i64| l.max(candidate)));
             }
-            if let Some(row) = plot.search(index, MismatchDirection::NearestRight) {
+            if let Some(row) = plot.first_non_whitespace_row(index) {
                 let candidate = plot.indices()[row];
                 if candidate == index {
                     return index; // already snapped
@@ -174,9 +218,10 @@ impl ChartEngine {
         pane_index: usize,
         from: i64,
     ) -> (&PriceScaleCore, f64) {
-        let series = self.series.iter().find(|s| {
-            s.visible && !s.overlay && s.pane_index.min(self.panes.len() - 1) == pane_index
-        });
+        let series = self
+            .series
+            .iter()
+            .find(|s| s.visible && !s.overlay && s.pane_index == pane_index);
         let target = series
             .map(series_scale_target)
             .unwrap_or(PriceScaleTarget::Right);
@@ -221,7 +266,7 @@ impl ChartEngine {
         };
         let mut candidates = Vec::new();
         for s in &self.series {
-            if !s.visible || s.overlay || s.pane_index.min(self.panes.len() - 1) != pane_index {
+            if !s.visible || s.overlay || s.pane_index != pane_index {
                 continue;
             }
             let scale = pane_scale(&self.panes[pane_index], series_scale_target(s));
@@ -232,6 +277,11 @@ impl ChartEngine {
             let Some(row) = plot.search(index, MismatchDirection::None) else {
                 continue;
             };
+            // A whitespace row at the snapped index is no bar (LWC's plot list omits
+            // whitespace, so its magnet sees no candidate there).
+            if plot.is_whitespace_row(row) {
+                continue;
+            }
             let Some(base_value) = self.series_base_value(s.id, from) else {
                 continue;
             };

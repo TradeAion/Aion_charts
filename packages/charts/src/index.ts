@@ -28,6 +28,16 @@ import type { chart_api, chart_options, deep_partial, localization_options, trac
 // ---------------------------------------------------------------------------------------------
 
 /**
+ * Pre-instantiate the wasm engine, optionally from an explicit URL. Only needed when the default
+ * resolution (the `.wasm` shipped beside `dist/index.js`) doesn't apply — e.g. Vite's dev
+ * pre-bundler (`import wasm_url from "@aion/charts/dist/aion_wasm_bg.wasm?url"`). Call once,
+ * before the first `create_chart`; later calls are no-ops.
+ */
+export function init_wasm(wasm_url?: string | URL): Promise<unknown> {
+  return ensure_init(wasm_url);
+}
+
+/**
  * Create a chart inside `container`. Resolves once the rendering backend is ready and the first
  * frame is drawn. Mirrors lightweight-charts' `createChart`, but async (backend acquisition).
  */

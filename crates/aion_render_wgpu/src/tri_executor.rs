@@ -169,6 +169,35 @@ pub fn geom_prims_to_tris(
 ) {
     for prim in prims {
         match prim {
+            // LWC `layout.background` VerticalGradient: two triangles over the pane rect with
+            // the stops as per-vertex colors — the same linear ramp the Canvas2D executor
+            // paints with `createLinearGradient` (stop-for-stop identical).
+            Prim::Background { rect, gradient } => {
+                let [x, y, w, h] = *rect;
+                if w <= 0.0 || h <= 0.0 {
+                    continue;
+                }
+                let to_f32 = |c: aion_render::color::Color| {
+                    [
+                        c.r() as f32 / 255.0,
+                        c.g() as f32 / 255.0,
+                        c.b() as f32 / 255.0,
+                        c.a() as f32 / 255.0,
+                    ]
+                };
+                let top = to_f32(gradient.top);
+                let bottom = to_f32(gradient.bottom);
+                let (x0, y0, x1, y1) = (x, y, x + w, y + h);
+                let v = |pos: [f32; 2], color: [f32; 4]| TriVertex { pos, color };
+                fill.extend([
+                    v([x0, y0], top),
+                    v([x1, y0], top),
+                    v([x0, y1], bottom),
+                    v([x1, y0], top),
+                    v([x1, y1], bottom),
+                    v([x0, y1], bottom),
+                ]);
+            }
             Prim::AreaFill {
                 first_point,
                 point_count,

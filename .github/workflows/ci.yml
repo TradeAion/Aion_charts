@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [master, main]
+    tags: ["v*"]
   pull_request:
 
 env:
@@ -59,6 +60,37 @@ jobs:
       - name: Typecheck
         working-directory: packages/charts
         run: npm run typecheck
+      - name: Pack smoke test (tarball installs and imports)
+        working-directory: packages/charts
+        run: npm run test:pack
+
+  publish:
+    name: npm publish (tags v*)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [rust, package, browser]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Install package deps
+        working-directory: packages/charts
+        run: npm ci
+      - name: Publish (prepublishOnly rebuilds + pack-smokes first)
+        working-directory: packages/charts
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   browser:
     name: Browser runtime & parity (Playwright)

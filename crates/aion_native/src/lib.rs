@@ -458,7 +458,10 @@ mod tests {
             10,
             100,
             Color::rgb(0, 0, 0),
-            &[Prim::Background { gradient: g }],
+            &[Prim::Background {
+                rect: [0.0, 0.0, 10.0, 100.0],
+                gradient: g,
+            }],
             &[],
         );
         let top = canvas.pixel_rgba(5, 2);

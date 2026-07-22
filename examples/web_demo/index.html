@@ -273,6 +273,9 @@ if (requested_feature === "markers") {
     overlay: true,
     scale_margins: { top: 0.82, bottom: 0 },
     histogram_updown: true,
+    // matches the LWC reference fixture (priceLineVisible/lastValueVisible: false)
+    price_line_visible: false,
+    last_value_visible: false,
   });
   vol_series.set_data(volume_data);
 }
@@ -389,7 +392,7 @@ document.getElementById("sma_toggle").addEventListener("change", (e) => {
 document.getElementById("vol_toggle").addEventListener("change", (e) => {
   if (e.target.checked && vol_series === null) {
     // overlay on the price pane's bottom band; green/red by the main series' up/down direction.
-    vol_series = chart.add_series("histogram", { overlay: true, scale_margins: { top: 0.82, bottom: 0 }, histogram_updown: true });
+    vol_series = chart.add_series("histogram", { overlay: true, scale_margins: { top: 0.82, bottom: 0 }, histogram_updown: true, price_line_visible: false, last_value_visible: false });
     vol_series.set_data(volume_data);
   } else if (!e.target.checked && vol_series !== null) {
     // Exercises the real remove_series API (tombstones the engine slot, not just clears data).

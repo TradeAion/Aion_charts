@@ -272,6 +272,130 @@ impl ChartEngine {
         }
     }
 
+    /// Merge a snake_case JSON patch of price-scale options into one pane scale (the engine
+    /// backing of the TS `priceScale.applyOptions`; unknown keys are ignored gracefully).
+    /// Keys: `mode` (0 normal, 1 log, 2 percentage, 3 indexed-to-100), `auto_scale`,
+    /// `invert_scale`, `scale_margins` (`{top, bottom}`, each optional), `align_labels`,
+    /// `ticks_visible`, `entire_text_only`, `minimum_width`, `text_color` (string, `""` or
+    /// `null` clears back to `layout.textColor`). Returns false for a malformed patch or an
+    /// unknown pane/target.
+    pub fn price_scale_apply_options_json(
+        &mut self,
+        pane: usize,
+        target: PriceScaleTarget,
+        json: &str,
+    ) -> bool {
+        let Ok(serde_json::Value::Object(patch)) = serde_json::from_str::<serde_json::Value>(json)
+        else {
+            return false;
+        };
+        let Some(scale) = self.price_scale_for_mut(pane, target) else {
+            return false;
+        };
+        let flag = |key: &str| patch.get(key).and_then(serde_json::Value::as_bool);
+        let finite = |key: &str| {
+            patch
+                .get(key)
+                .and_then(serde_json::Value::as_f64)
+                .filter(|v| v.is_finite())
+        };
+        if let Some(mode) = patch.get("mode").and_then(serde_json::Value::as_u64) {
+            scale.set_mode(match mode {
+                1 => PriceScaleMode::Logarithmic,
+                2 => PriceScaleMode::Percentage,
+                3 => PriceScaleMode::IndexedTo100,
+                _ => PriceScaleMode::Normal,
+            });
+        }
+        if let Some(auto) = flag("auto_scale") {
+            scale.set_auto_scale(auto);
+        }
+        if let Some(inverted) = flag("invert_scale") {
+            scale.set_invert_scale(inverted);
+        }
+        if let Some(margins) = patch
+            .get("scale_margins")
+            .and_then(serde_json::Value::as_object)
+        {
+            let current = scale.options().scale_margins;
+            let top = margins
+                .get("top")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(current.top);
+            let bottom = margins
+                .get("bottom")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(current.bottom);
+            // Same contract as `set_price_scale_margins_for`: fractions in 0..=1 summing
+            // to at most 1; an out-of-contract patch leaves the margins untouched.
+            if top.is_finite()
+                && bottom.is_finite()
+                && top >= 0.0
+                && bottom >= 0.0
+                && top <= 1.0
+                && bottom <= 1.0
+                && top + bottom <= 1.0
+            {
+                scale.set_scale_margins(top, bottom);
+            }
+        }
+        if let Some(align) = flag("align_labels") {
+            scale.set_align_labels(align);
+        }
+        if let Some(visible) = flag("ticks_visible") {
+            scale.set_ticks_visible(visible);
+        }
+        if let Some(entire) = flag("entire_text_only") {
+            scale.set_entire_text_only(entire);
+        }
+        if let Some(width) = finite("minimum_width") {
+            scale.set_minimum_width(width);
+        }
+        if let Some(value) = patch.get("text_color") {
+            if value.is_null() {
+                scale.set_text_color(None);
+            } else if let Some(css) = value.as_str() {
+                scale.set_text_color((!css.is_empty()).then(|| css.to_string()));
+            }
+        }
+        true
+    }
+
+    /// One pane scale's full options as a snake_case JSON object (LWC `priceScale.options()`
+    /// shape): `mode`, `auto_scale`, `invert_scale`, `scale_margins`, and the label
+    /// cosmetics (`align_labels`, `ticks_visible`, `entire_text_only`, `minimum_width`,
+    /// `text_color`). `None` for an unknown pane/target.
+    pub fn price_scale_options_json(
+        &self,
+        pane: usize,
+        target: PriceScaleTarget,
+    ) -> Option<String> {
+        let scale = self.price_scale_for(pane, target)?;
+        let options = scale.options();
+        Some(
+            serde_json::json!({
+                "mode": match options.mode {
+                    PriceScaleMode::Logarithmic => 1,
+                    PriceScaleMode::Percentage => 2,
+                    PriceScaleMode::IndexedTo100 => 3,
+                    PriceScaleMode::Normal => 0,
+                },
+                "auto_scale": options.auto_scale,
+                "invert_scale": options.invert_scale,
+                "scale_margins": {
+                    "top": options.scale_margins.top,
+                    "bottom": options.scale_margins.bottom,
+                },
+                "align_labels": options.align_labels,
+                "ticks_visible": options.ticks_visible,
+                "entire_text_only": options.entire_text_only,
+                "minimum_width": options.minimum_width,
+                "text_color": options.text_color,
+            })
+            .to_string(),
+        )
+    }
+
     pub fn series_price_scale(&self, id: SeriesId) -> Option<(usize, PriceScaleTarget)> {
         self.series
             .iter()
@@ -289,10 +413,11 @@ impl ChartEngine {
     }
 
     /// First close at or to the right of the visible left edge, matching LWC series first-value
-    /// selection for percentage/indexed coordinate modes.
+    /// selection for percentage/indexed coordinate modes. Whitespace rows are skipped (LWC's
+    /// plot list never contains them, so its first-value search lands on a real bar).
     pub(crate) fn series_base_value(&self, id: SeriesId, visible_from: i64) -> Option<f64> {
         let plot = self.data.plot(id);
-        let row = plot.search(visible_from, MismatchDirection::NearestRight)?;
+        let row = plot.first_non_whitespace_row(visible_from)?;
         let value = plot.value_at(row, PlotValueIndex::Close);
         value.is_finite().then_some(value)
     }

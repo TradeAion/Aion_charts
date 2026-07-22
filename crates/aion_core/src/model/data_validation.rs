@@ -14,7 +14,12 @@
 //! Repair policy, in order:
 //! 1. **Length mismatch** between the time and value columns is unrecoverable → [`Err`].
 //! 2. **Non-finite / out-of-safe-range** rows (NaN, ±Inf, |v| beyond [`MAX_SAFE_VALUE`], or a
-//!    non-finite time) are dropped and counted.
+//!    non-finite time) are dropped and counted — **except** a row whose four values are all
+//!    NaN, which is kept as an explicit **whitespace** row (LWC's `{time}`-only item,
+//!    data-consumer.ts `isWhitespaceData`): a real bar never has all four NaN, and for
+//!    single-value series a NaN value is whitespace. Whitespace rows occupy their time point
+//!    but draw nothing; genuinely malformed rows (a partial NaN set, ±Inf, out-of-range) are
+//!    still dropped.
 //! 3. **Unordered** rows are stably sorted by time (`reordered` flagged).
 //! 4. **Duplicate** timestamps collapse **last-wins** (the last occurrence in the *original*
 //!    input for that timestamp survives — matching a streaming `update()` overwriting a bar).
@@ -55,6 +60,12 @@ pub enum ValidationError {
         low: usize,
         close: usize,
     },
+    /// A per-point color channel's length differs from the time column.
+    ColorLengthMismatch {
+        times: usize,
+        channel: &'static str,
+        colors: usize,
+    },
 }
 
 impl core::fmt::Display for ValidationError {
@@ -63,6 +74,10 @@ impl core::fmt::Display for ValidationError {
             ValidationError::LengthMismatch { times, open, high, low, close } => write!(
                 f,
                 "time/OHLC arrays must have equal length (times={times}, open={open}, high={high}, low={low}, close={close})"
+            ),
+            ValidationError::ColorLengthMismatch { times, channel, colors } => write!(
+                f,
+                "point-color channel must match the row count (channel={channel}, times={times}, colors={colors})"
             ),
         }
     }
@@ -83,6 +98,13 @@ fn safe(v: f64) -> bool {
     v.is_finite() && (MIN_SAFE_VALUE..=MAX_SAFE_VALUE).contains(&v)
 }
 
+/// Whether the four values form an explicit whitespace row (LWC `{time}`-only item): all
+/// four are NaN. A real bar never has all four NaN; single-value series alias one value
+/// into all four slots, so a NaN value is whitespace there as well.
+pub fn is_whitespace_values(values: [f64; 4]) -> bool {
+    values.iter().all(|v| v.is_nan())
+}
+
 /// Sanitize parallel time/OHLC columns into ascending, unique, finite rows.
 ///
 /// `times` are wall-clock seconds as `f64` at the JS boundary; each is truncated toward zero to an
@@ -95,6 +117,78 @@ pub fn sanitize_ohlc(
     low: &[f64],
     close: &[f64],
 ) -> Result<SanitizedOhlc, ValidationError> {
+    sanitize_rows(times, open, high, low, close, |_| ()).map(|(out, _)| out)
+}
+
+/// [`sanitize_ohlc`] output plus the per-row color channels carried through the same repair.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct SanitizedOhlcStyled {
+    pub data: SanitizedOhlc,
+    /// The three LWC data-item color channels (body/wick/border) after the repair pipeline;
+    /// each is empty (channel absent) or aligned with `data`'s rows.
+    pub colors: [Vec<u32>; 3],
+}
+
+/// [`sanitize_ohlc`] carrying per-row data-item color channels (LWC series-bar-colorer.ts).
+/// Every present channel must match the time column's length (a mismatch is unrecoverable,
+/// like the OHLC columns); within a channel, `0` means "no override at this row". The repair
+/// policy treats the channels as part of their row: invalid rows drop them, the stable sort
+/// moves them, and the last-wins dedupe keeps the winning row's channels.
+pub fn sanitize_ohlc_styled(
+    times: &[f64],
+    open: &[f64],
+    high: &[f64],
+    low: &[f64],
+    close: &[f64],
+    colors: [Option<Vec<u32>>; 3],
+) -> Result<SanitizedOhlcStyled, ValidationError> {
+    const CHANNEL_NAMES: [&str; 3] = ["body", "wick", "border"];
+    for (name, channel) in CHANNEL_NAMES.into_iter().zip(&colors) {
+        if let Some(channel) = channel {
+            if channel.len() != times.len() {
+                return Err(ValidationError::ColorLengthMismatch {
+                    times: times.len(),
+                    channel: name,
+                    colors: channel.len(),
+                });
+            }
+        }
+    }
+    let present = [
+        colors[0].is_some(),
+        colors[1].is_some(),
+        colors[2].is_some(),
+    ];
+    let (data, payloads) = sanitize_rows(times, open, high, low, close, |row| {
+        [
+            colors[0].as_ref().map_or(0, |c| c[row]),
+            colors[1].as_ref().map_or(0, |c| c[row]),
+            colors[2].as_ref().map_or(0, |c| c[row]),
+        ]
+    })?;
+    let mut channels: [Vec<u32>; 3] = [vec![], vec![], vec![]];
+    for i in 0..3 {
+        if present[i] {
+            channels[i] = payloads.iter().map(|p| p[i]).collect();
+        }
+    }
+    Ok(SanitizedOhlcStyled {
+        data,
+        colors: channels,
+    })
+}
+
+/// Shared repair pipeline for [`sanitize_ohlc`] and [`sanitize_ohlc_styled`]: applies the
+/// drop-invalid → stable-sort → last-wins-dedupe policy, carrying a per-row payload through
+/// the same fate (the payload follows the winning row).
+fn sanitize_rows<P: Clone>(
+    times: &[f64],
+    open: &[f64],
+    high: &[f64],
+    low: &[f64],
+    close: &[f64],
+    payload_of: impl Fn(usize) -> P,
+) -> Result<(SanitizedOhlc, Vec<P>), ValidationError> {
     let n = times.len();
     if open.len() != n || high.len() != n || low.len() != n || close.len() != n {
         return Err(ValidationError::LengthMismatch {
@@ -109,15 +203,16 @@ pub fn sanitize_ohlc(
     let mut report = ValidationReport::default();
 
     // 1. Keep only finite, in-range rows; remember original order for stable sort + last-wins.
-    let mut rows: Vec<(i64, [f64; 4], usize)> = Vec::with_capacity(n);
+    //    All-NaN rows survive as explicit whitespace (LWC `{time}`-only items).
+    let mut rows: Vec<(i64, [f64; 4], usize, P)> = Vec::with_capacity(n);
     for i in 0..n {
         let t = times[i];
-        let (o, h, l, c) = (open[i], high[i], low[i], close[i]);
-        if !t.is_finite() || !(safe(o) && safe(h) && safe(l) && safe(c)) {
+        let v = [open[i], high[i], low[i], close[i]];
+        if !t.is_finite() || !(is_whitespace_values(v) || v.iter().copied().all(safe)) {
             report.dropped_invalid += 1;
             continue;
         }
-        rows.push((t as i64, [o, h, l, c], i));
+        rows.push((t as i64, v, i, payload_of(i)));
     }
 
     // 2. Detect out-of-order before sorting (so `reordered` reflects the caller's input).
@@ -132,7 +227,8 @@ pub fn sanitize_ohlc(
     //    ascending original-index order, so the last of each run is the latest-provided bar.
     let mut out = SanitizedOhlc::default();
     out.times.reserve(rows.len());
-    for (t, v, _) in rows {
+    let mut payloads: Vec<P> = Vec::with_capacity(rows.len());
+    for (t, v, _, payload) in rows {
         if out.times.last() == Some(&t) {
             report.dropped_duplicate += 1;
             let last = out.times.len() - 1;
@@ -140,18 +236,20 @@ pub fn sanitize_ohlc(
             out.high[last] = v[1];
             out.low[last] = v[2];
             out.close[last] = v[3];
+            payloads[last] = payload;
         } else {
             out.times.push(t);
             out.open.push(v[0]);
             out.high.push(v[1]);
             out.low.push(v[2]);
             out.close.push(v[3]);
+            payloads.push(payload);
         }
     }
 
     report.accepted = out.times.len();
     out.report = report;
-    Ok(out)
+    Ok((out, payloads))
 }
 
 /// Owned-input variant used by typed-array hosts. Clean integer-timestamp feeds take ownership of
@@ -207,8 +305,10 @@ pub fn sanitize_ohlc_owned(
 
 /// Sanitize a single streaming point. Returns `None` (with no effect on the chart) when the point
 /// is non-finite or out of range, so a bad tick is dropped instead of corrupting the series.
+/// An all-NaN value set is a valid whitespace update (LWC `series.update` with a `{time}`-only
+/// item replaces the bar with whitespace); a partial NaN set or ±Inf is a bad tick.
 pub fn sanitize_point(time: f64, values: [f64; 4]) -> Option<(i64, [f64; 4])> {
-    if !time.is_finite() || !values.iter().copied().all(safe) {
+    if !time.is_finite() || !(is_whitespace_values(values) || values.iter().copied().all(safe)) {
         return None;
     }
     Some((time as i64, values))
@@ -250,9 +350,81 @@ mod tests {
         let times = [1.0, 2.0, 3.0, 4.0, 5.0];
         let vals = [10.0, f64::NAN, f64::INFINITY, MAX_SAFE_VALUE * 2.0, 50.0];
         let s = ohlc(&times, &vals).unwrap();
-        assert_eq!(s.times, [1, 5]); // rows 2,3,4 dropped
-        assert_eq!(s.close, [10.0, 50.0]);
-        assert_eq!(s.report.dropped_invalid, 3);
+        // single-value columns: row 2 is all-NaN → explicit whitespace (kept); rows 3,4 drop
+        assert_eq!(s.times, [1, 2, 5]);
+        assert_eq!(s.close[0], 10.0);
+        assert!(s.close[1].is_nan());
+        assert_eq!(s.close[2], 50.0);
+        assert_eq!(s.report.dropped_invalid, 2);
+    }
+
+    #[test]
+    fn all_nan_rows_are_kept_as_whitespace() {
+        // LWC `{time}`-only items: an all-NaN row is explicit whitespace, not invalid data.
+        let nan = f64::NAN;
+        let s = sanitize_ohlc(
+            &[1.0, 2.0, 3.0],
+            &[10.0, nan, 30.0],
+            &[10.0, nan, 30.0],
+            &[10.0, nan, 30.0],
+            &[10.0, nan, 30.0],
+        )
+        .unwrap();
+        assert_eq!(s.times, [1, 2, 3]);
+        assert!(s.close[1].is_nan());
+        assert!(s.open[1].is_nan() && s.high[1].is_nan() && s.low[1].is_nan());
+        assert!(s.report.is_clean());
+        assert_eq!(s.report.accepted, 3);
+
+        // A partial NaN set is genuinely malformed and still drops, as do ±Inf rows.
+        let s = sanitize_ohlc(
+            &[1.0, 2.0, 3.0, 4.0],
+            &[10.0, nan, 30.0, 40.0],
+            &[10.0, 1.0, 30.0, 40.0],
+            &[10.0, 1.0, 30.0, 40.0],
+            &[10.0, 1.0, 30.0, 40.0],
+        )
+        .unwrap();
+        assert_eq!(s.times, [1, 3, 4]);
+        assert_eq!(s.report.dropped_invalid, 1);
+        let s = sanitize_ohlc(
+            &[1.0, 2.0],
+            &[10.0, f64::INFINITY],
+            &[10.0, f64::INFINITY],
+            &[10.0, f64::INFINITY],
+            &[10.0, f64::INFINITY],
+        )
+        .unwrap();
+        assert_eq!(s.times, [1]);
+        assert_eq!(s.report.dropped_invalid, 1);
+    }
+
+    #[test]
+    fn whitespace_rows_sort_dedupe_and_carry_colors_like_real_rows() {
+        let nan = f64::NAN;
+        let s = sanitize_ohlc_styled(
+            &[2.0, 1.0, 3.0],
+            &[20.0, 10.0, nan],
+            &[20.0, 10.0, nan],
+            &[20.0, 10.0, nan],
+            &[20.0, 10.0, nan],
+            [Some(vec![22, 11, 33]), None, None],
+        )
+        .unwrap();
+        assert_eq!(s.data.times, [1, 2, 3]);
+        assert!(s.data.close[2].is_nan());
+        assert_eq!(s.colors[0], [11, 22, 33]); // the whitespace row keeps its channel slot
+    }
+
+    #[test]
+    fn sanitize_point_accepts_whitespace_ticks() {
+        let nan = f64::NAN;
+        let ws = sanitize_point(2.0, [nan, nan, nan, nan]).unwrap();
+        assert_eq!(ws.0, 2);
+        assert!(ws.1.iter().all(|v| v.is_nan()));
+        // partial NaN / Inf ticks are still dropped
+        assert!(sanitize_point(2.0, [1.0, nan, 1.0, 1.0]).is_none());
+        assert!(sanitize_point(2.0, [f64::INFINITY; 4]).is_none());
     }
 
     #[test]
@@ -330,6 +502,78 @@ mod tests {
             sanitize_point(1.5, [1.0, 2.0, 0.5, 1.5]),
             Some((1, [1.0, 2.0, 0.5, 1.5]))
         );
+    }
+
+    #[test]
+    fn styled_dedupe_last_wins_keeps_the_winning_color() {
+        // duplicate time 2 appears twice; the later row (value 25, color 99) must win.
+        let s = sanitize_ohlc_styled(
+            &[1.0, 2.0, 2.0, 3.0],
+            &[10.0, 20.0, 25.0, 30.0],
+            &[10.0, 20.0, 25.0, 30.0],
+            &[10.0, 20.0, 25.0, 30.0],
+            &[10.0, 20.0, 25.0, 30.0],
+            [Some(vec![10, 20, 99, 30]), None, None],
+        )
+        .unwrap();
+        assert_eq!(s.data.times, [1, 2, 3]);
+        assert_eq!(s.data.close, [10.0, 25.0, 30.0]);
+        assert_eq!(s.colors[0], [10, 99, 30]);
+        assert!(s.colors[1].is_empty() && s.colors[2].is_empty());
+        assert_eq!(s.data.report.dropped_duplicate, 1);
+    }
+
+    #[test]
+    fn styled_sort_carries_colors_with_their_rows() {
+        // out of order AND duplicated: stable sort keeps the last original occurrence of
+        // time 2 (value 99, color 77).
+        let s = sanitize_ohlc_styled(
+            &[2.0, 1.0, 2.0],
+            &[20.0, 10.0, 99.0],
+            &[20.0, 10.0, 99.0],
+            &[20.0, 10.0, 99.0],
+            &[20.0, 10.0, 99.0],
+            [Some(vec![55, 11, 77]), Some(vec![5, 1, 7]), None],
+        )
+        .unwrap();
+        assert_eq!(s.data.times, [1, 2]);
+        assert_eq!(s.data.close, [10.0, 99.0]);
+        assert_eq!(s.colors[0], [11, 77]);
+        assert_eq!(s.colors[1], [1, 7]);
+        assert!(s.data.report.reordered);
+    }
+
+    #[test]
+    fn styled_drops_colors_of_invalid_rows_and_checks_lengths() {
+        let s = sanitize_ohlc_styled(
+            &[1.0, 2.0, 3.0],
+            &[10.0, f64::NAN, 30.0],
+            &[10.0, 1.0, 30.0],
+            &[10.0, 1.0, 30.0],
+            &[10.0, 1.0, 30.0],
+            [Some(vec![10, 20, 30]), None, None],
+        )
+        .unwrap();
+        assert_eq!(s.data.times, [1, 3]);
+        assert_eq!(s.colors[0], [10, 30]);
+
+        let err = sanitize_ohlc_styled(
+            &[1.0, 2.0],
+            &[1.0, 2.0],
+            &[1.0, 2.0],
+            &[1.0, 2.0],
+            &[1.0, 2.0],
+            [Some(vec![1]), None, None],
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::ColorLengthMismatch {
+                times: 2,
+                channel: "body",
+                colors: 1
+            }
+        ));
     }
 
     #[test]

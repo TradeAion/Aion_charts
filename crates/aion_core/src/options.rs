@@ -87,19 +87,24 @@ impl Default for BackgroundOptions {
     }
 }
 
-/// `layout.panes` — stacked-pane chrome (`layout-options-defaults.ts` v5: `separatorColor`;
-/// `separatorHoverColor`/`enableResize` are not modeled yet).
+/// `layout.panes` — stacked-pane chrome (`api/options/layout-options-defaults.ts` v5:
+/// `separatorColor`/`separatorHoverColor`; `enableResize` is not modeled).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PanesOptions {
     #[serde(rename = "separatorColor")]
     pub separator_color: String,
+    /// LWC `panes.separatorHoverColor` (default `rgba(178, 181, 189, 0.2)`): the hover band
+    /// painted over a separator by the gesture layer.
+    #[serde(rename = "separatorHoverColor")]
+    pub separator_hover_color: String,
 }
 
 impl Default for PanesOptions {
     fn default() -> Self {
         Self {
             separator_color: axis_border_color(),
+            separator_hover_color: "rgba(178, 181, 189, 0.2)".into(),
         }
     }
 }
@@ -206,9 +211,11 @@ pub struct CrosshairOptions {
 }
 
 /// Chart-level options of a pane price-axis strip: visibility plus the LWC border cosmetics
-/// (`price-scale.options.ts`: `borderVisible`/`borderColor`). Scale math and per-series scale
-/// options are owned by `PriceScaleCore`; `visible` determines whether layout reserves and paints
-/// the strip.
+/// (`price-scale.options.ts`: `borderVisible`/`borderColor`) and the label cosmetics the
+/// engine keeps per scale (`alignLabels`/`ticksVisible`/`entireTextOnly`/`minimumWidth`/
+/// `textColor` — LWC applies these chart-level groups to every pane's scale, pane.ts
+/// `applyScaleOptions`). Scale math and per-series scale options are owned by
+/// `PriceScaleCore`; `visible` determines whether layout reserves and paints the strip.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PriceAxisOptions {
@@ -217,6 +224,21 @@ pub struct PriceAxisOptions {
     pub border_visible: bool,
     #[serde(rename = "borderColor")]
     pub border_color: String,
+    /// LWC `alignLabels` (default true).
+    #[serde(rename = "alignLabels")]
+    pub align_labels: bool,
+    /// LWC `ticksVisible` (default false).
+    #[serde(rename = "ticksVisible")]
+    pub ticks_visible: bool,
+    /// LWC `entireTextOnly` (default false).
+    #[serde(rename = "entireTextOnly")]
+    pub entire_text_only: bool,
+    /// LWC `minimumWidth` (default 0).
+    #[serde(rename = "minimumWidth")]
+    pub minimum_width: f64,
+    /// LWC `textColor` (default `None` = follow `layout.textColor`).
+    #[serde(rename = "textColor")]
+    pub text_color: Option<String>,
 }
 
 impl PriceAxisOptions {
@@ -225,6 +247,12 @@ impl PriceAxisOptions {
             visible,
             border_visible: true,
             border_color: axis_border_color(),
+            // LWC defaults (price-scale-options-defaults.ts).
+            align_labels: true,
+            ticks_visible: false,
+            entire_text_only: false,
+            minimum_width: 0.0,
+            text_color: None,
         }
     }
 }

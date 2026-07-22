@@ -7,6 +7,7 @@
 
 mod frame;
 mod indicators;
+mod price_line_api;
 mod price_scale_api;
 mod series_query_api;
 #[cfg(test)]
@@ -17,9 +18,10 @@ pub(crate) use indicators::IndicatorBinding;
 pub use indicators::IndicatorKind;
 
 use aion_core::format::price_formatter::PriceFormatter;
+use aion_core::format::time_formatter::{MonthNames, DEFAULT_DATE_FORMAT};
 use aion_core::model::data_layer::{DataLayer, SeriesId};
 use aion_core::model::data_validation::{
-    sanitize_ohlc, sanitize_point, ValidationError, ValidationReport,
+    sanitize_ohlc, sanitize_ohlc_styled, sanitize_point, ValidationError, ValidationReport,
 };
 use aion_core::model::magnet::CrosshairMode;
 use aion_core::model::plot_list::{MismatchDirection, PlotValueIndex};
@@ -40,6 +42,47 @@ use aion_render::draw_list::{LineStyle, LineType};
 pub type PriceFormatterFn = Box<dyn Fn(f64) -> Option<String>>;
 pub type TickMarkFormatterFn = Box<dyn Fn(i64, u8) -> Option<String>>;
 pub type TimeFormatterFn = Box<dyn Fn(i64) -> Option<String>>;
+
+/// LWC `PriceFormat` kind (model/series-options.ts): the built-in `price` (precision/minMove
+/// decimals), `volume` (K/M/B suffixes), `percent` (% sign), or a host `custom` formatter fn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PriceFormatKind {
+    Price,
+    Volume,
+    Percent,
+    Custom,
+}
+
+/// Per-series price format (LWC series option `priceFormat`; series-options-defaults.ts:26-30
+/// defaults to `{type:'price', precision:2, minMove:0.01}`). The boxed host formatter is
+/// consulted only for [`PriceFormatKind::Custom`] (LWC `priceFormat.formatter`), with a `None`
+/// return falling back to the built-in price formatter.
+pub struct SeriesPriceFormat {
+    pub kind: PriceFormatKind,
+    pub precision: u32,
+    pub min_move: f64,
+    pub formatter: Option<PriceFormatterFn>,
+}
+
+impl Default for SeriesPriceFormat {
+    fn default() -> Self {
+        Self {
+            kind: PriceFormatKind::Price,
+            precision: 2,
+            min_move: 0.01,
+            formatter: None,
+        }
+    }
+}
+
+impl SeriesPriceFormat {
+    /// Whether the format still holds LWC's factory default — such a series defers to the
+    /// chart-level `localization.priceFormatter`/built-in formatter, exactly like a series
+    /// that never set `priceFormat`.
+    pub fn is_lwc_default(&self) -> bool {
+        self.kind == PriceFormatKind::Price && self.precision == 2 && self.min_move == 0.01
+    }
+}
 
 const DEFAULT_LINE_COLOR: Color = Color::rgb(0x21, 0x96, 0xf3);
 /// Default media-coordinate height of the horizontal axis. Hosts use this value during layout;
@@ -116,6 +159,17 @@ pub fn line_style_from_u8(style: u8) -> LineStyle {
     }
 }
 
+/// LWC `CrosshairMode` from its numeric wire form (unknown values fall back to Normal).
+pub fn crosshair_mode_from_u8(mode: u8) -> CrosshairMode {
+    use aion_core::options::crosshair_mode as wire;
+    match mode {
+        wire::MAGNET => CrosshairMode::Magnet,
+        wire::HIDDEN => CrosshairMode::Hidden,
+        wire::MAGNET_OHLC => CrosshairMode::MagnetOhlc,
+        _ => CrosshairMode::Normal,
+    }
+}
+
 pub mod marker_pos {
     pub const ABOVE: u8 = 0;
     pub const BELOW: u8 = 1;
@@ -146,26 +200,44 @@ pub struct PriceLine {
     pub width: i32,
     pub style: LineStyle,
     pub title: String,
+    /// LWC `lineVisible` (default true): draw the horizontal line across the pane.
+    pub line_visible: bool,
+    /// LWC `axisLabelVisible` (default true): show the boxed label on the price axis.
+    pub axis_label_visible: bool,
+    /// LWC `axisLabelColor` (default `''`): label background; `None` follows the line color.
+    pub axis_label_color: Option<String>,
+    /// LWC `axisLabelTextColor` (default `''`): label text; `None` is the contrast pick
+    /// against the label background (as the crosshair labels do).
+    pub axis_label_text_color: Option<String>,
 }
 
 pub struct SeriesEntry {
     pub id: SeriesId,
     pub kind: SeriesKind,
-    pub line_color: Color,
-    pub up_color: Option<Color>,
-    pub down_color: Option<Color>,
+    /// LWC line/area/baseline `lineColor` (and the histogram `color`). Stored verbatim as a
+    /// CSS string (LWC `series.options()` returns the applied string); `None` is the
+    /// kind-default placeholder [`DEFAULT_LINE_COLOR`], parsed only at render time.
+    pub line_color: Option<String>,
+    /// Candlestick/bar up & down body colors; `None` = LWC default (follows the engine UP/DOWN
+    /// palette). Stored verbatim as CSS strings; parsed at render time.
+    pub up_color: Option<String>,
+    pub down_color: Option<String>,
     /// Candlestick wick colors per direction; `None` falls back to the body color (LWC parity).
-    pub wick_up_color: Option<Color>,
-    pub wick_down_color: Option<Color>,
+    /// Stored verbatim as CSS strings; parsed at render time.
+    pub wick_up_color: Option<String>,
+    pub wick_down_color: Option<String>,
     /// Candlestick border colors per direction; `None` falls back to the body color (LWC parity).
-    pub border_up_color: Option<Color>,
-    pub border_down_color: Option<Color>,
+    /// Stored verbatim as CSS strings; parsed at render time.
+    pub border_up_color: Option<String>,
+    pub border_down_color: Option<String>,
     /// Candlestick part visibility; `None` = visible (LWC parity).
     pub wick_visible: Option<bool>,
     pub border_visible: Option<bool>,
     pub line_width: Option<f64>,
-    pub area_top_color: Option<Color>,
-    pub area_bottom_color: Option<Color>,
+    /// Area fill gradient colors; `None` = engine defaults. Stored verbatim as CSS strings;
+    /// parsed at render time.
+    pub area_top_color: Option<String>,
+    pub area_bottom_color: Option<String>,
     pub histogram_updown: bool,
     pub overlay: bool,
     pub left_scale: bool,
@@ -175,6 +247,83 @@ pub struct SeriesEntry {
     pub visible: bool,
     pub baseline: Option<f64>,
     pub last_price_animation: bool,
+    /// LWC `SeriesOptionsCommon.lastValueVisible` (series-options-defaults.ts: true): draw this
+    /// series' last-value label on its price scale.
+    pub last_value_visible: bool,
+    /// LWC `priceLineVisible` (default true): draw the built-in last-price line for this series.
+    pub price_line_visible: bool,
+    /// LWC `priceLineSource` (PriceLineSource): 0 = LastBar (default), 1 = LastVisible.
+    pub price_line_source: u8,
+    /// LWC `priceLineWidth` in CSS px (default 1).
+    pub price_line_width: f64,
+    /// LWC `priceLineColor` (default `''`): `None` follows the last bar's color. The CSS
+    /// string is stored verbatim (LWC `series.options()` returns the applied string); it is
+    /// parsed only at render time, falling back to the follow behavior when unparseable.
+    pub price_line_color: Option<String>,
+    /// LWC `priceLineStyle` (default 2 = Dashed; the LWC LineStyle numbering).
+    pub price_line_style: u8,
+    /// LWC line/area/baseline `lineStyle` (default 0 = Solid; LWC LineStyle numbering).
+    pub line_style: u8,
+    /// LWC `lineVisible` (default true): hides the line stroke; an area keeps its fill and a
+    /// line series keeps only its point markers.
+    pub line_visible: bool,
+    /// LWC `pointMarkersRadius` (default `undefined`): `None` = auto (`lineWidth / 2 + 2`,
+    /// line-pane-view.ts).
+    pub point_markers_radius: Option<f64>,
+    /// LWC `crosshairMarkerVisible` (default true).
+    pub crosshair_marker_visible: bool,
+    /// LWC `crosshairMarkerRadius` in CSS px (default 4).
+    pub crosshair_marker_radius: f64,
+    /// LWC `crosshairMarkerBorderColor` (default `''`): `None` uses the chart background color,
+    /// as LWC's `backgroundColorAtYPercentFromTop` does for the solid background. Stored
+    /// verbatim as a CSS string; parsed at render time.
+    pub crosshair_marker_border_color: Option<String>,
+    /// LWC `crosshairMarkerBackgroundColor` (default `''`): `None` follows the bar color.
+    /// Stored verbatim as a CSS string; parsed at render time.
+    pub crosshair_marker_background_color: Option<String>,
+    /// LWC `crosshairMarkerBorderWidth` in CSS px (default 2).
+    pub crosshair_marker_border_width: f64,
+    /// LWC baseline `topFillColor1` (default `rgba(38, 166, 154, 0.28)`); `None` = LWC default.
+    /// Stored verbatim as a CSS string; parsed at render time.
+    pub top_fill_color1: Option<String>,
+    /// LWC baseline `topFillColor2` (default `rgba(38, 166, 154, 0.05)`); `None` = LWC default.
+    /// Stored verbatim as a CSS string; parsed at render time.
+    pub top_fill_color2: Option<String>,
+    /// LWC baseline `topLineColor` (default `rgba(38, 166, 154, 1)`); `None` = LWC default.
+    /// Stored verbatim as a CSS string; parsed at render time.
+    pub top_line_color: Option<String>,
+    /// Baseline top-quadrant line width in CSS px; `None` follows `line_width` (LWC's single
+    /// baseline `lineWidth`, default 3). LWC has no per-quadrant width; the option is an
+    /// engine extension mirroring the quadrant colors.
+    pub top_line_width: Option<f64>,
+    /// Baseline top-quadrant line style (default 0 = Solid; LWC's shared `lineStyle`).
+    pub top_line_style: u8,
+    /// LWC baseline `bottomFillColor1` (default `rgba(239, 83, 80, 0.05)`); `None` = LWC
+    /// default. Stored verbatim as a CSS string; parsed at render time.
+    pub bottom_fill_color1: Option<String>,
+    /// LWC baseline `bottomFillColor2` (default `rgba(239, 83, 80, 0.28)`); `None` = LWC
+    /// default. Stored verbatim as a CSS string; parsed at render time.
+    pub bottom_fill_color2: Option<String>,
+    /// LWC baseline `bottomLineColor` (default `rgba(239, 83, 80, 1)`); `None` = LWC default.
+    /// Stored verbatim as a CSS string; parsed at render time.
+    pub bottom_line_color: Option<String>,
+    /// Baseline bottom-quadrant line width; `None` follows `line_width` (see `top_line_width`).
+    pub bottom_line_width: Option<f64>,
+    /// Baseline bottom-quadrant line style (default 0 = Solid).
+    pub bottom_line_style: u8,
+    /// LWC histogram `base` (default 0): the price level columns grow from.
+    pub base: f64,
+    /// LWC area `invertFilledArea` (default false): fill above the line instead of below.
+    pub invert_filled_area: bool,
+    /// LWC bar `openVisible` (default true): draw the open tick on OHLC bars.
+    pub open_visible: bool,
+    /// LWC bar `thinBars` (default true): bar body width capped to the crisp line width.
+    pub thin_bars: bool,
+    /// LWC `priceFormat` (series-options-defaults.ts: `{type:'price', precision:2, minMove:0.01}`):
+    /// drives this series' last-value label, its price-line labels, the crosshair price label
+    /// when this series is the label source, and the axis ticks when it is the scale's primary
+    /// source.
+    pub price_format: SeriesPriceFormat,
     pub price_lines: Vec<PriceLine>,
     pub markers: Vec<Marker>,
     pub markers_auto_scale: bool,
@@ -190,7 +339,7 @@ impl SeriesEntry {
         Self {
             id,
             kind,
-            line_color: DEFAULT_LINE_COLOR,
+            line_color: None,
             up_color: None,
             down_color: None,
             wick_up_color: None,
@@ -211,6 +360,37 @@ impl SeriesEntry {
             visible: true,
             baseline: None,
             last_price_animation: false,
+            // LWC defaults: series-options-defaults.ts (common), line/area/baseline-series.ts
+            // (line family + baseline quadrants), bar-series.ts, histogram-series.ts.
+            last_value_visible: true,
+            price_line_visible: true,
+            price_line_source: 0,
+            price_line_width: 1.0,
+            price_line_color: None,
+            price_line_style: 2,
+            line_style: 0,
+            line_visible: true,
+            point_markers_radius: None,
+            crosshair_marker_visible: true,
+            crosshair_marker_radius: 4.0,
+            crosshair_marker_border_color: None,
+            crosshair_marker_background_color: None,
+            crosshair_marker_border_width: 2.0,
+            top_fill_color1: None,
+            top_fill_color2: None,
+            top_line_color: None,
+            top_line_width: None,
+            top_line_style: 0,
+            bottom_fill_color1: None,
+            bottom_fill_color2: None,
+            bottom_line_color: None,
+            bottom_line_width: None,
+            bottom_line_style: 0,
+            base: 0.0,
+            invert_filled_area: false,
+            open_visible: true,
+            thin_bars: true,
+            price_format: SeriesPriceFormat::default(),
             price_lines: Vec::new(),
             markers: Vec::new(),
             markers_auto_scale: true,
@@ -221,6 +401,11 @@ impl SeriesEntry {
 
 pub const PANE_SEPARATOR: f64 = 1.0;
 
+/// `pane_index` sentinel for a series whose pane was removed (LWC `removePane` orphans the
+/// pane's series — `paneForSource` turns null): the series keeps its data but renders and
+/// scales nowhere until re-assigned to a live pane.
+pub(crate) const PANELESS: usize = usize::MAX;
+
 pub struct Pane {
     pub price_scale: PriceScaleCore,
     pub left_scale: PriceScaleCore,
@@ -228,6 +413,10 @@ pub struct Pane {
     pub stretch_factor: f64,
     pub overlay_top: f64,
     pub overlay_bottom: f64,
+    /// LWC pane.ts `_preserveEmptyPane` (default false): an empty pane collapses on the next
+    /// series removal/move-out unless this holds it open (chart-model.ts
+    /// `_cleanupIfPaneIsEmpty`).
+    pub preserve_empty: bool,
     pub marker_margin_above: f64,
     pub marker_margin_below: f64,
     pub left_marker_margin_above: f64,
@@ -255,6 +444,7 @@ impl Pane {
             stretch_factor: 1.0,
             overlay_top: 0.8,
             overlay_bottom: 0.0,
+            preserve_empty: false,
             marker_margin_above: 0.0,
             marker_margin_below: 0.0,
             left_marker_margin_above: 0.0,
@@ -309,7 +499,23 @@ pub struct ChartEngine {
     pub crosshair_mode: CrosshairMode,
     pub animation_time: f64,
     pub next_price_line_id: u32,
+    /// LWC `timeScale.timeVisible` — label semantics only: whether axis/crosshair time labels
+    /// include the time of day. Strip reservation is [`Self::time_axis_visible`].
     pub time_visible: bool,
+    /// LWC `timeScale.visible` (default true): reserve and paint the whole time-axis strip.
+    /// When false the strip collapses to zero height and its labels/ticks/border vanish.
+    pub time_axis_visible: bool,
+    /// LWC `timeScale.ticksVisible` (default false): tick marks on the time axis.
+    pub time_ticks_visible: bool,
+    /// LWC `timeScale.minimumHeight` (default 0 = the [`TIME_AXIS_HEIGHT`] auto height): floor
+    /// for the time-axis strip height.
+    pub time_axis_minimum_height: f64,
+    /// LWC `timeScale.tickMarkMaxCharacterLength` (default 8): tick-label width cap in
+    /// characters. 0 restores the default (LWC's `|| defaultTickMarkMaxCharacterLength`).
+    pub tick_mark_max_character_length: u32,
+    /// Hovered pane separator index for the hover band (LWC pane-separator.ts
+    /// `separatorHoverColor` handle); `None` paints nothing. Mirrored into the axis frame.
+    pub separator_hover: Option<usize>,
     /// LWC `timeScale.secondsVisible` — include seconds in axis/crosshair time labels when
     /// `time_visible` is set. Defaults to false (LWC default).
     pub seconds_visible: bool,
@@ -326,6 +532,16 @@ pub struct ChartEngine {
     indicators: Vec<IndicatorBinding>,
     synced_points_len: usize,
     synced_last_time: Option<i64>,
+    synced_first_time: Option<i64>,
+    /// LWC `localization.dateFormat` (default `dd MMM \'yy`): drives the crosshair time label.
+    pub date_format: String,
+    /// Per-locale month-name tables (LWC `localization.locale`) used by the date-format
+    /// `MMM`/`MMMM` tokens and the month tick labels. Hosts inject locale-derived names (the
+    /// wasm host builds them from `Intl.DateTimeFormat`); the headless default is English.
+    pub month_names: MonthNames,
+    /// Series ids in render order, bottom to top (topmost LAST — LWC's z-order, pane.ts
+    /// `orderedSources`/`setSeriesOrder`). Live series only: removed slots leave the list.
+    series_order: Vec<SeriesId>,
     /// Optional host formatting callbacks (LWC `localization.priceFormatter`/`timeFormatter` and
     /// `timeScale.tickMarkFormatter`). The engine stays headless — the host supplies plain boxed
     /// closures; each returns `None` to fall back to the built-in formatter (e.g. the callback
@@ -352,6 +568,11 @@ impl ChartEngine {
             animation_time: 0.0,
             next_price_line_id: 1,
             time_visible: true,
+            time_axis_visible: true,
+            time_ticks_visible: false,
+            time_axis_minimum_height: 0.0,
+            tick_mark_max_character_length: 8,
+            separator_hover: None,
             seconds_visible: false,
             css_width,
             css_height,
@@ -365,6 +586,10 @@ impl ChartEngine {
             indicators: Vec::new(),
             synced_points_len: 0,
             synced_last_time: None,
+            synced_first_time: None,
+            date_format: DEFAULT_DATE_FORMAT.to_string(),
+            month_names: MonthNames::default(),
+            series_order: vec![main],
             price_formatter_fn: None,
             tick_mark_formatter_fn: None,
             time_formatter_fn: None,
@@ -390,30 +615,54 @@ impl ChartEngine {
         self.time_formatter_fn = f;
     }
 
+    /// LWC `localization.dateFormat` (default `dd MMM \'yy`): the pattern driving the
+    /// crosshair time label. Ignored while a host `timeFormatter` is installed (LWC parity).
+    pub fn set_date_format(&mut self, pattern: &str) {
+        self.date_format = pattern.to_string();
+    }
+
+    /// Inject per-locale month-name tables (LWC `localization.locale`): the 12 short and 12
+    /// long month names used by the date-format `MMM`/`MMMM` tokens and the month tick
+    /// labels. The engine stays headless — hosts derive the names (the wasm host uses
+    /// `Intl.DateTimeFormat`); the default is English.
+    pub fn set_month_names(&mut self, short: [String; 12], long: [String; 12]) {
+        self.month_names = MonthNames { short, long };
+    }
+
     /// Add a series to the headless chart. The returned id is stable for the instance lifetime.
     pub fn add_series(&mut self, kind: SeriesKind) -> SeriesId {
         let id = self.data.add_series();
         self.series.push(SeriesEntry::new(id, kind));
+        // new series paint on top (LWC appends to the pane's data sources)
+        self.series_order.push(id);
         id
     }
 
-    /// Remove a series (LWC `removeSeries`). The primary series (id 0) anchors the crosshair,
-    /// last-value badge, and pulse, so it cannot be removed — `remove_series(0)` returns false, as
-    /// does an unknown or already-removed id. Any indicators bound to (or derived from) the series
-    /// are dropped with it. Returns true if a live series was removed.
+    /// Remove a series (LWC `removeSeries`, which accepts any series including the first).
+    /// Returns false for an unknown or already-removed id. Any indicators bound to (or
+    /// derived from) the series are dropped with it. Consumers that anchor on the "primary"
+    /// series (crosshair defaults, the volume up/down reference, the last-price pulse, the
+    /// wasm coordinate API) fall back to the first visible non-removed series.
     ///
     /// The slot is tombstoned rather than compacted: `SeriesId` is a positional index into the
     /// data layer and the series list (`series[rs.id]` is used directly), so compaction would
     /// invalidate every other id. The emptied, hidden slot is inert in all draw/scale paths.
     pub fn remove_series(&mut self, id: SeriesId) -> bool {
-        if id == 0 || !self.series.iter().any(|s| s.id == id && !s.removed) {
+        if !self.series.iter().any(|s| s.id == id && !s.removed) {
             return false;
         }
+        // The pane losing the series may collapse afterwards (LWC `_cleanupIfPaneIsEmpty`).
+        let home_pane = self
+            .series
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| s.pane_index);
         // Drop indicator bindings touching this series and collect their output series to tombstone
         // alongside it (a removed source leaves no derived data behind).
         let mut tombstones = self.drop_indicators_touching(id);
         tombstones.push(id);
-        for rid in tombstones {
+        for rid in &tombstones {
+            let rid = *rid;
             if let Some(entry) = self.series.iter_mut().find(|s| s.id == rid) {
                 entry.removed = true;
                 entry.visible = false;
@@ -431,8 +680,183 @@ impl ChartEngine {
                 Vec::new(),
             );
         }
+        self.series_order.retain(|sid| !tombstones.contains(sid));
         self.sync_time_points();
+        // LWC chart-model.ts `removeSeries`: prune the pane the series left when it is empty
+        // and not preserved (a pane-less index — after an explicit `remove_pane` — prunes
+        // nothing).
+        if let Some(pane_index) = home_pane {
+            self.cleanup_if_pane_is_empty(pane_index);
+        }
         true
+    }
+
+    /// LWC chart-api.ts `addPane(preserveEmptyPane)` → chart-model.ts `_addPane`: append a
+    /// pane and return its index. The new pane's scales inherit the chart-level
+    /// `leftPriceScale`/`rightPriceScale` cosmetics, exactly like LWC's `Pane` constructor.
+    pub fn add_pane(&mut self, preserve_empty: bool) -> usize {
+        let mut pane = Pane::new();
+        pane.preserve_empty = preserve_empty;
+        self.apply_chart_scale_options(&mut pane);
+        self.panes.push(pane);
+        self.panes.len() - 1
+    }
+
+    /// LWC chart-model.ts `removePane`: refuses the last remaining pane and out-of-range
+    /// indices (false). The removed pane's series are NOT moved or removed — they become
+    /// pane-less (LWC leaves them with `paneForSource` → null): they keep their data but
+    /// render and scale nowhere until re-assigned. Series below shift one pane up.
+    pub fn remove_pane(&mut self, index: usize) -> bool {
+        if self.panes.len() <= 1 || index >= self.panes.len() {
+            return false;
+        }
+        self.panes.remove(index);
+        for s in &mut self.series {
+            if s.pane_index == index {
+                s.pane_index = PANELESS;
+            } else if s.pane_index != PANELESS && s.pane_index > index {
+                s.pane_index -= 1;
+            }
+        }
+        true
+    }
+
+    /// LWC chart-model.ts `swapPanes`: the two panes trade places; their series assignments,
+    /// stretch factors, scales, and preserve flags ride along with them.
+    pub fn swap_panes(&mut self, first: usize, second: usize) -> bool {
+        if first >= self.panes.len() || second >= self.panes.len() {
+            return false;
+        }
+        self.panes.swap(first, second);
+        for s in &mut self.series {
+            if s.pane_index == first {
+                s.pane_index = second;
+            } else if s.pane_index == second {
+                s.pane_index = first;
+            }
+        }
+        true
+    }
+
+    /// LWC chart-model.ts `movePane` (pane-api.ts `moveTo`): relocate the pane to a new index
+    /// with its series; the panes in between shift one slot.
+    pub fn move_pane(&mut self, from: usize, to: usize) -> bool {
+        if from >= self.panes.len() || to >= self.panes.len() {
+            return false;
+        }
+        if from == to {
+            return true;
+        }
+        let pane = self.panes.remove(from);
+        self.panes.insert(to, pane);
+        for s in &mut self.series {
+            let p = s.pane_index;
+            if p == PANELESS {
+                continue;
+            }
+            s.pane_index = if p == from {
+                to
+            } else if from < to && p > from && p <= to {
+                p - 1
+            } else if to < from && p >= to && p < from {
+                p + 1
+            } else {
+                p
+            };
+        }
+        true
+    }
+
+    /// LWC pane-api.ts `preserveEmptyPane()` (false for a stale index).
+    pub fn pane_preserve_empty(&self, index: usize) -> bool {
+        self.panes
+            .get(index)
+            .map(|p| p.preserve_empty)
+            .unwrap_or(false)
+    }
+
+    /// LWC pane-api.ts `setPreserveEmptyPane(preserve)` (ignored for a stale index).
+    pub fn pane_set_preserve_empty(&mut self, index: usize, flag: bool) {
+        if let Some(pane) = self.panes.get_mut(index) {
+            pane.preserve_empty = flag;
+        }
+    }
+
+    /// LWC pane-api.ts `getSeries()`: the pane's live series in render order (bottom first,
+    /// matching the chart z-order). Empty for a stale index.
+    pub fn pane_series_ids(&self, index: usize) -> Vec<SeriesId> {
+        self.series_order
+            .iter()
+            .copied()
+            .filter(|&id| self.series[id].pane_index == index)
+            .collect()
+    }
+
+    /// Move a series into pane `pane_index`, creating panes (with the given stretch factor
+    /// for a newly-created pane) as needed — LWC `moveSeriesToPane` with `_getOrCreatePane`.
+    /// The pane the series left collapses when empty and not preserved (LWC
+    /// `_cleanupIfPaneIsEmpty`, chart-model.ts:1135).
+    pub fn set_series_pane(&mut self, id: SeriesId, pane_index: usize, stretch_factor: f64) {
+        while self.panes.len() <= pane_index {
+            let mut pane = Pane::new();
+            pane.stretch_factor = stretch_factor.max(0.01);
+            self.apply_chart_scale_options(&mut pane);
+            self.panes.push(pane);
+        }
+        let Some(series) = self.series.iter_mut().find(|s| s.id == id && !s.removed) else {
+            return;
+        };
+        let from = series.pane_index;
+        if from == pane_index {
+            return;
+        }
+        series.pane_index = pane_index;
+        if from != PANELESS {
+            self.cleanup_if_pane_is_empty(from);
+        }
+    }
+
+    /// Port of LWC chart-model.ts `_cleanupIfPaneIsEmpty`: a pane left without any live
+    /// series collapses unless it is preserved or the last remaining pane. Series below
+    /// shift one pane up. Returns true when the pane was removed.
+    fn cleanup_if_pane_is_empty(&mut self, pane_index: usize) -> bool {
+        if pane_index >= self.panes.len() || self.panes.len() <= 1 {
+            return false;
+        }
+        if self.panes[pane_index].preserve_empty {
+            return false;
+        }
+        // LWC checks `pane.dataSources().length === 0`: hidden series still occupy their
+        // pane; removed (tombstoned) ones are detached from it.
+        if self
+            .series
+            .iter()
+            .any(|s| !s.removed && s.pane_index == pane_index)
+        {
+            return false;
+        }
+        self.panes.remove(pane_index);
+        for s in &mut self.series {
+            if s.pane_index != PANELESS && s.pane_index > pane_index {
+                s.pane_index -= 1;
+            }
+        }
+        true
+    }
+
+    /// Copy the chart-level `leftPriceScale`/`rightPriceScale` scale-held cosmetics onto a
+    /// new pane's scales (LWC pane.ts constructor `_createPriceScale` from the chart options).
+    fn apply_chart_scale_options(&self, pane: &mut Pane) {
+        let options = self.options.get();
+        let apply = |scale: &mut PriceScaleCore, group: &aion_core::options::PriceAxisOptions| {
+            scale.set_align_labels(group.align_labels);
+            scale.set_ticks_visible(group.ticks_visible);
+            scale.set_entire_text_only(group.entire_text_only);
+            scale.set_minimum_width(group.minimum_width);
+            scale.set_text_color(group.text_color.clone());
+        };
+        apply(&mut pane.left_scale, &options.left_price_scale);
+        apply(&mut pane.price_scale, &options.right_price_scale);
     }
 
     /// Whether `id` names a tombstoned (removed) series. Data mutations on such a slot are ignored
@@ -441,11 +865,66 @@ impl ChartEngine {
         self.series.iter().any(|s| s.id == id && s.removed)
     }
 
-    /// Toggle a series without destroying its data or indicator binding.
+    /// Toggle a series without destroying its data or indicator binding. A removed slot can
+    /// never be revived, so visibility changes on it are ignored.
     pub fn set_series_visible(&mut self, id: SeriesId, visible: bool) {
-        if let Some(series) = self.series.iter_mut().find(|series| series.id == id) {
+        if let Some(series) = self
+            .series
+            .iter_mut()
+            .find(|series| series.id == id && !series.removed)
+        {
             series.visible = visible;
         }
+    }
+
+    /// The effective primary series: the first visible, non-removed entry. LWC lets any
+    /// series be removed (`removeSeries`), so every "first series" anchor resolves through
+    /// this fallback instead of assuming id 0 is alive.
+    pub(crate) fn primary_series(&self) -> Option<&SeriesEntry> {
+        self.series.iter().find(|s| !s.removed && s.visible)
+    }
+
+    /// Series ids in current render order (bottom to top; topmost LAST), live series only.
+    pub fn series_order(&self) -> &[SeriesId] {
+        &self.series_order
+    }
+
+    /// The render order as a JSON array of series ids (LWC's z-order; the last id paints on
+    /// top). Backs the TS `chart.seriesOrder()`.
+    pub fn series_order_json(&self) -> String {
+        serde_json::to_string(&self.series_order).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// LWC `chart.setSeriesOrder`: reorder which series paints on top. The patch must name
+    /// every live series id exactly once (a bad permutation — wrong length, duplicates,
+    /// unknown or missing ids — is rejected with false and no state change).
+    pub fn set_series_order(&mut self, ids: Vec<SeriesId>) -> bool {
+        if ids.len() != self.series_order.len() {
+            return false;
+        }
+        let mut requested = ids.clone();
+        requested.sort_unstable();
+        let mut current = self.series_order.clone();
+        current.sort_unstable();
+        if requested != current {
+            return false;
+        }
+        self.series_order = ids;
+        true
+    }
+
+    /// Remove the last `count` data points of a series (LWC v5.2 `ISeriesApi.pop`,
+    /// iseries-api.ts:203): `count` 0 is a no-op, larger counts clamp to the data length.
+    /// Per-point color channels truncate with their rows. Returns the new data length, or
+    /// `None` for an unknown/removed id.
+    pub fn series_pop(&mut self, id: SeriesId, count: usize) -> Option<usize> {
+        if self.is_series_removed(id) || !self.series.iter().any(|s| s.id == id) {
+            return None;
+        }
+        let len = self.data.pop(id, count);
+        self.sync_time_points();
+        self.recompute_indicators();
+        Some(len)
     }
 
     pub fn set_series_markers(&mut self, id: SeriesId, markers: Vec<Marker>) {
@@ -462,16 +941,85 @@ impl ChartEngine {
 
     /// Apply one streaming OHLC update after validating its time and values.
     pub fn update_series_bar(&mut self, id: SeriesId, time: f64, values: [f64; 4]) -> bool {
+        self.update_series_bar_styled(id, time, values, [None; 3])
+    }
+
+    /// [`update_series_bar`] plus the target bar's per-point color channels (LWC
+    /// `series.update` with data-item colors; `None` = no custom color for that channel).
+    /// Mirrors the plain update's semantics exactly: append-new-time vs replace-last.
+    pub fn update_series_bar_styled(
+        &mut self,
+        id: SeriesId,
+        time: f64,
+        values: [f64; 4],
+        colors: [Option<u32>; 3],
+    ) -> bool {
         if self.is_series_removed(id) {
             return false;
         }
         let Some((time, values)) = sanitize_point(time, values) else {
             return false;
         };
-        self.data.update(id, time, values);
+        self.data.update_styled(id, time, values, colors);
         self.sync_time_points();
         self.update_indicators_after_source_update(id, time);
         true
+    }
+
+    /// Install per-row color overrides for a series (LWC data-item colors, packed RGBA
+    /// `0xRRGGBBAA`). Channels: body = candle/bar body, line/area stroke + point marker,
+    /// histogram column; wick/border = candlestick parts. Each channel is `None`/empty for
+    /// absent, or must match the series' row count exactly — a mismatch rejects the whole call
+    /// (false, no partial state). `set_series_data`/`install_series_data` reset these colors,
+    /// so hosts install them right after setting data.
+    pub fn set_series_point_colors(
+        &mut self,
+        id: SeriesId,
+        body: Option<Vec<u32>>,
+        wick: Option<Vec<u32>>,
+        border: Option<Vec<u32>>,
+    ) -> bool {
+        if self.is_series_removed(id) || !self.series.iter().any(|s| s.id == id) {
+            return false;
+        }
+        self.data.set_point_colors(id, [body, wick, border])
+    }
+
+    /// Full (re)assignment with per-row color channels run through the same repair pipeline as
+    /// the OHLC columns: the colors follow their row through invalid-row drops and the stable
+    /// sort, and the last-wins dedupe keeps the winning row's channels.
+    #[allow(clippy::too_many_arguments)] // mirrors set_series_data plus the three LWC color slots
+    pub fn set_series_data_styled(
+        &mut self,
+        id: SeriesId,
+        times: &[f64],
+        open: &[f64],
+        high: &[f64],
+        low: &[f64],
+        close: &[f64],
+        colors: [Option<Vec<u32>>; 3],
+    ) -> Result<ValidationReport, ValidationError> {
+        if self.is_series_removed(id) {
+            return Ok(ValidationReport::default());
+        }
+        let s = sanitize_ohlc_styled(times, open, high, low, close, colors)?;
+        let report = s.data.report.clone();
+        self.data.set_data(
+            id,
+            s.data.times,
+            s.data.open,
+            s.data.high,
+            s.data.low,
+            s.data.close,
+        );
+        let [body, wick, border] = s.colors;
+        let installed = self
+            .data
+            .set_point_colors(id, [Some(body), Some(wick), Some(border)]);
+        debug_assert!(installed, "sanitized channels are aligned by construction");
+        self.sync_time_points();
+        self.recompute_indicators();
+        Ok(report)
     }
 
     /// Validate and install one series' parallel OHLC columns without involving a host runtime.
@@ -548,6 +1096,50 @@ impl ChartEngine {
         self.time_visible = visible;
     }
 
+    /// LWC `timeScale.visible`: reserve/collapse the whole time-axis strip. Distinct from
+    /// [`Self::set_time_visible`], which only governs label content (LWC
+    /// time-scale-options-defaults.ts keeps the two flags separate).
+    pub fn set_time_axis_visible(&mut self, visible: bool) {
+        self.time_axis_visible = visible;
+    }
+
+    /// LWC `timeScale.ticksVisible`: tick marks beside the time-axis labels.
+    pub fn set_time_ticks_visible(&mut self, visible: bool) {
+        self.time_ticks_visible = visible;
+    }
+
+    /// LWC `timeScale.minimumHeight` (CSS px; non-negative, finite): floor for the strip
+    /// height — chart-widget.ts `Math.max(optimalHeight(), minimumHeight)`.
+    pub fn set_time_axis_minimum_height(&mut self, height: f64) {
+        if height.is_finite() && height >= 0.0 {
+            self.time_axis_minimum_height = height;
+        }
+    }
+
+    /// LWC `timeScale.tickMarkMaxCharacterLength`: 0 restores the default 8, matching LWC's
+    /// `tickMarkMaxCharacterLength || defaultTickMarkMaxCharacterLength` (time-scale.ts:635).
+    pub fn set_tick_mark_max_character_length(&mut self, n: u32) {
+        self.tick_mark_max_character_length = if n == 0 { 8 } else { n };
+    }
+
+    /// The reserved time-axis strip height in media px (LWC chart-widget.ts
+    /// `_adjustSizeImpl`): zero when the strip is hidden, else the auto height floored at
+    /// `timeScale.minimumHeight`. Hosts subtract this from the chart height for the pane
+    /// content area and report it from their `time_scale_height()` gestures getter.
+    pub fn time_axis_height(&self) -> f64 {
+        if self.time_axis_visible {
+            TIME_AXIS_HEIGHT.max(self.time_axis_minimum_height)
+        } else {
+            0.0
+        }
+    }
+
+    /// Set/clear the hovered pane separator (LWC pane-separator.ts hover handle). Mirrored
+    /// into the next axis frame; hosts repaint to show the band.
+    pub fn set_separator_hover(&mut self, index: Option<usize>) {
+        self.separator_hover = index;
+    }
+
     /// LWC `timeScale.secondsVisible`: include seconds when `time_visible` is set.
     pub fn set_seconds_visible(&mut self, visible: bool) {
         self.seconds_visible = visible;
@@ -556,6 +1148,27 @@ impl ChartEngine {
     /// LWC `timeScale.minBarSpacing`.
     pub fn set_min_bar_spacing(&mut self, spacing: f64) {
         self.time_scale.set_min_bar_spacing(spacing);
+    }
+
+    /// LWC `timeScale.maxBarSpacing` (CSS px; 0 restores the default half-width cap).
+    pub fn set_max_bar_spacing(&mut self, spacing: f64) {
+        self.time_scale.set_max_bar_spacing(spacing);
+    }
+
+    /// LWC `timeScale().applyOptions({ barSpacing })`: write the option and apply it live.
+    pub fn apply_bar_spacing_option(&mut self, spacing: f64) {
+        self.time_scale.apply_bar_spacing_option(spacing);
+    }
+
+    /// LWC `timeScale().applyOptions({ rightOffset })`: write the option and apply it live.
+    pub fn apply_right_offset_option(&mut self, offset: f64) {
+        self.time_scale.apply_right_offset_option(offset);
+    }
+
+    /// LWC `timeScale.rightOffsetPixels`: pin the right offset in pixels (converted to bars
+    /// through the current bar spacing, then preserved across zoom).
+    pub fn set_right_offset_pixels(&mut self, pixels: f64) {
+        self.time_scale.set_right_offset_pixels(pixels);
     }
 
     /// LWC `timeScale.fixLeftEdge`.
@@ -576,6 +1189,58 @@ impl ChartEngine {
     /// LWC `timeScale.rightBarStaysOnScroll`.
     pub fn set_right_bar_stays_on_scroll(&mut self, stays: bool) {
         self.time_scale.set_right_bar_stays_on_scroll(stays);
+    }
+
+    /// LWC `timeScale.shiftVisibleRangeOnNewBar` (default true): when the last bar is
+    /// visible, the visible range follows newly appended bars instead of compensating the
+    /// right offset (chart-model.ts:968-983).
+    pub fn set_shift_visible_range_on_new_bar(&mut self, shift: bool) {
+        self.time_scale.set_shift_visible_range_on_new_bar(shift);
+    }
+
+    /// LWC `timeScale.allowShiftVisibleRangeOnWhitespaceReplacement` (default false): also
+    /// shift when the new bar replaces an existing whitespace time point.
+    pub fn set_allow_shift_visible_range_on_whitespace_replacement(&mut self, allow: bool) {
+        self.time_scale
+            .set_allow_shift_visible_range_on_whitespace_replacement(allow);
+    }
+
+    /// LWC `chart.setCrosshairPosition(price, time, series)` (chart-model.ts
+    /// `setAndSaveSyntheticPosition`): position the crosshair at a data point without a DOM
+    /// event. The time must land exactly on a merged time point (false otherwise); x is that
+    /// bar's coordinate and y the price converted through the given series' price scale.
+    /// Works headless — the next built frame draws it; hosts emit their crosshair event.
+    pub fn set_crosshair_position(&mut self, price: f64, time: f64, series_id: SeriesId) -> bool {
+        if !price.is_finite() || self.is_series_removed(series_id) {
+            return false;
+        }
+        if !self.series.iter().any(|s| s.id == series_id) {
+            return false;
+        }
+        // Bars live at integer-second times (ingestion truncates), so a fractional time can
+        // never resolve to a bar — reject it rather than truncating onto one (LWC compares
+        // exact time keys and reports no match).
+        if !time.is_finite() || time.fract() != 0.0 {
+            return false;
+        }
+        let Some(index) = self.time_to_index(time, false) else {
+            return false;
+        };
+        let Some(y) = self.series_price_to_coordinate(series_id, price) else {
+            return false;
+        };
+        let x = self.time_scale.index_to_coordinate(index);
+        self.crosshair = Some((x, y));
+        true
+    }
+
+    /// LWC `chart.clearCrosshairPosition`. The engine keeps a single stored position — the
+    /// LWC origin coords *are* the position here (a synthetic set saves (x, y) and the frame
+    /// builder re-derives the snapped index from that stored x, exactly like LWC's
+    /// `updateCrosshair` re-deriving from the saved origin) — so clearing it leaves nothing
+    /// a scale change could resurrect.
+    pub fn clear_crosshair_position(&mut self) {
+        self.crosshair = None;
     }
 
     /// Host-pushed "all scaling and scrolling disabled" aggregate (LWC
@@ -612,6 +1277,187 @@ impl ChartEngine {
     /// Restore the configured default bar spacing and right offset.
     pub fn reset_time_scale(&mut self) {
         self.time_scale.restore_default();
+    }
+
+    /// Deep-merge a JSON options patch into the chart options store (LWC `applyOptions`
+    /// semantics) and apply the runtime-affecting fields: the crosshair mode, plus any
+    /// behavioral `timeScale` keys routed to the core scale through the same setters as the
+    /// public time-scale API. Returns the parse error for a malformed patch.
+    pub fn apply_options(&mut self, patch_json: &str) -> Result<(), serde_json::Error> {
+        let patch: serde_json::Value = serde_json::from_str(patch_json)?;
+        self.options.apply(&patch);
+        // Re-derive runtime state that isn't read straight from the store each frame.
+        self.crosshair_mode = crosshair_mode_from_u8(self.options.get().crosshair.mode);
+        self.route_time_scale_patch(&patch);
+        self.route_price_scale_patch(&patch);
+        self.route_localization_patch(&patch);
+        Ok(())
+    }
+
+    /// Route the behavioral keys of a `timeScale` options patch to the core scale (LWC
+    /// `applyOptions({ timeScale })`, time-scale.ts:381-420). Only keys present in this patch
+    /// are applied — the merged store is never re-read here, so an unrelated patch leaves the
+    /// live scale state untouched.
+    fn route_time_scale_patch(&mut self, patch: &serde_json::Value) {
+        let Some(time_scale) = patch
+            .get("timeScale")
+            .and_then(serde_json::Value::as_object)
+        else {
+            return;
+        };
+        let number = |key: &str| time_scale.get(key).and_then(serde_json::Value::as_f64);
+        let flag = |key: &str| time_scale.get(key).and_then(serde_json::Value::as_bool);
+        // LWC ordering (time-scale.ts:384-407): edge fixes first, then bar spacing, right
+        // offset, and rightOffsetPixels (which converts through the just-applied spacing);
+        // the spacing constraints come last since each re-corrects spacing and offset.
+        if let Some(fix) = flag("fixLeftEdge") {
+            self.set_fix_left_edge(fix);
+        }
+        if let Some(fix) = flag("fixRightEdge") {
+            self.set_fix_right_edge(fix);
+        }
+        if let Some(spacing) = number("barSpacing") {
+            self.apply_bar_spacing_option(spacing);
+        }
+        if let Some(offset) = number("rightOffset") {
+            self.apply_right_offset_option(offset);
+        }
+        if let Some(pixels) = number("rightOffsetPixels") {
+            self.set_right_offset_pixels(pixels);
+        }
+        if let Some(spacing) = number("minBarSpacing") {
+            self.set_min_bar_spacing(spacing);
+        }
+        if let Some(spacing) = number("maxBarSpacing") {
+            self.set_max_bar_spacing(spacing);
+        }
+        if let Some(visible) = flag("timeVisible") {
+            self.set_time_visible(visible);
+        }
+        if let Some(visible) = flag("secondsVisible") {
+            self.set_seconds_visible(visible);
+        }
+        // Strip cosmetics (LWC timeScale options distinct from the label flags): `visible`
+        // reserves the whole strip; the others shape its height and tick chrome.
+        if let Some(visible) = flag("visible") {
+            self.set_time_axis_visible(visible);
+        }
+        if let Some(visible) = flag("ticksVisible") {
+            self.set_time_ticks_visible(visible);
+        }
+        if let Some(height) = number("minimumHeight") {
+            self.set_time_axis_minimum_height(height);
+        }
+        if let Some(n) = time_scale
+            .get("tickMarkMaxCharacterLength")
+            .and_then(serde_json::Value::as_u64)
+        {
+            self.set_tick_mark_max_character_length(n.min(u32::MAX as u64) as u32);
+        }
+        if let Some(lock) = flag("lockVisibleTimeRangeOnResize") {
+            self.set_lock_visible_time_range_on_resize(lock);
+        }
+        if let Some(stays) = flag("rightBarStaysOnScroll") {
+            self.set_right_bar_stays_on_scroll(stays);
+        }
+        if let Some(shift) = flag("shiftVisibleRangeOnNewBar") {
+            self.set_shift_visible_range_on_new_bar(shift);
+        }
+        if let Some(allow) = flag("allowShiftVisibleRangeOnWhitespaceReplacement") {
+            self.set_allow_shift_visible_range_on_whitespace_replacement(allow);
+        }
+    }
+
+    /// Route a `localization` options patch: `dateFormat` drives the crosshair time label
+    /// (LWC chart-options-defaults.ts:34-37). `locale` is handled by hosts that can resolve
+    /// month names (the wasm layer intercepts it before delegating here); the store keeps
+    /// both keys for the options round-trip either way.
+    /// Route the scale-held keys of a `leftPriceScale`/`rightPriceScale` patch to every
+    /// pane's corresponding scale — LWC pane.ts `applyScaleOptions` applies the chart-level
+    /// groups to all panes. The strip cosmetics (`visible`, borders) stay in the options
+    /// store and are read at render time. Only keys present in this patch are applied.
+    fn route_price_scale_patch(&mut self, patch: &serde_json::Value) {
+        for (group_key, target) in [
+            ("leftPriceScale", PriceScaleTarget::Left),
+            ("rightPriceScale", PriceScaleTarget::Right),
+        ] {
+            let Some(group) = patch.get(group_key).and_then(serde_json::Value::as_object) else {
+                continue;
+            };
+            let flag = |key: &str| group.get(key).and_then(serde_json::Value::as_bool);
+            for pane in &mut self.panes {
+                let scale = match target {
+                    PriceScaleTarget::Left => &mut pane.left_scale,
+                    PriceScaleTarget::Right => &mut pane.price_scale,
+                    PriceScaleTarget::Overlay => continue,
+                };
+                if let Some(align) = flag("alignLabels") {
+                    scale.set_align_labels(align);
+                }
+                if let Some(visible) = flag("ticksVisible") {
+                    scale.set_ticks_visible(visible);
+                }
+                if let Some(entire) = flag("entireTextOnly") {
+                    scale.set_entire_text_only(entire);
+                }
+                if let Some(width) = group
+                    .get("minimumWidth")
+                    .and_then(serde_json::Value::as_f64)
+                {
+                    scale.set_minimum_width(width);
+                }
+                if let Some(value) = group.get("textColor") {
+                    if value.is_null() {
+                        scale.set_text_color(None);
+                    } else if let Some(css) = value.as_str() {
+                        scale.set_text_color((!css.is_empty()).then(|| css.to_string()));
+                    }
+                }
+            }
+        }
+    }
+
+    fn route_localization_patch(&mut self, patch: &serde_json::Value) {
+        let Some(localization) = patch
+            .get("localization")
+            .and_then(serde_json::Value::as_object)
+        else {
+            return;
+        };
+        if let Some(pattern) = localization.get("dateFormat").and_then(|v| v.as_str()) {
+            self.set_date_format(pattern);
+        }
+    }
+
+    /// All time-scale options as a snake_case JSON object: the `TimeScaleOptions` fields from
+    /// the core scale plus the engine-held `timeVisible`/`secondsVisible` label flags and the
+    /// strip cosmetics (`visible`, `ticks_visible`, `minimum_height`,
+    /// `tick_mark_max_character_length`). Backs
+    /// the TS time-scale handle's `options()`. Values are the *configured* options (LWC
+    /// `timeScale().options()` semantics): `applyOptions` writes them, scroll/zoom gestures
+    /// only move the live scale.
+    pub fn time_scale_options_json(&self) -> String {
+        let options = self.time_scale.options();
+        serde_json::json!({
+            "bar_spacing": options.bar_spacing,
+            "right_offset": options.right_offset,
+            "min_bar_spacing": options.min_bar_spacing,
+            "max_bar_spacing": options.max_bar_spacing,
+            "right_offset_pixels": options.right_offset_pixels,
+            "time_visible": self.time_visible,
+            "seconds_visible": self.seconds_visible,
+            "visible": self.time_axis_visible,
+            "ticks_visible": self.time_ticks_visible,
+            "minimum_height": self.time_axis_minimum_height,
+            "tick_mark_max_character_length": self.tick_mark_max_character_length,
+            "fix_left_edge": options.fix_left_edge,
+            "fix_right_edge": options.fix_right_edge,
+            "lock_visible_time_range_on_resize": options.lock_visible_time_range_on_resize,
+            "right_bar_stays_on_scroll": options.right_bar_stays_on_scroll,
+            "shift_visible_range_on_new_bar": options.shift_visible_range_on_new_bar,
+            "allow_shift_visible_range_on_whitespace_replacement": options.allow_shift_visible_range_on_whitespace_replacement,
+        })
+        .to_string()
     }
 
     /// X coordinate for an integer logical index, or `None` when the scale has no points.
@@ -749,6 +1595,45 @@ impl ChartEngine {
     }
 
     fn sync_time_points(&mut self) {
+        // Port of LWC `ChartModel.updateTimeScale` (chart-model.ts:953-984): decide the
+        // right-offset compensation BEFORE the new points/base index land on the scale.
+        let old_first_time = self.synced_first_time;
+        let new_first_time = self.data.merged_times().first().copied();
+        let current_base_index = self.time_scale.base_index();
+        let visible_bars = self.time_scale.visible_strict_range();
+        let new_base_index = self.data.base_index();
+        // LWC's `replacedExistingWhitespace` (firstChangedPointIndex === undefined): the time
+        // scale points did not change, so a base-index move comes from a real bar replacing a
+        // whitespace point (or a same-length data swap) rather than from new points.
+        let points_unchanged = self.data.merged_times().len() == self.synced_points_len
+            && new_first_time == old_first_time
+            && self.data.merged_times().last().copied() == self.synced_last_time;
+        let replaced_existing_whitespace = points_unchanged;
+
+        if let (Some(visible_bars), Some(old_first), Some(new_first)) =
+            (visible_bars, old_first_time, new_first_time)
+        {
+            let is_last_series_bar_visible = visible_bars.contains(current_base_index);
+            let is_left_bar_shift_to_left = old_first > new_first;
+            let is_series_points_added =
+                new_base_index.is_some_and(|new_base| new_base > current_base_index);
+            let is_series_points_added_to_right =
+                is_series_points_added && !is_left_bar_shift_to_left;
+
+            let allow_shift_when_replacing_whitespace = self
+                .time_scale
+                .options()
+                .allow_shift_visible_range_on_whitespace_replacement;
+            let need_shift_visible_range_on_new_bar = is_last_series_bar_visible
+                && (!replaced_existing_whitespace || allow_shift_when_replacing_whitespace)
+                && self.time_scale.options().shift_visible_range_on_new_bar;
+            if is_series_points_added_to_right && !need_shift_visible_range_on_new_bar {
+                let compensation_shift = new_base_index.unwrap() - current_base_index;
+                self.time_scale
+                    .set_right_offset(self.time_scale.right_offset() - compensation_shift as f64);
+            }
+        }
+
         let times = self.data.merged_times();
         let appended = times.len() == self.synced_points_len + 1
             && !times.is_empty()
@@ -769,6 +1654,7 @@ impl ChartEngine {
         }
         self.synced_points_len = times.len();
         self.synced_last_time = times.last().copied();
+        self.synced_first_time = times.first().copied();
         self.time_scale.set_points_len(times.len());
         self.time_scale.set_base_index(self.data.base_index());
     }

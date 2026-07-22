@@ -245,6 +245,9 @@ test("public time and price scale handles are engine-owned and LWC-compatible", 
     const scrolled = time.scroll_position();
     time.reset_time_scale();
     const reset_options = time.options();
+    // With LWC `restoreDefault` semantics the applied bar_spacing 12 persists through the reset;
+    // restore the fixture spacing for the downstream LWC-reference comparisons.
+    time.apply_options({ bar_spacing: 6 });
     const query_logical_range = time.get_visible_logical_range();
     const queried_data = main.data();
     const data_scopes = [];
@@ -341,7 +344,27 @@ test("public time and price scale handles are engine-owned and LWC-compatible", 
   expect(result.time_result.logical_roundtrip).toBe(100);
   expect(result.time_result.time_coordinate_matches).toBe(true);
   expect(result.scrolled).toBe(0);
-  expect(result.reset_options).toEqual({ bar_spacing: 6, right_offset: 0 });
+  // LWC `restoreDefault` restores from the *configured* options (time-scale.ts), so the
+  // bar_spacing applied above (12) survives reset_time_scale — options() reports it back.
+  expect(result.reset_options).toEqual({
+    bar_spacing: 12,
+    right_offset: 0,
+    min_bar_spacing: 0.5,
+    max_bar_spacing: 0,
+    right_offset_pixels: null,
+    time_visible: true,
+    seconds_visible: false,
+    fix_left_edge: false,
+    fix_right_edge: false,
+    lock_visible_time_range_on_resize: false,
+    right_bar_stays_on_scroll: false,
+    shift_visible_range_on_new_bar: true,
+    allow_shift_visible_range_on_whitespace_replacement: false,
+    ticks_visible: false,
+    minimum_height: 0,
+    tick_mark_max_character_length: 8,
+    visible: true,
+  });
   expect(result.series_queries.length).toBe(fixture.bar_count);
   expect(result.series_queries.type).toBe("candlestick");
   expect(result.series_queries.missing).toBeNull();
