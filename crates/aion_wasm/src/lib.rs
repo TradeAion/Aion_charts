@@ -10,6 +10,14 @@ mod axis_policy;
 mod backend_policy;
 #[cfg(any(target_arch = "wasm32", test))]
 mod color_policy;
+// Pure JSON→Prim decoder for pane-primitive command buffers (plugin platform Phase C-a);
+// compiled for the host target too so its tests run outside the browser.
+#[cfg(any(target_arch = "wasm32", test))]
+mod prim_decode;
+// Pure custom-series item alignment (plugin platform Phase C-c); compiled for the host target
+// too so its tests run outside the browser.
+#[cfg(any(target_arch = "wasm32", test))]
+mod custom_align;
 
 #[cfg(target_arch = "wasm32")]
 mod canvas2d_target;

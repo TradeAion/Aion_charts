@@ -452,6 +452,25 @@ impl ChartEngine {
     /// at or left of the visible right edge.
     pub fn series_last_value_data(&self, id: SeriesId, global_last: bool) -> Option<String> {
         let series = self.series.iter().find(|s| s.id == id && !s.removed)?;
+        // A custom series' last value is the host-recorded one (Phase C-c; the plugin's
+        // current value of the last / last-visible non-whitespace item), formatted with the
+        // series' price format like a built-in close.
+        if series.kind == SeriesKind::Custom {
+            let last = if global_last {
+                series.custom_frame.last
+            } else {
+                series.custom_frame.last_visible
+            }?;
+            let formatted = self.format_series_resolved(series, last.value);
+            return Some(
+                serde_json::json!({
+                    "value": last.value,
+                    "formatted": formatted,
+                    "time": last.time,
+                })
+                .to_string(),
+            );
+        }
         let plot = self.data.plot(id);
         if plot.is_empty() {
             return None;

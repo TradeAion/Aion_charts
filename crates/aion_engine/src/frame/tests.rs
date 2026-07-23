@@ -107,7 +107,8 @@ fn ohlc_conflation_keeps_first_open_last_close_and_full_envelope() {
                 high: 19.0,
                 low: 8.0,
                 close: 13.0,
-                source_row: 3
+                source_row: 3,
+                geometry_time: 0
             },
             VisibleOhlc {
                 x_px: 1.0,
@@ -115,7 +116,8 @@ fn ohlc_conflation_keeps_first_open_last_close_and_full_envelope() {
                 high: 25.0,
                 low: 14.0,
                 close: 16.0,
-                source_row: 7
+                source_row: 7,
+                geometry_time: 1
             },
         ]
     );
@@ -1158,4 +1160,172 @@ fn last_value_label_background_honors_the_per_point_color() {
         p,
         Prim::HLine { color, style: LineStyle::Dashed, .. } if *color == Color(POINT_RED)
     )));
+}
+
+/// A custom series (Phase C-c) with time-only (whitespace-style) rows, installed exactly like
+/// the wasm host installs them: the engine owns the time mapping while every value arrives
+/// through `set_custom_frame_values` (and, host-side, the plugin's autoscale contributions).
+use crate::{CustomSeriesFrameValues, CustomSeriesLastValue, PrimitiveAutoscaleContribution};
+
+fn custom_chart(bars: usize) -> (ChartEngine, SeriesId) {
+    let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+    let custom = chart.add_series(SeriesKind::Custom);
+    let times: Vec<i64> = (0..bars as i64).collect();
+    let nan = vec![f64::NAN; bars];
+    chart.install_series_data(custom, times, nan.clone(), nan.clone(), nan.clone(), nan);
+    chart.time_scale.set_width(800.0);
+    chart.fit_content();
+    (chart, custom)
+}
+
+#[test]
+fn custom_series_emits_no_prims_but_marks_its_paint_slot() {
+    let (mut chart, custom) = custom_chart(4);
+    let frame = chart.build_frame();
+    // Both the (empty) primary candle series and the custom series record a paint mark, in
+    // paint order; the custom series painted nothing, so its mark equals the previous one.
+    let marks = &frame.panes[0].series_paint_marks;
+    assert_eq!(marks.len(), 2);
+    assert_eq!(marks[0].0, 0);
+    assert_eq!(marks[1].0, custom);
+    assert_eq!(marks[0].1, marks[1].1);
+    assert!(frame.panes[0].main.is_empty());
+    // ...and its time-only rows still anchor the base index (LWC's custom plot rows carry
+    // values, so they count), exactly like a built-in kind with real bars.
+    assert_eq!(chart.time_scale.base_index(), 3);
+}
+
+#[test]
+fn custom_series_last_value_line_and_label_follow_the_frame_values() {
+    let (mut chart, custom) = custom_chart(4);
+    chart.set_price_scale_visible_range_for(0, PriceScaleTarget::Right, 90.0, 110.0);
+    let global = CustomSeriesLastValue {
+        value: 105.0,
+        color: Color::rgb(0x11, 0x22, 0x33),
+        time: 3,
+    };
+    let visible = CustomSeriesLastValue {
+        value: 104.0,
+        color: Color::rgb(0x44, 0x55, 0x66),
+        time: 2,
+    };
+    chart.set_custom_frame_values(
+        custom,
+        CustomSeriesFrameValues {
+            first_value: Some(100.0),
+            last: Some(global),
+            last_visible: Some(visible),
+        },
+    );
+    // The built-in last-price line tracks the GLOBAL last (default priceLineSource LastBar).
+    let frame = chart.build_frame();
+    assert!(frame.panes[0].main.iter().any(|p| matches!(
+        p,
+        Prim::HLine { color, style: LineStyle::Dashed, .. } if *color == global.color
+    )));
+    // priceLineSource LastVisible switches the line to the visible record.
+    chart.series[custom].price_line_source = 1;
+    let frame = chart.build_frame();
+    assert!(frame.panes[0].main.iter().any(|p| matches!(
+        p,
+        Prim::HLine { color, style: LineStyle::Dashed, .. } if *color == visible.color
+    )));
+    // The last-value axis label always tracks the visible record (LWC lastValueData(false)).
+    let axis = chart.build_axis_frame(80.0, |t| t.len() as f64 * 7.0);
+    assert!(axis.labels.iter().any(
+        |l| matches!(l.background, Some((.., c)) if c == visible.color) && l.text == "104.00"
+    ));
+}
+
+#[test]
+fn custom_series_last_value_data_and_base_value_come_from_the_frame_values() {
+    let (mut chart, custom) = custom_chart(3);
+    chart.set_price_scale_visible_range_for(0, PriceScaleTarget::Right, 90.0, 110.0);
+    chart.set_custom_frame_values(
+        custom,
+        CustomSeriesFrameValues {
+            first_value: Some(100.0),
+            last: Some(CustomSeriesLastValue {
+                value: 103.5,
+                color: Color::rgb(1, 2, 3),
+                time: 2,
+            }),
+            last_visible: Some(CustomSeriesLastValue {
+                value: 102.5,
+                color: Color::rgb(1, 2, 3),
+                time: 1,
+            }),
+        },
+    );
+    // LWC `ISeriesApi.lastValueData`: global vs visible, formatted with the series' price format.
+    let global: serde_json::Value =
+        serde_json::from_str(&chart.series_last_value_data(custom, true).unwrap()).unwrap();
+    assert_eq!(global["value"].as_f64().unwrap(), 103.5);
+    assert_eq!(global["formatted"].as_str().unwrap(), "103.50");
+    assert_eq!(global["time"].as_i64().unwrap(), 2);
+    let visible: serde_json::Value =
+        serde_json::from_str(&chart.series_last_value_data(custom, false).unwrap()).unwrap();
+    assert_eq!(visible["value"].as_f64().unwrap(), 102.5);
+    // The custom first value anchors coordinate conversion (series_base_value's custom branch).
+    assert_eq!(chart.series_base_value(custom, 0), Some(100.0));
+    // A non-custom kind rejects frame values, and a custom series without them reports nothing.
+    assert!(chart.series_last_value_data(0, true).is_none());
+    chart.set_custom_frame_values(
+        0,
+        CustomSeriesFrameValues {
+            first_value: Some(1.0),
+            last: None,
+            last_visible: None,
+        },
+    );
+    assert!(chart.series_base_value(0, 0).is_none());
+}
+
+#[test]
+fn custom_series_autoscale_contribution_merges_through_the_custom_base_value() {
+    let (mut chart, custom) = custom_chart(4);
+    // The host-side contract (Phase C-c): the plugin's price values reach the scale through
+    // the C-b contribution path, gated on the custom first value like any built-in series.
+    chart.set_custom_frame_values(
+        custom,
+        CustomSeriesFrameValues {
+            first_value: Some(100.0),
+            last: None,
+            last_visible: None,
+        },
+    );
+    chart.add_autoscale_contribution(PrimitiveAutoscaleContribution {
+        series: custom,
+        pane: 0,
+        target: PriceScaleTarget::Right,
+        min: 95.0,
+        max: 115.0,
+    });
+    chart.autoscale_visible();
+    let (from, to) = chart
+        .price_scale_visible_range_for(0, PriceScaleTarget::Right)
+        .unwrap();
+    assert!(
+        from <= 95.0 && to >= 115.0,
+        "range [{from}, {to}] must contain the contribution"
+    );
+    // No first value recorded -> the contribution is dropped (same gate as built-ins without
+    // data), and the scale keeps whatever range it had.
+    chart.set_custom_frame_values(custom, CustomSeriesFrameValues::default());
+    chart.clear_autoscale_contributions();
+    chart.add_autoscale_contribution(PrimitiveAutoscaleContribution {
+        series: custom,
+        pane: 0,
+        target: PriceScaleTarget::Right,
+        min: 1.0,
+        max: 2.0,
+    });
+    chart.autoscale_visible();
+    let (from, to) = chart
+        .price_scale_visible_range_for(0, PriceScaleTarget::Right)
+        .unwrap();
+    assert!(
+        from < 1.0 || to > 2.0,
+        "stale range must survive a dropped contribution"
+    );
 }

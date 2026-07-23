@@ -652,6 +652,39 @@ impl ChartEngine {
                 if plot.is_empty() || scale.is_empty() {
                     continue;
                 }
+                // A custom series' label tracks the last VISIBLE non-whitespace item's current
+                // value and bar color, recorded per frame by the host (Phase C-c; LWC
+                // lastValueData(false) over the custom plot row's Close slot).
+                if series.kind == SeriesKind::Custom {
+                    let Some(last) = series.custom_frame.last_visible else {
+                        continue;
+                    };
+                    let Some(base_value) = self.series_base_value(series.id, from) else {
+                        continue;
+                    };
+                    let y = scale.price_to_coordinate(last.value, base_value);
+                    if y < 0.0 || y > self.pane_h {
+                        continue;
+                    }
+                    let text = self.format_series_value(
+                        series,
+                        scale,
+                        scale.price_to_logical_value(last.value, base_value),
+                    );
+                    let (group, align) = if target == PriceScaleTarget::Left {
+                        (&mut left, pane.left_scale.options().align_labels)
+                    } else {
+                        (&mut right, pane.price_scale.options().align_labels)
+                    };
+                    group.push(LastValueLabel {
+                        text,
+                        y,
+                        height,
+                        color: last.color,
+                        align,
+                    });
+                    continue;
+                }
                 // LWC series.ts lastValueData(false): the label tracks the last *visible*
                 // bar; whitespace rows are skipped (LWC's plot list omits them).
                 let Some(row) = plot.last_non_whitespace_row(to) else {

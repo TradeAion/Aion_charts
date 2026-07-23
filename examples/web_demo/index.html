@@ -86,6 +86,12 @@
     <div class="group">
       <label><input type="checkbox" id="sma_toggle"> SMA(20)</label>
       <label><input type="checkbox" id="vol_toggle"> volume</label>
+      <label title="Pane primitive (plugin platform): alternating day shading behind the series"><input type="checkbox" id="bands_toggle"> day bands</label>
+      <label title="Series primitive (plugin platform): position band with a price-axis tag on the main series"><input type="checkbox" id="pos_band_toggle"> position band</label>
+      <label title="Series primitive (plugin platform): autoscale-expanding band beyond the data"><input type="checkbox" id="scale_band_toggle"> scale band</label>
+      <label title="Custom series (plugin platform): the LWC rounded-candles plugin example, drawn by the plugin"><input type="checkbox" id="custom_toggle"> rounded candles</label>
+      <label title="Built-in plugin (LWC createSeriesMarkers): the markers fixture drawn by the plugin platform — A/B against ?feature=markers (engine markers)"><input type="checkbox" id="plugin_markers_toggle"> plugin markers</label>
+      <label title="Built-in plugin (LWC createTextWatermark): two-line watermark painted through the overlay-text hook"><input type="checkbox" id="plugin_watermark_toggle"> plugin watermark</label>
     </div>
 
     <div class="group">
@@ -154,10 +160,11 @@
 <script type="module">
 // Built from the real package distribution. The demo build copies @aion/charts' published
 // artifacts; it does not compile or wire an engine of its own.
-import { create_chart, theme_options, theme_palette } from "./dist/aion_charts.js";
+import { create_chart, create_series_markers, create_text_watermark, theme_options, theme_palette } from "./dist/aion_charts.js";
 import { generate_fixture_data } from "./fixture_data.js";
 import { fixture_theme } from "./fixture_styles.js";
 import { marker_fixture, volume_fixture } from "./fixture_features.js";
+import { rounded_candles_pane_view } from "./fixture_custom_series.js";
 
 const container = document.getElementById("chart_container");
 const status = document.getElementById("status");
@@ -279,6 +286,235 @@ if (requested_feature === "markers") {
   });
   vol_series.set_data(volume_data);
 }
+
+// ---- pane primitive demo (plugin platform Phase C-a) -----------------------------------------
+// Alternating day-shading bands behind the series (LWC zOrder "bottom"), attached to pane 0 via
+// the public pane_api.attach_primitive. The renderer records Prim draw commands (no raw canvas),
+// so the bands are identical on the WebGPU and Canvas2D backends. Off by default so the fidelity
+// fixtures don't shift; `?feature=primitive` enables it for fixtures/tests.
+function session_bands_primitive() {
+  const day_seconds = 86400;
+  return {
+    pane_views() {
+      return [{
+        z_order: "bottom",
+        renderer(ctx) {
+          // Renderers run while the chart is mid-render, so they must not call chart APIs back
+          // (the draw context is the read path). Draw every day band instead of querying the
+          // visible range — the pane scissor clips the offscreen ones.
+          if (data.length === 0) return;
+          let start = 0;
+          for (let i = 1; i <= data.length; i += 1) {
+            const same_day = i < data.length
+              && Math.floor(data[i].time / day_seconds) === Math.floor(data[start].time / day_seconds);
+            if (same_day) continue;
+            const day_index = Math.floor(data[start].time / day_seconds);
+            if (day_index % 2 === 0) {
+              const x0 = ctx.logical_to_x(start - 0.5);
+              const x1 = ctx.logical_to_x(i - 1 + 0.5);
+              if (x0 !== null && x1 !== null && x1 > x0
+                && x1 > ctx.pane_left && x0 < ctx.pane_left + ctx.pane_width) {
+                ctx.rect(x0, ctx.pane_top, x1 - x0, ctx.pane_height, "rgba(41, 98, 255, 0.08)");
+              }
+            }
+            start = i;
+          }
+        },
+      }];
+    },
+  };
+}
+let bands_handle = null;
+function set_day_bands(on) {
+  if (on && bands_handle === null) {
+    bands_handle = chart.panes()[0].attach_primitive(session_bands_primitive());
+  } else if (!on && bands_handle !== null) {
+    bands_handle.detach();
+    bands_handle = null;
+  }
+  document.getElementById("bands_toggle").checked = on;
+}
+document.getElementById("bands_toggle").addEventListener("change", (e) => set_day_bands(e.target.checked));
+if (requested_feature === "primitive") set_day_bands(true);
+window.__set_day_bands = set_day_bands; // test hook
+window.__day_bands_active = () => bands_handle !== null; // test hook
+
+// ---- series primitive demos (plugin platform Phase C-b) ----------------------------------
+// Position band: a horizontal ±2% band around a fixed entry price on the main series
+// (z_order "top") with a price-axis tag at the entry — the tag uses the `price` descriptor
+// form, converted on the series' own scale by the host. Scale band: two dashed lines beyond
+// the data whose `autoscale_info` expands the right scale while enabled. Both off by default
+// so the fidelity fixtures don't shift; `?feature=series_primitive` enables the position band.
+function position_band_primitive(entry_price) {
+  const top = entry_price * 1.02;
+  const bottom = entry_price * 0.98;
+  // The band's last drawn geometry in absolute bitmap px, cached from the renderer so the
+  // hit test (which runs on hover, outside any render) can test against it — the draw
+  // context's coordinate space is the hit test's coordinate space.
+  let band = null;
+  return {
+    pane_views() {
+      return [{
+        z_order: "top",
+        renderer(ctx) {
+          const y_top = ctx.price_to_y(top);
+          const y_bottom = ctx.price_to_y(bottom);
+          band = y_top === null || y_bottom === null
+            ? null
+            : { y_top, y_bottom, x0: ctx.pane_left, x1: ctx.pane_left + ctx.pane_width };
+          if (band === null) return;
+          ctx.rect(ctx.pane_left, y_top, ctx.pane_width, y_bottom - y_top, "rgba(255, 152, 0, 0.15)");
+          ctx.hline(y_top, ctx.pane_left, ctx.pane_left + ctx.pane_width, "#ff9800", 2, 2);
+          ctx.hline(y_bottom, ctx.pane_left, ctx.pane_left + ctx.pane_width, "#ff9800", 2, 2);
+        },
+      }];
+    },
+    // Hovering the band shows a move cursor and flows "position-band" into the mouse-event
+    // params' hovered_object_id (plus hovered_series, since a series primitive's source IS
+    // the series — LWC parity).
+    hit_test(x, y) {
+      if (band !== null && x >= band.x0 && x <= band.x1 && y >= band.y_top && y <= band.y_bottom) {
+        return { external_id: "position-band", cursor_style: "move", z_order: "top" };
+      }
+      return null;
+    },
+    price_axis_views() {
+      return [{ text: `POS ${entry_price.toFixed(2)}`, price: entry_price, color: "#ff9800" }];
+    },
+  };
+}
+function scale_band_primitive(lo, hi) {
+  return {
+    pane_views() {
+      return [{
+        z_order: "top",
+        renderer(ctx) {
+          // Off-scale prices convert to null — the scissor would clip them anyway once the
+          // autoscale contribution below brings them into view.
+          const y_hi = ctx.price_to_y(hi);
+          const y_lo = ctx.price_to_y(lo);
+          if (y_hi !== null) ctx.hline(y_hi, ctx.pane_left, ctx.pane_left + ctx.pane_width, "#9c27b0", 2, 2);
+          if (y_lo !== null) ctx.hline(y_lo, ctx.pane_left, ctx.pane_left + ctx.pane_width, "#9c27b0", 2, 2);
+        },
+      }];
+    },
+    autoscale_info() {
+      return { min: lo, max: hi };
+    },
+  };
+}
+const position_entry = data.length > 0 ? data[Math.floor(data.length / 2)].close : 100;
+const scale_band_bounds = data.length > 0
+  ? {
+      lo: Math.min(...data.map((bar) => bar.low)) - 10,
+      hi: Math.max(...data.map((bar) => bar.high)) + 10,
+    }
+  : { lo: 90, hi: 110 };
+let position_band_handle = null;
+function set_position_band(on) {
+  if (on && position_band_handle === null) {
+    position_band_handle = main.attach_primitive(position_band_primitive(position_entry));
+  } else if (!on && position_band_handle !== null) {
+    position_band_handle.detach();
+    position_band_handle = null;
+  }
+  document.getElementById("pos_band_toggle").checked = on;
+}
+let scale_band_handle = null;
+function set_scale_band(on) {
+  if (on && scale_band_handle === null) {
+    scale_band_handle = main.attach_primitive(scale_band_primitive(scale_band_bounds.lo, scale_band_bounds.hi));
+  } else if (!on && scale_band_handle !== null) {
+    scale_band_handle.detach();
+    scale_band_handle = null;
+  }
+  document.getElementById("scale_band_toggle").checked = on;
+}
+document.getElementById("pos_band_toggle").addEventListener("change", (e) => set_position_band(e.target.checked));
+document.getElementById("scale_band_toggle").addEventListener("change", (e) => set_scale_band(e.target.checked));
+if (requested_feature === "series_primitive") set_position_band(true);
+window.__set_position_band = set_position_band; // test hook
+window.__position_band_active = () => position_band_handle !== null; // test hook
+window.__set_scale_band = set_scale_band; // test hook
+window.__scale_band_active = () => scale_band_handle !== null; // test hook
+
+// ---- custom series demo (plugin platform Phase C-c) -----------------------------------------
+// The LWC plugin-examples rounded-candles series, ported to the custom-series contract
+// (fixture_custom_series.js): the engine owns the time mapping/autoscale, the plugin draws
+// each bar through the command-recording render context — identical on both backends. Off by
+// default so the fidelity fixtures don't shift; `?feature=custom_series` enables it.
+let custom_series = null;
+let custom_destroy_count = 0;
+function set_custom_series(on) {
+  if (on && custom_series === null) {
+    custom_series = chart.add_custom_series(
+      rounded_candles_pane_view({}, {
+        on_render: (items) => {
+          // Test observability: each frame's visible (x, time) pairs the plugin received.
+          window.__custom_render_items = items.map(({ x, item }) => ({ x, time: item.time }));
+        },
+        on_destroy: () => { custom_destroy_count += 1; },
+      }),
+    );
+    // The demo's candle data transformed into the plugin's item shape (OHLC + optional
+    // `rounded`; LWC's RoundedCandleSeriesData).
+    custom_series.set_data(data.map((bar) => ({
+      time: bar.time, open: bar.open, high: bar.high, low: bar.low, close: bar.close,
+    })));
+    window.__custom = custom_series; // test handle
+  } else if (!on && custom_series !== null) {
+    chart.remove_series(custom_series);
+    custom_series = null;
+    window.__custom = null;
+  }
+  document.getElementById("custom_toggle").checked = on;
+}
+document.getElementById("custom_toggle").addEventListener("change", (e) => set_custom_series(e.target.checked));
+if (requested_feature === "custom_series") set_custom_series(true);
+window.__set_custom_series = set_custom_series; // test hook
+window.__custom_series_active = () => custom_series !== null; // test hook
+window.__custom_destroy_count = () => custom_destroy_count; // test hook
+
+// ---- built-in plugins (plugin platform Phase 3.5: LWC's own plugin surface) ----------------
+// Plugin markers: the same markers fixture the engine-markers path (`?feature=markers`) uses,
+// drawn by `create_series_markers` on the primitive platform — a visual A/B against the
+// engine's built-in markers. Plugin watermark: `create_text_watermark` on pane 0. Both off by
+// default so the fidelity fixtures don't shift.
+let plugin_markers_handle = null;
+function set_plugin_markers(on, options, markers) {
+  if (on && plugin_markers_handle === null) {
+    plugin_markers_handle = create_series_markers(main, markers ?? marker_fixture(data), options);
+  } else if (!on && plugin_markers_handle !== null) {
+    plugin_markers_handle.detach();
+    plugin_markers_handle = null;
+  }
+  document.getElementById("plugin_markers_toggle").checked = on;
+}
+document.getElementById("plugin_markers_toggle").addEventListener("change", (e) => set_plugin_markers(e.target.checked));
+window.__set_plugin_markers = set_plugin_markers; // test hook
+window.__plugin_markers_active = () => plugin_markers_handle !== null; // test hook
+window.__plugin_markers_handle = () => plugin_markers_handle; // test hook
+// Engine markers with the same fixture (the parity A/B counterpart); `?feature=markers` keeps
+// its default-options form for the LWC fidelity fixture.
+window.__set_engine_markers = (on, options) => main.set_markers(on ? marker_fixture(data) : [], options); // test hook
+let plugin_watermark_handle = null;
+function set_plugin_watermark(on) {
+  if (on && plugin_watermark_handle === null) {
+    plugin_watermark_handle = create_text_watermark(chart.panes()[0], {
+      lines: [
+        { text: "AION", color: "rgba(41, 98, 255, 0.16)", fontSize: 72, fontStyle: "bold" },
+        { text: "plugin watermark", color: "rgba(41, 98, 255, 0.30)", fontSize: 24, fontFamily: "monospace" },
+      ],
+    });
+  } else if (!on && plugin_watermark_handle !== null) {
+    plugin_watermark_handle.detach();
+    plugin_watermark_handle = null;
+  }
+  document.getElementById("plugin_watermark_toggle").checked = on;
+}
+document.getElementById("plugin_watermark_toggle").addEventListener("change", (e) => set_plugin_watermark(e.target.checked));
+window.__set_plugin_watermark = set_plugin_watermark; // test hook
+window.__plugin_watermark_active = () => plugin_watermark_handle !== null; // test hook
 
 status.textContent = `1000 bars · ${chart.backend()} · dpr ${(window.devicePixelRatio || 1).toFixed(3)}`;
 
@@ -511,13 +747,15 @@ document.getElementById("theme_select").addEventListener("change", (e) => {
 });
 sync_style_visibility("candlestick");
 
-// crosshair-move subscription → OHLC legend (the public event API)
+// crosshair-move subscription → OHLC legend (the public event API); a hovered primitive
+// object (e.g. the position band) shows its external id alongside.
 const legend = document.getElementById("legend");
 const fmt = (v) => (v === undefined ? "—" : v.toFixed(2));
 chart.subscribe_crosshair_move((params) => {
   const bar = params.series_data.get(main);
-  if (!bar || params.point === null) { legend.textContent = "O — H — L — C —"; return; }
-  legend.textContent = `O ${fmt(bar.open)}  H ${fmt(bar.high)}  L ${fmt(bar.low)}  C ${fmt(bar.close)}`;
+  const tag = params.hovered_object_id !== null ? `  [${params.hovered_object_id}]` : "";
+  if (!bar || params.point === null) { legend.textContent = "O — H — L — C —" + tag; return; }
+  legend.textContent = `O ${fmt(bar.open)}  H ${fmt(bar.high)}  L ${fmt(bar.low)}  C ${fmt(bar.close)}` + tag;
 });
 chart.subscribe_click((params) => {
   if (params.time !== null) console.log("aion click @", new Date(params.time * 1000).toISOString());

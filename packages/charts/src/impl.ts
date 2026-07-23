@@ -7,6 +7,8 @@
 import init, { AionChart } from "../pkg/aion_wasm.js";
 
 import { install_gestures } from "./gestures.js";
+import type { pane_primitive, pane_primitive_handle, series_primitive, series_primitive_handle } from "./primitives.js";
+import type { custom_series_item, custom_series_pane_view } from "./custom_series.js";
 import type {
   bars_info, chart_api, chart_options, data_changed_handler, dbl_click_handler,
   deep_partial, handle_scale_options, handle_scroll_options, kinetic_scroll_options,
@@ -99,7 +101,7 @@ const PRICE_SCALE_JSON_OPTION_KEYS = [
 ] as const;
 
 /** Engine kind ordinal → public kind name (index-aligned with `KIND_TO_U8`). */
-const KIND_NAMES = ["candlestick", "bar", "line", "area", "histogram", "baseline"] as const;
+const KIND_NAMES = ["candlestick", "bar", "line", "area", "histogram", "baseline", "custom"] as const;
 
 /**
  * Index of the stacked pane containing CSS-y `y`, counted from the pane separators (shared by
@@ -117,7 +119,7 @@ export function pane_index_of_y(separator_ys: Float64Array, y: number): number {
  * are taken at UTC midnight (matching LWC's `Date.UTC(...)/1000`). A malformed value yields `NaN`,
  * which the engine's sanitizer drops as an invalid row.
  */
-function time_to_utc_seconds(t: time): number {
+export function time_to_utc_seconds(t: time): number {
   if (typeof t === "number") return t;
   if (typeof t === "string") {
     const [y, m, d] = t.split("-").map(Number);
@@ -250,13 +252,13 @@ function point_color_to_u32(css: string | undefined): number | undefined {
 }
 
 class series_impl implements series_api {
-  private readonly data_changed_subs = new Set<data_changed_handler>();
+  protected readonly data_changed_subs = new Set<data_changed_handler>();
   private removed = false;
 
   constructor(
     readonly id: number,
     readonly kind: series_kind,
-    private readonly chart: chart_impl,
+    protected readonly chart: chart_impl,
   ) {}
 
   /** Called by `chart_impl.remove_series`; makes every subsequent method on this handle throw. */
@@ -264,7 +266,7 @@ class series_impl implements series_api {
     this.removed = true;
     this.data_changed_subs.clear();
   }
-  private assert_live(): void {
+  protected assert_live(): void {
     if (this.removed) throw new Error("aion: this series has been removed from the chart");
   }
 
@@ -420,6 +422,10 @@ class series_impl implements series_api {
 
   set_type(kind: series_kind): void {
     this.assert_live();
+    if (kind === "custom") {
+      console.warn("aion: set_type() cannot convert a series to 'custom'; use chart.add_custom_series");
+      return;
+    }
     if (this.id === 0) {
       this.chart.wasm.set_series_type(KIND_TO_U8[kind]);
     } else {
@@ -541,6 +547,92 @@ class series_impl implements series_api {
   }
   unsubscribe_data_changed(handler: data_changed_handler): void {
     this.data_changed_subs.delete(handler);
+  }
+
+  attach_primitive(primitive: series_primitive): series_primitive_handle {
+    this.assert_live();
+    // Bind the hooks the plugin actually implements into a plain object (the host reads own
+    // properties; binding also pins `this` for class-instance primitives), then register.
+    const adapted: Record<string, unknown> = {};
+    for (const key of [
+      "detached",
+      "update_all_views",
+      "pane_views",
+      "price_axis_views",
+      "time_axis_views",
+      "text_views",
+      "autoscale_info",
+      "hit_test",
+    ] as const) {
+      const hook = primitive[key];
+      if (typeof hook === "function") adapted[key] = hook.bind(primitive);
+    }
+    if (typeof primitive.attached === "function") {
+      const attached = primitive.attached;
+      // The host supplies `{series_id, pane_index}`; inject `request_update` (a repaint
+      // scheduler, LWC `requestUpdate`) before the plugin sees the params.
+      adapted.attached = (params: { series_id: number; pane_index?: number; request_update?: () => void }) => {
+        params.request_update = () => this.chart.repaint();
+        attached.call(primitive, params);
+      };
+    }
+    const id = this.chart.wasm.attach_series_primitive(this.id, adapted);
+    this.chart.repaint();
+    return new series_primitive_handle_impl(this.chart, id);
+  }
+}
+
+/**
+ * The handle for a custom series (plugin platform Phase C-c; LWC's `ISeriesApi<'Custom'>`).
+ * Shares the built-in handle's options/coordinate/primitive surface; the data methods work on
+ * the raw plugin items (the engine rows carry times only, so `data()`/`data_by_index()` come
+ * from the host's aligned item store, and `last_value_data` resolves through the engine's
+ * host-recorded frame values).
+ */
+class custom_series_impl extends series_impl {
+  constructor(id: number, chart: chart_impl) {
+    super(id, "custom", chart);
+  }
+
+  /** Replace the series' items (LWC `setData`). Times convert to UTC seconds here (the same
+   *  boundary conversion as the built-ins); sort/dedupe happens engine-side with the items
+   *  carried along, so `data()` returns the aligned raw items. */
+  set_data(data: readonly custom_series_item[]): void {
+    this.assert_live();
+    const converted = data.map((item) => ({ ...item, time: time_to_utc_seconds(item.time) }));
+    this.chart.wasm.set_custom_series_data(this.id, converted);
+    this.chart.repaint();
+    for (const handler of this.data_changed_subs) handler("full");
+  }
+
+  /** Append a new item or replace the one at an existing time (LWC `update`). */
+  update(item: custom_series_item): void {
+    this.assert_live();
+    this.chart.wasm.update_custom_series_item(this.id, { ...item, time: time_to_utc_seconds(item.time) });
+    this.chart.repaint();
+    for (const handler of this.data_changed_subs) handler("update");
+  }
+
+  /** The raw items aligned with the engine rows (sorted, last-wins deduped). */
+  data(): readonly custom_series_item[] {
+    this.assert_live();
+    return this.chart.wasm.custom_series_data(this.id) as custom_series_item[];
+  }
+
+  data_by_index(logical_index: number, mismatch_direction: mismatch_direction = 0): custom_series_item | null {
+    this.assert_live();
+    return undef_to_null(
+      this.chart.wasm.custom_series_data_by_index(this.id, logical_index, mismatch_direction),
+    ) as custom_series_item | null;
+  }
+
+  series_type(): series_kind {
+    return "custom";
+  }
+
+  set_type(): void {
+    // A custom series' type IS the pane view; change it by removing and re-adding the series.
+    console.warn("aion: set_type() does not apply to a custom series");
   }
 }
 
@@ -794,6 +886,53 @@ class pane_impl implements pane_api {
   price_scale(id: "left" | "right" | ""): price_scale_api {
     return this.chart.price_scale(id, this.index);
   }
+
+  attach_primitive(primitive: pane_primitive): pane_primitive_handle {
+    // Bind the hooks the plugin actually implements into a plain object (the host reads own
+    // properties; binding also pins `this` for class-instance primitives), then register.
+    const adapted: Record<string, unknown> = {};
+    for (const key of [
+      "attached",
+      "detached",
+      "update_all_views",
+      "pane_views",
+      "price_axis_views",
+      "time_axis_views",
+      "text_views",
+      "hit_test",
+    ] as const) {
+      const hook = primitive[key];
+      if (typeof hook === "function") adapted[key] = hook.bind(primitive);
+    }
+    const id = this.chart.wasm.attach_pane_primitive(this.index, adapted);
+    this.chart.repaint();
+    return new pane_primitive_handle_impl(this.chart, id);
+  }
+}
+
+/** Detach handle for a registered pane primitive (the wasm registry owns the lifecycle). */
+class pane_primitive_handle_impl implements pane_primitive_handle {
+  constructor(private readonly chart: chart_impl, private readonly id: number) {}
+
+  detach(): void {
+    // The engine answers false for an unknown/already-detached id — repaint once, on change.
+    if (this.chart.wasm.detach_pane_primitive(this.id)) {
+      this.chart.repaint();
+    }
+  }
+}
+
+/** Detach handle for a registered series primitive (the wasm registry owns the lifecycle). */
+class series_primitive_handle_impl implements series_primitive_handle {
+  constructor(private readonly chart: chart_impl, private readonly id: number) {}
+
+  detach(): void {
+    // The engine answers false for an unknown/already-detached id — repaint once, on change.
+    // (Detaching after the owning series was removed is a no-op: the removal auto-detached.)
+    if (this.chart.wasm.detach_series_primitive(this.id)) {
+      this.chart.repaint();
+    }
+  }
 }
 
 /** Gesture toggles resolved to concrete values the recognizer reads on each event. */
@@ -915,6 +1054,8 @@ export class chart_impl implements chart_api {
   private auto_size: boolean;
   /** Crosshair position tracked TS-side (for crosshair-less screenshots); `null` when hidden. */
   private last_crosshair: { x: number; y: number } | null = null;
+  /** Last hover hit-test result (Phase C-d), refreshed on crosshair moves; feeds event params. */
+  private hover: { series_id: number | null; object_id: string | null; cursor: string | null } | null = null;
   private readonly backend_runtime_id: number;
   private anim_frame: number | null = null;
   private readonly backend_loss_handler = (event: Event): void => {
@@ -1025,6 +1166,9 @@ export class chart_impl implements chart_api {
   }
 
   add_series(kind: series_kind, options?: Partial<series_options>): series_api {
+    if (kind === "custom") {
+      throw new Error("aion: add_series does not accept 'custom'; use add_custom_series(pane_view)");
+    }
     // Series 0 is created by the engine at construction; the first add_series adopts it so the
     // common "one chart, one series" path matches LWC (add_series returns the primary series).
     let id: number;
@@ -1040,6 +1184,36 @@ export class chart_impl implements chart_api {
     if (options) {
       series.apply_options(options);
     }
+    return series;
+  }
+
+  add_custom_series(pane_view: custom_series_pane_view, options?: Partial<series_options>): series_api {
+    // Bind the hooks the view actually implements into a plain object (the host reads own
+    // properties; binding also pins `this` for class-instance views), then register — the same
+    // adaptation the primitive handles use.
+    const adapted: Record<string, unknown> = {};
+    for (const key of ["price_value_builder", "is_whitespace", "render", "destroy"] as const) {
+      const hook = pane_view[key];
+      if (typeof hook === "function") adapted[key] = hook.bind(pane_view);
+    }
+    if (typeof adapted.price_value_builder !== "function" || typeof adapted.render !== "function") {
+      throw new Error("aion: add_custom_series needs a pane view with `price_value_builder` and `render` (LWC `ensure(customPaneView)`)");
+    }
+    // The first-series adoption mirrors add_series (the engine's construction-time series 0
+    // converts to Custom instead of leaving an empty built-in behind).
+    let id: number;
+    if (!this.next_extra_series) {
+      this.next_extra_series = true;
+      id = this.wasm.add_custom_series(adapted, true);
+    } else {
+      id = this.wasm.add_custom_series(adapted, false);
+    }
+    if (id === 0xffffffff) throw new Error("aion: add_custom_series was rejected by the engine");
+    const series = new custom_series_impl(id, this);
+    this.series_by_id.set(id, series);
+    // LWC createCustomSeriesDefinition: the view's defaultOptions merge UNDER the caller's.
+    const merged = { ...(pane_view.default_options ?? {}), ...(options ?? {}) } as Partial<series_options>;
+    if (Object.keys(merged).length > 0) series.apply_options(merged);
     return series;
   }
 
@@ -1177,7 +1351,33 @@ export class chart_impl implements chart_api {
           : { time: t, value: c },
       );
     }
-    return { time, logical, point: { x, y }, pane_index: this.pane_index_at(x, y), series_data };
+    const hovered_series = this.hover?.series_id != null ? this.series_handle(this.hover.series_id) : null;
+    return {
+      time, logical, point: { x, y }, pane_index: this.pane_index_at(x, y), series_data,
+      hovered_series, hovered_object_id: this.hover?.object_id ?? null,
+    };
+  }
+
+  /**
+   * Refresh the hover hit-test state (Phase C-d) for a crosshair at pane CSS px (x, y): runs
+   * the engine's series hit test plus the primitives' `hit_test`, stashes the result for
+   * `build_params`, and updates the engine's hovered series for `hoveredSeriesOnTop` (the
+   * caller repaints, so the z-bump lands on the next frame). Called by the gesture
+   * recognizer on every crosshair move.
+   */
+  update_hover(x: number, y: number): void {
+    this.hover = JSON.parse(this.wasm.hover_at(x, y)) as chart_impl["hover"];
+  }
+
+  /** Clear the hover state (cursor left the chart) and release the z-bump; caller repaints. */
+  clear_hover(): void {
+    this.hover = null;
+    this.wasm.clear_hover();
+  }
+
+  /** The cursor a primitive's `hit_test` reports for the current hover, or `null`. */
+  hover_cursor(): string | null {
+    return this.hover?.cursor ?? null;
   }
 
   /** Emit a crosshair-move event (called by the gesture recognizer). */
@@ -1193,6 +1393,7 @@ export class chart_impl implements chart_api {
     if (this.crosshair_subs.size === 0) return;
     const params: mouse_event_params = {
       time: null, logical: null, point: null, pane_index: null, series_data: new Map(),
+      hovered_series: null, hovered_object_id: null,
     };
     for (const h of this.crosshair_subs) h(params);
   }

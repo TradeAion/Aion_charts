@@ -799,6 +799,40 @@ impl ChartEngine {
                 continue;
             }
             let scale = pane_scale(pane, series_scale_target(series));
+            // A custom series' last value comes from the host-recorded frame values (Phase
+            // C-c): the plugin's current value (the LAST `priceValueBuilder` element, the
+            // Close slot of LWC's custom plot-row mapping) of the last non-whitespace item —
+            // global, or visible per `priceLineSource`.
+            if series.kind == SeriesKind::Custom {
+                if scale.is_empty() {
+                    continue;
+                }
+                let last = if series.price_line_source == 1 {
+                    series.custom_frame.last_visible
+                } else {
+                    series.custom_frame.last
+                };
+                let Some(last) = last else {
+                    continue;
+                };
+                let Some(base_value) = self.series_base_value(series.id, from) else {
+                    continue;
+                };
+                let color = series
+                    .price_line_color
+                    .as_deref()
+                    .and_then(Color::parse_css)
+                    .unwrap_or(last.color);
+                out.push(Prim::HLine {
+                    y: (scale.price_to_coordinate(last.value, base_value) * vpr).round() as i32,
+                    x0: 0,
+                    x1: width,
+                    width: 1f64.max((series.price_line_width * hpr).floor()) as i32,
+                    style: crate::line_style_from_u8(series.price_line_style),
+                    color,
+                });
+                continue;
+            }
             let plot = self.data.plot(series.id);
             if plot.is_empty() || scale.is_empty() {
                 continue;

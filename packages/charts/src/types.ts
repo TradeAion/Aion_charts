@@ -3,12 +3,19 @@
  * lightweight-charts v5). Extracted from `index.ts`.
  */
 
+import type { pane_primitive, pane_primitive_handle, series_primitive, series_primitive_handle } from "./primitives.js";
+import type { custom_series_pane_view } from "./custom_series.js";
+
 // ---------------------------------------------------------------------------------------------
 // Data & option types
 // ---------------------------------------------------------------------------------------------
 
-/** A series kind. Maps to the engine's numeric kind at the boundary. */
-export type series_kind = "candlestick" | "bar" | "line" | "area" | "histogram" | "baseline";
+/**
+ * A series kind. Maps to the engine's numeric kind at the boundary. `"custom"` is only ever
+ * REPORTED (by {@link series_api.series_type} for a custom series); it is not accepted by
+ * {@link chart_api.add_series} — custom series are created with {@link chart_api.add_custom_series}.
+ */
+export type series_kind = "candlestick" | "bar" | "line" | "area" | "histogram" | "baseline" | "custom";
 
 /** Calendar day (LWC `BusinessDay`), interpreted at UTC midnight. `month`/`day` are 1-based. */
 export interface business_day {
@@ -119,6 +126,17 @@ export interface mouse_event_params {
   pane_index: number | null;
   /** Per-series value at the hovered bar, keyed by the series handle. */
   series_data: Map<series_api, ohlc_data | single_value_data>;
+  /**
+   * The series under the cursor (LWC `MouseEventParams.hoveredSeries`), from the engine's
+   * per-kind hit tests (candle/bar high-low range, histogram column, line stroke) — or a
+   * series primitive's hit, whose owning series reports here. `null` when nothing is hit.
+   */
+  hovered_series: series_api | null;
+  /**
+   * The `external_id` a primitive's `hit_test` reported for the hovered object (LWC
+   * `MouseEventParams.hoveredObjectId`), or `null` when no primitive is hit.
+   */
+  hovered_object_id: string | null;
 }
 
 export type mouse_event_handler = (params: mouse_event_params) => void;
@@ -595,6 +613,7 @@ export const KIND_TO_U8: Record<series_kind, number> = {
   area: 3,
   histogram: 4,
   baseline: 5,
+  custom: 6,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -647,6 +666,15 @@ export interface series_api {
   series_type(): series_kind;
   subscribe_data_changed(handler: data_changed_handler): void;
   unsubscribe_data_changed(handler: data_changed_handler): void;
+  /**
+   * Attach a series primitive (LWC `ISeriesApi.attachPrimitive`, plugin platform Phase C-b)
+   * and repaint. The primitive records backend-neutral draw commands (no raw canvas), so its
+   * output is identical on the WebGPU and Canvas2D backends; its price converter and price-axis
+   * labels resolve on this series' price scale, and its `autoscale_info` hook can expand that
+   * scale's range. Divergence: LWC returns `void`; here the returned handle detaches. Removing
+   * the series auto-detaches its primitives (the `detached` hook fires).
+   */
+  attach_primitive(primitive: series_primitive): series_primitive_handle;
   /** The engine-side series id. */
   readonly id: number;
 }
@@ -728,6 +756,14 @@ export interface pane_api {
   /** The series attached to this pane, as live handles (LWC `IPaneApi.getSeries`). */
   get_series(): series_api[];
   /**
+   * Attach a pane primitive (LWC `IPaneApi.attachPrimitive`, plugin platform Phase C-a) and
+   * repaint. The primitive records backend-neutral draw commands (no raw canvas), so its
+   * output is identical on the WebGPU and Canvas2D backends. Divergence: LWC returns `void`;
+   * here the returned handle detaches. The pane binding is by index — it does not follow
+   * later pane moves/removals (a removed pane's primitives draw nowhere until detached).
+   */
+  attach_primitive(primitive: pane_primitive): pane_primitive_handle;
+  /**
    * This pane's price scale by id (LWC `IPaneApi.priceScale`): the visible `"left"`/`"right"`
    * axis, or `""` for the overlay scale. Divergence: LWC throws on an unknown id; here the id is
    * one of the three literals, so a scale always resolves.
@@ -739,6 +775,19 @@ export interface chart_api {
   /** Active pane backend: `webgpu` when available, otherwise the shared `canvas2d` fallback. */
   backend(): "webgpu" | "canvas2d";
   add_series(kind: series_kind, options?: Partial<series_options>): series_api;
+  /**
+   * Add a custom series (plugin platform Phase C-c; LWC `IChartApi.addCustomSeries`): a
+   * user-defined series type rendered by the pane view's `render(ctx)` through backend-neutral
+   * draw commands, so its output is pixel-identical on the WebGPU and Canvas2D backends. The
+   * engine owns the time mapping and autoscale (via the view's `price_value_builder`); the
+   * returned handle's `set_data`/`update`/`data` work on the raw plugin items. The view's
+   * `default_options` merge under the caller's `options` (LWC `createCustomSeriesDefinition`);
+   * the series options that make sense for a plugin-drawn series apply (`visible`,
+   * `price_scale_id`/overlay, `pane`/`move_to_pane`, `last_value_visible`, the `price_line_*`
+   * family, `price_format`) and unsupported style keys are ignored. Removing the series fires
+   * the view's `destroy` hook.
+   */
+  add_custom_series(pane_view: custom_series_pane_view, options?: Partial<series_options>): series_api;
   /**
    * Remove a series (and any indicators derived from it). No-op for an already-removed or
    * foreign handle. The primary series (the first one created, engine id 0) may also be removed;

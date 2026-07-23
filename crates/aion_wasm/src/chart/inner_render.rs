@@ -14,6 +14,14 @@ impl ChartInner {
     }
 
     pub fn render(&mut self) -> Result<(), JsValue> {
+        // Series primitives (plugin platform Phase C-b): pull this frame's autoscale
+        // contributions from the plugin hooks before any layout/autoscale pass runs, so the
+        // axis-width negotiation, axis frame, and pane frame all see the merged ranges.
+        self.collect_series_primitive_autoscale();
+        // Custom series (Phase C-c): same pre-layout collection point — the visible items'
+        // price values become autoscale contributions and the engine's custom frame values.
+        self.collect_custom_series_autoscale();
+
         // ---- layout (price axis width negotiated against the price labels) ----
         self.recompute_layout(false);
 
@@ -37,6 +45,18 @@ impl ChartInner {
         // The headless engine owns chart geometry. The WASM host only adds browser-adapter
         // concerns such as crosshair interaction and text labels.
         self.engine.build_frame_into(&mut self.frame);
+
+        // Pane primitives (plugin platform Phase C-a): plugin renderers record Prim commands
+        // into the pane layers and boxed labels into the axis frame, after the engine frame is
+        // settled and before either backend consumes it. The Phase 3.5 overlay-text store is
+        // cleared first so a detached primitive leaves no stale glyphs behind.
+        self.primitive_texts.clear();
+        self.run_pane_primitives();
+        // Series primitives (Phase C-b): same pass, bound to each owning series' scale.
+        self.run_series_primitives();
+        // Custom series (Phase C-c): plugin renders splice into each pane's `main` layer at
+        // the series' paint-order marks (same command-recording model).
+        self.run_custom_series();
 
         if self
             .gfx
@@ -78,8 +98,17 @@ impl ChartInner {
                     &mut group.fill_tris,
                     &mut group.stroke_tris,
                 );
+                // The `top` layer (z-order "top" primitives) converts after `main` so its
+                // instances append past the main ones within each bucket.
+                geom_prims_to_tris(
+                    &pane_frame.top_prims,
+                    &pane_frame.points,
+                    &mut group.fill_tris,
+                    &mut group.stroke_tris,
+                );
                 prims_to_instances(&pane_frame.under, &mut group.under_quads);
                 prims_to_instances(&pane_frame.main, &mut group.quads);
+                prims_to_instances(&pane_frame.top_prims, &mut group.quads);
             }
             let groups = &self.gpu_groups[..];
             let Some(gfx) = self.gfx.as_mut() else {
@@ -198,6 +227,9 @@ impl ChartInner {
         let options = self.opts();
         // Watermark paints first so it sits below the axis borders, labels, and crosshair chrome.
         self.draw_watermark(&options.watermark, dpr)?;
+        // The primitives' `text_views` overlay draws share the watermark's slot (Phase 3.5):
+        // in-pane plugin text, below the axis chrome, identical on both backends.
+        self.draw_primitive_overlay_texts(dpr)?;
 
         // Axis borders come from the options store (LWC `borderColor`/`borderVisible` per strip);
         // an unparseable color falls back to the LWC default.
@@ -351,6 +383,35 @@ impl ChartInner {
         result
     }
 
+    /// Paint the primitives' `text_views` overlay draws (plugin platform Phase 3.5) in media
+    /// coordinates (context scaled by DPR) like the axis labels. Each draw carries its own
+    /// fully-resolved font, color, and canvas alignment keywords; colors pass through verbatim
+    /// so alpha is preserved (same rule as the watermark).
+    fn draw_primitive_overlay_texts(&self, dpr: f64) -> Result<(), JsValue> {
+        if self.primitive_texts.is_empty() {
+            return Ok(());
+        }
+        let ctx = &self.axis_ctx;
+        ctx.save();
+        if let Err(error) = ctx.scale(dpr, dpr) {
+            ctx.restore();
+            return Err(error);
+        }
+        let mut draw_result = Ok(());
+        for text in &self.primitive_texts {
+            ctx.set_font(&text.font);
+            ctx.set_fill_style_str(&text.color);
+            ctx.set_text_align(&text.align);
+            ctx.set_text_baseline(&text.baseline);
+            if let Err(error) = ctx.fill_text(&text.text, text.x, text.y).map(|_| ()) {
+                draw_result = Err(error);
+                break;
+            }
+        }
+        ctx.restore();
+        draw_result
+    }
+
     fn draw_axis_labels(
         &self,
         axis_frame: &AxisFrame,
@@ -467,13 +528,14 @@ impl ChartInner {
             target.clip_rect(x as f32, y as f32, w as f32, h as f32);
             execute_canvas2d(&pane.under, &pane.points, &mut target, viewport);
             execute_canvas2d(&pane.main, &pane.points, &mut target, viewport);
+            execute_canvas2d(&pane.top_prims, &pane.points, &mut target, viewport);
             target.restore();
         }
         Ok(())
     }
 }
 
-fn measure_text_ctx(
+pub(super) fn measure_text_ctx(
     ctx: &CanvasRenderingContext2d,
     dpr: f64,
     font_family: &str,

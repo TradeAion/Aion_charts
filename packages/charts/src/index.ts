@@ -18,6 +18,9 @@ import { create_chart as wasm_create_chart } from "../pkg/aion_wasm.js";
 
 export * from "./types.js";
 export * from "./theme.js";
+export * from "./primitives.js";
+export * from "./custom_series.js";
+export * from "./builtin_plugins.js";
 import { chart_impl } from "./impl.js";
 import { ensure_init } from "./impl.js";
 import { theme_options } from "./theme.js";

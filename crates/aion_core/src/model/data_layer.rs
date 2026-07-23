@@ -39,6 +39,11 @@ struct RawSeries {
     /// (absent for the whole series) or aligned 1:1 with `times`; kept in lockstep with the
     /// value columns across set_data/update so plot rows (which mirror raw rows) stay aligned.
     point_colors: [Vec<u32>; POINT_COLOR_CHANNELS],
+    /// Custom series (plugin platform Phase C-c): their values live host-side, so the rows
+    /// here carry times only (whitespace-style) — yet they still mark real bars for the
+    /// time-scale base index (LWC's custom plot rows carry values, so they count in
+    /// `_getBaseIndex`).
+    rows_count_as_data: bool,
     /// Rebuilt against merged indices; keys are positions in `merged_times`.
     plot: PlotList,
 }
@@ -49,6 +54,7 @@ impl RawSeries {
             times: Vec::new(),
             values: [vec![], vec![], vec![], vec![]],
             point_colors: [vec![], vec![], vec![]],
+            rows_count_as_data: false,
             plot: PlotList::new(),
         }
     }
@@ -87,6 +93,15 @@ impl DataLayer {
         &mut self.series[id].plot
     }
 
+    /// Mark a series whose time-only rows still count as data rows for [`base_index`] (custom
+    /// series, Phase C-c). Set at series creation / kind conversion by the engine, which owns
+    /// the kind knowledge; an unknown id is ignored.
+    pub fn set_rows_count_as_data(&mut self, id: SeriesId, flag: bool) {
+        if let Some(s) = self.series.get_mut(id) {
+            s.rows_count_as_data = flag;
+        }
+    }
+
     /// Raw series columns for platform-independent derived-data producers.
     pub fn series_data(&self, id: SeriesId) -> Option<(&[i64], [&[f64]; 4])> {
         let s = self.series.get(id)?;
@@ -115,7 +130,7 @@ impl DataLayer {
                     s.values[2][row],
                     s.values[3][row],
                 ];
-                if !is_whitespace_values(values) {
+                if s.rows_count_as_data || !is_whitespace_values(values) {
                     last_data_time = Some(match last_data_time {
                         Some(t) => t.max(s.times[row]),
                         None => s.times[row],
@@ -572,6 +587,35 @@ mod tests {
         assert_eq!(dl.merged_times(), &[1, 2, 3, 4]);
         assert_eq!(dl.pop(a, 5), 0);
         assert_eq!(dl.merged_times(), &[3, 4]);
+    }
+
+    #[test]
+    fn rows_count_as_data_series_anchor_the_base_index() {
+        let mut dl = DataLayer::new();
+        let a = dl.add_series();
+        let nan = f64::NAN;
+        // A custom series (Phase C-c): time-only (whitespace-style) rows whose values live
+        // host-side. Like LWC's custom plot rows (which carry values), they count as data for
+        // the base index once flagged.
+        dl.set_data(
+            a,
+            vec![1, 2, 3],
+            vec![nan, nan, nan],
+            vec![nan, nan, nan],
+            vec![nan, nan, nan],
+            vec![nan, nan, nan],
+        );
+        // Unflagged, an all-whitespace series anchors on 0 (LWC's initialized baseIndex).
+        assert_eq!(dl.base_index(), Some(0));
+        dl.set_rows_count_as_data(a, true);
+        assert_eq!(dl.base_index(), Some(2));
+        // A second ordinary series' real bars still win by time, and clearing the flag
+        // restores whitespace semantics.
+        let b = dl.add_series();
+        set(&mut dl, b, &[1], &[7.0]);
+        assert_eq!(dl.base_index(), Some(2));
+        dl.set_rows_count_as_data(a, false);
+        assert_eq!(dl.base_index(), Some(0));
     }
 
     #[test]

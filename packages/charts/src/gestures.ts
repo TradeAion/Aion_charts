@@ -227,6 +227,9 @@ export function install_gestures(chart: chart_impl): () => void {
   const set_crosshair = (x: number, y: number) => {
     last_crosshair = { x, y };
     wasm.set_crosshair(x, y);
+    // Phase C-d: refresh the hover hit-test (primitives + series) before the repaint that
+    // follows, so a hovered series' `hoveredSeriesOnTop` z-bump lands on the same frame.
+    chart.update_hover(x, y);
     chart.emit_crosshair(x, y);
   };
 
@@ -533,18 +536,11 @@ export function install_gestures(chart: chart_impl): () => void {
       return;
     }
 
-    // hover cursor feedback (no button pressed)
+    // Separator hover highlight (no button pressed). The cursor itself is resolved after
+    // the crosshair feed below, which refreshes the hover hit-test first.
     if (pointers.size === 0) {
       // Same gate as the row-resize cursor below: no hover highlight while resizing is off.
       set_sep_hover(chart.gesture_config().panes_resize ? separator_at(p.y) : -1);
-      overlay.style.cursor =
-        separator_at(p.y) >= 0 && chart.gesture_config().panes_resize
-          ? "row-resize"
-          : price_axis_target_at(p) !== null
-            ? "ns-resize"
-            : is_time_axis(p)
-              ? "ew-resize"
-              : "crosshair";
     }
 
     if (pointers.has(e.pointerId)) pointers.set(e.pointerId, p);
@@ -564,6 +560,23 @@ export function install_gestures(chart: chart_impl): () => void {
     // captured drag keep feeding positions; the engine clamps them into the pane.
     if (pointers.size > 0 || (price_axis_target_at(p) === null && !is_time_axis(p))) {
       set_crosshair(p.x, p.y);
+    }
+    // Hover cursor feedback (no button pressed), resolved AFTER the crosshair feed refreshed
+    // the hover hit-test, so a primitive's `hit_test` cursor applies on the same move it
+    // starts hitting (LWC applies the hovered source's cursorStyle on every crosshair move).
+    if (pointers.size === 0) {
+      const region_cursor =
+        separator_at(p.y) >= 0 && chart.gesture_config().panes_resize
+          ? "row-resize"
+          : price_axis_target_at(p) !== null
+            ? "ns-resize"
+            : is_time_axis(p)
+              ? "ew-resize"
+              : "crosshair";
+      // A primitive's cursor overrides the region cursor while its hit holds — but only over
+      // the pane (the hover state is not refreshed over the axis strips).
+      overlay.style.cursor =
+        region_cursor === "crosshair" ? (chart.hover_cursor() ?? region_cursor) : region_cursor;
     }
     chart.repaint();
   };
@@ -607,6 +620,7 @@ export function install_gestures(chart: chart_impl): () => void {
     // LWC `mouseLeaveEvent` hides the crosshair; an active captured drag is left alone.
     if (pointers.size > 0) return;
     set_sep_hover(-1);
+    chart.clear_hover(); // Phase C-d: release the hover hit + hovered-series z-bump
     wasm.clear_crosshair();
     chart.emit_crosshair_left();
     chart.repaint();

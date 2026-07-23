@@ -150,12 +150,6 @@ impl ChartEngine {
         ))
     }
 
-    pub(super) fn pane_at_y(&self, y: f64) -> Option<usize> {
-        self.panes
-            .iter()
-            .position(|p| y >= p.top && y <= p.top + p.height)
-    }
-
     pub(super) fn snapped_crosshair_index(&self, x_css: f64, from: i64, to: i64) -> i64 {
         let index = self.time_scale.coordinate_to_index(x_css).clamp(from, to);
         self.snap_index_to_visible_series(index)

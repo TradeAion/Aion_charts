@@ -133,13 +133,43 @@ Ordered by user impact. Each item = option/method + TS type + engine plumbing + 
 
 Per [PLUGIN_PLATFORM_DESIGN.md](PLUGIN_PLATFORM_DESIGN.md) (design-complete, no code yet).
 
-- [ ] 3.1 Primitive attachment surface (`attachPrimitive`/`detachPrimitive` on series + panes,
-      lifecycle).
-- [ ] 3.2 `ISeriesPrimitive` view pipeline (pane/price-axis/time-axis views → draw-list Prims,
-      zOrder).
-- [ ] 3.3 `autoscaleInfo` + primitive hit-testing (`hoveredObjectId` in events).
-- [ ] 3.4 Custom series (`addCustomSeries`: `priceValueBuilder`, `isWhitespace`, conflation).
-- [ ] 3.5 Re-express markers + watermark as plugins on the platform (parity proof).
+**Decisions (2026-07-21, user sign-off):** A-first hybrid (Option C — plugins emit backend-neutral
+Prim commands; Canvas2D raw-ctx escape hatch deferred) and primitives-first ordering
+(C-a → C-b → C-d → C-c). Transport: one marshalling pass per primitive per frame (JSON command
+buffer; swappable for a typed-array ABI later without changing the plugin API).
+
+- [x] 3.1/C-a Pane primitives: `pane.attach_primitive`/`detach`, lifecycle (`attached`/`detached`),
+      `update_all_views`, `pane_views` → Prim commands at z-order (Bottom/Normal/Top; new
+      `FramePane.top_prims` layer), `price_axis_views`/`time_axis_views` → boxed axis labels
+      (extension beyond LWC — IPanePrimitiveBase lacks them). JSON→Prim decoder
+      (`prim_decode.rs`, host-tested). Session-bands reference primitive + Playwright fixture:
+      WebGPU≡Canvas2D 0-diff with primitives active, detach restores exact pixels. Known
+      placeholders: `text()` prim is a no-op on both backends until the glyph engine lands
+      (parity holds trivially); reentrant chart calls from renderers are guarded.
+      — 2026-07-21
+- [x] 3.2/C-b Series primitives: `series.attach_primitive` bound to the series' scale (incl. overlay),
+      `autoscale_info(from,to)` merged into the owning scale's range via per-frame engine
+      contributions (LWC visibility gating), series-bound axis labels (+`price` extension),
+      auto-detach on series removal. Position-band + scale-band demo fixtures; Playwright: numeric
+      autoscale superset assertion + WebGPU≡Canvas2D 0-diff. — 2026-07-21
+- [x] 3.3/C-d `hit_test` + interaction: primitive `hit_test(x,y)` (LWC `hitTestPane` precedence
+      ported: top > built-in series > normal > bottom), per-kind series hit tests (LWC
+      range/line ports incl. tolerance 3), `hovered_series`/`hovered_object_id` on mouse params,
+      hit-driven cursor, `hovered_series_on_top` render-only z-bump (closes the 2d deferral).
+      17 engine hit tests + 5 Playwright specs. — 2026-07-21
+- [x] 3.4/C-c Custom series (`add_custom_series`): engine-owned time mapping (Custom kind,
+      time-only rows with base-index flag), host-aligned item storage (sort/dedupe/update/pop),
+      `price_value_builder`/`is_whitespace` contract, autoscale via the C-b contribution path,
+      `render(ctx)` with visible items at bar centers spliced at the series' paint position,
+      last-value label/line from the custom value. LWC rounded-candles plugin ported line-for-line
+      as the proof fixture. Playwright 24/24. — 2026-07-21
+- [x] 3.5 Re-express markers + watermark as plugins: `create_series_markers` (LWC v5 plugin surface;
+      shapes + text pixel-identical to the engine built-in — 0-diff parity proof on both backends)
+      and `create_text_watermark` (per-line styled multi-line). Enabled by a small `text_views`
+      host hook painting plugin text on the shared overlay (the `Prim::Text` placeholder gap from
+      C-a is closed at the platform level). Found + documented a pre-existing WebGPU bucket-order
+      quirk (tris before quads affects engine markers identically — backlog item). — 2026-07-21
+- [ ] 3.6/C-e (Optional) Canvas2D escape-hatch primitive for raw-`ctx` LWC ports.
 
 ## Phase 4 — Release
 
@@ -195,6 +225,15 @@ Per [PLUGIN_PLATFORM_DESIGN.md](PLUGIN_PLATFORM_DESIGN.md) (design-complete, no 
   strip collapse, gradient pixels, hover. Gates: 221 cargo tests, clippy clean workspace-wide,
   Playwright 10/10 (spec updated for the four new time-scale fields), pack smoke green.
   **Next: Phase 3 — plugin platform.**
+- 2026-07-21 — **Phase 3 C-a→C-d + 3.5 complete.** The plugin platform is live: pane + series
+  primitives (Prim command plugins, z-ordered, axis views, lifecycle), `autoscale_info` engine
+  contributions, LWC `hitTestPane` precedence + per-kind series hit tests (`hovered_series`,
+  `hovered_object_id`, hit cursor, `hovered_series_on_top`), custom series (LWC rounded-candles
+  ported line-for-line), and markers/watermark re-expressed as plugins with a 0-diff parity proof.
+  Backlog notes: WebGPU tri/quad bucket order quirk (pre-existing, engine markers too);
+  `Prim::Text` glyph engine (plugin text uses the overlay hook). Playwright **28/28**, 270 cargo
+  tests, clippy clean, pack smoke green. Remaining: 3.6/C-e (optional raw-canvas escape hatch),
+  Phase 4 release.
 - 2026-07-21 — **Wave-1 verification pass.** Independent live-browser probe (defaults, apply→
   options round-trips, render) caught a fidelity bug: new color options round-tripped normalized
   (`#FF0000`→`#ff0000`) — fields were stored as parsed `Color`. Fixed to verbatim CSS strings with

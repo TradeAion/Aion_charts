@@ -284,7 +284,7 @@ pub fn render_engine(chart: &mut ChartEngine) -> TinySkiaCanvas {
         let point_base = points.len() as u32;
         points.extend(pane.points);
         prims.extend(pane.under);
-        for prim in pane.main {
+        for prim in pane.main.into_iter().chain(pane.top_prims) {
             prims.push(remap_prim_points(prim, point_base));
         }
     }

@@ -8,7 +8,7 @@ use super::*;
 /// The normal-spacing path remains unchanged. Once the source spacing drops below one physical
 /// pixel, each bucket keeps its first/last rows plus the close extrema, preserving the visible
 /// envelope and the line's endpoints while avoiding an O(number-of-source-points) draw list.
-pub(super) fn visible_line_rows(
+pub(crate) fn visible_line_rows(
     plot: &PlotList,
     from: i64,
     to: i64,
@@ -69,18 +69,21 @@ pub(super) fn visible_line_rows(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct VisibleOhlc {
+pub(crate) struct VisibleOhlc {
     /// Physical-pixel x coordinate. Aggregated buckets are pinned to their integer pixel so
     /// adjacent buckets cannot round back onto the same column in the geometry builders.
-    pub(super) x_px: f64,
-    pub(super) open: f64,
-    pub(super) high: f64,
-    pub(super) low: f64,
-    pub(super) close: f64,
+    pub(crate) x_px: f64,
+    pub(crate) open: f64,
+    pub(crate) high: f64,
+    pub(crate) low: f64,
+    pub(crate) close: f64,
     /// Source row supplying the bar's identity fields (open/high/low/close + per-point colors):
     /// the row itself at normal spacing, the bucket's last row (which owns the close) when
     /// compressed.
-    pub(super) source_row: usize,
+    pub(crate) source_row: usize,
+    /// Geometry-local adjacency key (LWC's conflated-item `time` in the range hit test): the
+    /// actual time-point index at normal spacing, the physical pixel bucket when compressed.
+    pub(crate) geometry_time: i64,
 }
 
 /// Aggregate source OHLC rows that share a physical x pixel.
@@ -88,7 +91,7 @@ pub(super) struct VisibleOhlc {
 /// Each compressed bucket is itself a valid OHLC bar: first open, maximum high, minimum low, and
 /// last close. At normal spacing this is an identity transform, apart from copying the visible
 /// values into the small frame-local item list required by the render geometry builders.
-pub(super) fn visible_ohlc(
+pub(crate) fn visible_ohlc(
     plot: &PlotList,
     from: i64,
     to: i64,
@@ -116,6 +119,7 @@ pub(super) fn visible_ohlc(
                 low: low[row],
                 close: close[row],
                 source_row: row,
+                geometry_time: indices[row],
             })
             .collect();
     }
@@ -147,6 +151,7 @@ pub(super) fn visible_ohlc(
                     low: low[row],
                     close: close[row],
                     source_row: row,
+                    geometry_time: bucket,
                 });
             }
         }
@@ -159,18 +164,18 @@ pub(super) fn visible_ohlc(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct VisibleHistogramRow {
-    pub(super) x_px: f64,
-    pub(super) source_row: usize,
+pub(crate) struct VisibleHistogramRow {
+    pub(crate) x_px: f64,
+    pub(crate) source_row: usize,
     /// Geometry-local adjacency key. It is the actual time-point index at normal spacing and the
     /// physical pixel bucket when compressed.
-    pub(super) geometry_time: i64,
+    pub(crate) geometry_time: i64,
 }
 
 /// Select one conservative histogram sample per physical pixel, retaining the value with the
 /// greatest magnitude so a volume/value spike cannot disappear merely because the scale is
 /// compressed. The selected source row also carries its original up/down color classification.
-pub(super) fn visible_histogram_rows(
+pub(crate) fn visible_histogram_rows(
     plot: &PlotList,
     from: i64,
     to: i64,

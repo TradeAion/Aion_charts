@@ -13,7 +13,16 @@ impl ChartInner {
     /// Remove a series and any indicators derived from it. Returns true if a live, non-primary
     /// series was removed. The primary series (id 0) cannot be removed.
     pub fn remove_series(&mut self, id: u32) -> bool {
-        self.engine.remove_series(id as SeriesId)
+        let removed = self.engine.remove_series(id as SeriesId);
+        if removed {
+            // Series primitives bound to the removed series (or to indicator outputs
+            // tombstoned with it) auto-detach (LWC `removeSeries` drops them with the series).
+            self.detach_orphaned_series_primitives();
+            // Custom series drop their entry with the series, firing the pane view's
+            // `destroy` hook (LWC `ICustomSeriesPaneView.destroy`).
+            self.drop_orphaned_custom_series();
+        }
+        removed
     }
 
     pub fn add_sma(&mut self, source_id: u32, period: u32) -> u32 {
@@ -590,6 +599,147 @@ impl ChartInner {
             .collect()
     }
 
+    /// Attach a pane primitive (LWC `IPaneApi.attachPrimitive`, plugin platform Phase C-a) and
+    /// return its registry id (0 when the pane index is stale). Fires the plugin's `attached`
+    /// hook with `{pane_index}` if present (LWC `PaneAttachedParameter`, reduced to what the
+    /// host can provide headlessly); a throwing hook detaches nothing and is only reported.
+    pub fn attach_pane_primitive(&mut self, pane: u32, primitive: js_sys::Object) -> u32 {
+        if pane as usize >= self.panes.len() {
+            web_sys::console::warn_1(
+                &format!("aion: attach_pane_primitive ignored — stale pane index {pane}").into(),
+            );
+            return 0;
+        }
+        let id = self.next_primitive_id;
+        self.next_primitive_id += 1;
+        self.primitives.push(PanePrimitiveEntry {
+            id,
+            pane,
+            obj: primitive.clone(),
+        });
+        if let Ok(hook) = js_sys::Reflect::get(&primitive, &"attached".into()) {
+            if let Ok(hook) = hook.dyn_into::<js_sys::Function>() {
+                let params = js_sys::Object::new();
+                let _ = js_sys::Reflect::set(&params, &"pane_index".into(), &pane.into());
+                if let Err(error) = hook.call1(&primitive, &params) {
+                    web_sys::console::warn_1(
+                        &format!("aion: pane primitive `attached` hook threw — {error:?}").into(),
+                    );
+                }
+            }
+        }
+        id
+    }
+
+    /// Detach a pane primitive by id (LWC `IPaneApi.detachPrimitive`): fires its `detached`
+    /// hook and drops the retained object so no JS reference leaks (mirrors the formatter
+    /// clear paths). False for an unknown id.
+    pub fn detach_pane_primitive(&mut self, id: u32) -> bool {
+        let Some(position) = self.primitives.iter().position(|entry| entry.id == id) else {
+            return false;
+        };
+        let entry = self.primitives.remove(position);
+        if let Ok(hook) = js_sys::Reflect::get(&entry.obj, &"detached".into()) {
+            if let Ok(hook) = hook.dyn_into::<js_sys::Function>() {
+                if let Err(error) = hook.call0(&entry.obj) {
+                    web_sys::console::warn_1(
+                        &format!("aion: pane primitive `detached` hook threw — {error:?}").into(),
+                    );
+                }
+            }
+        }
+        true
+    }
+
+    /// Attach a series primitive (LWC `ISeriesApi.attachPrimitive`, plugin platform Phase C-b)
+    /// and return its registry id (0 when the series id is unknown or already removed). Fires
+    /// the plugin's `attached` hook with `{series_id, pane_index}` if present (`pane_index`
+    /// omitted while the series is pane-less); the TS adapter injects `request_update` before
+    /// the plugin sees the params. A throwing hook detaches nothing and is only reported.
+    pub fn attach_series_primitive(&mut self, series_id: u32, primitive: js_sys::Object) -> u32 {
+        let Some(series) = self
+            .series
+            .iter()
+            .find(|s| s.id == series_id as SeriesId && !s.removed)
+        else {
+            web_sys::console::warn_1(
+                &format!(
+                    "aion: attach_series_primitive ignored — unknown/removed series {series_id}"
+                )
+                .into(),
+            );
+            return 0;
+        };
+        let pane_index = series.pane_index;
+        let id = self.next_primitive_id;
+        self.next_primitive_id += 1;
+        self.series_primitives.push(SeriesPrimitiveEntry {
+            id,
+            series: series_id,
+            obj: primitive.clone(),
+        });
+        if let Ok(hook) = js_sys::Reflect::get(&primitive, &"attached".into()) {
+            if let Ok(hook) = hook.dyn_into::<js_sys::Function>() {
+                let params = js_sys::Object::new();
+                let _ = js_sys::Reflect::set(&params, &"series_id".into(), &series_id.into());
+                if pane_index < self.panes.len() {
+                    let _ = js_sys::Reflect::set(
+                        &params,
+                        &"pane_index".into(),
+                        &(pane_index as u32).into(),
+                    );
+                }
+                if let Err(error) = hook.call1(&primitive, &params) {
+                    web_sys::console::warn_1(
+                        &format!("aion: series primitive `attached` hook threw — {error:?}").into(),
+                    );
+                }
+            }
+        }
+        id
+    }
+
+    /// Detach a series primitive by id (LWC `ISeriesApi.detachPrimitive`): fires its `detached`
+    /// hook and drops the retained object. False for an unknown id.
+    pub fn detach_series_primitive(&mut self, id: u32) -> bool {
+        let Some(position) = self
+            .series_primitives
+            .iter()
+            .position(|entry| entry.id == id)
+        else {
+            return false;
+        };
+        let entry = self.series_primitives.remove(position);
+        fire_primitive_detached(&entry.obj);
+        true
+    }
+
+    /// Auto-detach every series primitive whose owning series is gone (LWC drops a removed
+    /// series' primitives with it, chart-model.ts `removeSeries`). Called after any
+    /// `remove_series` — indicator outputs tombstoned alongside their source are covered too,
+    /// since they scan by live state rather than by the removed id.
+    fn detach_orphaned_series_primitives(&mut self) {
+        if self.series_primitives.is_empty() {
+            return;
+        }
+        let entries = std::mem::take(&mut self.series_primitives);
+        let mut orphans = Vec::new();
+        for entry in entries {
+            let live = self
+                .series
+                .iter()
+                .any(|s| s.id == entry.series as SeriesId && !s.removed);
+            if !live {
+                orphans.push(entry);
+            } else {
+                self.series_primitives.push(entry);
+            }
+        }
+        for entry in orphans {
+            fire_primitive_detached(&entry.obj);
+        }
+    }
+
     /// Merge a snake_case JSON patch of price-scale options into one pane scale (LWC
     /// `priceScale.applyOptions`; unknown keys are ignored). Mode/width-affecting keys force
     /// a full axis-width renegotiation like `set_price_scale_mode`.
@@ -617,7 +767,8 @@ impl ChartInner {
 
     /// 0 = candlestick, 1 = OHLC bars, 2 = line, 3 = area, 4 = histogram (sets the main series).
     pub fn set_series_type(&mut self, kind: u8) {
-        self.series[0].kind = SeriesKind::from_u8(kind);
+        self.engine
+            .convert_series_kind(0, SeriesKind::from_u8(kind));
     }
 
     pub fn set_time_visible(&mut self, visible: bool) {
@@ -741,11 +892,17 @@ impl ChartInner {
 
     /// LWC v5.2 `ISeriesApi.pop(count)`: remove the last `count` data points (clamped to the
     /// data length; point colors shift along). Returns the new data length (0 for an
-    /// unknown/removed id — such a series has no data anyway).
+    /// unknown/removed id — such a series has no data anyway). A custom series' host-side
+    /// items truncate in lockstep with the engine rows.
     pub fn series_pop(&mut self, id: u32, count: u32) -> u32 {
-        self.engine
+        let new_len = self
+            .engine
             .series_pop(id as SeriesId, count as usize)
-            .unwrap_or(0) as u32
+            .unwrap_or(0) as u32;
+        if let Some(entry) = self.custom_series.iter_mut().find(|e| e.series == id) {
+            crate::custom_align::pop_items(&mut entry.times, &mut entry.items, count as usize);
+        }
+        new_len
     }
 
     /// LWC `ISeriesApi.lastValueData(globalLast)`: JSON `{"value","formatted","time"}` of the
@@ -1365,4 +1522,18 @@ fn locale_month_names(locale: &str) -> Option<([String; 12], [String; 12])> {
             .and_then(|v| v.as_string())?;
     }
     Some((short, long))
+}
+
+/// Fire a detached primitive's `detached` hook (shared by the series-primitive detach paths);
+/// a throwing hook is only reported.
+fn fire_primitive_detached(obj: &js_sys::Object) {
+    if let Ok(hook) = js_sys::Reflect::get(obj, &"detached".into()) {
+        if let Ok(hook) = hook.dyn_into::<js_sys::Function>() {
+            if let Err(error) = hook.call0(obj) {
+                web_sys::console::warn_1(
+                    &format!("aion: series primitive `detached` hook threw — {error:?}").into(),
+                );
+            }
+        }
+    }
 }

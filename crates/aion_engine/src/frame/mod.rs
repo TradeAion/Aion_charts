@@ -26,7 +26,7 @@ use crate::{
 };
 
 mod axis;
-mod conflation;
+pub(crate) mod conflation;
 mod crosshair;
 mod series_geometry;
 #[cfg(test)]
@@ -128,6 +128,17 @@ pub struct FramePane {
     pub scissor: [u32; 4],
     pub under: Vec<Prim>,
     pub main: Vec<Prim>,
+    /// Primitive z-order `top` layer (LWC `PrimitivePaneViewZOrder` "top" — above everything,
+    /// crosshair included). The engine emits nothing here today; hosts append plugin prims
+    /// after frame construction. Kept beside `under`/`main` so both backends execute it with
+    /// the pane's scissor and point pool. (`FramePane.top` is already the pane's CSS y origin,
+    /// hence the `_prims` suffix.)
+    pub top_prims: Vec<Prim>,
+    /// Series paint-order marks (Phase C-c): `(series_id, main.len())` recorded right after
+    /// each visible series' slot in the pane's paint loop. A custom series paints nothing
+    /// here, so its mark equals the previous series'; hosts splice custom-series prims into
+    /// `main` at the mark, preserving the chart z-order instead of always painting on top.
+    pub series_paint_marks: Vec<(SeriesId, usize)>,
     pub points: Vec<[f32; 2]>,
 }
 
@@ -236,7 +247,7 @@ struct ResolvedSeries {
     base_value: f64,
 }
 
-fn series_scale_target(series: &crate::SeriesEntry) -> PriceScaleTarget {
+pub(crate) fn series_scale_target(series: &crate::SeriesEntry) -> PriceScaleTarget {
     if series.overlay {
         PriceScaleTarget::Overlay
     } else if series.left_scale {
@@ -246,7 +257,7 @@ fn series_scale_target(series: &crate::SeriesEntry) -> PriceScaleTarget {
     }
 }
 
-fn pane_scale(pane: &crate::Pane, target: PriceScaleTarget) -> &PriceScaleCore {
+pub(crate) fn pane_scale(pane: &crate::Pane, target: PriceScaleTarget) -> &PriceScaleCore {
     match target {
         PriceScaleTarget::Right => &pane.price_scale,
         PriceScaleTarget::Left => &pane.left_scale,
@@ -363,6 +374,10 @@ impl ChartEngine {
                     verbatim_color(&series.down_color, DOWN)
                 }
             }
+            // LWC custom-series colorer (series-bar-colorer.ts Custom arm): the series `color`
+            // option (the data-item color wins in LWC; the host folds those into the custom
+            // frame values, so this arm is only the exhaustiveness fallback).
+            SeriesKind::Custom => verbatim_color(&series.line_color, crate::DEFAULT_LINE_COLOR),
         }
     }
 }
@@ -429,8 +444,31 @@ impl ChartEngine {
         let pane_left_px = (self.pane_left * nominal_dpr).round().max(0.0) as u32;
         let mut resolved = Vec::with_capacity(self.series.len());
         // Paint in the chart's series order (LWC z-order, pane.ts orderedSources): ids run
-        // bottom to top so a later entry overpaints the earlier ones within its pane.
-        for &id in self.series_order() {
+        // bottom to top so a later entry overpaints the earlier ones within its pane. With
+        // `hoveredSeriesOnTop` the hovered series repaints topmost for the frame (LWC
+        // `hoveredSourceOnTopOrder` — render order only; the stable `series_order` and hit
+        // arbitration are untouched). The bump is global across panes, which only reorders
+        // within the hovered series' own pane since each pane paints its own series.
+        let order = match self
+            .hovered_series
+            .filter(|_| self.options.get().hovered_series_on_top)
+        {
+            Some(hovered)
+                if self.series_order.contains(&hovered)
+                    && self.series_order.last() != Some(&hovered) =>
+            {
+                let mut bumped: Vec<SeriesId> = self
+                    .series_order
+                    .iter()
+                    .copied()
+                    .filter(|&id| id != hovered)
+                    .collect();
+                bumped.push(hovered);
+                bumped
+            }
+            _ => self.series_order.clone(),
+        };
+        for &id in &order {
             let s = &self.series[id];
             let base_value = visible
                 .and_then(|(from, _)| self.series_base_value(s.id, from))
@@ -521,6 +559,8 @@ impl ChartEngine {
             out.scissor = [pane_left_px, top_px, pane_w_px, height_px];
             out.under.clear();
             out.main.clear();
+            out.top_prims.clear();
+            out.series_paint_marks.clear();
             out.points.clear();
             // LWC `layout.background` vertical gradient (pane-widget.ts `_drawBackground`):
             // each pane paints its own two-stop gradient spanning its full height, behind
@@ -591,7 +631,11 @@ impl ChartEngine {
                             &mut out.points,
                             scale,
                         ),
+                        // A custom series paints nothing engine-side: the host's plugin pass
+                        // splices its prims into `main` at the mark recorded below (Phase C-c).
+                        SeriesKind::Custom => {}
                     }
+                    out.series_paint_marks.push((rs.id, out.main.len()));
                 }
                 self.build_markers_frame(pi, from, to, hpr, vpr, &mut out.main);
                 self.build_price_lines_frame(pi, &mut out.main, pane_w_px as i32, vpr);
@@ -612,6 +656,7 @@ impl ChartEngine {
             if pane_left_px != 0 {
                 translate_prims_x(&mut out.under, pane_left_px as i32);
                 translate_prims_x(&mut out.main, pane_left_px as i32);
+                translate_prims_x(&mut out.top_prims, pane_left_px as i32);
                 for point in &mut out.points {
                     point[0] += pane_left_px as f32;
                 }
@@ -655,7 +700,7 @@ impl ChartEngine {
         })
     }
 
-    fn visible_range_for_frame(&self) -> Option<(i64, i64)> {
+    pub(crate) fn visible_range_for_frame(&self) -> Option<(i64, i64)> {
         let n = self.data.merged_times().len() as i64;
         let r = self.time_scale.visible_strict_range()?;
         if n == 0 {
@@ -726,6 +771,42 @@ impl ChartEngine {
                 target.0 = target.0.max(margins.0);
                 target.1 = target.1.max(margins.1);
             }
+        }
+        // Series-primitive autoscale contributions (plugin platform Phase C-b): LWC merges a
+        // series primitive's `autoscaleInfo` into its owning series' autoscale info (series.ts
+        // `_autoscaleInfoImpl`), and price-scale.ts `_recalculatePriceRangeImpl` only consults
+        // sources that are visible with a first value — so a hidden, data-less, or pane-less
+        // owning series silences its primitives' contributions too.
+        for contribution in &self.primitive_autoscale {
+            let Some(series) = self
+                .series
+                .iter()
+                .find(|s| s.id == contribution.series && !s.removed)
+            else {
+                continue;
+            };
+            if !series.visible || contribution.pane != series.pane_index || contribution.pane >= n {
+                continue;
+            }
+            let Some(base_value) = self.series_base_value(series.id, from) else {
+                continue;
+            };
+            let scale = pane_scale(&self.panes[contribution.pane], contribution.target);
+            let Some(range) = scale.price_range_to_logical(
+                &PriceRange::new(contribution.min, contribution.max),
+                base_value,
+            ) else {
+                continue;
+            };
+            let slot = match contribution.target {
+                PriceScaleTarget::Right => &mut main[contribution.pane],
+                PriceScaleTarget::Left => &mut left[contribution.pane],
+                PriceScaleTarget::Overlay => &mut overlay[contribution.pane],
+            };
+            *slot = Some(match slot.take() {
+                Some(old) => old.merge(Some(&range)),
+                None => range,
+            });
         }
         for (i, pane) in self.panes.iter_mut().enumerate() {
             let main_auto = pane.price_scale.is_auto_scale();

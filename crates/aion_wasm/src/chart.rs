@@ -14,8 +14,12 @@
 //! Multiple series share one time axis via [`DataLayer`] (the merged time-point list). Each
 //! series maps its data onto merged indices; a series absent at an index is whitespace there.
 
+mod custom_series;
 mod inner_api;
 mod inner_render;
+mod primitives;
+
+use custom_series::CustomSeriesEntry;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -39,7 +43,7 @@ use aion_core::scale::price_scale_core::PriceScaleMode;
 use aion_engine::{
     crosshair_mode_from_u8, line_style_from_u8, marker_pos, marker_shape, AxisFrame, AxisLabel,
     AxisTextAlign, AxisTextMidpoint, ChartEngine, Marker, Pane, PriceFormatterFn, PriceScaleTarget,
-    SeriesKind, TickMarkFormatterFn, TimeFormatterFn,
+    PrimitiveAutoscaleContribution, SeriesKind, TickMarkFormatterFn, TimeFormatterFn,
 };
 use aion_render::canvas2d::{execute as execute_canvas2d, Canvas2d, Viewport as CanvasViewport};
 use aion_render::color::Color;
@@ -160,6 +164,55 @@ struct ChartInner {
     frame: aion_engine::ChartFrame,
     axis_frame: AxisFrame,
     gpu_groups: Vec<DrawGroup>,
+    /// Pane-primitive registry (plugin platform Phase C-a): host-retained JS plugin objects,
+    /// drawn into the pane layers during `render`. Ids are never reused within a chart.
+    primitives: Vec<PanePrimitiveEntry>,
+    /// Series-primitive registry (plugin platform Phase C-b): same retained-object model as
+    /// the pane registry, but each entry is bound to an owning series — its views resolve
+    /// against that series' price scale, and removing the series auto-detaches them.
+    /// Shares `next_primitive_id` with the pane registry so ids stay unique within a chart.
+    series_primitives: Vec<SeriesPrimitiveEntry>,
+    next_primitive_id: u32,
+    /// Custom-series registry (plugin platform Phase C-c): one retained pane-view plugin
+    /// object plus its raw items per custom series, aligned with the engine's time-only
+    /// rows. Removing the series drops the entry (firing the view's `destroy` hook).
+    custom_series: Vec<CustomSeriesEntry>,
+    /// Overlay text draws collected from the primitives' `text_views` hooks during the
+    /// primitive passes (plugin platform Phase 3.5), painted on the axis overlay in the
+    /// engine watermark's slot by `draw_axes_2d`. Cleared at the top of every render.
+    primitive_texts: Vec<PrimitiveOverlayText>,
+}
+
+/// One in-pane overlay text draw registered by a primitive's `text_views` hook (plugin
+/// platform Phase 3.5 — the text answer to `Prim::Text` no-oping on both backends). Painted
+/// on the Canvas2D axis overlay in media coordinates, in the same slot as the engine's
+/// watermark (below the axis chrome, above the pane). `font` is a fully-resolved CSS font
+/// shorthand; `align`/`baseline` are canvas `textAlign`/`textBaseline` keywords.
+pub(super) struct PrimitiveOverlayText {
+    pub(super) text: String,
+    pub(super) x: f64,
+    pub(super) y: f64,
+    pub(super) color: String,
+    pub(super) font: String,
+    pub(super) align: String,
+    pub(super) baseline: String,
+}
+
+/// One attached pane primitive (LWC `IPanePrimitive`, adapted to a plain JS object by the TS
+/// package): the pane index it draws on plus the retained object itself.
+struct PanePrimitiveEntry {
+    id: u32,
+    pane: u32,
+    obj: js_sys::Object,
+}
+
+/// One attached series primitive (LWC `ISeriesPrimitive`, Phase C-b): the owning series id
+/// plus the retained object. The pane/scale binding is re-resolved from the series each frame,
+/// so the views follow the series across pane moves and scale rebinding.
+struct SeriesPrimitiveEntry {
+    id: u32,
+    series: u32,
+    obj: js_sys::Object,
 }
 impl std::ops::Deref for ChartInner {
     type Target = ChartEngine;
@@ -359,6 +412,11 @@ pub async fn create_chart(
         frame: aion_engine::ChartFrame::default(),
         axis_frame: AxisFrame::default(),
         gpu_groups: Vec::new(),
+        primitives: Vec::new(),
+        series_primitives: Vec::new(),
+        next_primitive_id: 1,
+        custom_series: Vec::new(),
+        primitive_texts: Vec::new(),
     };
 
     Ok(AionChart {
@@ -870,6 +928,83 @@ impl AionChart {
         self.inner.borrow().pane_series_ids(index)
     }
 
+    /// Attach a pane primitive (LWC `IPaneApi.attachPrimitive`, plugin platform Phase C-a):
+    /// a plain JS object with optional `attached`/`detached`/`update_all_views`/`pane_views`/
+    /// `price_axis_views`/`time_axis_views` hooks. Its `pane_views()` renderers record Prim
+    /// commands through a host-built draw context instead of touching a canvas, so the output
+    /// feeds both backends identically. Returns the primitive id (0 = rejected), used by
+    /// [`detach_pane_primitive`]. Call `render()` after.
+    pub fn attach_pane_primitive(&mut self, pane: u32, primitive: js_sys::Object) -> u32 {
+        self.inner
+            .borrow_mut()
+            .attach_pane_primitive(pane, primitive)
+    }
+
+    /// Detach a pane primitive by id (LWC `IPaneApi.detachPrimitive`): fires its `detached`
+    /// hook and drops the retained JS object. False for an unknown id. Call `render()` after.
+    pub fn detach_pane_primitive(&mut self, id: u32) -> bool {
+        self.inner.borrow_mut().detach_pane_primitive(id)
+    }
+
+    /// Attach a series primitive (LWC `ISeriesApi.attachPrimitive`, plugin platform Phase C-b):
+    /// a plain JS object like [`attach_pane_primitive`] plus an optional `autoscale_info(from,
+    /// to)` hook merged into the owning series' price-scale range. Its `pane_views()` renderers
+    /// get the same command-recording context, except `price_to_y(price)` is bound to the
+    /// owning series' scale. Returns the primitive id (0 = rejected), used by
+    /// [`detach_series_primitive`]. Call `render()` after.
+    pub fn attach_series_primitive(&mut self, series_id: u32, primitive: js_sys::Object) -> u32 {
+        self.inner
+            .borrow_mut()
+            .attach_series_primitive(series_id, primitive)
+    }
+
+    /// Detach a series primitive by id (LWC `ISeriesApi.detachPrimitive`): fires its `detached`
+    /// hook and drops the retained JS object. False for an unknown id. Removing the owning
+    /// series auto-detaches all its primitives. Call `render()` after.
+    pub fn detach_series_primitive(&mut self, id: u32) -> bool {
+        self.inner.borrow_mut().detach_series_primitive(id)
+    }
+
+    /// Add a custom series (plugin platform Phase C-c; LWC `IChartApi.addCustomSeries`): a
+    /// user-defined series type whose pane view (`price_value_builder`, `is_whitespace?`,
+    /// `render`, plus optional `default_options`/`destroy`) renders each bar through the
+    /// command-recording draw context, so its output is pixel-identical on both backends.
+    /// `adopt_primary` converts the engine's construction-time series 0 (the TS package's
+    /// first-series adoption, mirroring `add_series`). Returns the series id (u32::MAX =
+    /// rejected). Call `render()` after.
+    pub fn add_custom_series(&mut self, pane_view: js_sys::Object, adopt_primary: bool) -> u32 {
+        self.inner
+            .borrow_mut()
+            .add_custom_series(pane_view, adopt_primary)
+    }
+
+    /// Replace a custom series' items (LWC `ISeriesApi.setData`): a JS array of `{time, ...}`
+    /// objects (times in UTC seconds). The raw items are stored host-side verbatim; their
+    /// times enter the engine as whitespace-style rows. Call `render()` after.
+    pub fn set_custom_series_data(&mut self, id: u32, items: js_sys::Array) {
+        self.inner.borrow_mut().set_custom_series_data(id, items);
+    }
+
+    /// Streaming update of a custom series (LWC `ISeriesApi.update`): append a new time or
+    /// replace the item at an existing one. Call `render()` after.
+    pub fn update_custom_series_item(&mut self, id: u32, item: JsValue) {
+        self.inner.borrow_mut().update_custom_series_item(id, item);
+    }
+
+    /// The custom series' raw items aligned with the engine rows (post-sanitize order),
+    /// backing the TS `series.data()` (`null` for an unknown id).
+    pub fn custom_series_data(&self, id: u32) -> JsValue {
+        self.inner.borrow().custom_series_data(id)
+    }
+
+    /// The custom item at a logical index (the engine plot's mismatch-direction search),
+    /// backing the TS `series.data_by_index` (`null` off the data or for an unknown id).
+    pub fn custom_series_data_by_index(&self, id: u32, index: f64, mismatch: i8) -> JsValue {
+        self.inner
+            .borrow()
+            .custom_series_data_by_index(id, index, mismatch)
+    }
+
     /// Merge a snake_case JSON patch of price-scale options into one pane scale (LWC
     /// `priceScale.applyOptions`; unknown keys ignored). Keys: `mode`, `auto_scale`,
     /// `invert_scale`, `scale_margins`, `align_labels`, `ticks_visible`, `entire_text_only`,
@@ -1100,6 +1235,19 @@ impl AionChart {
     }
     pub fn clear_crosshair(&mut self) {
         self.inner.borrow_mut().clear_crosshair();
+    }
+    /// Hover hit testing (plugin platform Phase C-d): the primitive object and/or series
+    /// under pane-relative CSS px `(x_css, y_css)` as a JSON
+    /// `{"series_id":number|null,"object_id":string|null,"cursor":string|null}` (see the
+    /// inner method for the LWC arbitration). Also refreshes the engine's hovered series
+    /// for the `hoveredSeriesOnTop` z-bump, so call `render()` afterwards.
+    pub fn hover_at(&mut self, x_css: f64, y_css: f64) -> String {
+        self.inner.borrow_mut().hover_at(x_css, y_css)
+    }
+    /// Release the hovered series (cursor left the chart): the `hoveredSeriesOnTop` z-bump
+    /// lets go on the next `render()`.
+    pub fn clear_hover(&mut self) {
+        self.inner.borrow_mut().engine.set_hovered_series(None);
     }
     /// LWC `chart.setCrosshairPosition(price, time, series)`: position the crosshair at a
     /// data point with no DOM event — `time` must resolve exactly to a bar (false

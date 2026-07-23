@@ -98,6 +98,194 @@ fn ingests_data_without_a_host_runtime() {
 }
 
 #[test]
+fn series_primitive_autoscale_contribution_expands_the_owning_scale() {
+    let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+    chart
+        .set_series_data(
+            0,
+            &[1.0, 2.0],
+            &[5.0, 6.0],
+            &[10.0, 9.0],
+            &[0.0, 1.0],
+            &[7.0, 8.0],
+        )
+        .unwrap();
+    chart.time_scale.set_width(800.0);
+    chart.fit_content();
+    chart.autoscale_visible();
+    let base = chart.panes[0].price_scale.price_range().unwrap();
+    let base = (base.min_value(), base.max_value());
+    assert_eq!(base, (0.0, 10.0));
+
+    // A primitive on the series reaches past the data on both ends; the merged range unions in.
+    chart.add_autoscale_contribution(PrimitiveAutoscaleContribution {
+        series: 0,
+        pane: 0,
+        target: PriceScaleTarget::Right,
+        min: -50.0,
+        max: 60.0,
+    });
+    chart.autoscale_visible();
+    let merged = chart.panes[0].price_scale.price_range().unwrap();
+    assert_eq!((merged.min_value(), merged.max_value()), (-50.0, 60.0));
+
+    // Contributions are per-frame: clearing them returns the scale to the data range.
+    chart.clear_autoscale_contributions();
+    chart.autoscale_visible();
+    let restored = chart.panes[0].price_scale.price_range().unwrap();
+    assert_eq!((restored.min_value(), restored.max_value()), base);
+}
+
+#[test]
+fn series_primitive_autoscale_is_gated_on_owning_series_visibility() {
+    let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+    chart
+        .set_series_data(
+            0,
+            &[1.0, 2.0],
+            &[5.0, 6.0],
+            &[10.0, 9.0],
+            &[0.0, 1.0],
+            &[7.0, 8.0],
+        )
+        .unwrap();
+    chart.time_scale.set_width(800.0);
+    chart.fit_content();
+
+    // LWC price-scale.ts `_recalculatePriceRangeImpl` skips invisible sources, and series.ts
+    // merges primitive ranges into the series' own autoscale info — a hidden owning series
+    // therefore silences its primitives' contributions.
+    chart.set_series_visible(0, false);
+    chart.add_autoscale_contribution(PrimitiveAutoscaleContribution {
+        series: 0,
+        pane: 0,
+        target: PriceScaleTarget::Right,
+        min: -50.0,
+        max: 60.0,
+    });
+    chart.autoscale_visible();
+    let range = chart.panes[0].price_scale.price_range();
+    assert!(
+        range.is_none_or(|r| r.max_value() <= 10.0),
+        "hidden series must not contribute: {range:?}"
+    );
+
+    chart.set_series_visible(0, true);
+    chart.add_autoscale_contribution(PrimitiveAutoscaleContribution {
+        series: 0,
+        pane: 0,
+        target: PriceScaleTarget::Right,
+        min: -50.0,
+        max: 60.0,
+    });
+    chart.autoscale_visible();
+    let merged = chart.panes[0].price_scale.price_range().unwrap();
+    assert_eq!((merged.min_value(), merged.max_value()), (-50.0, 60.0));
+}
+
+#[test]
+fn series_primitive_autoscale_routes_to_the_owning_scale() {
+    let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+    chart
+        .set_series_data(
+            0,
+            &[1.0, 2.0],
+            &[5.0, 6.0],
+            &[10.0, 9.0],
+            &[0.0, 1.0],
+            &[7.0, 8.0],
+        )
+        .unwrap();
+    let left = chart.add_series(SeriesKind::Line);
+    chart
+        .set_series_data(
+            left,
+            &[1.0, 2.0],
+            &[100.0, 100.0],
+            &[100.0, 100.0],
+            &[100.0, 100.0],
+            &[100.0, 100.0],
+        )
+        .unwrap();
+    chart.set_series_price_scale(left, PriceScaleTarget::Left);
+    chart.time_scale.set_width(800.0);
+    chart.fit_content();
+
+    // The left-bound series' primitive grows only the left scale; the right scale is untouched.
+    chart.add_autoscale_contribution(PrimitiveAutoscaleContribution {
+        series: left,
+        pane: 0,
+        target: PriceScaleTarget::Left,
+        min: 0.0,
+        max: 500.0,
+    });
+    chart.autoscale_visible();
+    assert_eq!(
+        chart
+            .price_scale_visible_range_for(0, PriceScaleTarget::Left)
+            .unwrap(),
+        (0.0, 500.0)
+    );
+    assert_eq!(
+        chart
+            .price_scale_visible_range_for(0, PriceScaleTarget::Right)
+            .unwrap(),
+        (0.0, 10.0)
+    );
+
+    // A contribution recorded against a pane the series no longer occupies is stale and skipped.
+    chart.clear_autoscale_contributions();
+    chart.add_autoscale_contribution(PrimitiveAutoscaleContribution {
+        series: left,
+        pane: 3,
+        target: PriceScaleTarget::Left,
+        min: -999.0,
+        max: 999.0,
+    });
+    chart.autoscale_visible();
+    // (Flat 100 data yields the scale's degenerate ±0.05 range, not the stale contribution.)
+    assert_eq!(
+        chart
+            .price_scale_visible_range_for(0, PriceScaleTarget::Left)
+            .unwrap(),
+        (99.95, 100.05)
+    );
+}
+
+#[test]
+fn series_primitive_autoscale_rejects_non_finite_bounds() {
+    let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+    chart
+        .set_series_data(
+            0,
+            &[1.0, 2.0],
+            &[5.0, 6.0],
+            &[10.0, 9.0],
+            &[0.0, 1.0],
+            &[7.0, 8.0],
+        )
+        .unwrap();
+    chart.time_scale.set_width(800.0);
+    chart.fit_content();
+    for (min, max) in [(f64::NAN, 10.0), (0.0, f64::INFINITY), (f64::NAN, f64::NAN)] {
+        chart.add_autoscale_contribution(PrimitiveAutoscaleContribution {
+            series: 0,
+            pane: 0,
+            target: PriceScaleTarget::Right,
+            min,
+            max,
+        });
+    }
+    chart.autoscale_visible();
+    assert_eq!(
+        chart
+            .price_scale_visible_range_for(0, PriceScaleTarget::Right)
+            .unwrap(),
+        (0.0, 10.0)
+    );
+}
+
+#[test]
 fn hidden_series_do_not_expand_autoscale() {
     let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
     chart
@@ -729,6 +917,46 @@ fn retained_frame_reuses_pane_buffers() {
     chart.crosshair = Some((300.0, 100.0));
     chart.build_frame_into(&mut frame);
     assert!(frame.panes[0].main.capacity() >= first_capacity);
+}
+
+#[test]
+fn frame_pane_top_layer_is_retained_per_frame() {
+    // The `top` layer is host-appended (pane primitives, LWC zOrder "top") after frame
+    // construction; the engine owns clearing it between retained-frame rebuilds exactly like
+    // `under`/`main`, so a stale top prim can never survive into the next frame.
+    let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+    chart
+        .set_series_data(
+            0,
+            &[1.0, 2.0, 3.0],
+            &[1.0, 2.0, 3.0],
+            &[2.0, 3.0, 4.0],
+            &[0.0, 1.0, 2.0],
+            &[1.5, 2.5, 3.5],
+        )
+        .unwrap();
+    chart.time_scale.set_width(800.0);
+    chart.fit_content();
+    let mut frame = ChartFrame::default();
+    chart.build_frame_into(&mut frame);
+    assert!(frame.panes[0].top_prims.is_empty());
+    // Simulate a host appending a top-layer prim: it survives in the frame output until the
+    // next rebuild, which must reset the layer.
+    frame.panes[0]
+        .top_prims
+        .push(aion_render::draw_list::Prim::Rect {
+            rect: aion_render::draw_list::IRect {
+                x: 0,
+                y: 0,
+                w: 4,
+                h: 4,
+            },
+            color: aion_render::color::Color::rgb(0xff, 0x00, 0x00),
+        });
+    assert_eq!(frame.panes[0].top_prims.len(), 1);
+    chart.build_frame_into(&mut frame);
+    assert!(frame.panes[0].top_prims.is_empty());
+    assert!(!frame.panes[0].main.is_empty());
 }
 
 #[test]

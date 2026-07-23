@@ -1,0 +1,205 @@
+import { test, expect } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import pixelmatch from "pixelmatch";
+import { PNG } from "pngjs";
+
+const fixture = JSON.parse(readFileSync(new URL("../fixtures/d1/candles.json", import.meta.url), "utf8"));
+
+test.beforeEach(async ({ page }) => {
+  page.on("console", (message) => console.log(`[browser:${message.type()}] ${message.text()}`));
+  page.on("pageerror", (error) => console.log(`[browser:pageerror] ${error.message}`));
+});
+
+async function wait_for_chart(page) {
+  await page.waitForFunction(() => window.__chart?.backend?.() !== undefined);
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
+}
+
+async function settle_frames(page) {
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
+}
+
+async function goto_fixture(page, backend) {
+  await page.goto(`/?runtimeTest=presentedFrame&backend=${backend}&forceFallbackAdapter=1`);
+  await wait_for_chart(page);
+}
+
+async function screenshot(page) {
+  return PNG.sync.read(await page.screenshot({ animations: "disabled", fullPage: false }));
+}
+
+function crop_png(source, x, y, width, height) {
+  const output = new PNG({ width, height });
+  PNG.bitblt(source, output, x, y, width, height, 0, 0);
+  return output;
+}
+
+function count_different(a, b) {
+  expect([a.width, a.height]).toEqual([b.width, b.height]);
+  return pixelmatch(a.data, b.data, new PNG({ width: a.width, height: a.height }).data, a.width, a.height, {
+    threshold: 0,
+    includeAA: true,
+  });
+}
+
+async function set_engine_markers(page, on) {
+  // The engine's built-in markers with auto_scale disabled: the parity proof isolates the
+  // marker drawing itself — the platform's autoscale contract ({min,max} price bounds) cannot
+  // express the engine's pixel internal margins (see builtin_plugins.ts).
+  await page.evaluate((flag) => window.__set_engine_markers(flag, { auto_scale: false }), on);
+  await settle_frames(page);
+}
+
+async function set_plugin_markers(page, on, options) {
+  await page.evaluate(([flag, opts]) => window.__set_plugin_markers(flag, opts), [on, options ?? null]);
+  await settle_frames(page);
+}
+
+// (a) The parity proof: plugin markers (create_series_markers on the primitive platform) and
+// engine markers (series.set_markers) render pixel-identical frames on the same markers
+// fixture — shapes AND text (plugin text paints through the overlay-text hook, the engine's
+// own marker-label path).
+test("plugin markers render pixel-identical to engine markers", async ({ page }, test_info) => {
+  await goto_fixture(page, "canvas2d");
+  expect(await page.evaluate(() => window.__chart.backend())).toBe("canvas2d");
+
+  const baseline = await screenshot(page);
+
+  await set_engine_markers(page, true);
+  const engine = await screenshot(page);
+  const engine_footprint = count_different(baseline, engine);
+  expect(engine_footprint, "engine markers must change the frame").toBeGreaterThan(0);
+
+  // Engine markers clear exactly.
+  await set_engine_markers(page, false);
+  expect(count_different(baseline, await screenshot(page))).toBe(0);
+
+  await set_plugin_markers(page, true, { auto_scale: false });
+  expect(await page.evaluate(() => window.__plugin_markers_active())).toBe(true);
+  const plugin = await screenshot(page);
+  expect(count_different(baseline, plugin), "plugin markers must change the frame").toBeGreaterThan(0);
+
+  const parity_diff = count_different(engine, plugin);
+  if (parity_diff !== 0) {
+    await test_info.attach("engine-markers.png", { body: PNG.sync.write(engine), contentType: "image/png" });
+    await test_info.attach("plugin-markers.png", { body: PNG.sync.write(plugin), contentType: "image/png" });
+  }
+  expect(parity_diff, "plugin markers must be pixel-identical to engine markers").toBe(0);
+
+  // The plugin detaches exactly.
+  await set_plugin_markers(page, false);
+  expect(await page.evaluate(() => window.__plugin_markers_active())).toBe(false);
+  expect(count_different(baseline, await screenshot(page))).toBe(0);
+});
+
+// (b) Parity on the WebGPU backend: plugin ≡ engine 0-diff. A literal WebGPU≡Canvas2D 0-diff
+// is not achievable with markers on either form: the engine's WebGPU pass tessellates AA
+// shapes (circle/triangle/round-rect) into its tri bucket, which paints before the quad
+// bucket (so markers sit under candle wicks there), and SwiftShader's MSAA edge coverage
+// differs from Canvas2D's analytic AA by a few percent on AA edges — both pre-date the
+// plugin platform and reproduce identically with the engine's own markers (measured: 272 vs
+// 266 px with the overlapping fixture; isolated shapes: arrow 48, square 54, circle 36 px —
+// AA-edge coverage steps only, interiors exact). The platform's 0-diff backend guarantee is
+// scoped to the quad family for this reason (see the pane/series reference primitives).
+test("plugin markers match engine markers on WebGPU", async ({ page }, test_info) => {
+  await goto_fixture(page, "auto");
+  expect(await page.evaluate(() => window.__chart.backend())).toBe("webgpu");
+
+  await set_engine_markers(page, true);
+  const engine = await screenshot(page);
+  await set_engine_markers(page, false);
+
+  await set_plugin_markers(page, true, { auto_scale: false });
+  const plugin = await screenshot(page);
+  const parity_diff = count_different(engine, plugin);
+  if (parity_diff !== 0) {
+    await test_info.attach("engine-markers-webgpu.png", { body: PNG.sync.write(engine), contentType: "image/png" });
+    await test_info.attach("plugin-markers-webgpu.png", { body: PNG.sync.write(plugin), contentType: "image/png" });
+  }
+  expect(parity_diff, "plugin markers must be pixel-identical to engine markers on WebGPU").toBe(0);
+});
+
+// (c) set_markers([]) clears the markers without detaching; detach removes them entirely.
+// Both restore the exact baseline pixels. The default auto_scale option must also expand the
+// owning scale while markers are present (LWC autoScale behavior).
+test("plugin markers clear with set_markers([]) and detach; auto_scale expands the scale", async ({ page }) => {
+  await goto_fixture(page, "canvas2d");
+  const baseline = await screenshot(page);
+  const plain_range = await page.evaluate(() => window.__chart.price_scale("right").get_visible_range());
+  expect(plain_range).not.toBeNull();
+
+  await set_plugin_markers(page, true);
+  const handle = await page.evaluate(() => window.__plugin_markers_handle() !== null);
+  expect(handle).toBe(true);
+  const with_markers = await screenshot(page);
+  expect(count_different(baseline, with_markers), "markers must paint").toBeGreaterThan(0);
+
+  // auto_scale (default true) pushes the scale past the data-driven range on both ends.
+  const expanded_range = await page.evaluate(() => window.__chart.price_scale("right").get_visible_range());
+  expect(expanded_range).not.toBeNull();
+  expect(expanded_range.from, "marker auto_scale must add headroom below the data").toBeLessThan(plain_range.from);
+  expect(expanded_range.to, "marker auto_scale must add headroom above the data").toBeGreaterThan(plain_range.to);
+
+  // set_markers([]) removes the markers and their autoscale contribution.
+  await page.evaluate(() => window.__plugin_markers_handle().set_markers([]));
+  await settle_frames(page);
+  expect(count_different(baseline, await screenshot(page))).toBe(0);
+  const cleared_range = await page.evaluate(() => window.__chart.price_scale("right").get_visible_range());
+  expect(cleared_range.from).toBeCloseTo(plain_range.from, 8);
+  expect(cleared_range.to).toBeCloseTo(plain_range.to, 8);
+
+  // Re-set, then detach: same removal, and markers() round-trips the fixture.
+  const marker_count = await page.evaluate(() => {
+    const markers = window.__plugin_markers_handle().markers();
+    return Array.isArray(markers) ? markers.length : -1;
+  });
+  expect(marker_count).toBe(0);
+  await page.evaluate(() => window.__set_plugin_markers(false));
+  // Re-create with the fixture and detach through the handle.
+  await set_plugin_markers(page, true, { auto_scale: false });
+  expect(count_different(baseline, await screenshot(page))).toBeGreaterThan(0);
+  const count_after_reset = await page.evaluate(() => window.__plugin_markers_handle().markers().length);
+  expect(count_after_reset).toBe(4);
+  await page.evaluate(() => window.__plugin_markers_handle().detach());
+  await settle_frames(page);
+  expect(count_different(baseline, await screenshot(page))).toBe(0);
+  // The handle-level detach leaves the demo's handle slot stale; the setter syncs it.
+  await page.evaluate(() => window.__set_plugin_markers(false));
+  expect(await page.evaluate(() => window.__plugin_markers_active())).toBe(false);
+});
+
+// (d) The text watermark plugin paints its lines on the overlay (the engine watermark's
+// slot) and detach clears them exactly.
+test("plugin watermark paints its lines and detach clears them", async ({ page }) => {
+  await goto_fixture(page, "canvas2d");
+  const baseline = await screenshot(page);
+
+  const pixel_ratio = fixture.pixel_ratio;
+  const pane_width = Math.round((fixture.css_width - fixture.price_axis_width) * pixel_ratio);
+  const pane_height = Math.round((fixture.css_height - fixture.time_axis_height) * pixel_ratio);
+  const center = (image) => crop_png(
+    image,
+    Math.round(pane_width / 2) - 300,
+    Math.round(pane_height / 2) - 150,
+    600,
+    300,
+  );
+
+  await page.evaluate(() => window.__set_plugin_watermark(true));
+  await settle_frames(page);
+  expect(await page.evaluate(() => window.__plugin_watermark_active())).toBe(true);
+  const watermarked = await screenshot(page);
+  expect(
+    count_different(center(baseline), center(watermarked)),
+    "the watermark lines must paint in the pane's center",
+  ).toBeGreaterThan(0);
+
+  await page.evaluate(() => window.__set_plugin_watermark(false));
+  await settle_frames(page);
+  expect(await page.evaluate(() => window.__plugin_watermark_active())).toBe(false);
+  expect(count_different(baseline, await screenshot(page))).toBe(0);
+});

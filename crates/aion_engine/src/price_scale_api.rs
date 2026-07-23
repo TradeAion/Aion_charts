@@ -414,8 +414,18 @@ impl ChartEngine {
 
     /// First close at or to the right of the visible left edge, matching LWC series first-value
     /// selection for percentage/indexed coordinate modes. Whitespace rows are skipped (LWC's
-    /// plot list never contains them, so its first-value search lands on a real bar).
+    /// plot list never contains them, so its first-value search lands on a real bar). A custom
+    /// series' rows are time-only, so its first value is the host-recorded frame value (the
+    /// plugin's `priceValueBuilder` current value of the first visible non-whitespace item —
+    /// LWC `firstValue` reads the custom plot row's Close slot).
     pub(crate) fn series_base_value(&self, id: SeriesId, visible_from: i64) -> Option<f64> {
+        let series = self.series.iter().find(|s| s.id == id)?;
+        if series.kind == SeriesKind::Custom {
+            return series
+                .custom_frame
+                .first_value
+                .filter(|value| value.is_finite());
+        }
         let plot = self.data.plot(id);
         let row = plot.first_non_whitespace_row(visible_from)?;
         let value = plot.value_at(row, PlotValueIndex::Close);

@@ -6,6 +6,7 @@
 //! migrated here incrementally from `aion_wasm`.
 
 mod frame;
+mod hit_test;
 mod indicators;
 mod price_line_api;
 mod price_scale_api;
@@ -14,6 +15,7 @@ mod series_query_api;
 mod tests;
 
 pub use frame::{AxisFrame, AxisLabel, AxisTextAlign, AxisTextMidpoint, ChartFrame, FramePane};
+pub use hit_test::{SeriesHit, SeriesHitKind};
 pub(crate) use indicators::IndicatorBinding;
 pub use indicators::IndicatorKind;
 
@@ -84,7 +86,9 @@ impl SeriesPriceFormat {
     }
 }
 
-const DEFAULT_LINE_COLOR: Color = Color::rgb(0x21, 0x96, 0xf3);
+/// LWC's shared line-family default color (line/area/baseline `lineColor`, histogram `color`,
+/// and the custom-series `color` — custom-series.ts `customStyleDefaults`).
+pub const DEFAULT_LINE_COLOR: Color = Color::rgb(0x21, 0x96, 0xf3);
 /// Default media-coordinate height of the horizontal axis. Hosts use this value during layout;
 /// it is engine policy rather than a browser/demo constant.
 pub const TIME_AXIS_HEIGHT: f64 = 28.0;
@@ -97,6 +101,39 @@ pub enum SeriesKind {
     Area,
     Histogram,
     Baseline,
+    /// A plugin-defined series type (plugin platform Phase C-c; LWC `addCustomSeries`). Its
+    /// data-layer rows carry times only (whitespace-style); the host renders each item through
+    /// the plugin's pane view and records the frame values the built-in chrome needs.
+    Custom,
+}
+
+/// One custom series' last-value record (Phase C-c): the plugin's current value for the item
+/// (the LAST element of `priceValueBuilder`, mirroring the Close slot of LWC's
+/// `[last, max, min, last]` custom plot-row mapping — get-series-plot-row-creator.ts), the bar
+/// color LWC's custom barColorer resolves (data item `color` ?? series `color`), and the
+/// item's UTC-seconds time.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CustomSeriesLastValue {
+    pub value: f64,
+    pub color: Color,
+    pub time: i64,
+}
+
+/// Custom-series frame values (plugin platform Phase C-c), recorded by the host each frame
+/// before any layout/frame pass consumes them — the same per-frame host-recording pattern as
+/// [`PrimitiveAutoscaleContribution`]. A custom series' data rows are time-only, so the
+/// values the built-in chrome needs — the percentage/indexed scale anchor (LWC `firstValue`),
+/// the built-in last-price line, the last-value axis label — arrive here, computed host-side
+/// from the plugin's `priceValueBuilder` over its stored items.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CustomSeriesFrameValues {
+    /// First visible non-whitespace item's current value (LWC `firstValue()`).
+    pub first_value: Option<f64>,
+    /// Last non-whitespace item (LWC `lastValueData(true)`).
+    pub last: Option<CustomSeriesLastValue>,
+    /// Last non-whitespace item at or left of the visible right edge (LWC
+    /// `lastValueData(false)`).
+    pub last_visible: Option<CustomSeriesLastValue>,
 }
 
 /// The price scale that owns a series. Left and right are visible pane axes; overlay is the
@@ -106,6 +143,24 @@ pub enum PriceScaleTarget {
     Right,
     Left,
     Overlay,
+}
+
+/// One series primitive's autoscale contribution for the frame being built (plugin platform
+/// Phase C-b; LWC `ISeriesPrimitiveBase.autoscaleInfo` merged into the owning series' price
+/// scale range, series.ts `_autoscaleInfoImpl`). Hosts record these between frames; the next
+/// autoscale pass unions each into the owning scale's range (gated on the owning series being
+/// visible with a first value, exactly like LWC's per-source autoscale gate).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PrimitiveAutoscaleContribution {
+    /// The primitive's owning series.
+    pub series: SeriesId,
+    /// Pane of the owning series at record time.
+    pub pane: usize,
+    /// Price scale of the owning series at record time.
+    pub target: PriceScaleTarget,
+    /// Raw price bounds to union into the scale's range.
+    pub min: f64,
+    pub max: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -133,6 +188,7 @@ impl SeriesKind {
             3 => Self::Area,
             4 => Self::Histogram,
             5 => Self::Baseline,
+            6 => Self::Custom,
             _ => Self::Candlestick,
         }
     }
@@ -145,6 +201,7 @@ impl SeriesKind {
             Self::Area => 3,
             Self::Histogram => 4,
             Self::Baseline => 5,
+            Self::Custom => 6,
         }
     }
 }
@@ -332,6 +389,10 @@ pub struct SeriesEntry {
     /// compacted; every other series keeps its id. Removed slots are inert in every draw/scale path
     /// because they carry no data and are not visible.
     pub removed: bool,
+    /// Custom series (Phase C-c): host-recorded frame values (first/last values for the scale
+    /// anchor, the last-value label, and the built-in last-price line). Refreshed per frame by
+    /// the host before any layout/frame pass consumes them; unused by other kinds.
+    pub custom_frame: CustomSeriesFrameValues,
 }
 
 impl SeriesEntry {
@@ -395,6 +456,7 @@ impl SeriesEntry {
             markers: Vec::new(),
             markers_auto_scale: true,
             removed: false,
+            custom_frame: CustomSeriesFrameValues::default(),
         }
     }
 }
@@ -542,6 +604,14 @@ pub struct ChartEngine {
     /// Series ids in render order, bottom to top (topmost LAST — LWC's z-order, pane.ts
     /// `orderedSources`/`setSeriesOrder`). Live series only: removed slots leave the list.
     series_order: Vec<SeriesId>,
+    /// The series under the cursor (LWC `ChartModel._hoveredSource`), refreshed by hosts
+    /// from their hover pipeline. When `hoveredSeriesOnTop` holds, the frame build paints
+    /// this series topmost (LWC `hoveredSourceOnTopOrder`) without touching `series_order`.
+    hovered_series: Option<SeriesId>,
+    /// Series-primitive autoscale contributions for the current frame build (Phase C-b).
+    /// Hosts clear and re-record them per frame, before any layout/autoscale pass runs;
+    /// `autoscale_for_frame` unions them into the owning scales.
+    primitive_autoscale: Vec<PrimitiveAutoscaleContribution>,
     /// Optional host formatting callbacks (LWC `localization.priceFormatter`/`timeFormatter` and
     /// `timeScale.tickMarkFormatter`). The engine stays headless — the host supplies plain boxed
     /// closures; each returns `None` to fall back to the built-in formatter (e.g. the callback
@@ -590,6 +660,8 @@ impl ChartEngine {
             date_format: DEFAULT_DATE_FORMAT.to_string(),
             month_names: MonthNames::default(),
             series_order: vec![main],
+            hovered_series: None,
+            primitive_autoscale: Vec::new(),
             price_formatter_fn: None,
             tick_mark_formatter_fn: None,
             time_formatter_fn: None,
@@ -635,7 +707,34 @@ impl ChartEngine {
         self.series.push(SeriesEntry::new(id, kind));
         // new series paint on top (LWC appends to the pane's data sources)
         self.series_order.push(id);
+        // A custom series' time-only rows still count as data rows for the base index.
+        self.data
+            .set_rows_count_as_data(id, kind == SeriesKind::Custom);
         id
+    }
+
+    /// Change a live series' kind (host `setSeriesType` and custom-series adoption, Phase C-c).
+    /// Keeps the data layer's custom-series bookkeeping in sync: a Custom series' rows carry
+    /// times only, yet still count as data rows for the time-scale base index.
+    pub fn convert_series_kind(&mut self, id: SeriesId, kind: SeriesKind) {
+        if let Some(s) = self.series.iter_mut().find(|s| s.id == id && !s.removed) {
+            s.kind = kind;
+            self.data
+                .set_rows_count_as_data(id, kind == SeriesKind::Custom);
+        }
+    }
+
+    /// Record a custom series' frame values (Phase C-c; hosts refresh them per frame, before
+    /// the layout/autoscale passes consume them). Ignored for an unknown, removed, or
+    /// non-custom id.
+    pub fn set_custom_frame_values(&mut self, id: SeriesId, values: CustomSeriesFrameValues) {
+        if let Some(s) = self
+            .series
+            .iter_mut()
+            .find(|s| s.id == id && !s.removed && s.kind == SeriesKind::Custom)
+        {
+            s.custom_frame = values;
+        }
     }
 
     /// Remove a series (LWC `removeSeries`, which accepts any series including the first).
@@ -681,6 +780,13 @@ impl ChartEngine {
             );
         }
         self.series_order.retain(|sid| !tombstones.contains(sid));
+        // A hovered series leaving the chart releases the hovered-on-top z-bump with it.
+        if self
+            .hovered_series
+            .is_some_and(|hovered| tombstones.contains(&hovered))
+        {
+            self.hovered_series = None;
+        }
         self.sync_time_points();
         // LWC chart-model.ts `removeSeries`: prune the pane the series left when it is empty
         // and not preserved (a pane-less index — after an explicit `remove_pane` — prunes
@@ -689,6 +795,22 @@ impl ChartEngine {
             self.cleanup_if_pane_is_empty(pane_index);
         }
         true
+    }
+
+    /// Record a series primitive's autoscale contribution for the next autoscale pass (plugin
+    /// platform Phase C-b; LWC `ISeriesPrimitiveBase.autoscaleInfo`). Non-finite bounds are
+    /// rejected here so a misbehaving plugin cannot poison the scale range.
+    pub fn add_autoscale_contribution(&mut self, contribution: PrimitiveAutoscaleContribution) {
+        if !contribution.min.is_finite() || !contribution.max.is_finite() {
+            return;
+        }
+        self.primitive_autoscale.push(contribution);
+    }
+
+    /// Drop all recorded series-primitive autoscale contributions. Hosts call this at frame
+    /// build start, before re-collecting the current frame's contributions.
+    pub fn clear_autoscale_contributions(&mut self) {
+        self.primitive_autoscale.clear();
     }
 
     /// LWC chart-api.ts `addPane(preserveEmptyPane)` → chart-model.ts `_addPane`: append a
