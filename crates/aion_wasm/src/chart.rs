@@ -49,8 +49,8 @@ use aion_render::canvas2d::{execute as execute_canvas2d, Canvas2d, Viewport as C
 use aion_render::color::Color;
 use aion_render::draw_list::LineType;
 use aion_render_wgpu::{
-    geom_prims_to_tris, prims_to_instances, render_frame, DrawGroup, LabelAtlas, MsaaTarget,
-    QuadRenderer, TexQuadRenderer, TriRenderer, SAMPLE_COUNT,
+    prims_to_group, render_frame, DrawGroup, LabelAtlas, MsaaTarget, QuadRenderer, TexQuadRenderer,
+    TriRenderer, SAMPLE_COUNT,
 };
 
 #[wasm_bindgen(inline_js = r#"

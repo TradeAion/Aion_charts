@@ -236,12 +236,13 @@ impl TexQuadRenderer {
         &'p self,
         pass: &mut wgpu::RenderPass<'p>,
         instances: &'p wgpu::Buffer,
+        first: u32,
         count: u32,
     ) {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.globals_bg, &[]);
         pass.set_bind_group(1, &self.atlas_bg, &[]);
         pass.set_vertex_buffer(0, instances.slice(..));
-        pass.draw(0..6, 0..count);
+        pass.draw(0..6, first..first + count);
     }
 }

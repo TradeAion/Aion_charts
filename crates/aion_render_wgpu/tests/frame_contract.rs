@@ -9,7 +9,9 @@ use aion_render::canvas2d::{execute, Canvas2d, Viewport};
 use aion_render::color::Color;
 use aion_render::draw_list::{LineStyle, Prim};
 
-use aion_render_wgpu::{geom_prims_to_tris, prims_to_instances};
+use aion_render_wgpu::{
+    geom_prims_to_tris, prims_to_group, prims_to_instances, DrawGroup, DrawRun, RunPipeline,
+};
 
 #[derive(Default)]
 struct CountingCanvas {
@@ -197,4 +199,184 @@ fn one_engine_frame_is_consumable_by_canvas2d_and_webgpu_adapters() {
         ];
         assert_eq!(gpu.color, expected, "Canvas2D/WebGPU rect color diverged");
     }
+}
+
+/// Runs must tile their pipeline's buffer contiguously, in ascending order, covering it exactly.
+fn assert_runs_tile_buffers(group: &DrawGroup) {
+    for (pipeline, len) in [
+        (RunPipeline::Tri, group.tris.len()),
+        (RunPipeline::Quad, group.quads.len()),
+        (RunPipeline::TexQuad, group.tex_quads.len()),
+    ] {
+        let mut next = 0u32;
+        for run in group.runs.iter().filter(|r| r.pipeline == pipeline) {
+            assert_eq!(run.first, next, "{pipeline:?} runs must be contiguous");
+            assert!(run.count > 0, "empty runs are never recorded");
+            next += run.count;
+        }
+        assert_eq!(
+            next as usize, len,
+            "{pipeline:?} runs must cover the buffer"
+        );
+    }
+}
+
+#[test]
+fn group_builder_preserves_mixed_prim_order_with_run_length_batching() {
+    use aion_render::draw_list::{IRect, LineType};
+    // The Canvas2D executor paints strictly in prim order; the WebGPU schedule must encode
+    // the same observable order, one draw call per maximal same-pipeline run.
+    let rect = |x| Prim::Rect {
+        rect: IRect {
+            x,
+            y: 0,
+            w: 4,
+            h: 4,
+        },
+        color: Color::rgb(0, 0, 0),
+    };
+    let circle = |x| Prim::Circle {
+        cx: x,
+        cy: 5.0,
+        radius: 3.0,
+        fill: Color::rgb(0xFF, 0, 0),
+        stroke_width: 0.0,
+        stroke: Color::rgb(0, 0, 0),
+    };
+    let points = [[0.0f32, 0.0], [10.0, 5.0], [20.0, 0.0]];
+    let prims = [
+        rect(0),
+        circle(8.0),
+        rect(20),
+        rect(30), // batches with the previous quad
+        Prim::Polyline {
+            first_point: 0,
+            point_count: 3,
+            width: 2.0,
+            style: LineStyle::Solid,
+            line_type: LineType::Simple,
+            color: Color::rgb(0, 0, 0xFF),
+        },
+        circle(40.0), // batches with the previous tri run
+        Prim::Text {
+            run_id: 0,
+            x: 0.0,
+            y: 0.0,
+            color: Color::rgb(0, 0, 0),
+        }, // ordering slot only: no run
+        rect(50),
+        // Degenerate geometry emits nothing and must not split the run either.
+        Prim::Rect {
+            rect: IRect {
+                x: 0,
+                y: 0,
+                w: 0,
+                h: 5,
+            },
+            color: Color::rgb(0, 0, 0),
+        },
+        rect(60), // still the same quad run as rect(50)
+    ];
+    let mut group = DrawGroup::default();
+    prims_to_group(&prims, &points, &mut group);
+
+    let schedule: Vec<RunPipeline> = group.runs.iter().map(|r| r.pipeline).collect();
+    assert_eq!(
+        schedule,
+        [
+            RunPipeline::Quad,
+            RunPipeline::Tri,
+            RunPipeline::Quad,
+            RunPipeline::Tri,
+            RunPipeline::Quad,
+        ],
+        "the schedule must reproduce the Canvas2D family order exactly"
+    );
+    assert_eq!(group.quads.len(), 5);
+    assert_eq!(
+        group.runs[0],
+        DrawRun {
+            pipeline: RunPipeline::Quad,
+            first: 0,
+            count: 1
+        }
+    );
+    assert_eq!(
+        group.runs[2],
+        DrawRun {
+            pipeline: RunPipeline::Quad,
+            first: 1,
+            count: 2
+        },
+        "consecutive quads must batch into one run"
+    );
+    assert_eq!(
+        group.runs[4],
+        DrawRun {
+            pipeline: RunPipeline::Quad,
+            first: 3,
+            count: 2
+        },
+        "degenerate prims and text slots must not split a run"
+    );
+    let tri_runs: Vec<_> = group
+        .runs
+        .iter()
+        .filter(|r| r.pipeline == RunPipeline::Tri)
+        .collect();
+    assert_eq!(tri_runs.len(), 2);
+    assert_eq!(tri_runs[0].first, 0);
+    assert_eq!(
+        tri_runs[1].first,
+        tri_runs[0].first + tri_runs[0].count,
+        "tri runs must be adjacent ranges of one buffer"
+    );
+    assert_runs_tile_buffers(&group);
+}
+
+#[test]
+fn group_builder_batches_candle_blocks_and_schedules_markers_after_candles() {
+    let mut chart = fixture();
+    let frame = chart.build_frame();
+    let mut saw_tri_over_quad = false;
+    for pane in &frame.panes {
+        let mut group = DrawGroup::default();
+        prims_to_group(&pane.under, &pane.points, &mut group);
+        prims_to_group(&pane.main, &pane.points, &mut group);
+        prims_to_group(&pane.top_prims, &pane.points, &mut group);
+        assert_runs_tile_buffers(&group);
+
+        // Perf contract: the candle/bar/histogram blocks (hundreds of quads) stay a handful
+        // of draw calls — run-length batching must not degrade into per-prim draws.
+        assert!(
+            group.quads.len() > 100,
+            "fixture should exercise a realistic quad count"
+        );
+        let quad_runs = group
+            .runs
+            .iter()
+            .filter(|r| r.pipeline == RunPipeline::Quad)
+            .count();
+        assert!(
+            quad_runs <= 6,
+            "quad content collapsed to {quad_runs} runs; batching regressed"
+        );
+        assert!(
+            group.runs.len() <= 14,
+            "{} draw calls for a candle frame; run-length batching regressed",
+            group.runs.len()
+        );
+
+        // The ordering regression this builder fixes: engine markers are tri-family prims
+        // emitted after the quad-family candles, so the schedule must contain a quad run
+        // followed by a tri run (previously every tri bucket painted before every quad).
+        saw_tri_over_quad |= group
+            .runs
+            .windows(2)
+            .any(|w| w[0].pipeline == RunPipeline::Quad && w[1].pipeline == RunPipeline::Tri);
+    }
+    assert!(
+        saw_tri_over_quad,
+        "the marker fixture must exercise tri-after-quad scheduling"
+    );
 }

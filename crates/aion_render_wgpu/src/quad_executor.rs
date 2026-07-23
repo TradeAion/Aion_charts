@@ -95,63 +95,67 @@ fn dash_segments(style: LineStyle, width: i32, from: i32, to: i32, mut emit: imp
     }
 }
 
+/// Convert one rect-family prim into quad instances. Non-rect geometry is handled by the
+/// triangle adapter; text remains on the host overlay rather than in the pane frame.
+pub fn prim_to_instances(prim: &Prim, out: &mut Vec<QuadInstance>) {
+    match prim {
+        Prim::Rect { rect, color } => push_rect(out, *rect, *color),
+        Prim::RectFrame {
+            rect,
+            border,
+            color,
+        } => push_rect_frame(out, *rect, *border, *color),
+        Prim::HLine {
+            y,
+            x0,
+            x1,
+            width,
+            style,
+            color,
+        } => {
+            let top = y - width / 2;
+            dash_segments(*style, *width, *x0, *x1, |a, b| {
+                push_rect(
+                    out,
+                    IRect {
+                        x: a,
+                        y: top,
+                        w: b - a,
+                        h: *width,
+                    },
+                    *color,
+                );
+            });
+        }
+        Prim::VLine {
+            x,
+            y0,
+            y1,
+            width,
+            style,
+            color,
+        } => {
+            let left = x - width / 2;
+            dash_segments(*style, *width, *y0, *y1, |a, b| {
+                push_rect(
+                    out,
+                    IRect {
+                        x: left,
+                        y: a,
+                        w: *width,
+                        h: b - a,
+                    },
+                    *color,
+                );
+            });
+        }
+        _ => {}
+    }
+}
+
 pub fn prims_to_instances(prims: &[Prim], out: &mut Vec<QuadInstance>) {
     for prim in prims {
-        match prim {
-            Prim::Rect { rect, color } => push_rect(out, *rect, *color),
-            Prim::RectFrame {
-                rect,
-                border,
-                color,
-            } => push_rect_frame(out, *rect, *border, *color),
-            Prim::HLine {
-                y,
-                x0,
-                x1,
-                width,
-                style,
-                color,
-            } => {
-                let top = y - width / 2;
-                dash_segments(*style, *width, *x0, *x1, |a, b| {
-                    push_rect(
-                        out,
-                        IRect {
-                            x: a,
-                            y: top,
-                            w: b - a,
-                            h: *width,
-                        },
-                        *color,
-                    );
-                });
-            }
-            Prim::VLine {
-                x,
-                y0,
-                y1,
-                width,
-                style,
-                color,
-            } => {
-                let left = x - width / 2;
-                dash_segments(*style, *width, *y0, *y1, |a, b| {
-                    push_rect(
-                        out,
-                        IRect {
-                            x: left,
-                            y: a,
-                            w: *width,
-                            h: b - a,
-                        },
-                        *color,
-                    );
-                });
-            }
-            // Non-rect geometry is handled by the triangle adapter; text remains on the host
-            // overlay rather than in the pane frame.
-            _ => {}
-        }
+        prim_to_instances(prim, out);
     }
 }
 

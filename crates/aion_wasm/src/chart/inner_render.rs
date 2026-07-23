@@ -75,40 +75,15 @@ impl ChartInner {
             self.gpu_groups.truncate(engine_frame.panes.len());
             for (group, pane_frame) in self.gpu_groups.iter_mut().zip(&engine_frame.panes) {
                 group.scissor = Some(pane_frame.scissor);
-                group.bg_tris.clear();
-                group.under_quads.clear();
-                group.fill_tris.clear();
-                group.stroke_tris.clear();
-                group.quads.clear();
-                group.tex_quads.clear();
-                // Convert the shared frame only at the WebGPU backend boundary.
-                // `under` geometry is the pane background gradient (LWC `layout.background`
-                // VerticalGradient); it tessellates into the below-grid bucket so the grid
-                // lines (under_quads) paint over it, matching the Canvas2D list order. The
-                // stroke sink is a formality — `under` carries no stroke prims.
-                geom_prims_to_tris(
-                    &pane_frame.under,
-                    &pane_frame.points,
-                    &mut group.bg_tris,
-                    &mut group.stroke_tris,
-                );
-                geom_prims_to_tris(
-                    &pane_frame.main,
-                    &pane_frame.points,
-                    &mut group.fill_tris,
-                    &mut group.stroke_tris,
-                );
-                // The `top` layer (z-order "top" primitives) converts after `main` so its
-                // instances append past the main ones within each bucket.
-                geom_prims_to_tris(
-                    &pane_frame.top_prims,
-                    &pane_frame.points,
-                    &mut group.fill_tris,
-                    &mut group.stroke_tris,
-                );
-                prims_to_instances(&pane_frame.under, &mut group.under_quads);
-                prims_to_instances(&pane_frame.main, &mut group.quads);
-                prims_to_instances(&pane_frame.top_prims, &mut group.quads);
+                group.clear();
+                // Convert the shared frame only at the WebGPU backend boundary. The builder
+                // walks each layer in the Canvas2D executor's order (under, then main, then
+                // top; prims in list order within a layer) and records one run per maximal
+                // same-pipeline block, so e.g. markers emitted after the candles paint over
+                // the wicks on WebGPU exactly as they do on Canvas2D.
+                prims_to_group(&pane_frame.under, &pane_frame.points, group);
+                prims_to_group(&pane_frame.main, &pane_frame.points, group);
+                prims_to_group(&pane_frame.top_prims, &pane_frame.points, group);
             }
             let groups = &self.gpu_groups[..];
             let Some(gfx) = self.gfx.as_mut() else {

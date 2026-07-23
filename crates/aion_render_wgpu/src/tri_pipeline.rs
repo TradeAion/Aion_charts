@@ -161,11 +161,12 @@ impl TriRenderer {
         &'p self,
         pass: &mut wgpu::RenderPass<'p>,
         vertices: &'p wgpu::Buffer,
+        first: u32,
         count: u32,
     ) {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, vertices.slice(..));
-        pass.draw(0..count, 0..1);
+        pass.draw(first..first + count, 0..1);
     }
 }

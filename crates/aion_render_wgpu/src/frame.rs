@@ -1,38 +1,128 @@
-//! Frame composition: one MSAA render pass drawing scissored groups of triangle meshes
-//! (area fills, then line strokes), solid quads, then textured quads (text).
+//! Frame composition: one MSAA render pass drawing scissored groups of triangle meshes and
+//! solid/textured quads in the frame's prim order.
 //!
 //! Groups replicate LWC's pane/axis canvas separation: the pane group is scissored to the
 //! pane rect. 4x MSAA smooths diagonal line edges while leaving pixel-aligned rects and
 //! texture-alpha text bit-identical (their edges never straddle a pixel boundary), so
 //! candles and labels stay crisp.
+//!
+//! Execution order matches the Canvas2D executor exactly: within a layer, prims paint in
+//! list order (a marker emitted after the candles covers the wicks on both backends). The
+//! group therefore keeps one vertex/instance buffer per pipeline plus a run-length schedule
+//! ([`DrawRun`]) — one draw call per maximal run of the same pipeline, so a candle block of
+//! thousands of quads still costs a single instanced draw.
 
 use wgpu::util::DeviceExt;
 
+use aion_render::draw_list::Prim;
+
+use crate::quad_executor::prim_to_instances;
 use crate::quad_pipeline::{QuadInstance, QuadRenderer};
 use crate::tex_quad_pipeline::{TexQuadInstance, TexQuadRenderer};
+use crate::tri_executor::geom_prim_to_tris;
 use crate::tri_pipeline::{TriRenderer, TriVertex};
 
 pub const SAMPLE_COUNT: u32 = 4;
+
+/// The pipeline a [`DrawRun`] draws with; selects which group buffer the run indexes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunPipeline {
+    /// Triangle mesh (fills, strokes, markers, background gradient); `first`/`count` are vertices.
+    Tri,
+    /// Solid instanced quads (rects, grid, candles, crosshair); `first`/`count` are instances.
+    Quad,
+    /// Textured instanced quads (label atlas); `first`/`count` are instances.
+    TexQuad,
+}
+
+/// One draw call: `count` elements starting at `first` in the pipeline's group buffer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DrawRun {
+    pub pipeline: RunPipeline,
+    pub first: u32,
+    pub count: u32,
+}
 
 #[derive(Default)]
 pub struct DrawGroup {
     /// x, y, w, h in bitmap px; None = full target.
     pub scissor: Option<[u32; 4]>,
-    /// Pane background gradient (LWC `layout.background` VerticalGradient), drawn first — below
-    /// the under-layer, since the grid lines it sits behind live there. A solid background
-    /// emits nothing: the pass clear color already covers it.
-    pub bg_tris: Vec<TriVertex>,
-    /// Background rects drawn *below* the series (grid lines). Kept separate from `quads` because
-    /// the fixed bucket order draws all tris (area fills / line strokes) between them and the
-    /// foreground quads — so grid must live in its own under-layer or it paints over line/area.
-    pub under_quads: Vec<QuadInstance>,
-    /// Drawn after the under-layer (area fills, below strokes).
-    pub fill_tris: Vec<TriVertex>,
-    /// Drawn after fills (line strokes).
-    pub stroke_tris: Vec<TriVertex>,
-    /// Foreground rects drawn *above* the series (candles, price lines, last-value, crosshair).
+    /// Triangle-mesh vertices in prim order across all layers (under, then main, then top).
+    pub tris: Vec<TriVertex>,
+    /// Solid-quad instances in prim order across all layers.
     pub quads: Vec<QuadInstance>,
+    /// Textured-quad instances. Nothing schedules these today (text paints on the host
+    /// overlay); a populated buffer without any [`RunPipeline::TexQuad`] run draws last,
+    /// preserving the previous whole-buffer behavior.
     pub tex_quads: Vec<TexQuadInstance>,
+    /// Run-length draw schedule over `tris`/`quads`/`tex_quads`, in Canvas2D paint order.
+    pub runs: Vec<DrawRun>,
+}
+
+impl DrawGroup {
+    /// Reset the geometry and schedule for reuse next frame (keeps the allocations).
+    pub fn clear(&mut self) {
+        self.tris.clear();
+        self.quads.clear();
+        self.tex_quads.clear();
+        self.runs.clear();
+    }
+}
+
+/// Record a run covering `[first, first + count)` of `pipeline`'s buffer, merging with the
+/// previous run when it is the immediately preceding range of the same pipeline (run-length
+/// batching: consecutive same-family prims stay one draw call).
+fn push_run(runs: &mut Vec<DrawRun>, pipeline: RunPipeline, first: u32, count: u32) {
+    if count == 0 {
+        return;
+    }
+    if let Some(last) = runs.last_mut() {
+        if last.pipeline == pipeline && last.first + last.count == first {
+            last.count += count;
+            return;
+        }
+    }
+    runs.push(DrawRun {
+        pipeline,
+        first,
+        count,
+    });
+}
+
+/// Append one layer's prims to the group in list order, exactly as the Canvas2D executor
+/// would paint them: each rect-family prim (`Rect`/`RectFrame`/`HLine`/`VLine`) extends the
+/// quad buffer, every other geometry prim extends the tri buffer, and each maximal
+/// same-pipeline run records one [`DrawRun`]. `Text` prims reserve their ordering slot only —
+/// text paints on the host overlay on both backends.
+pub fn prims_to_group(prims: &[Prim], points: &[[f32; 2]], group: &mut DrawGroup) {
+    for prim in prims {
+        match prim {
+            Prim::Rect { .. }
+            | Prim::RectFrame { .. }
+            | Prim::HLine { .. }
+            | Prim::VLine { .. } => {
+                let first = group.quads.len() as u32;
+                prim_to_instances(prim, &mut group.quads);
+                push_run(
+                    &mut group.runs,
+                    RunPipeline::Quad,
+                    first,
+                    group.quads.len() as u32 - first,
+                );
+            }
+            Prim::Text { .. } => {}
+            _ => {
+                let first = group.tris.len() as u32;
+                geom_prim_to_tris(prim, points, &mut group.tris);
+                push_run(
+                    &mut group.runs,
+                    RunPipeline::Tri,
+                    first,
+                    group.tris.len() as u32 - first,
+                );
+            }
+        }
+    }
 }
 
 /// The MSAA color target; recreated on resize.
@@ -90,12 +180,9 @@ impl MsaaTarget {
 }
 
 struct GroupBuffers {
-    bg: Option<(wgpu::Buffer, u32)>,
-    under_quad: Option<(wgpu::Buffer, u32)>,
-    fill: Option<(wgpu::Buffer, u32)>,
-    stroke: Option<(wgpu::Buffer, u32)>,
-    quad: Option<(wgpu::Buffer, u32)>,
-    tex: Option<(wgpu::Buffer, u32)>,
+    tris: Option<wgpu::Buffer>,
+    quads: Option<wgpu::Buffer>,
+    tex: Option<wgpu::Buffer>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -124,46 +211,13 @@ pub fn render_frame(
         })
     };
 
-    // buffers must outlive the pass
+    // buffers must outlive the pass; draw counts come from the runs
     let buffers: Vec<GroupBuffers> = groups
         .iter()
         .map(|g| GroupBuffers {
-            bg: (!g.bg_tris.is_empty()).then(|| {
-                (
-                    vbuf(bytemuck::cast_slice(&g.bg_tris), "bg_tris"),
-                    g.bg_tris.len() as u32,
-                )
-            }),
-            under_quad: (!g.under_quads.is_empty()).then(|| {
-                (
-                    vbuf(bytemuck::cast_slice(&g.under_quads), "under_quads"),
-                    g.under_quads.len() as u32,
-                )
-            }),
-            fill: (!g.fill_tris.is_empty()).then(|| {
-                (
-                    vbuf(bytemuck::cast_slice(&g.fill_tris), "fill"),
-                    g.fill_tris.len() as u32,
-                )
-            }),
-            stroke: (!g.stroke_tris.is_empty()).then(|| {
-                (
-                    vbuf(bytemuck::cast_slice(&g.stroke_tris), "stroke"),
-                    g.stroke_tris.len() as u32,
-                )
-            }),
-            quad: (!g.quads.is_empty()).then(|| {
-                (
-                    vbuf(bytemuck::cast_slice(&g.quads), "quads"),
-                    g.quads.len() as u32,
-                )
-            }),
-            tex: (!g.tex_quads.is_empty()).then(|| {
-                (
-                    vbuf(bytemuck::cast_slice(&g.tex_quads), "tex"),
-                    g.tex_quads.len() as u32,
-                )
-            }),
+            tris: (!g.tris.is_empty()).then(|| vbuf(bytemuck::cast_slice(&g.tris), "tris")),
+            quads: (!g.quads.is_empty()).then(|| vbuf(bytemuck::cast_slice(&g.quads), "quads")),
+            tex: (!g.tex_quads.is_empty()).then(|| vbuf(bytemuck::cast_slice(&g.tex_quads), "tex")),
         })
         .collect();
 
@@ -201,23 +255,37 @@ pub fn render_frame(
             }
             pass.set_scissor_rect(sx, sy, sw, sh);
 
-            if let Some((b, n)) = &bufs.bg {
-                tri.draw(&mut pass, b, *n);
+            // One draw call per scheduled run, in Canvas2D paint order.
+            for run in &group.runs {
+                match run.pipeline {
+                    RunPipeline::Tri => {
+                        if let Some(b) = &bufs.tris {
+                            tri.draw(&mut pass, b, run.first, run.count);
+                        }
+                    }
+                    RunPipeline::Quad => {
+                        if let Some(b) = &bufs.quads {
+                            quad.draw(&mut pass, b, run.first, run.count);
+                        }
+                    }
+                    RunPipeline::TexQuad => {
+                        if let Some(b) = &bufs.tex {
+                            tex.draw(&mut pass, b, run.first, run.count);
+                        }
+                    }
+                }
             }
-            if let Some((b, n)) = &bufs.under_quad {
-                quad.draw(&mut pass, b, *n);
-            }
-            if let Some((b, n)) = &bufs.fill {
-                tri.draw(&mut pass, b, *n);
-            }
-            if let Some((b, n)) = &bufs.stroke {
-                tri.draw(&mut pass, b, *n);
-            }
-            if let Some((b, n)) = &bufs.quad {
-                quad.draw(&mut pass, b, *n);
-            }
-            if let Some((b, n)) = &bufs.tex {
-                tex.draw(&mut pass, b, *n);
+            // A directly populated tex buffer with no scheduled runs keeps the previous
+            // whole-buffer, drawn-last behavior (textured quads paint above everything).
+            if !group.tex_quads.is_empty()
+                && !group
+                    .runs
+                    .iter()
+                    .any(|run| run.pipeline == RunPipeline::TexQuad)
+            {
+                if let Some(b) = &bufs.tex {
+                    tex.draw(&mut pass, b, 0, group.tex_quads.len() as u32);
+                }
             }
         }
     }

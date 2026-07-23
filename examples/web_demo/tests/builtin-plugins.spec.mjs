@@ -98,13 +98,15 @@ test("plugin markers render pixel-identical to engine markers", async ({ page },
 
 // (b) Parity on the WebGPU backend: plugin ≡ engine 0-diff. A literal WebGPU≡Canvas2D 0-diff
 // is not achievable with markers on either form: the engine's WebGPU pass tessellates AA
-// shapes (circle/triangle/round-rect) into its tri bucket, which paints before the quad
-// bucket (so markers sit under candle wicks there), and SwiftShader's MSAA edge coverage
-// differs from Canvas2D's analytic AA by a few percent on AA edges — both pre-date the
-// plugin platform and reproduce identically with the engine's own markers (measured: 272 vs
-// 266 px with the overlapping fixture; isolated shapes: arrow 48, square 54, circle 36 px —
-// AA-edge coverage steps only, interiors exact). The platform's 0-diff backend guarantee is
-// scoped to the quad family for this reason (see the pane/series reference primitives).
+// shapes (circle/triangle/round-rect) and rasterizes them through its 4xMSAA target, whose
+// edge coverage differs from Canvas2D's analytic AA by 1-2 steps on AA edges (the paint-order
+// half of the original gap — tessellated markers painting before the quad bucket, under the
+// candle wicks — is fixed: both backends now execute the frame's prim order). Both effects
+// pre-date the plugin platform and reproduce identically with the engine's own markers
+// (measured with the overlapping fixture: 275 px before the ordering fix, 204 px of pure
+// AA-edge steps after; isolated shapes: arrow 48, square 54, circle 36 px — AA-edge coverage
+// steps only, interiors exact). The platform's 0-diff backend guarantee is scoped to the quad
+// family for this reason (see the pane/series reference primitives).
 test("plugin markers match engine markers on WebGPU", async ({ page }, test_info) => {
   await goto_fixture(page, "auto");
   expect(await page.evaluate(() => window.__chart.backend())).toBe("webgpu");

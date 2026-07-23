@@ -25,8 +25,8 @@ async function wait_for_chart(page) {
   }));
 }
 
-async function capture_presented_frame(page, backend) {
-  await page.goto(`/?runtimeTest=presentedFrame&backend=${backend}&forceFallbackAdapter=1`);
+async function capture_presented_frame(page, backend, extra_query = "") {
+  await page.goto(`/?runtimeTest=presentedFrame&backend=${backend}&forceFallbackAdapter=1${extra_query}`);
   await wait_for_chart(page);
   return {
     backend: await page.evaluate(() => window.__chart.backend()),
@@ -180,6 +180,56 @@ test("presented WebGPU and Canvas2D frames are pixel-identical", async ({ page }
     await test_info.attach("diff.png", { body: PNG.sync.write(diff), contentType: "image/png" });
   }
   expect(different_pixels).toBe(0);
+
+  // The same presented-frame gate with engine markers visible (?feature=markers) — the state
+  // that exposed the WebGPU paint-order bug: markers are tri-family shapes emitted after the
+  // quad-family candles, so both backends must paint them over the wicks/bodies.
+  const marker_gpu = await capture_presented_frame(page, "auto", "&feature=markers");
+  expect(marker_gpu.backend, "markers gate: WebGPU must stay active").toBe("webgpu");
+  const marker_canvas = await capture_presented_frame(page, "canvas2d", "&feature=markers");
+  expect(marker_canvas.backend).toBe("canvas2d");
+  const gpu_markers = PNG.sync.read(marker_gpu.png);
+  const canvas_markers = PNG.sync.read(marker_canvas.png);
+  expect([gpu_markers.width, gpu_markers.height]).toEqual([canvas_markers.width, canvas_markers.height]);
+
+  // The markers must actually paint on both backends, or the gate below is vacuous.
+  const marker_pixels = { threshold: 0, includeAA: true };
+  expect(
+    pixelmatch(gpu_image.data, gpu_markers.data, null, gpu_image.width, gpu_image.height, marker_pixels),
+    "engine markers must change the presented WebGPU frame",
+  ).toBeGreaterThan(0);
+  expect(
+    pixelmatch(canvas_image.data, canvas_markers.data, null, canvas_image.width, canvas_image.height, marker_pixels),
+    "engine markers must change the presented Canvas2D frame",
+  ).toBeGreaterThan(0);
+
+  // Ordering contract: zero pixels may differ by more than an AA coverage step. The shapes'
+  // anti-aliased edges legitimately differ by 1-2 steps between SwiftShader's 4xMSAA and
+  // Canvas2D's analytic coverage (measured max channel delta 66 on this fixture — not the
+  // ordering contract's concern); a paint-order mismatch swaps whole marker/wick/body colors
+  // (pre-fix: 67 pixels above this bound, up to 201). This keeps the strict 0-diff gate
+  // above untouched while pinning the marker paint order exactly.
+  let ordering_diff = 0;
+  let edge_diff = 0;
+  let maximum_channel_delta = 0;
+  for (let offset = 0; offset < gpu_markers.data.length; offset += 4) {
+    let pixel_delta = 0;
+    for (let channel = 0; channel < 4; channel += 1) {
+      pixel_delta = Math.max(pixel_delta, Math.abs(gpu_markers.data[offset + channel] - canvas_markers.data[offset + channel]));
+    }
+    maximum_channel_delta = Math.max(maximum_channel_delta, pixel_delta);
+    if (pixel_delta > 96) ordering_diff += 1;
+    else if (pixel_delta !== 0) edge_diff += 1;
+  }
+  console.log(`markers gate: ${edge_diff} AA-edge pixels (max step ${maximum_channel_delta}), ${ordering_diff} ordering pixels`);
+  if (ordering_diff !== 0) {
+    const marker_visual = new PNG({ width: gpu_markers.width, height: gpu_markers.height });
+    pixelmatch(gpu_markers.data, canvas_markers.data, marker_visual.data, gpu_markers.width, gpu_markers.height, marker_pixels);
+    await test_info.attach("webgpu-markers.png", { body: marker_gpu.png, contentType: "image/png" });
+    await test_info.attach("canvas2d-markers.png", { body: marker_canvas.png, contentType: "image/png" });
+    await test_info.attach("markers-diff.png", { body: PNG.sync.write(marker_visual), contentType: "image/png" });
+  }
+  expect(ordering_diff, "marker paint order must match Canvas2D (only AA coverage steps may differ)").toBe(0);
 });
 
 test("native and browser Canvas2D panes consume the same fixture", async ({ page }, test_info) => {

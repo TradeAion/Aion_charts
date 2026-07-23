@@ -14,11 +14,13 @@ mod tri_executor;
 mod tri_pipeline;
 
 pub use atlas::{AtlasSlot, LabelAtlas, ATLAS_SIZE};
-pub use frame::{render_frame, DrawGroup, MsaaTarget, SAMPLE_COUNT};
-pub use quad_executor::prims_to_instances;
+pub use frame::{
+    prims_to_group, render_frame, DrawGroup, DrawRun, MsaaTarget, RunPipeline, SAMPLE_COUNT,
+};
+pub use quad_executor::{prim_to_instances, prims_to_instances};
 pub use quad_pipeline::{QuadInstance, QuadRenderer};
 pub use tex_quad_pipeline::{TexQuadInstance, TexQuadRenderer};
-pub use tri_executor::geom_prims_to_tris;
+pub use tri_executor::{geom_prim_to_tris, geom_prims_to_tris};
 pub use tri_pipeline::{TriRenderer, TriVertex};
 
 pub use aion_render::draw_list::DrawList;

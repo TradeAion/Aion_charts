@@ -158,9 +158,139 @@ fn round_rect_to_tris(
     }
 }
 
+/// Tessellate one geometry prim into `out`, appending nothing for rects, text, and unhandled
+/// prims (they render elsewhere). Used by the order-preserving group builder in `frame.rs`.
+pub fn geom_prim_to_tris(prim: &Prim, points: &[[f32; 2]], out: &mut Vec<TriVertex>) {
+    match prim {
+        // LWC `layout.background` VerticalGradient: two triangles over the pane rect with
+        // the stops as per-vertex colors — the same linear ramp the Canvas2D executor
+        // paints with `createLinearGradient` (stop-for-stop identical).
+        Prim::Background { rect, gradient } => {
+            let [x, y, w, h] = *rect;
+            if w <= 0.0 || h <= 0.0 {
+                return;
+            }
+            let to_f32 = |c: aion_render::color::Color| {
+                [
+                    c.r() as f32 / 255.0,
+                    c.g() as f32 / 255.0,
+                    c.b() as f32 / 255.0,
+                    c.a() as f32 / 255.0,
+                ]
+            };
+            let top = to_f32(gradient.top);
+            let bottom = to_f32(gradient.bottom);
+            let (x0, y0, x1, y1) = (x, y, x + w, y + h);
+            let v = |pos: [f32; 2], color: [f32; 4]| TriVertex { pos, color };
+            out.extend([
+                v([x0, y0], top),
+                v([x1, y0], top),
+                v([x0, y1], bottom),
+                v([x1, y0], top),
+                v([x1, y1], bottom),
+                v([x0, y1], bottom),
+            ]);
+        }
+        Prim::AreaFill {
+            first_point,
+            point_count,
+            base_y,
+            line_type,
+            gradient,
+        } => {
+            let pts = pool_slice(points, *first_point, *point_count);
+            let mut mesh = AreaMesh::default();
+            build_area_fill(
+                &pts,
+                *base_y as f64,
+                gradient.top,
+                gradient.bottom,
+                &identity(0.0, *line_type),
+                &mut mesh,
+            );
+            out.extend(mesh.vertices.iter().map(tri));
+        }
+        Prim::Polyline {
+            first_point,
+            point_count,
+            width,
+            line_type,
+            color,
+            ..
+        } => {
+            let pts = pool_slice(points, *first_point, *point_count);
+            let mut mesh = StrokeMesh::default();
+            build_line_stroke(
+                &pts,
+                *color,
+                &identity(*width as f64, *line_type),
+                &mut mesh,
+            );
+            out.extend(mesh.vertices.iter().map(tri));
+        }
+        Prim::Circle {
+            cx,
+            cy,
+            radius,
+            fill: f,
+            ..
+        } => {
+            let mut disc = Vec::new();
+            build_disc([*cx, *cy], *radius, *f, &mut disc);
+            out.extend(disc.iter().map(tri));
+        }
+        Prim::Triangle { a, b, c, color } => {
+            let col = [
+                color.r() as f32 / 255.0,
+                color.g() as f32 / 255.0,
+                color.b() as f32 / 255.0,
+                color.a() as f32 / 255.0,
+            ];
+            out.extend([
+                TriVertex {
+                    pos: *a,
+                    color: col,
+                },
+                TriVertex {
+                    pos: *b,
+                    color: col,
+                },
+                TriVertex {
+                    pos: *c,
+                    color: col,
+                },
+            ]);
+        }
+        Prim::RoundRect {
+            x,
+            y,
+            w,
+            h,
+            radii,
+            fill,
+            border_width,
+            border_color,
+        } => {
+            round_rect_to_tris(
+                *x,
+                *y,
+                *w,
+                *h,
+                *radii,
+                *fill,
+                *border_width,
+                *border_color,
+                out,
+            );
+        }
+        _ => {}
+    }
+}
+
 /// Tessellate the geometry prims into `fill` (area fills, drawn first/below) and `stroke` (line
 /// strokes + filled discs/markers). Rects, text, and unhandled prims are ignored — they render
-/// elsewhere.
+/// elsewhere. Kept for bucket-style consumers; the frame's ordered builder uses
+/// [`geom_prim_to_tris`] per prim instead so paint order matches the Canvas2D executor.
 pub fn geom_prims_to_tris(
     prims: &[Prim],
     points: &[[f32; 2]],
@@ -169,128 +299,10 @@ pub fn geom_prims_to_tris(
 ) {
     for prim in prims {
         match prim {
-            // LWC `layout.background` VerticalGradient: two triangles over the pane rect with
-            // the stops as per-vertex colors — the same linear ramp the Canvas2D executor
-            // paints with `createLinearGradient` (stop-for-stop identical).
-            Prim::Background { rect, gradient } => {
-                let [x, y, w, h] = *rect;
-                if w <= 0.0 || h <= 0.0 {
-                    continue;
-                }
-                let to_f32 = |c: aion_render::color::Color| {
-                    [
-                        c.r() as f32 / 255.0,
-                        c.g() as f32 / 255.0,
-                        c.b() as f32 / 255.0,
-                        c.a() as f32 / 255.0,
-                    ]
-                };
-                let top = to_f32(gradient.top);
-                let bottom = to_f32(gradient.bottom);
-                let (x0, y0, x1, y1) = (x, y, x + w, y + h);
-                let v = |pos: [f32; 2], color: [f32; 4]| TriVertex { pos, color };
-                fill.extend([
-                    v([x0, y0], top),
-                    v([x1, y0], top),
-                    v([x0, y1], bottom),
-                    v([x1, y0], top),
-                    v([x1, y1], bottom),
-                    v([x0, y1], bottom),
-                ]);
+            Prim::Background { .. } | Prim::AreaFill { .. } => {
+                geom_prim_to_tris(prim, points, fill);
             }
-            Prim::AreaFill {
-                first_point,
-                point_count,
-                base_y,
-                line_type,
-                gradient,
-            } => {
-                let pts = pool_slice(points, *first_point, *point_count);
-                let mut mesh = AreaMesh::default();
-                build_area_fill(
-                    &pts,
-                    *base_y as f64,
-                    gradient.top,
-                    gradient.bottom,
-                    &identity(0.0, *line_type),
-                    &mut mesh,
-                );
-                fill.extend(mesh.vertices.iter().map(tri));
-            }
-            Prim::Polyline {
-                first_point,
-                point_count,
-                width,
-                line_type,
-                color,
-                ..
-            } => {
-                let pts = pool_slice(points, *first_point, *point_count);
-                let mut mesh = StrokeMesh::default();
-                build_line_stroke(
-                    &pts,
-                    *color,
-                    &identity(*width as f64, *line_type),
-                    &mut mesh,
-                );
-                stroke.extend(mesh.vertices.iter().map(tri));
-            }
-            Prim::Circle {
-                cx,
-                cy,
-                radius,
-                fill: f,
-                ..
-            } => {
-                let mut disc = Vec::new();
-                build_disc([*cx, *cy], *radius, *f, &mut disc);
-                stroke.extend(disc.iter().map(tri));
-            }
-            Prim::Triangle { a, b, c, color } => {
-                let col = [
-                    color.r() as f32 / 255.0,
-                    color.g() as f32 / 255.0,
-                    color.b() as f32 / 255.0,
-                    color.a() as f32 / 255.0,
-                ];
-                stroke.extend([
-                    TriVertex {
-                        pos: *a,
-                        color: col,
-                    },
-                    TriVertex {
-                        pos: *b,
-                        color: col,
-                    },
-                    TriVertex {
-                        pos: *c,
-                        color: col,
-                    },
-                ]);
-            }
-            Prim::RoundRect {
-                x,
-                y,
-                w,
-                h,
-                radii,
-                fill,
-                border_width,
-                border_color,
-            } => {
-                round_rect_to_tris(
-                    *x,
-                    *y,
-                    *w,
-                    *h,
-                    *radii,
-                    *fill,
-                    *border_width,
-                    *border_color,
-                    stroke,
-                );
-            }
-            _ => {}
+            _ => geom_prim_to_tris(prim, points, stroke),
         }
     }
 }

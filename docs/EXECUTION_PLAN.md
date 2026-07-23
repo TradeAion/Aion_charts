@@ -179,8 +179,10 @@ buffer; swappable for a typed-array ABI later without changing the plugin API).
       the pack smoke test. — 2026-07-23
 - [ ] 4.2 Tag `v0.1.0` → CI publishes; verify `bun add @aion/charts` (primary) and
       `npm i @aion/charts` in a fresh Vite + webpack + plain-server consumer.
-- [ ] 4.3 Optional: React/Vue/Svelte thin wrappers (separate packages; framework-agnostic core
-      stays as-is).
+- [x] 4.3 React wrapper — **decided: descoped.** Closed-source internal React app; no distribution
+      need, so no `@aion/react` package. The ~50-line `use_chart` lifecycle hook lives in the app
+      itself (StrictMode-safe create/destroy). Revisit only if the engine is ever published for
+      external consumers. — 2026-07-23
 - [x] 4.4 Docs: root README install section (bun-primary); phases archived into
       PRODUCTION_ROADMAP.md. — 2026-07-23
 
@@ -244,6 +246,15 @@ buffer; swappable for a typed-array ABI later without changing the plugin API).
   these doc updates, then `git tag v0.1.0 && git push origin v0.1.0` — the publish CI job builds
   and publishes after all gates pass; 4. verify in a fresh consumer: `bun add @aion/charts` then
   `import { create_chart } from "@aion/charts"`.
+- 2026-07-23 — **WebGPU bucket-order fidelity bug fixed.** The WebGPU executor painted family
+  buckets (tris → quads) within a layer while Canvas2D paints in prim order, so markers/rounded
+  shapes z-ordered differently across backends (275 px on the marker fixture). Fixed with
+  order-exact run-length batching (`prims_to_group` + `DrawRun`): prim order now matches the
+  Canvas2D executor exactly, candles stay 1 draw call, and the browser gate asserts **zero
+  ordering diff with markers visible** (only SwiftShader-MSAA-vs-analytic-AA edge steps remain —
+  unreachable, documented). New backlog note: 50%-alpha histogram quads show premultiplied-alpha
+  rounding diffs between backends (`?feature=volume`, ~1.9k px, ungated).
+- 2026-07-23 — **4.3 descoped** (closed-source; no React package needed — hook lives in the app).
 - 2026-07-21 — **Wave-1 verification pass.** Independent live-browser probe (defaults, apply→
   options round-trips, render) caught a fidelity bug: new color options round-tripped normalized
   (`#FF0000`→`#ff0000`) — fields were stored as parsed `Color`. Fixed to verbatim CSS strings with
