@@ -103,8 +103,10 @@ fn hit_test_series_range(
     let mut min_distance = f64::INFINITY;
     for index in candidate_from..candidate_to {
         let item = items[index];
-        let previous = (index > 0).then_some(items[index - 1]);
-        let next = (index + 1 < items.len()).then_some(items[index + 1]);
+        // NOTE: `then` (lazy), not `then_some` — the argument is eagerly evaluated there and
+        // `items[index ± 1]` would panic at the edges of the visible set.
+        let previous = (index > 0).then(|| items[index - 1]);
+        let next = (index + 1 < items.len()).then(|| items[index + 1]);
         // slotStart/slotEnd: adjacent items (consecutive geometry keys) share their midpoint.
         let slot_start = match previous {
             Some(p) if p.1 == item.1 - 1 => (p.0 + item.0) / 2.0,

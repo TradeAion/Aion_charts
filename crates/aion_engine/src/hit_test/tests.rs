@@ -420,3 +420,5 @@ fn is_better_hit_ports_reference_arbitration() {
         kind: SeriesHitKind::Range,
     }));
 }
+
+mod edge_panics;
