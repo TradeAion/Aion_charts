@@ -479,10 +479,7 @@ impl AionChart {
                     // When it comes back equal (some engines/emulators report CSS px here), the
                     // report is untrustworthy — use round(css*dpr) instead of downscaling to
                     // a blurry dpr-1 bitmap.
-                    if dpr > 1.0
-                        && (dw - css_w).abs() <= 1.0
-                        && (dh - css_h).abs() <= 1.0
-                    {
+                    if dpr > 1.0 && (dw - css_w).abs() <= 1.0 && (dh - css_h).abs() <= 1.0 {
                         ((css_w * dpr).round(), (css_h * dpr).round())
                     } else {
                         (dw, dh)
