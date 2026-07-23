@@ -170,7 +170,10 @@ buffer; swappable for a typed-array ABI later without changing the plugin API).
       host hook painting plugin text on the shared overlay (the `Prim::Text` placeholder gap from
       C-a is closed at the platform level). Found + documented a pre-existing WebGPU bucket-order
       quirk (tris before quads affects engine markers identically — backlog item). — 2026-07-21
-- [ ] 3.6/C-e (Optional) Canvas2D escape-hatch primitive for raw-`ctx` reference ports.
+- [x] 3.6/C-e (Optional) Canvas2D escape-hatch primitive for raw-`ctx` reference ports — fourth
+      stacked canvas below the input overlay, `attach_canvas_primitive`, `canvas_render_target`
+      with media/bitmap coordinate spaces (reference `CanvasRenderingTarget2D` subset). Reference
+      `vertical-line` plugin ported character-for-character as the proof. — 2026-07-23
 
 ## Phase 4 — Release
 
@@ -267,7 +270,14 @@ repo visibility).
   ordering diff with markers visible** (only SwiftShader-MSAA-vs-analytic-AA edge steps remain —
   unreachable, documented). New backlog note: 50%-alpha histogram quads show premultiplied-alpha
   rounding diffs between backends (`?feature=volume`, ~1.9k px, ungated).
-- 2026-07-23 — **4.3 descoped** (closed-source; no React package needed — hook lives in the app).
+- 2026-07-23 — **Backlog cleared (all three items).** (1) Premultiplied-alpha fidelity: exact
+  browser source-over math in WGSL (`blend.rs`) — volume fixture strict-diff **1,879 → 0 px**,
+  exhaustive 16.6M-cell verification vs Chrome's integer blending. (2) C-e raw-canvas escape
+  hatch: plugin canvas + verbatim `vertical-line` reference plugin port. (3) `Prim::Text`
+  engine: browser-rasterized glyph bitmaps → texture quads on WebGPU (LRU cache, color-baked
+  rasters), direct `fillText` on Canvas2D, both in prim order; text parity residual measured at
+  162 px, every channel exactly ±1/255 on AA edges only (the documented sp=0 blend class).
+  Playwright **33/33**; Playwright count grew 28 → 33 across these features.
 - 2026-07-21 — **Wave-1 verification pass.** Independent live-browser probe (defaults, apply→
   options round-trips, render) caught a fidelity bug: new color options round-tripped normalized
   (`#FF0000`→`#ff0000`) — fields were stored as parsed `Color`. Fixed to verbatim CSS strings with

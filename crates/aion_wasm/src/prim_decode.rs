@@ -15,7 +15,18 @@
 
 use aion_engine::line_style_from_u8;
 use aion_render::color::Color;
-use aion_render::draw_list::{Gradient, IRect, LineType, Prim};
+use aion_render::draw_list::{Gradient, IRect, LineType, Prim, TextAlign};
+
+/// Defaults the host folds into `text` commands (the draw context has no font state of its
+/// own): the layout font family, the layout font size scaled to the pane's bitmap px, and the
+/// layout text color — the same sources the engine's own axis labels draw with.
+#[derive(Clone, Debug)]
+pub struct TextDefaults {
+    pub family: String,
+    /// Bitmap px (the command coordinate space): `layout.fontSize × dpr`.
+    pub size: f32,
+    pub color: Color,
+}
 
 /// Decode result: the prims produced (in command order) plus one warning per skipped command.
 #[derive(Clone, Debug, Default)]
@@ -73,7 +84,11 @@ fn push_points(value: &serde_json::Value, pool: &mut Vec<[f32; 2]>) -> Option<(u
     Some((first as u32, count as u32))
 }
 
-fn decode_one(command: &serde_json::Value, pool: &mut Vec<[f32; 2]>) -> Result<Prim, String> {
+fn decode_one(
+    command: &serde_json::Value,
+    pool: &mut Vec<[f32; 2]>,
+    text_defaults: &TextDefaults,
+) -> Result<Prim, String> {
     let kind = command
         .get("c")
         .and_then(serde_json::Value::as_str)
@@ -179,14 +194,38 @@ fn decode_one(command: &serde_json::Value, pool: &mut Vec<[f32; 2]>) -> Result<P
             ],
             color: color(command, "color").ok_or("color")?,
         }),
-        // The IR text slot reserves layer ordering only (both executors no-op it today — in-pane
-        // text lands with the glyph engine). `size`/`font`/`align`/`bold` therefore have no IR
-        // home yet and are accepted but unused.
+        // Text runs decode fully: the anchor (x = aligned edge, y = vertical center — the
+        // axis labels' middle-baseline convention), the run, and the font components, with the
+        // host's layout defaults folded in so the prim is backend-ready. Both backends paint
+        // it in layer order through the browser's text engine (Canvas2D `fillText` directly,
+        // WebGPU via a host-rasterized atlas quad of the same run).
         "text" => Ok(Prim::Text {
-            run_id: 0,
             x: num(command, "x").ok_or("x")? as f32,
             y: num(command, "y").ok_or("y")? as f32,
-            color: optional_color(command, "color").unwrap_or(Color::rgb(0, 0, 0)),
+            text: command
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            color: optional_color(command, "color").unwrap_or(text_defaults.color),
+            size: num(command, "size")
+                .filter(|s| *s > 0.0)
+                .unwrap_or(f64::from(text_defaults.size)) as f32,
+            family: command
+                .get("font")
+                .and_then(serde_json::Value::as_str)
+                .filter(|f| !f.is_empty())
+                .unwrap_or(&text_defaults.family)
+                .to_string(),
+            align: match command.get("align").and_then(serde_json::Value::as_str) {
+                Some("center") => TextAlign::Center,
+                Some("right") => TextAlign::Right,
+                _ => TextAlign::Left,
+            },
+            bold: command
+                .get("bold")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
         }),
         other => Err(format!("unknown command {other:?}")),
     }
@@ -195,7 +234,11 @@ fn decode_one(command: &serde_json::Value, pool: &mut Vec<[f32; 2]>) -> Result<P
 /// Decode one renderer's JSON command array into prims, appending polyline/area points to
 /// `pool`. Malformed JSON, non-array input, and per-command problems skip with a warning
 /// rather than failing the frame — a broken plugin must never take the chart down.
-pub fn decode_commands(json: &str, pool: &mut Vec<[f32; 2]>) -> DecodedCommands {
+pub fn decode_commands(
+    json: &str,
+    pool: &mut Vec<[f32; 2]>,
+    text_defaults: &TextDefaults,
+) -> DecodedCommands {
     let mut out = DecodedCommands::default();
     let parsed = match serde_json::from_str::<serde_json::Value>(json) {
         Ok(value) => value,
@@ -211,7 +254,7 @@ pub fn decode_commands(json: &str, pool: &mut Vec<[f32; 2]>) -> DecodedCommands 
         return out;
     };
     for (index, command) in commands.iter().enumerate() {
-        match decode_one(command, pool) {
+        match decode_one(command, pool, text_defaults) {
             Ok(prim) => out.prims.push(prim),
             Err(detail) => out.warn(index, format!("skipped ({detail})")),
         }
@@ -226,7 +269,12 @@ mod tests {
 
     fn decode(json: &str) -> (Vec<Prim>, Vec<[f32; 2]>, Vec<String>) {
         let mut pool = Vec::new();
-        let out = decode_commands(json, &mut pool);
+        let defaults = TextDefaults {
+            family: "DefaultFamily".into(),
+            size: 24.0,
+            color: Color::rgb(0x11, 0x22, 0x33),
+        };
+        let out = decode_commands(json, &mut pool, &defaults);
         (out.prims, pool, out.warnings)
     }
 
@@ -409,10 +457,72 @@ mod tests {
                     color: Color::rgb(0xab, 0xcd, 0xef),
                 },
                 Prim::Text {
-                    run_id: 0,
                     x: 40.0,
                     y: 60.0,
+                    text: "hello".into(),
                     color: Color::rgb(0x19, 0x19, 0x19),
+                    size: 12.0,
+                    family: "DefaultFamily".into(),
+                    align: TextAlign::Center,
+                    bold: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn text_decodes_defaults_and_explicit_font_family() {
+        let (prims, _, warnings) = decode(
+            r##"[
+                {"c":"text","x":1.0,"y":2.0,"text":"bare"},
+                {"c":"text","x":3.0,"y":4.0,"text":"styled","size":9.5,"font":"Custom","align":"right","bold":true,"color":"#ff0000"},
+                {"c":"text","x":5.0,"y":6.0,"text":"badalign","align":"justify"},
+                {"c":"text","x":7.0,"y":8.0,"text":"badsize","size":0}
+            ]"##,
+        );
+        assert!(warnings.is_empty());
+        assert_eq!(
+            prims,
+            vec![
+                Prim::Text {
+                    x: 1.0,
+                    y: 2.0,
+                    text: "bare".into(),
+                    color: Color::rgb(0x11, 0x22, 0x33),
+                    size: 24.0,
+                    family: "DefaultFamily".into(),
+                    align: TextAlign::Left,
+                    bold: false,
+                },
+                Prim::Text {
+                    x: 3.0,
+                    y: 4.0,
+                    text: "styled".into(),
+                    color: Color::rgb(0xff, 0x00, 0x00),
+                    size: 9.5,
+                    family: "Custom".into(),
+                    align: TextAlign::Right,
+                    bold: true,
+                },
+                Prim::Text {
+                    x: 5.0,
+                    y: 6.0,
+                    text: "badalign".into(),
+                    color: Color::rgb(0x11, 0x22, 0x33),
+                    size: 24.0,
+                    family: "DefaultFamily".into(),
+                    align: TextAlign::Left,
+                    bold: false,
+                },
+                Prim::Text {
+                    x: 7.0,
+                    y: 8.0,
+                    text: "badsize".into(),
+                    color: Color::rgb(0x11, 0x22, 0x33),
+                    size: 24.0,
+                    family: "DefaultFamily".into(),
+                    align: TextAlign::Left,
+                    bold: false,
                 },
             ]
         );
@@ -472,12 +582,18 @@ mod tests {
     #[test]
     fn pool_is_rolled_back_when_a_point_run_is_malformed() {
         let mut pool = vec![[9.0, 9.0]];
+        let defaults = TextDefaults {
+            family: "DefaultFamily".into(),
+            size: 24.0,
+            color: Color::rgb(0, 0, 0),
+        };
         let out = decode_commands(
             r##"[
                 {"c":"polyline","points":[0,0, 1,1],"color":"#000","width":1,"style":0},
                 {"c":"polyline","points":[2,2, "bad",3],"color":"#000","width":1,"style":0}
             ]"##,
             &mut pool,
+            &defaults,
         );
         assert_eq!(out.prims.len(), 1);
         assert_eq!(out.warnings.len(), 1);

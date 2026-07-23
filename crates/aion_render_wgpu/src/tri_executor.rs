@@ -382,10 +382,14 @@ mod tests {
                 color: Color::rgb(0, 0, 0),
             },
             Prim::Text {
-                run_id: 0,
                 x: 0.0,
                 y: 0.0,
+                text: "t".into(),
                 color: Color::rgb(0, 0, 0),
+                size: 12.0,
+                family: "Test".into(),
+                align: aion_render::draw_list::TextAlign::Left,
+                bold: false,
             },
         ];
         let (mut fill, mut stroke) = (Vec::new(), Vec::new());

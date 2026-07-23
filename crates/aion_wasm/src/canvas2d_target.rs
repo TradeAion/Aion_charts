@@ -4,6 +4,7 @@
 
 use aion_render::canvas2d::Canvas2d;
 use aion_render::color::Color;
+use aion_render::draw_list::TextAlign;
 use wasm_bindgen::JsValue;
 use web_sys::CanvasRenderingContext2d;
 
@@ -95,5 +96,22 @@ impl Canvas2d for WasmCanvas2d<'_> {
     }
     fn fill(&mut self) {
         self.ctx.fill();
+    }
+
+    fn fill_text(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        font: &str,
+        color: Color,
+        align: TextAlign,
+    ) {
+        self.ctx.set_font(font);
+        self.ctx.set_fill_style_str(&css(color));
+        self.ctx.set_text_align(align.canvas_keyword());
+        // House convention (axis labels): y is the vertical center of the run.
+        self.ctx.set_text_baseline("middle");
+        let _ = self.ctx.fill_text(text, x as f64, y as f64);
     }
 }

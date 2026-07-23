@@ -6,6 +6,7 @@
 //! smooths diagonal lines while leaving pixel-aligned rects and text bit-identical.
 
 mod atlas;
+mod blend;
 mod frame;
 mod quad_executor;
 mod quad_pipeline;

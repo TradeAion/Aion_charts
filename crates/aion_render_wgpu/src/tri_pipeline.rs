@@ -18,7 +18,7 @@ struct Globals {
     _pad: [f32; 2],
 }
 
-const SHADER: &str = r#"
+const SHADER_VERTEX: &str = r#"
 struct Globals {
     viewport: vec2<f32>,
     _pad: vec2<f32>,
@@ -42,12 +42,23 @@ fn vs_main(@location(0) pos: vec2<f32>, @location(1) color: vec4<f32>) -> VsOut 
     out.color = color;
     return out;
 }
+"#;
 
+const SHADER_FRAGMENT: &str = r#"
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    return vec4<f32>(in.color.rgb * in.color.a, in.color.a);
+    return aion_source_over(in.color);
 }
 "#;
+
+fn shader_source() -> String {
+    [
+        SHADER_VERTEX,
+        crate::blend::SOURCE_OVER_WGSL,
+        SHADER_FRAGMENT,
+    ]
+    .concat()
+}
 
 pub struct TriRenderer {
     pipeline: wgpu::RenderPipeline,
@@ -59,7 +70,7 @@ impl TriRenderer {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, sample_count: u32) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tri_shader"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(shader_source().into()),
         });
 
         let globals_buf = device.create_buffer(&wgpu::BufferDescriptor {

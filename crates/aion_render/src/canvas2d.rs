@@ -13,7 +13,7 @@
 //! map onto native 2D path/gradient calls, which the wgpu path approximates with tessellation.
 
 use crate::color::Color;
-use crate::draw_list::{IRect, LineStyle, LineType, Prim};
+use crate::draw_list::{text_font_spec, IRect, LineStyle, LineType, Prim, TextAlign};
 use crate::line::{expand_line, LinePoint};
 
 /// Abstract 2D drawing target: the subset of `CanvasRenderingContext2D` this executor needs.
@@ -51,6 +51,21 @@ pub trait Canvas2d {
     fn stroke(&mut self);
     /// Fill the current path with the current fill style.
     fn fill(&mut self);
+
+    /// Draw a text run with the browser's text engine: fully-resolved CSS `font` shorthand
+    /// ([`text_font_spec`]), `textBaseline: "middle"` (y is the vertical center), `textAlign`
+    /// from `align`. Default no-op: targets without a glyph engine (e.g. recorders, native
+    /// rasterizers not yet text-capable) silently drop text.
+    fn fill_text(
+        &mut self,
+        _text: &str,
+        _x: f32,
+        _y: f32,
+        _font: &str,
+        _color: Color,
+        _align: TextAlign,
+    ) {
+    }
 }
 
 /// The viewport (bitmap px). Carried for target context; every prim now owns its own extent
@@ -155,8 +170,9 @@ fn pool_slice(points: &[[f32; 2]], first: u32, count: u32) -> Vec<LinePoint> {
 }
 
 /// Execute one layer of prims against a 2D target. `points` is the layer's shared point pool
-/// (referenced by `Polyline`/`AreaFill`). `Text` is skipped — text is drawn by the native/2D text
-/// path, not this executor (the IR slot only reserves layer ordering).
+/// (referenced by `Polyline`/`AreaFill`). `Text` runs go through the target's text engine in
+/// prim order — the browser target rasterizes the same glyphs the WebGPU host samples into its
+/// atlas, keeping the two backends pixel-identical.
 pub fn execute(
     prims: &[Prim],
     points: &[[f32; 2]],
@@ -314,7 +330,27 @@ pub fn execute(
                 target.set_fill_vgradient(y, y + h, gradient.top, gradient.bottom);
                 target.fill_rect(x, y, w, h);
             }
-            Prim::Text { .. } => {}
+            Prim::Text {
+                x,
+                y,
+                text,
+                color,
+                size,
+                family,
+                align,
+                bold,
+            } => {
+                if !text.is_empty() {
+                    target.fill_text(
+                        text,
+                        *x,
+                        *y,
+                        &text_font_spec(*size, family, *bold),
+                        *color,
+                        *align,
+                    );
+                }
+            }
         }
     }
 }
@@ -412,6 +448,21 @@ mod tests {
         }
         fn fill(&mut self) {
             self.ops.push("fill".into());
+        }
+        fn fill_text(
+            &mut self,
+            text: &str,
+            x: f32,
+            y: f32,
+            font: &str,
+            color: Color,
+            align: TextAlign,
+        ) {
+            self.ops.push(format!(
+                "text {text:?} {x} {y} {font:?} {} {}",
+                hx(color),
+                align.canvas_keyword()
+            ));
         }
     }
 
@@ -649,16 +700,44 @@ mod tests {
     }
 
     #[test]
-    fn text_prim_is_skipped() {
+    fn text_prim_draws_with_font_spec_and_empty_text_is_skipped() {
         let ops = run(
-            &[Prim::Text {
-                run_id: 0,
-                x: 1.0,
-                y: 2.0,
-                color: C,
-            }],
+            &[
+                Prim::Text {
+                    x: 10.5,
+                    y: 20.0,
+                    text: "hello".into(),
+                    color: C,
+                    size: 24.0,
+                    family: "Roboto".into(),
+                    align: TextAlign::Center,
+                    bold: true,
+                },
+                Prim::Text {
+                    x: 0.0,
+                    y: 0.0,
+                    text: String::new(),
+                    color: C,
+                    size: 12.0,
+                    family: "Roboto".into(),
+                    align: TextAlign::Left,
+                    bold: false,
+                },
+            ],
             &[],
         );
-        assert!(ops.is_empty());
+        assert_eq!(
+            ops,
+            vec![r#"text "hello" 10.5 20 "700 24px Roboto" 102030ff center"#.to_string()]
+        );
+    }
+
+    #[test]
+    fn font_spec_uses_numeric_weight_and_plain_size() {
+        assert_eq!(
+            text_font_spec(12.0, "Inter, sans-serif", false),
+            "400 12px Inter, sans-serif"
+        );
+        assert_eq!(text_font_spec(11.5, "Inter", true), "700 11.5px Inter");
     }
 }

@@ -594,8 +594,9 @@ impl ChartInner {
                 Ok(json) => String::from(json),
                 Err(_) => continue,
             };
+            let text_defaults = self.text_defaults();
             let frame_pane = &mut self.frame.panes[p.pane];
-            let decoded = decode_commands(&json, &mut frame_pane.points);
+            let decoded = decode_commands(&json, &mut frame_pane.points, &text_defaults);
             if !decoded.warnings.is_empty() {
                 web_sys::console::warn_1(
                     &format!(

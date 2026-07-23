@@ -1,6 +1,8 @@
 //! `ChartInner` rendering: WebGPU/Canvas2D pane execution, axis overlay painting, backend
 //! failover, and browser text measurement.
 
+use aion_render::draw_list::Prim;
+
 use super::*;
 
 impl ChartInner {
@@ -73,6 +75,10 @@ impl ChartInner {
             self.gpu_groups
                 .resize_with(engine_frame.panes.len(), DrawGroup::default);
             self.gpu_groups.truncate(engine_frame.panes.len());
+            let Some(gfx) = self.gfx.as_mut() else {
+                return Err(JsValue::from_str("WebGPU state disappeared mid-render"));
+            };
+            let text_runs = &mut self.text_runs;
             for (group, pane_frame) in self.gpu_groups.iter_mut().zip(&engine_frame.panes) {
                 group.scissor = Some(pane_frame.scissor);
                 group.clear();
@@ -80,15 +86,36 @@ impl ChartInner {
                 // walks each layer in the Canvas2D executor's order (under, then main, then
                 // top; prims in list order within a layer) and records one run per maximal
                 // same-pipeline block, so e.g. markers emitted after the candles paint over
-                // the wicks on WebGPU exactly as they do on Canvas2D.
-                prims_to_group(&pane_frame.under, &pane_frame.points, group);
-                prims_to_group(&pane_frame.main, &pane_frame.points, group);
-                prims_to_group(&pane_frame.top_prims, &pane_frame.points, group);
+                // the wicks on WebGPU exactly as they do on Canvas2D. Text prims resolve
+                // through the host's browser-rasterized atlas cache (chart/text_runs.rs) and
+                // schedule as tex-quad runs at their prim position in the same order.
+                let atlas = &mut gfx.atlas;
+                let queue = &gfx.queue;
+                let mut resolve_text = |prim: &Prim| {
+                    text_runs
+                        .as_mut()
+                        .and_then(|runs| runs.resolve(atlas, queue, prim))
+                };
+                prims_to_group(
+                    &pane_frame.under,
+                    &pane_frame.points,
+                    group,
+                    &mut resolve_text,
+                );
+                prims_to_group(
+                    &pane_frame.main,
+                    &pane_frame.points,
+                    group,
+                    &mut resolve_text,
+                );
+                prims_to_group(
+                    &pane_frame.top_prims,
+                    &pane_frame.points,
+                    group,
+                    &mut resolve_text,
+                );
             }
             let groups = &self.gpu_groups[..];
-            let Some(gfx) = self.gfx.as_mut() else {
-                return Err(JsValue::from_str("WebGPU state disappeared mid-render"));
-            };
             gfx.msaa.ensure(
                 &gfx.device,
                 gfx.config.format,

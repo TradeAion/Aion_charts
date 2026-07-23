@@ -2,10 +2,10 @@
  * @tradeaion/charts — public API (snake_case; semantics mirror the reference charting library v5).
  *
  * A thin, typed façade over the `aion_wasm` engine. It owns the browser-side concerns that the
- * engine deliberately leaves out: creating the two stacked canvases (WebGPU/Canvas2D pane +
- * Canvas2D axis overlay), the input-gesture recognizer, typed-array packing of data at the
- * boundary, and the chart/series/time-scale handle objects. All model, layout, and rendering math
- * lives in Rust.
+ * engine deliberately leaves out: creating the stacked canvases (WebGPU/Canvas2D pane + package-owned
+ * plugin overlay + Canvas2D axis/input overlay), the input-gesture recognizer, typed-array packing
+ * of data at the boundary, and the chart/series/time-scale handle objects. All model, layout, and
+ * rendering math lives in Rust.
  *
  * WebGPU device acquisition is async, so `create_chart` returns a Promise — the one deliberate
  * divergence from the reference's synchronous `createChart`.
@@ -19,6 +19,7 @@ import { create_chart as wasm_create_chart } from "../pkg/aion_wasm.js";
 export * from "./types.js";
 export * from "./theme.js";
 export * from "./primitives.js";
+export * from "./canvas_plugins.js";
 export * from "./custom_series.js";
 export * from "./builtin_plugins.js";
 import { chart_impl } from "./impl.js";
@@ -50,17 +51,21 @@ export async function create_chart(
 ): Promise<chart_api> {
   await ensure_init();
 
-  // Three stacked, absolutely-positioned canvases fill the container: dedicated WebGPU and
-  // Canvas2D panes below the transparent axis/input overlay. A canvas cannot change context type,
-  // so keeping the fallback pane warm is what makes device-loss failover possible without
-  // recreating the chart or moving state out of the headless engine.
+  // Four stacked, absolutely-positioned canvases fill the container: dedicated WebGPU and
+  // Canvas2D panes below the transparent plugin overlay (Phase C-e canvas primitives), below the
+  // transparent axis/input overlay. A canvas cannot change context type, so keeping the fallback
+  // pane warm is what makes device-loss failover possible without recreating the chart or moving
+  // state out of the headless engine. The plugin overlay is plain package-owned DOM (no wasm
+  // involvement): it never takes input (gestures live on the top overlay), and the package
+  // paints it after each engine frame.
   if (getComputedStyle(container).position === "static") {
     container.style.position = "relative";
   }
   const gpu_pane = document.createElement("canvas");
   const fallback_pane = document.createElement("canvas");
+  const plugin_canvas = document.createElement("canvas");
   const overlay = document.createElement("canvas");
-  for (const c of [gpu_pane, fallback_pane, overlay]) {
+  for (const c of [gpu_pane, fallback_pane, plugin_canvas, overlay]) {
     c.style.position = "absolute";
     c.style.inset = "0";
     c.style.width = "100%";
@@ -69,9 +74,11 @@ export async function create_chart(
     // No `touch-action: none` (reference parity): the recognizer uses non-passive touch listeners and
     // conditionally preventDefaults, so a drag the chart doesn't own scrolls the page.
   }
+  plugin_canvas.style.pointerEvents = "none";
   overlay.style.cursor = "crosshair";
   container.appendChild(gpu_pane);
   container.appendChild(fallback_pane);
+  container.appendChild(plugin_canvas);
   container.appendChild(overlay);
 
   const rect = container.getBoundingClientRect();
@@ -80,7 +87,7 @@ export async function create_chart(
   const dpr = window.devicePixelRatio || 1;
   // Bootstrap the bitmap size so either pane backend configures; auto-resize (if enabled) or a
   // manual resize() will correct it.
-  for (const c of [gpu_pane, fallback_pane, overlay]) {
+  for (const c of [gpu_pane, fallback_pane, plugin_canvas, overlay]) {
     c.width = Math.max(1, Math.round(css_w * dpr));
     c.height = Math.max(1, Math.round(css_h * dpr));
   }
@@ -127,7 +134,7 @@ export async function create_chart(
     wasm.apply_options(JSON.stringify(engine_options));
   }
   const auto_size = options?.autoSize === true;
-  const chart = new chart_impl(wasm, container, gpu_pane, fallback_pane, overlay, auto_size);
+  const chart = new chart_impl(wasm, container, gpu_pane, fallback_pane, plugin_canvas, overlay, auto_size);
   if (
     handle_scroll !== undefined || handle_scale !== undefined || kinetic_scroll !== undefined ||
     tracking_mode !== undefined

@@ -50,7 +50,11 @@ async function last_hover(page) {
 
 /** The overlay (input/axis) canvas — the element the gesture layer styles with cursors. */
 async function overlay_cursor(page) {
-  return page.evaluate(() => document.querySelectorAll("#chart_container canvas")[2].style.cursor);
+  // The overlay is the topmost (last) of the package's stacked canvases.
+  return page.evaluate(() => {
+    const canvases = document.querySelectorAll("#chart_container canvas");
+    return canvases[canvases.length - 1].style.cursor;
+  });
 }
 
 /** A visible bar's center coordinates plus its mid high/low y, via the public handles. */

@@ -4,6 +4,7 @@
  */
 
 import type { pane_primitive, pane_primitive_handle, series_primitive, series_primitive_handle } from "./primitives.js";
+import type { canvas_primitive, canvas_primitive_handle } from "./canvas_plugins.js";
 import type { custom_series_pane_view } from "./custom_series.js";
 
 // ---------------------------------------------------------------------------------------------
@@ -763,6 +764,16 @@ export interface pane_api {
    * later pane moves/removals (a removed pane's primitives draw nowhere until detached).
    */
   attach_primitive(primitive: pane_primitive): pane_primitive_handle;
+  /**
+   * Attach a canvas primitive (plugin platform Phase C-e — the Canvas2D escape hatch) and
+   * repaint. The primitive paints with arbitrary Canvas2D calls on the plugin overlay canvas
+   * through a reference-style `CanvasRenderingTarget2D` mirror, so reference plugin renderers
+   * port near-verbatim. Locked limits (docs/PLUGIN_PLATFORM_DESIGN.md §3 Option B): plugin
+   * content is Canvas2D-only, always above the whole pane (no pane scissor, no z-ordering
+   * between engine layers — `normal`/`top` only order among canvas views) and below the axis
+   * chrome/crosshair. Divergence: reference returns `void`; here the returned handle detaches.
+   */
+  attach_canvas_primitive(primitive: canvas_primitive): canvas_primitive_handle;
   /**
    * This pane's price scale by id (reference `IPaneApi.priceScale`): the visible `"left"`/`"right"`
    * axis, or `""` for the overlay scale. Divergence: reference throws on an unknown id; here the id is

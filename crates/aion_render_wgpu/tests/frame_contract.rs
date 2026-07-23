@@ -11,7 +11,34 @@ use aion_render::draw_list::{LineStyle, Prim};
 
 use aion_render_wgpu::{
     geom_prims_to_tris, prims_to_group, prims_to_instances, DrawGroup, DrawRun, RunPipeline,
+    TexQuadInstance,
 };
+
+/// A minimal text prim for scheduling tests (content is irrelevant to the group builder).
+fn text_prim(x: f32) -> Prim {
+    Prim::Text {
+        x,
+        y: 0.0,
+        text: "txt".into(),
+        color: Color::rgb(0, 0, 0),
+        size: 12.0,
+        family: "Test".into(),
+        align: aion_render::draw_list::TextAlign::Left,
+        bold: false,
+    }
+}
+
+/// A resolver that maps every text prim to a dummy 2x2 atlas quad at its anchor.
+fn dummy_quad(prim: &Prim) -> Option<TexQuadInstance> {
+    let Prim::Text { x, y, .. } = prim else {
+        return None;
+    };
+    Some(TexQuadInstance {
+        rect: [*x, *y, 2.0, 2.0],
+        uv: [0.0, 0.0, 0.5, 0.5],
+        color: [0.0, 0.0, 0.0, 1.0],
+    })
+}
 
 #[derive(Default)]
 struct CountingCanvas {
@@ -257,13 +284,8 @@ fn group_builder_preserves_mixed_prim_order_with_run_length_batching() {
             line_type: LineType::Simple,
             color: Color::rgb(0, 0, 0xFF),
         },
-        circle(40.0), // batches with the previous tri run
-        Prim::Text {
-            run_id: 0,
-            x: 0.0,
-            y: 0.0,
-            color: Color::rgb(0, 0, 0),
-        }, // ordering slot only: no run
+        circle(40.0),   // batches with the previous tri run
+        text_prim(0.0), // unresolved (None) text reserves no slot and splits no run
         rect(50),
         // Degenerate geometry emits nothing and must not split the run either.
         Prim::Rect {
@@ -278,7 +300,7 @@ fn group_builder_preserves_mixed_prim_order_with_run_length_batching() {
         rect(60), // still the same quad run as rect(50)
     ];
     let mut group = DrawGroup::default();
-    prims_to_group(&prims, &points, &mut group);
+    prims_to_group(&prims, &points, &mut group, &mut |_| None);
 
     let schedule: Vec<RunPipeline> = group.runs.iter().map(|r| r.pipeline).collect();
     assert_eq!(
@@ -335,15 +357,52 @@ fn group_builder_preserves_mixed_prim_order_with_run_length_batching() {
 }
 
 #[test]
+fn group_builder_schedules_resolved_text_quads_in_prim_order() {
+    use aion_render::draw_list::IRect;
+    let rect = |x| Prim::Rect {
+        rect: IRect {
+            x,
+            y: 0,
+            w: 4,
+            h: 4,
+        },
+        color: Color::rgb(0, 0, 0),
+    };
+    // Two text runs around one rect: the tex quads must land between the quad runs, batching
+    // with each other, mirroring the Canvas2D paint order rect → text → text → rect.
+    let prims = [rect(0), text_prim(10.0), text_prim(20.0), rect(30)];
+    let mut group = DrawGroup::default();
+    prims_to_group(&prims, &[], &mut group, &mut dummy_quad);
+
+    let schedule: Vec<RunPipeline> = group.runs.iter().map(|r| r.pipeline).collect();
+    assert_eq!(
+        schedule,
+        [RunPipeline::Quad, RunPipeline::TexQuad, RunPipeline::Quad],
+        "text quads must schedule at their prim position, not above everything"
+    );
+    assert_eq!(group.tex_quads.len(), 2);
+    assert_eq!(
+        group.runs[1],
+        DrawRun {
+            pipeline: RunPipeline::TexQuad,
+            first: 0,
+            count: 2
+        },
+        "consecutive text runs batch into one tex-quad draw"
+    );
+    assert_runs_tile_buffers(&group);
+}
+
+#[test]
 fn group_builder_batches_candle_blocks_and_schedules_markers_after_candles() {
     let mut chart = fixture();
     let frame = chart.build_frame();
     let mut saw_tri_over_quad = false;
     for pane in &frame.panes {
         let mut group = DrawGroup::default();
-        prims_to_group(&pane.under, &pane.points, &mut group);
-        prims_to_group(&pane.main, &pane.points, &mut group);
-        prims_to_group(&pane.top_prims, &pane.points, &mut group);
+        prims_to_group(&pane.under, &pane.points, &mut group, &mut |_| None);
+        prims_to_group(&pane.main, &pane.points, &mut group, &mut |_| None);
+        prims_to_group(&pane.top_prims, &pane.points, &mut group, &mut |_| None);
         assert_runs_tile_buffers(&group);
 
         // Perf contract: the candle/bar/histogram blocks (hundreds of quads) stay a handful

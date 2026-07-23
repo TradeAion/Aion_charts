@@ -18,6 +18,10 @@ mod prim_decode;
 // too so its tests run outside the browser.
 #[cfg(any(target_arch = "wasm32", test))]
 mod custom_align;
+// Pure text-run cache + placement math for the WebGPU `Prim::Text` path; compiled for the host
+// target too so the LRU/placement tests run outside the browser.
+#[cfg(any(target_arch = "wasm32", test))]
+mod text_cache;
 
 #[cfg(target_arch = "wasm32")]
 mod canvas2d_target;

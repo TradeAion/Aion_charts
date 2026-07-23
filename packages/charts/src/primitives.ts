@@ -61,9 +61,15 @@ export interface primitive_draw_context {
   /** Filled triangle. */
   triangle(x1: number, y1: number, x2: number, y2: number, x3: number, y3: number, color: string): void;
   /**
-   * In-pane text. The `Prim` IR reserves a text slot for layer ordering, but both backends
-   * no-op it until the glyph engine lands — treat this as a forward-compatible placeholder
-   * (it draws nothing today). `options` accepts color/size/font/align/bold for that future.
+   * In-pane text, painted at the command's position in the layer order on BOTH backends
+   * (Canvas2D `fillText` directly; WebGPU via a browser-rasterized atlas quad of the same
+   * run — pixel-identical glyphs by construction). The anchor is (x, y) in absolute bitmap
+   * px: x is the aligned edge (`align`, default `"left"`), y the vertical center of the run
+   * (Canvas `textBaseline: "middle"`, the axis-label convention). `options.size` is the glyph
+   * size in bitmap px (default: `layout.fontSize × dpr`), `options.font` the font family
+   * (default: `layout.fontFamily`), `options.color` any CSS color (default:
+   * `layout.textColor`), `options.bold` selects weight 700 over 400. For overlay text below
+   * the axis chrome use {@link pane_primitive.text_views}.
    */
   text(
     x: number,
@@ -124,10 +130,11 @@ export interface primitive_axis_label {
 
 /**
  * An in-pane overlay text draw registered through {@link pane_primitive.text_views} /
- * {@link series_primitive.text_views} (plugin platform Phase 3.5). The `Prim` IR's text slot
- * no-ops on both backends (see {@link primitive_draw_context.text}), so in-pane plugin text is
- * painted on the Canvas2D axis overlay — the one canvas that draws glyphs today — in the
- * engine watermark's slot: below the axis chrome, above the pane, identical on both backends.
+ * {@link series_primitive.text_views} (plugin platform Phase 3.5). Painted on the Canvas2D
+ * axis overlay in the engine watermark's slot: below the axis chrome, above the pane,
+ * identical on both backends. For text at a specific layer position between the engine's own
+ * prims (e.g. above the crosshair or behind the series), use
+ * {@link primitive_draw_context.text} instead — this hook always shares the watermark slot.
  *
  * `x`/`y` are absolute bitmap px (the draw context's coordinate space); the host converts to
  * the overlay's media space with the frame's exact pixel ratios. `color` is any CSS color

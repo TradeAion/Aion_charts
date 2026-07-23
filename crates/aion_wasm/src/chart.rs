@@ -18,8 +18,10 @@ mod custom_series;
 mod inner_api;
 mod inner_render;
 mod primitives;
+mod text_runs;
 
 use custom_series::CustomSeriesEntry;
+use text_runs::TextRunStore;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -138,9 +140,9 @@ struct Gfx {
     quad_renderer: QuadRenderer,
     tri_renderer: TriRenderer,
     msaa: MsaaTarget,
-    // Reserved for future in-pane text (legend, watermark). The atlas owns the texture the
-    // tex renderer's bind group references, so it must stay alive.
-    _atlas: LabelAtlas,
+    /// Label atlas the host's text runs pack into. The atlas owns the texture the tex
+    /// renderer's bind group references, so it must stay alive for the renderer's lifetime.
+    atlas: LabelAtlas,
     tex_renderer: TexQuadRenderer,
     device_lost: Arc<AtomicBool>,
 }
@@ -181,6 +183,10 @@ struct ChartInner {
     /// primitive passes (plugin platform Phase 3.5), painted on the axis overlay in the
     /// engine watermark's slot by `draw_axes_2d`. Cleared at the top of every render.
     primitive_texts: Vec<PrimitiveOverlayText>,
+    /// Browser-rasterized text-run store for `Prim::Text` on the WebGPU backend (offscreen
+    /// canvas + atlas cache). `None` only if the offscreen context could not be created —
+    /// the Canvas2D backend draws text directly and never consults this.
+    text_runs: Option<TextRunStore>,
 }
 
 /// One in-pane overlay text draw registered by a primitive's `text_views` hook (plugin
@@ -417,6 +423,18 @@ pub async fn create_chart(
         next_primitive_id: 1,
         custom_series: Vec::new(),
         primitive_texts: Vec::new(),
+        text_runs: match TextRunStore::new() {
+            Ok(store) => Some(store),
+            Err(error) => {
+                web_sys::console::warn_1(
+                    &format!(
+                        "aion: text-run rasterizer unavailable ({error:?}); WebGPU text disabled"
+                    )
+                    .into(),
+                );
+                None
+            }
+        },
     };
 
     Ok(AionChart {
@@ -1459,6 +1477,17 @@ impl AionChart {
             notify_aion_backend_loss(self.runtime_id);
         }
     }
+
+    /// Test-only instrumentation for the `Prim::Text` texture cache: `{"entries":n,
+    /// "rasterizations":n}` — identical text runs must rasterize once. Absent from the public
+    /// TypeScript API (reached as `chart.wasm.text_cache_debug()` in the browser specs).
+    #[doc(hidden)]
+    pub fn text_cache_debug(&self) -> String {
+        self.inner.borrow().text_runs.as_ref().map_or(
+            "{\"entries\":0,\"rasterizations\":0}".to_string(),
+            |store| store.debug_stats(),
+        )
+    }
 }
 
 impl ChartInner {
@@ -1526,7 +1555,7 @@ async fn try_create_gfx(
         quad_renderer,
         tri_renderer,
         msaa,
-        _atlas: atlas,
+        atlas,
         tex_renderer,
         device_lost,
     })

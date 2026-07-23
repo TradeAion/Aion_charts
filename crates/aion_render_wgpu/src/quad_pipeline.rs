@@ -8,7 +8,8 @@
 pub struct QuadInstance {
     /// x, y, w, h in bitmap pixels.
     pub rect: [f32; 4],
-    /// Straight (non-premultiplied) RGBA in 0..1; premultiplied in the fragment shader.
+    /// Straight (non-premultiplied) RGBA in 0..1; the fragment shader applies the
+    /// Canvas2D-exact source-over conversion from `crate::blend`.
     pub color: [f32; 4],
 }
 
@@ -19,7 +20,7 @@ struct Globals {
     _pad: [f32; 2],
 }
 
-const SHADER: &str = r#"
+const SHADER_VERTEX: &str = r#"
 struct Globals {
     viewport: vec2<f32>,
     _pad: vec2<f32>,
@@ -53,12 +54,23 @@ fn vs_main(
     out.color = color;
     return out;
 }
+"#;
 
+const SHADER_FRAGMENT: &str = r#"
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    return vec4<f32>(in.color.rgb * in.color.a, in.color.a);
+    return aion_source_over(in.color);
 }
 "#;
+
+fn shader_source() -> String {
+    [
+        SHADER_VERTEX,
+        crate::blend::SOURCE_OVER_WGSL,
+        SHADER_FRAGMENT,
+    ]
+    .concat()
+}
 
 pub struct QuadRenderer {
     pipeline: wgpu::RenderPipeline,
@@ -70,7 +82,7 @@ impl QuadRenderer {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, sample_count: u32) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("quad_shader"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(shader_source().into()),
         });
 
         let globals_buf = device.create_buffer(&wgpu::BufferDescriptor {

@@ -51,6 +51,33 @@ pub struct Gradient {
     pub bottom: Color,
 }
 
+/// Horizontal alignment of a [`Prim::Text`] run around its anchor x.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TextAlign {
+    Left,
+    Center,
+    Right,
+}
+
+impl TextAlign {
+    /// The Canvas `textAlign` keyword both browser backends set before drawing/measuring.
+    pub fn canvas_keyword(&self) -> &'static str {
+        match self {
+            TextAlign::Left => "left",
+            TextAlign::Center => "center",
+            TextAlign::Right => "right",
+        }
+    }
+}
+
+/// CSS font shorthand for a text run: `"{weight} {size}px {family}"` with weight 700/400.
+/// `size` is in the IR's bitmap px; `family` is the resolved family list (the layout
+/// `fontFamily` default is folded in by the decoder). One string shared by the Canvas2D
+/// executor's `fillText` and the WebGPU host rasterizer, so both draw the same glyphs.
+pub fn text_font_spec(size: f32, family: &str, bold: bool) -> String {
+    format!("{} {}px {}", if bold { 700 } else { 400 }, size, family)
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Prim {
     /// Integer bitmap-space filled rect (Canvas2D `fillRect` semantics).
@@ -126,13 +153,19 @@ pub enum Prim {
     /// `VerticalGradient` painted per pane (pane-widget.ts `_drawBackground` spans the pane's
     /// own bitmap, so a stacked pane each gets the full top→bottom ramp).
     Background { rect: [f32; 4], gradient: Gradient },
-    // Text runs come with the glyph engine in aion_render_wgpu; the IR slot is reserved so
-    // layer ordering is stable.
+    /// A run of text anchored at (x, y) bitmap px: x is the aligned edge (`align`), y the
+    /// vertical center (Canvas `textBaseline: "middle"`, the axis-label convention). `size` is
+    /// bitmap px and `family` fully resolved (layout defaults folded in by the decoder), so
+    /// [`text_font_spec`] yields the exact font string both browser backends rasterize with.
     Text {
-        run_id: u32,
         x: f32,
         y: f32,
+        text: String,
         color: Color,
+        size: f32,
+        family: String,
+        align: TextAlign,
+        bold: bool,
     },
 }
 

@@ -8,6 +8,8 @@ import init, { AionChart } from "../pkg/aion_wasm.js";
 
 import { install_gestures } from "./gestures.js";
 import type { pane_primitive, pane_primitive_handle, series_primitive, series_primitive_handle } from "./primitives.js";
+import type { canvas_primitive, canvas_primitive_handle, canvas_pane_view } from "./canvas_plugins.js";
+import { create_canvas_render_target } from "./canvas_plugins.js";
 import type { custom_series_item, custom_series_pane_view } from "./custom_series.js";
 import type {
   bars_info, chart_api, chart_options, data_changed_handler, dbl_click_handler,
@@ -908,6 +910,11 @@ class pane_impl implements pane_api {
     this.chart.repaint();
     return new pane_primitive_handle_impl(this.chart, id);
   }
+
+  attach_canvas_primitive(primitive: canvas_primitive): canvas_primitive_handle {
+    // No wasm involvement: the package owns the plugin canvas and the per-frame pass.
+    return this.chart.attach_canvas_primitive(this.index, primitive);
+  }
 }
 
 /** Detach handle for a registered pane primitive (the wasm registry owns the lifecycle). */
@@ -932,6 +939,26 @@ class series_primitive_handle_impl implements series_primitive_handle {
     if (this.chart.wasm.detach_series_primitive(this.id)) {
       this.chart.repaint();
     }
+  }
+}
+
+/** One registered canvas primitive (Phase C-e) in the package-side registry. */
+interface canvas_primitive_entry {
+  primitive: canvas_primitive;
+  detached: boolean;
+}
+
+/** Detach handle for a registered canvas primitive (the TS registry owns the lifecycle). */
+class canvas_primitive_handle_impl implements canvas_primitive_handle {
+  private detached = false;
+
+  constructor(private readonly chart: chart_impl, private readonly entry: canvas_primitive_entry) {}
+
+  detach(): void {
+    // Idempotent-ish: detaching twice is a no-op (mirrors the wasm-registry handles).
+    if (this.detached) return;
+    this.detached = true;
+    this.chart.detach_canvas_primitive(this.entry);
   }
 }
 
@@ -1058,6 +1085,10 @@ export class chart_impl implements chart_api {
   private hover: { series_id: number | null; object_id: string | null; cursor: string | null } | null = null;
   private readonly backend_runtime_id: number;
   private anim_frame: number | null = null;
+  /** The Phase C-e plugin overlay canvas and its 2D context (package-owned host DOM). */
+  private readonly plugin_ctx: CanvasRenderingContext2D;
+  private readonly canvas_primitives: canvas_primitive_entry[] = [];
+  private plugin_resize_observer: ResizeObserver | null = null;
   private readonly backend_loss_handler = (event: Event): void => {
     if ((event as CustomEvent<number>).detail !== this.backend_runtime_id || this.removed) return;
     // The wgpu callback may arrive from a promise microtask. Defer the repaint once more so the
@@ -1070,9 +1101,13 @@ export class chart_impl implements chart_api {
     private readonly container: HTMLElement,
     private readonly gpu_pane: HTMLCanvasElement,
     private readonly fallback_pane: HTMLCanvasElement,
+    private readonly plugin_canvas: HTMLCanvasElement,
     private readonly overlay: HTMLCanvasElement,
     auto_size: boolean,
   ) {
+    const plugin_ctx = plugin_canvas.getContext("2d");
+    if (plugin_ctx === null) throw new Error("aion: plugin canvas 2D context is unavailable");
+    this.plugin_ctx = plugin_ctx;
     this.backend_runtime_id = this.wasm.backend_runtime_id();
     window.addEventListener("aion-chart-backend-lost", this.backend_loss_handler);
     this.last_visible_logical_range = this.read_visible_logical_range();
@@ -1085,14 +1120,106 @@ export class chart_impl implements chart_api {
     if (auto_size) {
       this.wasm.enable_auto_resize(container);
     }
+    // Canvas primitives (Phase C-e): the engine's own ResizeObserver (registered first, above)
+    // re-renders on container resizes; this one re-runs the package-side canvas pass on the
+    // settled frame so plugin content tracks the new size/DPR. The microtask defers past ALL
+    // observer callbacks (microtasks drain after the notification task, before paint), so the
+    // engine's auto-resize render has always completed by the time the pass runs.
+    this.plugin_resize_observer = new ResizeObserver(() => {
+      queueMicrotask(() => this.run_canvas_primitives());
+    });
+    this.plugin_resize_observer.observe(container);
   }
 
   /** Repaint unless torn down. Named distinctly from the public `render` for internal use. */
   repaint(): void {
     if (!this.removed) {
       this.wasm.render();
+      this.run_canvas_primitives();
       this.emit_visible_range_changes();
     }
+  }
+
+  /**
+   * Canvas primitives (plugin platform Phase C-e): after the engine frame, paint every
+   * attached canvas primitive onto the plugin overlay. The canvas is package-owned host DOM —
+   * no wasm involvement — so ordering with the axis chrome is compositor-level: the plugin
+   * canvas sits above the pane canvases and below the axis/input overlay. Its backing store
+   * tracks the engine-sized overlay's (bitmap = css * dpr at every size/DPR change), and
+   * assigning `width`/`height` clears, so a resize never leaves stale pixels behind.
+   */
+  private run_canvas_primitives(): void {
+    if (this.removed) return;
+    const canvas = this.plugin_canvas;
+    if (canvas.width !== this.overlay.width) canvas.width = this.overlay.width;
+    if (canvas.height !== this.overlay.height) canvas.height = this.overlay.height;
+    const ctx = this.plugin_ctx;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (this.canvas_primitives.length === 0) return;
+    // One target per frame, shared by every view (the reference shares one target per widget).
+    // Media size is the canvas' own CSS box — pinned to the container, like the overlay's.
+    const rect = canvas.getBoundingClientRect();
+    const target = create_canvas_render_target(
+      ctx,
+      { width: rect.width, height: rect.height },
+      { width: canvas.width, height: canvas.height },
+    );
+    // update_all_views before the frame's views (like C-a); views bucket by z_order so all
+    // `normal` views paint before all `top` views (attach order within a pass).
+    const normal: canvas_pane_view["renderer"][] = [];
+    const top: canvas_pane_view["renderer"][] = [];
+    for (const entry of this.canvas_primitives) {
+      const primitive = entry.primitive;
+      try {
+        primitive.update_all_views?.();
+      } catch (error) {
+        console.warn(`aion: canvas primitive \`update_all_views\` threw — ${error}`);
+      }
+      let views;
+      try {
+        views = primitive.pane_views?.();
+      } catch (error) {
+        console.warn(`aion: canvas primitive \`pane_views\` threw — ${error}`);
+        continue;
+      }
+      for (const view of views ?? []) {
+        (view.z_order === "top" ? top : normal).push(view.renderer);
+      }
+    }
+    for (const renderer of [...normal, ...top]) {
+      try {
+        renderer(target);
+      } catch (error) {
+        console.warn(`aion: canvas primitive renderer threw — ${error}`);
+      }
+    }
+  }
+
+  /** Register a canvas primitive (Phase C-e) on behalf of `pane_impl`. */
+  attach_canvas_primitive(pane_index: number, primitive: canvas_primitive): canvas_primitive_handle {
+    const entry: canvas_primitive_entry = { primitive, detached: false };
+    this.canvas_primitives.push(entry);
+    try {
+      primitive.attached?.({ pane_index });
+    } catch (error) {
+      console.warn(`aion: canvas primitive \`attached\` threw — ${error}`);
+    }
+    this.repaint();
+    return new canvas_primitive_handle_impl(this, entry);
+  }
+
+  /** Drop a canvas primitive; the repaint clears its paint (the pass re-clears the canvas). */
+  detach_canvas_primitive(entry: canvas_primitive_entry): void {
+    if (entry.detached) return;
+    entry.detached = true;
+    const index = this.canvas_primitives.indexOf(entry);
+    if (index >= 0) this.canvas_primitives.splice(index, 1);
+    try {
+      entry.primitive.detached?.();
+    } catch (error) {
+      console.warn(`aion: canvas primitive \`detached\` threw — ${error}`);
+    }
+    this.repaint();
   }
 
   private read_visible_logical_range(): logical_range | null {
@@ -1154,6 +1281,7 @@ export class chart_impl implements chart_api {
       }
       this.wasm.set_animation_time(performance.now());
       this.wasm.render();
+      this.run_canvas_primitives();
       this.anim_frame = requestAnimationFrame(tick);
     };
     this.anim_frame = requestAnimationFrame(tick);
@@ -1657,6 +1785,10 @@ export class chart_impl implements chart_api {
     const ctx = output.getContext("2d");
     if (ctx === null) throw new Error("aion: screenshot Canvas2D context is unavailable");
     ctx.drawImage(this.fallback_pane, 0, 0);
+    // Canvas primitives composite at pane level (the reference paints primitives on the pane
+    // canvas), so they are captured regardless of `add_top_layer`. The repaint above re-ran
+    // the pass, so the plugin canvas is fresh.
+    ctx.drawImage(this.plugin_canvas, 0, 0);
     if (add_top_layer) {
       ctx.drawImage(this.overlay, 0, 0);
     }
@@ -1678,8 +1810,10 @@ export class chart_impl implements chart_api {
     window.removeEventListener("aion-chart-backend-lost", this.backend_loss_handler);
     this.detach_gestures?.();
     this.observer?.disconnect();
+    this.plugin_resize_observer?.disconnect();
     this.gpu_pane.remove();
     this.fallback_pane.remove();
+    this.plugin_canvas.remove();
     this.overlay.remove();
   }
 }

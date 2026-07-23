@@ -34,6 +34,9 @@ pub struct LabelAtlas {
     cursor_y: u32,
     shelf_h: u32,
     entries: HashMap<String, AtlasSlot>,
+    /// Bumped every full-atlas reset, so external slot holders (the host's text-run cache)
+    /// can invalidate placements that point at reused texels.
+    epoch: u64,
 }
 
 impl LabelAtlas {
@@ -60,11 +63,17 @@ impl LabelAtlas {
             cursor_y: 0,
             shelf_h: 0,
             entries: HashMap::new(),
+            epoch: 0,
         }
     }
 
     pub fn view(&self) -> &wgpu::TextureView {
         &self.view
+    }
+
+    /// Reset generation: changes every time [`Self::insert`] clears the full atlas.
+    pub fn epoch(&self) -> u64 {
+        self.epoch
     }
 
     pub fn get(&self, key: &str) -> Option<AtlasSlot> {
@@ -99,6 +108,7 @@ impl LabelAtlas {
             self.cursor_x = 0;
             self.cursor_y = 0;
             self.shelf_h = 0;
+            self.epoch += 1;
         }
 
         let slot = AtlasSlot {

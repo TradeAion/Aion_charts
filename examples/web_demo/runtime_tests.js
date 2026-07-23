@@ -65,10 +65,10 @@ function compare_screenshots(webgpu, canvas2d) {
 
 async function capture_presented_webgpu(container) {
   const canvases = Array.from(container.querySelectorAll(":scope > canvas"));
-  if (canvases.length !== 3) {
-    throw new Error(`parity gate: expected three package canvases, found ${canvases.length}`);
+  if (canvases.length !== 4) {
+    throw new Error(`parity gate: expected four package canvases, found ${canvases.length}`);
   }
-  const [gpu_pane, , overlay] = canvases;
+  const [gpu_pane, , , overlay] = canvases;
   const bitmap = await createImageBitmap(gpu_pane);
   const output = document.createElement("canvas");
   output.width = overlay.width;

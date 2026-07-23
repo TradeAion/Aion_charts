@@ -468,6 +468,18 @@ impl ChartInner {
         }
     }
 
+    /// The text defaults folded into decoded `text` commands (prim_decode): the layout font
+    /// family and text color, and the layout font size scaled to the pane's bitmap px (the
+    /// draw context's coordinate space) — the same sources the axis labels draw with.
+    pub(super) fn text_defaults(&self) -> crate::prim_decode::TextDefaults {
+        let layout = self.opts().layout;
+        crate::prim_decode::TextDefaults {
+            family: layout.font_family,
+            size: (layout.font_size * self.dpr) as f32,
+            color: Color::parse_css(&layout.text_color).unwrap_or(Color::rgb(0, 0, 0)),
+        }
+    }
+
     /// Record one pane view's commands and append the decoded prims to the pane's layer for
     /// the view's `z_order` (reference `PrimitivePaneViewZOrder`: bottom → `under`, normal → `main`,
     /// top → `top`).
@@ -520,10 +532,11 @@ impl ChartInner {
             Ok(json) => String::from(json),
             Err(_) => return,
         };
+        let text_defaults = self.text_defaults();
         let Some(frame_pane) = self.frame.panes.get_mut(pane) else {
             return;
         };
-        let decoded = decode_commands(&json, &mut frame_pane.points);
+        let decoded = decode_commands(&json, &mut frame_pane.points, &text_defaults);
         if !decoded.warnings.is_empty() {
             web_sys::console::warn_1(
                 &format!(

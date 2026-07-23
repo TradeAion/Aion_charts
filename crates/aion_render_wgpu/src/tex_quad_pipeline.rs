@@ -1,7 +1,10 @@
-//! Textured-quad pipeline for atlas labels. Glyphs are rasterized white-on-transparent by
-//! the host; the shader uses only the atlas alpha and tints with the instance color, so one
-//! atlas entry serves every text color. Nearest sampling: labels are drawn 1:1 at integer
-//! bitmap positions, matching Canvas2D `fillText` crispness.
+//! Textured-quad pipeline for atlas labels. Glyph runs are rasterized by the host (Canvas2D)
+//! **in the run's own color** — Chrome's glyph anti-aliasing is color-dependent (sRGB mask
+//! gamma), so a white-on-transparent raster tinted at draw time visibly diverges from direct
+//! `fillText` for non-white text. The shader folds the straight-alpha texel into premultiplied
+//! form and multiplies by the instance tint (white for text), reproducing the browser's blend
+//! exactly. Nearest sampling: labels are drawn 1:1 at integer bitmap positions, matching
+//! Canvas2D `fillText` crispness.
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -63,8 +66,11 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let a = textureSample(atlas_tex, atlas_samp, in.uv).a * in.color.a;
-    return vec4<f32>(in.color.rgb * a, a);
+    // Texels are straight-alpha browser rasters in the run's color; fold to premultiplied and
+    // tint. With the text path's white tint this is exactly the browser's source-over source.
+    let t = textureSample(atlas_tex, atlas_samp, in.uv);
+    let a = t.a * in.color.a;
+    return vec4<f32>(t.rgb * in.color.rgb * a, a);
 }
 "#;
 

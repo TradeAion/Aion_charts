@@ -93,6 +93,7 @@
       <label title="Custom series (plugin platform): the reference rounded-candles plugin example, drawn by the plugin"><input type="checkbox" id="custom_toggle"> rounded candles</label>
       <label title="Built-in plugin (reference createSeriesMarkers): the markers fixture drawn by the plugin platform — A/B against ?feature=markers (engine markers)"><input type="checkbox" id="plugin_markers_toggle"> plugin markers</label>
       <label title="Built-in plugin (reference createTextWatermark): two-line watermark painted through the overlay-text hook"><input type="checkbox" id="plugin_watermark_toggle"> plugin watermark</label>
+      <label title="Canvas primitive (plugin platform C-e): the reference vertical-line plugin example, painted with raw Canvas2D calls on the plugin overlay"><input type="checkbox" id="vertline_toggle"> vert line</label>
     </div>
 
     <div class="group" data-caption="Crosshair">
@@ -187,6 +188,7 @@ import { generate_fixture_data } from "./fixture_data.js";
 import { fixture_theme } from "./fixture_styles.js";
 import { marker_fixture, volume_fixture } from "./fixture_features.js";
 import { rounded_candles_pane_view } from "./fixture_custom_series.js";
+import { vert_line_canvas_primitive } from "./fixture_canvas_plugin.js";
 
 const container = document.getElementById("chart_container");
 const status = document.getElementById("status");
@@ -537,6 +539,30 @@ function set_plugin_watermark(on) {
 document.getElementById("plugin_watermark_toggle").addEventListener("change", (e) => set_plugin_watermark(e.target.checked));
 window.__set_plugin_watermark = set_plugin_watermark; // test hook
 window.__plugin_watermark_active = () => plugin_watermark_handle !== null; // test hook
+
+// ---- canvas primitive demo (plugin platform Phase C-e) ----------------------------------------
+// The reference plugin-examples vertical-line plugin, ported near-verbatim to the canvas-primitive
+// escape hatch (fixture_canvas_plugin.js): the renderer draws with raw Canvas2D calls through the
+// CanvasRenderingTarget2D mirror on the plugin overlay (above the pane, below the axis chrome).
+// Off by default so the fidelity fixtures don't shift; `?feature=canvas_primitive` enables it.
+let vert_line_handle = null;
+function set_vert_line(on) {
+  if (on && vert_line_handle === null) {
+    vert_line_handle = chart.panes()[0].attach_canvas_primitive(
+      vert_line_canvas_primitive(chart, main, data[Math.floor(data.length / 2)].time, { color: "#e91e63", width: 3 }),
+    );
+  } else if (!on && vert_line_handle !== null) {
+    vert_line_handle.detach();
+    vert_line_handle = null;
+  }
+  document.getElementById("vertline_toggle").checked = on;
+}
+document.getElementById("vertline_toggle").addEventListener("change", (e) => set_vert_line(e.target.checked));
+if (requested_feature === "canvas_primitive") set_vert_line(true);
+window.__set_vert_line = set_vert_line; // test hook
+window.__vert_line_active = () => vert_line_handle !== null; // test hook
+// Test hook: the package-owned plugin overlay canvas (gpu pane, fallback pane, plugin, overlay).
+window.__plugin_canvas = () => container.querySelectorAll("canvas")[2]; // test hook
 
 status.textContent = `1000 bars · ${chart.backend()} · dpr ${(window.devicePixelRatio || 1).toFixed(3)}`;
 

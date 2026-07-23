@@ -51,9 +51,9 @@ pub struct DrawGroup {
     pub tris: Vec<TriVertex>,
     /// Solid-quad instances in prim order across all layers.
     pub quads: Vec<QuadInstance>,
-    /// Textured-quad instances. Nothing schedules these today (text paints on the host
-    /// overlay); a populated buffer without any [`RunPipeline::TexQuad`] run draws last,
-    /// preserving the previous whole-buffer behavior.
+    /// Textured-quad instances (browser-rasterized text runs). Scheduled in prim order by
+    /// [`prims_to_group`]; a buffer populated without any [`RunPipeline::TexQuad`] run keeps
+    /// the previous whole-buffer, drawn-last behavior.
     pub tex_quads: Vec<TexQuadInstance>,
     /// Run-length draw schedule over `tris`/`quads`/`tex_quads`, in Canvas2D paint order.
     pub runs: Vec<DrawRun>,
@@ -92,9 +92,17 @@ fn push_run(runs: &mut Vec<DrawRun>, pipeline: RunPipeline, first: u32, count: u
 /// Append one layer's prims to the group in list order, exactly as the Canvas2D executor
 /// would paint them: each rect-family prim (`Rect`/`RectFrame`/`HLine`/`VLine`) extends the
 /// quad buffer, every other geometry prim extends the tri buffer, and each maximal
-/// same-pipeline run records one [`DrawRun`]. `Text` prims reserve their ordering slot only —
-/// text paints on the host overlay on both backends.
-pub fn prims_to_group(prims: &[Prim], points: &[[f32; 2]], group: &mut DrawGroup) {
+/// same-pipeline run records one [`DrawRun`]. `Text` prims resolve through `resolve_text` —
+/// the host seam that maps a run to its browser-rasterized atlas quad (the IR/wgpu crates
+/// stay DOM-free). A resolved text quad schedules in prim order like everything else; a
+/// `None` (empty run, raster failure, oversized run) collapses the slot without splitting
+/// the surrounding runs, exactly like a degenerate rect.
+pub fn prims_to_group(
+    prims: &[Prim],
+    points: &[[f32; 2]],
+    group: &mut DrawGroup,
+    resolve_text: &mut dyn FnMut(&Prim) -> Option<TexQuadInstance>,
+) {
     for prim in prims {
         match prim {
             Prim::Rect { .. }
@@ -110,7 +118,13 @@ pub fn prims_to_group(prims: &[Prim], points: &[[f32; 2]], group: &mut DrawGroup
                     group.quads.len() as u32 - first,
                 );
             }
-            Prim::Text { .. } => {}
+            Prim::Text { .. } => {
+                if let Some(instance) = resolve_text(prim) {
+                    let first = group.tex_quads.len() as u32;
+                    group.tex_quads.push(instance);
+                    push_run(&mut group.runs, RunPipeline::TexQuad, first, 1);
+                }
+            }
             _ => {
                 let first = group.tris.len() as u32;
                 geom_prim_to_tris(prim, points, &mut group.tris);
