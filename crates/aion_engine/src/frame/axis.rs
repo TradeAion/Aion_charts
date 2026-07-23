@@ -253,6 +253,39 @@ impl ChartEngine {
         )
     }
 
+    /// Aion extension: bold round-figure price tick labels (TradingView decile rule). Uniform
+    /// ticks: the value is a multiple of `step × 10`. Non-uniform (log-style) ticks: the value
+    /// is an exact power of ten.
+    pub(crate) fn bold_round_decisions(logicals: &[f64], enabled: bool) -> Vec<bool> {
+        if !enabled || logicals.is_empty() {
+            return vec![false; logicals.len()];
+        }
+        let step = logicals
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(f64::INFINITY, f64::min);
+        let uniform = step.is_finite()
+            && step > 0.0
+            && logicals
+                .windows(2)
+                .all(|w| ((w[1] - w[0]).abs() - step).abs() <= step * 1e-6 + 1e-12);
+        logicals
+            .iter()
+            .map(|&v| {
+                if uniform {
+                    let ratio = v / step;
+                    let nearest = ratio.round();
+                    (ratio - nearest).abs() < 1e-6 && (nearest as i64) % 10 == 0
+                } else {
+                    v != 0.0 && {
+                        let log = v.abs().log10();
+                        (log.round() - log).abs() < 1e-9
+                    }
+                }
+            })
+            .collect()
+    }
+
     /// Build backend-neutral axis label decisions. The host supplies only font measurement; all
     /// visible ranges, scale choices, snapping, formatting, and label positions come from the
     /// engine so Canvas2D, WebGPU text, and native glyph backends share one layout result.
@@ -293,7 +326,12 @@ impl ChartEngine {
                 };
                 let text_color = scale_text_color(&pane.price_scale);
                 let ticks_visible = pane.price_scale.options().ticks_visible;
-                for mark in pane.price_scale.build_tick_marks(100, entire_margin) {
+                let marks = pane.price_scale.build_tick_marks(100, entire_margin);
+                let bold_round = Self::bold_round_decisions(
+                    &marks.iter().map(|m| m.logical).collect::<Vec<_>>(),
+                    pane.price_scale.options().bold_round_labels,
+                );
+                for (mark, bold) in marks.iter().zip(bold_round) {
                     let y = mark.coord;
                     if y >= pane.top - 0.5 && y <= pane.top + pane.height + 0.5 {
                         if ticks_visible {
@@ -311,7 +349,7 @@ impl ChartEngine {
                             color: text_color,
                             align: AxisTextAlign::Left,
                             midpoint: AxisTextMidpoint::Label,
-                            bold: false,
+                            bold,
                             background: None,
                         });
                     }
@@ -325,7 +363,12 @@ impl ChartEngine {
                 };
                 let text_color = scale_text_color(&pane.left_scale);
                 let ticks_visible = pane.left_scale.options().ticks_visible;
-                for mark in pane.left_scale.build_tick_marks(100, entire_margin) {
+                let marks = pane.left_scale.build_tick_marks(100, entire_margin);
+                let bold_round = Self::bold_round_decisions(
+                    &marks.iter().map(|m| m.logical).collect::<Vec<_>>(),
+                    pane.left_scale.options().bold_round_labels,
+                );
+                for (mark, bold) in marks.iter().zip(bold_round) {
                     let y = mark.coord;
                     if y >= pane.top - 0.5 && y <= pane.top + pane.height + 0.5 {
                         if ticks_visible {
@@ -343,7 +386,7 @@ impl ChartEngine {
                             color: text_color,
                             align: AxisTextAlign::Right,
                             midpoint: AxisTextMidpoint::Label,
-                            bold: false,
+                            bold,
                             background: None,
                         });
                     }
@@ -381,7 +424,8 @@ impl ChartEngine {
                     color: layout_text_color,
                     align: AxisTextAlign::Center,
                     midpoint: AxisTextMidpoint::None,
-                    bold: weight >= maximum_weight,
+                    // reference `timeScale.allowBoldLabels` (default true): bold major labels.
+                    bold: self.time_scale.options().allow_bold_labels && weight >= maximum_weight,
                     background: None,
                 });
             }

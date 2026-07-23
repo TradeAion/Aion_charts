@@ -1,0 +1,22 @@
+import { chromium } from "playwright";
+const b = await chromium.launch({ channel: "chromium" });
+const ctx = await b.newContext({ viewport: { width: 1280, height: 750 }, deviceScaleFactor: 1.5 });
+const p = await ctx.newPage();
+const q = new URLSearchParams({ runtimeTest: "presentedFrame", backend: "canvas2d", dpr: "1.5", spacing: "50", theme: "light" });
+await p.goto("http://127.0.0.1:4174/reference.html?" + q);
+await p.waitForFunction(() => document.documentElement.dataset.ready === "true");
+const out = await p.evaluate(() => {
+  const c = window.__reference.chart;
+  const r = { before: c.priceScale("right").width() };
+  c.applyOptions({ layout: { fontSize: 9 } });
+  r.font9 = c.priceScale("right").width();
+  c.applyOptions({ layout: { fontSize: 16 } });
+  r.font16 = c.priceScale("right").width();
+  c.applyOptions({ layout: { fontSize: 12 } });
+  r.font12 = c.priceScale("right").width();
+  c.priceScale("right").applyOptions({ mode: 1 });
+  r.afterModeChange = c.priceScale("right").width();
+  return r;
+});
+console.log(JSON.stringify(out));
+await b.close();

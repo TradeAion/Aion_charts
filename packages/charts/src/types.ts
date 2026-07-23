@@ -182,6 +182,8 @@ export interface time_scale_options {
    * enabled (reference `allowShiftVisibleRangeOnWhitespaceReplacement`, default `false`).
    */
   allow_shift_visible_range_on_whitespace_replacement?: boolean;
+  /** reference `timeScale.allowBoldLabels` (default true): bold the major time tick labels. */
+  allow_bold_labels?: boolean;
   /**
    * Show the whole time-scale strip (reference `timeScale.visible`, default `true`). Distinct from
    * `time_visible`, which only controls whether the labels show the time of day.
@@ -229,6 +231,11 @@ export interface price_scale_options {
    * Price scale text color (reference `textColor`); when unset, the scale follows `layout.textColor`.
    */
   text_color?: string;
+  /**
+   * Aion extension (TradingView-style, default true): draw round-figure tick labels in the bold
+   * font — multiples of step×10 on uniform ticks, exact powers of ten on log ticks.
+   */
+  bold_round_labels?: boolean;
 }
 
 /** The visible raw-value range of a price scale. */
@@ -345,6 +352,8 @@ export interface chart_price_scale_options {
   minimumWidth?: number;
   /** Price scale text color (reference `textColor`); when unset, the scale follows `layout.textColor`. */
   textColor?: string;
+  /** Bold round-figure tick labels (Aion extension, TradingView-style, default `true`). */
+  boldRoundLabels?: boolean;
 }
 
 /** Crosshair "tracking mode" behavior on touch (reference `trackingMode`). Package-level. */

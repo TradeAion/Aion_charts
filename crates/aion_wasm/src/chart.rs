@@ -1149,6 +1149,11 @@ impl AionChart {
             .set_allow_shift_visible_range_on_whitespace_replacement(allow);
     }
 
+    /// reference `timeScale.allowBoldLabels` (default true): bold the major time tick labels.
+    pub fn set_allow_bold_labels(&mut self, allow: bool) {
+        self.inner.borrow_mut().set_allow_bold_labels(allow);
+    }
+
     /// reference `localization.dateFormat` (default `dd MMM \'yy`): the crosshair time-label
     /// pattern. Tokens: `dd`/`d`, `MM`/`M`/`MMM`/`MMMM`, `yy`/`yyyy`, `'…'` quoted literals.
     pub fn set_date_format(&mut self, pattern: &str) {

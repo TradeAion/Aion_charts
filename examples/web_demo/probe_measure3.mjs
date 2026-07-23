@@ -1,0 +1,15 @@
+import { chromium } from "playwright";
+const b = await chromium.launch({ channel: "chromium" });
+const ctx = await b.newContext({ viewport: { width: 1280, height: 750 }, deviceScaleFactor: 1.5 });
+const p = await ctx.newPage();
+const q = new URLSearchParams({ runtimeTest: "presentedFrame", backend: "canvas2d", dpr: "1.5", spacing: "50", theme: "light" });
+await p.goto("http://127.0.0.1:4174/reference.html?" + q);
+await p.waitForFunction(() => document.documentElement.dataset.ready === "true");
+const w = () => p.evaluate(() => window.__reference.chart.priceScale("right").width());
+const raf2 = () => p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+const out = { before: await w() };
+await p.evaluate(() => window.__reference.chart.applyOptions({ layout: { fontSize: 9 } })); await raf2(); out.font9 = await w();
+await p.evaluate(() => window.__reference.chart.applyOptions({ layout: { fontSize: 16 } })); await raf2(); out.font16 = await w();
+await p.evaluate(() => window.__reference.chart.applyOptions({ layout: { fontSize: 12 } })); await raf2(); out.font12 = await w();
+console.log(JSON.stringify(out));
+await b.close();

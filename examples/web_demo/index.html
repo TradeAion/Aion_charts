@@ -145,7 +145,7 @@
           <option value="Georgia, serif">serif</option>
         </select>
       </label>
-      <label>size <input type="range" id="font_size" min="9" max="20" step="1" value="12"><span id="font_size_val">12</span></label>
+      <label>size <input type="range" id="font_size" min="8" max="20" step="1" value="12"><span id="font_size_val">12</span></label>
     </div>
 
     <div class="group" data-caption="Series chrome" title="Built-in last-price line and last-value axis label on the main series (reference defaults: both on; the line follows the bar direction color)">
@@ -255,10 +255,11 @@ if (parity_fixture !== null) {
     horzLines: { color: palette.grid },
   };
   // Keep the cross-library fidelity gate pinned to the reference's axis-border default; the package
-  // theme palette (theme.ts) must not leak into the comparison.
+  // theme palette (theme.ts) must not leak into the comparison. `boldRoundLabels` is an Aion-only
+  // extension (default on) with no reference counterpart, so the comparison disables it too.
   chart_options.timeScale = { borderColor: "#2B2B43" };
-  chart_options.leftPriceScale = { ...(chart_options.leftPriceScale ?? {}), borderColor: "#2B2B43" };
-  chart_options.rightPriceScale = { ...(chart_options.rightPriceScale ?? {}), borderColor: "#2B2B43" };
+  chart_options.leftPriceScale = { ...(chart_options.leftPriceScale ?? {}), borderColor: "#2B2B43", boldRoundLabels: false };
+  chart_options.rightPriceScale = { ...(chart_options.rightPriceScale ?? {}), borderColor: "#2B2B43", boldRoundLabels: false };
 }
 if (runtime_test === "adapterFailure") chart_options.__simulate_webgpu_adapter_failure = true;
 if (query.get("forceFallbackAdapter") === "1") chart_options.__force_webgpu_fallback_adapter = true;

@@ -410,6 +410,7 @@ test("public time and price scale handles are engine-owned and reference-compati
     right_bar_stays_on_scroll: false,
     shift_visible_range_on_new_bar: true,
     allow_shift_visible_range_on_whitespace_replacement: false,
+    allow_bold_labels: true,
     ticks_visible: false,
     minimum_height: 0,
     tick_mark_max_character_length: 8,

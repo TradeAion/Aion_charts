@@ -30,6 +30,9 @@ pub struct TimeScaleOptions {
     /// shift when the "new bar" replaces an existing whitespace time point
     /// (time-scale.ts:173-181).
     pub allow_shift_visible_range_on_whitespace_replacement: bool,
+    /// reference `timeScale.allowBoldLabels` (default true): draw the major (highest-weight)
+    /// time tick labels in the bold font (time-axis-widget.ts `_baseBoldFont`).
+    pub allow_bold_labels: bool,
     /// When set, overrides `right_offset` and is preserved in pixels across zoom.
     pub right_offset_pixels: Option<f64>,
 }
@@ -48,6 +51,7 @@ impl Default for TimeScaleOptions {
             // reference defaults (time-scale-options-defaults.ts:17-18).
             shift_visible_range_on_new_bar: true,
             allow_shift_visible_range_on_whitespace_replacement: false,
+            allow_bold_labels: true,
             right_offset_pixels: None,
         }
     }
@@ -352,6 +356,11 @@ impl TimeScaleCore {
     pub fn set_allow_shift_visible_range_on_whitespace_replacement(&mut self, allow: bool) {
         self.options
             .allow_shift_visible_range_on_whitespace_replacement = allow;
+    }
+
+    /// reference `timeScale.allowBoldLabels` (default true): bold the major time tick labels.
+    pub fn set_allow_bold_labels(&mut self, allow: bool) {
+        self.options.allow_bold_labels = allow;
     }
 
     /// Host-pushed "all scaling and scrolling disabled" flag (reference

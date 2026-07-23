@@ -1370,3 +1370,65 @@ fn crosshair_follows_the_cursor_into_the_empty_area() {
         "time label present over a real bar"
     );
 }
+
+#[test]
+fn bold_round_labels_decile_rule() {
+    // Uniform step 2: multiples of 20 are round.
+    let marks: Vec<f64> = (88..=126).step_by(2).map(|v| v as f64).collect();
+    let bold = ChartEngine::bold_round_decisions(&marks, true);
+    for (v, b) in marks.iter().zip(&bold) {
+        assert_eq!(*b, matches!(*v as i64, 100 | 120), "value {v}");
+    }
+    // Uniform step 1000: multiples of 10000 are round (TradingView's screenshot behavior).
+    let marks: Vec<f64> = (16_000..=40_000).step_by(1_000).map(|v| v as f64).collect();
+    let bold = ChartEngine::bold_round_decisions(&marks, true);
+    for (v, b) in marks.iter().zip(&bold) {
+        assert_eq!(
+            *b,
+            *v as i64 == 40_000 || *v as i64 % 10_000 == 0,
+            "value {v}"
+        );
+    }
+    // Negatives follow the same rule (uniform step 4: multiples of 40 are round).
+    let bold = ChartEngine::bold_round_decisions(
+        &[
+            -40.0, -36.0, -32.0, -28.0, -24.0, -20.0, -16.0, -12.0, -8.0, -4.0, 0.0,
+        ],
+        true,
+    );
+    assert_eq!(
+        bold,
+        vec![true, false, false, false, false, false, false, false, false, false, true]
+    );
+    // Disabled: nothing bold.
+    let bold = ChartEngine::bold_round_decisions(&[100.0, 120.0], false);
+    assert_eq!(bold, vec![false, false]);
+    // Non-uniform (log-style) ticks: exact powers of ten only.
+    let bold = ChartEngine::bold_round_decisions(&[1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0], true);
+    assert_eq!(bold, vec![true, false, false, true, false, false, true]);
+}
+
+#[test]
+fn allow_bold_labels_gates_major_time_ticks() {
+    let mut chart = crosshair_chart();
+    chart.time_scale.set_width(300.0);
+    let frame = chart.build_axis_frame(80.0, |t| t.len() as f64 * 7.0);
+    let time_labels: Vec<_> = frame
+        .labels
+        .iter()
+        .filter(|l| l.midpoint == AxisTextMidpoint::None)
+        .collect();
+    assert!(
+        time_labels.iter().any(|l| l.bold),
+        "major labels bold by default"
+    );
+    chart.time_scale.set_allow_bold_labels(false);
+    let frame = chart.build_axis_frame(80.0, |t| t.len() as f64 * 7.0);
+    assert!(
+        frame
+            .labels
+            .iter()
+            .all(|l| l.midpoint != AxisTextMidpoint::None || !l.bold),
+        "no bold time labels when allowBoldLabels is off"
+    );
+}

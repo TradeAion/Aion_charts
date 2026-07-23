@@ -45,6 +45,10 @@ pub struct PriceScaleCoreOptions {
     /// reference `textColor` (default `None` = follow `layout.textColor`). Stored verbatim as a
     /// CSS string; parsed at render time.
     pub text_color: Option<String>,
+    /// Aion extension (TradingView-style, default true): draw round-figure tick labels in the
+    /// bold font — multiples of `step × 10` on uniform ticks, exact powers of ten on
+    /// non-uniform (log) ticks.
+    pub bold_round_labels: bool,
 }
 
 impl Default for PriceScaleCoreOptions {
@@ -65,6 +69,7 @@ impl Default for PriceScaleCoreOptions {
             entire_text_only: false,
             minimum_width: 0.0,
             text_color: None,
+            bold_round_labels: true,
         }
     }
 }
@@ -194,6 +199,11 @@ impl PriceScaleCore {
     /// render time.
     pub fn set_text_color(&mut self, css: Option<String>) {
         self.options.text_color = css;
+    }
+
+    /// Aion extension (TradingView-style, default true): bold round-figure tick labels.
+    pub fn set_bold_round_labels(&mut self, bold: bool) {
+        self.options.bold_round_labels = bold;
     }
 
     pub fn is_auto_scale(&self) -> bool {

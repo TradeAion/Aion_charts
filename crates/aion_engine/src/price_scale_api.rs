@@ -358,6 +358,9 @@ impl ChartEngine {
                 scale.set_text_color((!css.is_empty()).then(|| css.to_string()));
             }
         }
+        if let Some(value) = flag("bold_round_labels") {
+            scale.set_bold_round_labels(value);
+        }
         true
     }
 
@@ -391,6 +394,7 @@ impl ChartEngine {
                 "entire_text_only": options.entire_text_only,
                 "minimum_width": options.minimum_width,
                 "text_color": options.text_color,
+                "bold_round_labels": options.bold_round_labels,
             })
             .to_string(),
         )

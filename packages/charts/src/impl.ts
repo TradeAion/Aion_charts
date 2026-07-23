@@ -100,6 +100,7 @@ const PRICE_SCALE_JSON_OPTION_KEYS = [
   "entire_text_only",
   "minimum_width",
   "text_color",
+  "bold_round_labels",
 ] as const;
 
 /** Engine kind ordinal → public kind name (index-aligned with `KIND_TO_U8`). */
@@ -706,6 +707,8 @@ class time_scale_impl implements time_scale_api {
       this.chart.wasm.set_allow_shift_visible_range_on_whitespace_replacement(
         options.allow_shift_visible_range_on_whitespace_replacement,
       );
+    if (options.allow_bold_labels !== undefined)
+      this.chart.wasm.set_allow_bold_labels(options.allow_bold_labels);
     if (options.ticks_visible !== undefined) this.chart.wasm.set_time_ticks_visible(options.ticks_visible);
     if (options.minimum_height !== undefined) this.chart.wasm.set_time_axis_minimum_height(options.minimum_height);
     if (options.tick_mark_max_character_length !== undefined)
@@ -1579,7 +1582,15 @@ export class chart_impl implements chart_api {
     if (localization !== undefined) this.apply_localization(localization);
     // autoSize stays in `rest` (the engine stores it); the active flag is tracked TS-side.
     if (options.autoSize !== undefined) this.set_auto_size(options.autoSize);
-    this.wasm.apply_options(JSON.stringify(engine_options));
+    // Gesture-only patches strip down to an empty object; an empty patch is a no-op for the
+    // engine, so don't forward it (it would still trigger the full relayout that real patches
+    // get — reference applyOptions(fullUpdate) semantics — with nothing to apply).
+    if (Object.keys(engine_options).some((key) => {
+      const value = (engine_options as Record<string, unknown>)[key];
+      return value !== undefined && (typeof value !== "object" || value === null || Object.keys(value).length > 0);
+    })) {
+      this.wasm.apply_options(JSON.stringify(engine_options));
+    }
     this.repaint();
   }
 

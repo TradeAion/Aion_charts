@@ -870,6 +870,11 @@ impl ChartInner {
             .set_allow_shift_visible_range_on_whitespace_replacement(allow);
     }
 
+    /// reference `timeScale.allowBoldLabels` (default true): bold the major time tick labels.
+    pub fn set_allow_bold_labels(&mut self, allow: bool) {
+        self.engine.set_allow_bold_labels(allow);
+    }
+
     /// reference `localization.dateFormat` (default `dd MMM \'yy`): the crosshair time-label
     /// pattern. Tokens `dd`/`d`, `MM`/`M`/`MMM`/`MMMM`, `yy`/`yyyy` with `'…'` quoting.
     pub fn set_date_format(&mut self, pattern: &str) {
@@ -1025,9 +1030,13 @@ impl ChartInner {
         }
         if let Err(e) = self.engine.apply_options(patch_json) {
             web_sys::console::warn_1(
-                &format!("aion: apply_options ignored malformed patch — {e}").into(),
+                &format!("aion: apply_options ignored malformed patch - {e}").into(),
             );
         }
+        // reference `applyOptions` triggers a FULL update: the axis width renegotiates in both
+        // directions (a smaller font/narrower labels shrink the strip). The grow-only rule
+        // applies only to the incremental marks path (render()).
+        self.recompute_layout(true);
     }
 
     /// Current options as a JSON string (round-trips the deep-merged state back to JS).

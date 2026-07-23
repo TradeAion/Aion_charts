@@ -1327,6 +1327,11 @@ impl ChartEngine {
             .set_allow_shift_visible_range_on_whitespace_replacement(allow);
     }
 
+    /// reference `timeScale.allowBoldLabels` (default true): bold the major time tick labels.
+    pub fn set_allow_bold_labels(&mut self, allow: bool) {
+        self.time_scale.set_allow_bold_labels(allow);
+    }
+
     /// reference `chart.setCrosshairPosition(price, time, series)` (chart-model.ts
     /// `setAndSaveSyntheticPosition`): position the crosshair at a data point without a DOM
     /// event. The time must land exactly on a merged time point (false otherwise); x is that
@@ -1488,6 +1493,9 @@ impl ChartEngine {
         if let Some(allow) = flag("allowShiftVisibleRangeOnWhitespaceReplacement") {
             self.set_allow_shift_visible_range_on_whitespace_replacement(allow);
         }
+        if let Some(allow) = flag("allowBoldLabels") {
+            self.set_allow_bold_labels(allow);
+        }
     }
 
     /// Route a `localization` options patch: `dateFormat` drives the crosshair time label
@@ -1535,6 +1543,9 @@ impl ChartEngine {
                         scale.set_text_color((!css.is_empty()).then(|| css.to_string()));
                     }
                 }
+                if let Some(bold) = flag("boldRoundLabels") {
+                    scale.set_bold_round_labels(bold);
+                }
             }
         }
     }
@@ -1578,6 +1589,7 @@ impl ChartEngine {
             "right_bar_stays_on_scroll": options.right_bar_stays_on_scroll,
             "shift_visible_range_on_new_bar": options.shift_visible_range_on_new_bar,
             "allow_shift_visible_range_on_whitespace_replacement": options.allow_shift_visible_range_on_whitespace_replacement,
+            "allow_bold_labels": options.allow_bold_labels,
         })
         .to_string()
     }
