@@ -151,6 +151,9 @@
     <div class="group" data-caption="Series chrome" title="Built-in last-price line and last-value axis label on the main series (reference defaults: both on; the line follows the bar direction color)">
       <label><input type="checkbox" id="price_line_toggle" checked> price line</label>
       <label><input type="checkbox" id="last_value_toggle" checked> last value</label>
+      <label title="TradingView-style title chip in the last-value cluster (darker shade of the label color, left of the price)"><input type="checkbox" id="title_chip_toggle" checked> title chip</label>
+      <label>title <input type="text" id="series_title" value="AION" size="6"></label>
+      <label title="TradingView-style candle-close countdown stacked below the price in the last-value cluster"><input type="checkbox" id="countdown_toggle"> countdown</label>
     </div>
 
     <!-- price/time axis cosmetics: border (reference borderColor/borderVisible) + text (textColor) -->
@@ -230,7 +233,9 @@ const parity_fixture = runtime_test === null
   : await fetch("./fixtures/d1/candles.json", { cache: "no-store" }).then((response) => response.json());
 // External browser runners cannot read a presented WebGPU canvas from page JavaScript. This mode
 // removes all non-chart UI so an ordinary viewport screenshot is a stable full-frame artifact.
-if (runtime_test === "presentedFrame") {
+// backendParity also hides it: its two captures happen on opposite sides of the status-line
+// update, and a taller/wrapped toolbar would change the container height between them.
+if (runtime_test === "presentedFrame" || runtime_test === "backendParity") {
   document.getElementById("bar").style.display = "none";
   document.getElementById("legend").style.display = "none";
 }
@@ -646,6 +651,19 @@ document.getElementById("grid_style").addEventListener("change", apply_grid_styl
 // Built-in last-price line + last-value label toggles (main series).
 document.getElementById("price_line_toggle").addEventListener("change", (e) => main.apply_options({ price_line_visible: e.target.checked }));
 document.getElementById("last_value_toggle").addEventListener("change", (e) => main.apply_options({ last_value_visible: e.target.checked }));
+// TradingView-style last-value cluster: title chip (darker shade, left of the price) and a
+// candle-close countdown row below. Typing a title or toggling either control applies the trio;
+// nothing is applied on load so the fidelity fixtures stay untouched.
+function apply_series_chrome() {
+  main.apply_options({
+    title: document.getElementById("series_title").value,
+    title_visible: document.getElementById("title_chip_toggle").checked,
+    countdown_visible: document.getElementById("countdown_toggle").checked,
+  });
+}
+document.getElementById("title_chip_toggle").addEventListener("change", apply_series_chrome);
+document.getElementById("series_title").addEventListener("input", apply_series_chrome);
+document.getElementById("countdown_toggle").addEventListener("change", apply_series_chrome);
 
 document.getElementById("up_color").addEventListener("input", () => main.apply_options({ up_color: document.getElementById("up_color").value }));
 document.getElementById("down_color").addEventListener("input", () => main.apply_options({ down_color: document.getElementById("down_color").value }));

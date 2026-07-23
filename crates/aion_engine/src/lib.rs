@@ -14,7 +14,9 @@ mod series_query_api;
 #[cfg(test)]
 mod tests;
 
-pub use frame::{AxisFrame, AxisLabel, AxisTextAlign, AxisTextMidpoint, ChartFrame, FramePane};
+pub use frame::{
+    AxisFrame, AxisLabel, AxisLabelCorners, AxisTextAlign, AxisTextMidpoint, ChartFrame, FramePane,
+};
 pub use hit_test::{SeriesHit, SeriesHitKind};
 pub(crate) use indicators::IndicatorBinding;
 pub use indicators::IndicatorKind;
@@ -307,6 +309,18 @@ pub struct SeriesEntry {
     /// reference `SeriesOptionsCommon.lastValueVisible` (series-options-defaults.ts: true): draw this
     /// series' last-value label on its price scale.
     pub last_value_visible: bool,
+    /// reference `title` (series-options-defaults.ts: `''`): the series' display name. Shown as a
+    /// chip in a darker shade of the label color at the front of the last-value label cluster
+    /// when `title_visible` holds (TradingView-style).
+    pub title: String,
+    /// TradingView-style title-chip toggle (default true): include the series' `title` as the
+    /// darker chip of the last-value cluster. The chip renders even when the price label itself
+    /// is off (`last_value_visible: false`).
+    pub title_visible: bool,
+    /// TradingView-style candle-close countdown (default false): stack a countdown row below the
+    /// price inside the last-value cluster. Hidden when the series has no usable bar interval
+    /// or the host installed no clock (`now_override`).
+    pub countdown_visible: bool,
     /// reference `priceLineVisible` (default true): draw the built-in last-price line for this series.
     pub price_line_visible: bool,
     /// reference `priceLineSource` (PriceLineSource): 0 = LastBar (default), 1 = LastVisible.
@@ -424,6 +438,9 @@ impl SeriesEntry {
             // reference defaults: series-options-defaults.ts (common), line/area/baseline-series.ts
             // (line family + baseline quadrants), bar-series.ts, histogram-series.ts.
             last_value_visible: true,
+            title: String::new(),
+            title_visible: true,
+            countdown_visible: false,
             price_line_visible: true,
             price_line_source: 0,
             price_line_width: 1.0,
@@ -584,6 +601,11 @@ pub struct ChartEngine {
     pub css_width: f64,
     pub css_height: f64,
     pub dpr: f64,
+    /// Host-installed clock (UTC seconds) for the candle-close countdown rows of the last-value
+    /// label clusters (TradingView-style extension). The engine is headless: countdown rows stay
+    /// hidden until a host supplies the time — the wasm render path feeds the browser's system
+    /// time every frame unless a value is pinned; tests pin one here for determinism.
+    pub now_override: Option<f64>,
     pub crosshair: Option<(f64, f64)>,
     pub pane_w: f64,
     pub pane_h: f64,
@@ -647,6 +669,7 @@ impl ChartEngine {
             css_width,
             css_height,
             dpr,
+            now_override: None,
             crosshair: None,
             pane_w: css_width,
             pane_h: css_height,
@@ -680,6 +703,15 @@ impl ChartEngine {
     /// 2 DayOfMonth, 3 Time, 4 TimeWithSeconds).
     pub fn set_tick_mark_formatter(&mut self, f: Option<TickMarkFormatterFn>) {
         self.tick_mark_formatter_fn = f;
+    }
+
+    /// Pin the engine clock (UTC seconds) used by the candle-close countdown rows of the
+    /// last-value label clusters. Hosts with a ticking countdown call this on every tick;
+    /// per frame the wasm render path also feeds the system time when nothing was pinned.
+    pub fn set_now_seconds(&mut self, now: f64) {
+        if now.is_finite() {
+            self.now_override = Some(now);
+        }
     }
 
     /// Install (or clear) the host crosshair time formatter (reference `localization.timeFormatter`).

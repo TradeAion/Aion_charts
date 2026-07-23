@@ -44,8 +44,9 @@ use aion_core::options::{ChartOptions, WatermarkOptions};
 use aion_core::scale::price_scale_core::PriceScaleMode;
 use aion_engine::{
     crosshair_mode_from_u8, line_style_from_u8, marker_pos, marker_shape, AxisFrame, AxisLabel,
-    AxisTextAlign, AxisTextMidpoint, ChartEngine, Marker, Pane, PriceFormatterFn, PriceScaleTarget,
-    PrimitiveAutoscaleContribution, SeriesKind, TickMarkFormatterFn, TimeFormatterFn,
+    AxisLabelCorners, AxisTextAlign, AxisTextMidpoint, ChartEngine, Marker, Pane, PriceFormatterFn,
+    PriceScaleTarget, PrimitiveAutoscaleContribution, SeriesKind, TickMarkFormatterFn,
+    TimeFormatterFn,
 };
 use aion_render::canvas2d::{execute as execute_canvas2d, Canvas2d, Viewport as CanvasViewport};
 use aion_render::color::Color;
@@ -187,6 +188,10 @@ struct ChartInner {
     /// canvas + atlas cache). `None` only if the offscreen context could not be created —
     /// the Canvas2D backend draws text directly and never consults this.
     text_runs: Option<TextRunStore>,
+    /// Host-pinned clock (UTC seconds) for the candle-close countdown labels. `None` = the
+    /// render path feeds the browser's system time every frame; `set_now_seconds` pins a value
+    /// (the package's 1s countdown timer), which then drives every render until replaced.
+    now_override: Option<f64>,
 }
 
 /// One in-pane overlay text draw registered by a primitive's `text_views` hook (plugin
@@ -423,6 +428,7 @@ pub async fn create_chart(
         next_primitive_id: 1,
         custom_series: Vec::new(),
         primitive_texts: Vec::new(),
+        now_override: None,
         text_runs: match TextRunStore::new() {
             Ok(store) => Some(store),
             Err(error) => {
@@ -871,6 +877,12 @@ impl AionChart {
     /// Set the host animation clock (ms). Call before `render()` in the rAF loop (Phase B3).
     pub fn set_animation_time(&mut self, t_ms: f64) {
         self.inner.borrow_mut().set_animation_time(t_ms);
+    }
+
+    /// Pin the countdown clock (UTC seconds). Until the first pin the render path feeds the
+    /// browser's system time every frame; the package's countdown timer pins once per second.
+    pub fn set_now_seconds(&mut self, now: f64) {
+        self.inner.borrow_mut().now_override = if now.is_finite() { Some(now) } else { None };
     }
 
     /// Move a series to the bottom-band overlay (volume) price scale with the given fractional

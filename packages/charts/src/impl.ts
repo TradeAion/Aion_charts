@@ -56,11 +56,24 @@ function same_time_range(a: time_range | null, b: time_range | null): boolean {
 const SCROLL_ANIM_MS = 300;
 
 /**
+ * Whether the candle-close countdown timer should run: any series with `countdown_visible`
+ * and data. Factored pure so the start/stop logic is testable without a chart.
+ */
+export function countdown_timer_needed(
+  series: readonly { countdown_visible?: boolean; has_data: boolean }[],
+): boolean {
+  return series.some((s) => s.countdown_visible === true && s.has_data);
+}
+
+/**
  * Series style keys without a dedicated wasm setter, forwarded to `series_apply_options_json`
  * as one snake_case JSON patch (the engine ignores unknown keys).
  */
 const SERIES_JSON_OPTION_KEYS = [
   "last_value_visible",
+  "title",
+  "title_visible",
+  "countdown_visible",
   "price_line_visible",
   "price_line_source",
   "price_line_width",
@@ -281,6 +294,7 @@ class series_impl implements series_api {
     if (p.body_colors !== undefined || p.wick_colors !== undefined || p.border_colors !== undefined) {
       this.chart.wasm.set_series_point_colors(this.id, p.body_colors, p.wick_colors, p.border_colors);
     }
+    this.chart.sync_countdown_timer();
     this.chart.repaint();
     for (const handler of this.data_changed_subs) handler("full");
   }
@@ -301,6 +315,8 @@ class series_impl implements series_api {
     this.chart.wasm.update_series_bar_styled(
       this.id, time_to_utc_seconds(point.time), o, h, l, c, body, wick, border,
     );
+    // Data arriving on a countdown-enabled series can start the timer (cheap flag check).
+    if (this.chart.countdown_series_present) this.chart.sync_countdown_timer();
     this.chart.repaint();
     for (const handler of this.data_changed_subs) handler("update");
   }
@@ -415,6 +431,7 @@ class series_impl implements series_api {
     if (Object.keys(json_patch).length > 0) {
       this.chart.wasm.series_apply_options_json(this.id, JSON.stringify(json_patch));
     }
+    this.chart.sync_countdown_timer();
     this.chart.repaint();
   }
 
@@ -1088,6 +1105,13 @@ export class chart_impl implements chart_api {
   private hover: { series_id: number | null; object_id: string | null; cursor: string | null } | null = null;
   private readonly backend_runtime_id: number;
   private anim_frame: number | null = null;
+  /** The 1s candle-close countdown interval; `null` while no countdown is visible. */
+  private countdown_timer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Cached "any live series has countdown_visible" flag (refreshed by `sync_countdown_timer`)
+   * so streaming `update` calls can cheaply decide whether data-arrival may start the timer.
+   */
+  countdown_series_present = false;
   /** The Phase C-e plugin overlay canvas and its 2D context (package-owned host DOM). */
   private readonly plugin_ctx: CanvasRenderingContext2D;
   private readonly canvas_primitives: canvas_primitive_entry[] = [];
@@ -1275,6 +1299,47 @@ export class chart_impl implements chart_api {
       this.stop_animation();
     }
   }
+
+  /**
+   * Start or stop the 1s candle-close countdown interval to match whether any live series has
+   * `countdown_visible` and data (TradingView-style countdown row in the last-value cluster).
+   * Central rebuild point: called from the series apply-options/set-data/remove paths and on
+   * chart teardown. Ticks pin the engine clock and repaint; ticks are skipped while the
+   * document is hidden.
+   */
+  sync_countdown_timer(): void {
+    if (this.removed) return;
+    const candidates: { countdown_visible?: boolean; has_data: boolean }[] = [];
+    this.countdown_series_present = false;
+    for (const series of this.series_by_id.values()) {
+      if (series.options().countdown_visible === true) {
+        this.countdown_series_present = true;
+        candidates.push({
+          countdown_visible: true,
+          has_data: this.wasm.series_last_value_data(series.id, true) !== "",
+        });
+      }
+    }
+    if (countdown_timer_needed(candidates)) {
+      if (this.countdown_timer === null) {
+        this.wasm.set_now_seconds(Date.now() / 1000);
+        this.countdown_timer = setInterval(() => {
+          if (document.hidden) return;
+          this.wasm.set_now_seconds(Date.now() / 1000);
+          this.repaint();
+        }, 1000);
+      }
+    } else if (this.countdown_timer !== null) {
+      clearInterval(this.countdown_timer);
+      this.countdown_timer = null;
+    }
+  }
+  private stop_countdown_timer(): void {
+    if (this.countdown_timer !== null) {
+      clearInterval(this.countdown_timer);
+      this.countdown_timer = null;
+    }
+  }
   private start_animation(): void {
     if (this.anim_frame !== null || this.removed) return;
     const tick = () => {
@@ -1356,6 +1421,7 @@ export class chart_impl implements chart_api {
     if (!this.wasm.remove_series(series.id)) return;
     impl.mark_removed();
     this.series_by_id.delete(series.id);
+    this.sync_countdown_timer();
     this.repaint();
   }
 
@@ -1818,6 +1884,7 @@ export class chart_impl implements chart_api {
     if (this.removed) return;
     this.removed = true;
     this.stop_animation();
+    this.stop_countdown_timer();
     window.removeEventListener("aion-chart-backend-lost", this.backend_loss_handler);
     this.detach_gestures?.();
     this.observer?.disconnect();

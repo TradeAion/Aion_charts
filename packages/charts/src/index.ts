@@ -27,6 +27,9 @@ import { ensure_init } from "./impl.js";
 import { theme_options } from "./theme.js";
 import type { chart_api, chart_options, deep_partial, localization_options, tracking_mode_options } from "./types.js";
 
+/** Pure countdown-timer predicate (unit-tested without a chart). */
+export { countdown_timer_needed } from "./impl.js";
+
 // ---------------------------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------------------------

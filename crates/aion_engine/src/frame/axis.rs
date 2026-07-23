@@ -6,12 +6,61 @@ use super::*;
 /// the original `coordinate` plus the render coordinate the overlap pass adjusts). `align`
 /// is the owning scale's `alignLabels` — a scale with it off leaves its labels at their raw
 /// coordinates (price-axis-widget.ts:633 early-return).
+///
+/// The candidate is a TradingView-style CLUSTER of up to three independently-toggleable parts:
+/// the title chip (a darker shade of the label color, left of the price text), the price text,
+/// and a candle-close countdown row stacked below. `y`/`height` describe the whole cluster
+/// (center + total height), which is what the overlap pass spaces; `top_height` is the title +
+/// price row's share (`0` when both are hidden, e.g. a countdown-only cluster).
 struct LastValueLabel {
-    text: String,
+    /// Price text; `None` when the series' `lastValueVisible` is off (the cluster can still
+    /// render its title chip and/or countdown row).
+    price_text: Option<String>,
+    /// Title chip text (the series' `title`); `None` when unset or `title_visible` is off.
+    title: Option<String>,
+    /// Countdown row text; `None` when `countdown_visible` is off, the series has no usable
+    /// bar interval, or no host clock is installed.
+    countdown: Option<String>,
     y: f64,
     height: f64,
+    top_height: f64,
     color: Color,
     align: bool,
+}
+
+/// Median of the last up-to-10 inter-bar deltas of a series' bar times (fallback: with a single
+/// delta the median IS that delta); `None` with fewer than two usable bars, which hides the
+/// countdown row. Non-positive deltas (duplicate times) are skipped.
+pub(crate) fn median_bar_interval(times: &[i64]) -> Option<f64> {
+    let tail = &times[times.len().saturating_sub(11)..];
+    let mut deltas: Vec<i64> = tail
+        .windows(2)
+        .map(|w| w[1] - w[0])
+        .filter(|&d| d > 0)
+        .collect();
+    if deltas.is_empty() {
+        return None;
+    }
+    deltas.sort_unstable();
+    let n = deltas.len();
+    Some(if n % 2 == 1 {
+        deltas[n / 2] as f64
+    } else {
+        (deltas[n / 2 - 1] as f64 + deltas[n / 2] as f64) / 2.0
+    })
+}
+
+/// TradingView countdown format by remaining magnitude: `mm:ss` zero-padded below an hour,
+/// `h:mm:ss` below a day, `"Xd Xh"` at a day and beyond.
+pub(crate) fn format_countdown_remaining(remaining: f64) -> String {
+    let secs = remaining.max(0.0).floor() as u64;
+    if secs < 3600 {
+        format!("{:02}:{:02}", secs / 60, secs % 60)
+    } else if secs < 86400 {
+        format!("{}:{:02}:{:02}", secs / 3600, secs % 3600 / 60, secs % 60)
+    } else {
+        format!("{}d {}h", secs / 86400, secs % 86400 / 3600)
+    }
 }
 
 /// Minimal port of reference price-axis-widget.ts `_fixLabelOverlap` + `recalculateOverlapping`
@@ -351,6 +400,8 @@ impl ChartEngine {
                             midpoint: AxisTextMidpoint::Label,
                             bold,
                             background: None,
+                            background_corners: AxisLabelCorners::NONE,
+                            measure_extra: 0.0,
                         });
                     }
                 }
@@ -388,6 +439,8 @@ impl ChartEngine {
                             midpoint: AxisTextMidpoint::Label,
                             bold,
                             background: None,
+                            background_corners: AxisLabelCorners::NONE,
+                            measure_extra: 0.0,
                         });
                     }
                 }
@@ -427,6 +480,8 @@ impl ChartEngine {
                     // reference `timeScale.allowBoldLabels` (default true): bold major labels.
                     bold: self.time_scale.options().allow_bold_labels && weight >= maximum_weight,
                     background: None,
+                    background_corners: AxisLabelCorners::NONE,
+                    measure_extra: 0.0,
                 });
             }
             self.append_marker_labels(&mut out.labels, from, to);
@@ -474,7 +529,9 @@ impl ChartEngine {
             .labels
             .iter()
             .filter(|label| label.align == wanted_align)
-            .map(|label| measure(&label.text))
+            // `measure_extra` carries the cluster's title-chip width on its price-area label,
+            // so the negotiated strip covers the chip + price row as one unit.
+            .map(|label| measure(&label.text) + label.measure_extra)
             .fold(0.0_f64, f64::max);
         let text_width = if max_text_width > 0.0 {
             max_text_width
@@ -574,6 +631,8 @@ impl ChartEngine {
                             midpoint: AxisTextMidpoint::None,
                             bold: false,
                             background: None,
+                            background_corners: AxisLabelCorners::NONE,
+                            measure_extra: 0.0,
                         });
                     }
                 }
@@ -661,6 +720,8 @@ impl ChartEngine {
                             height,
                             background,
                         )),
+                        background_corners: AxisLabelCorners::for_align(align),
+                        measure_extra: 0.0,
                     });
                 }
             }
@@ -672,6 +733,14 @@ impl ChartEngine {
     /// the text its contrast, the value the last visible bar's close in the scale's format.
     /// Labels sharing an axis side are pushed apart with the reference's overlap resolution
     /// (price-axis-widget.ts `_fixLabelOverlap`).
+    ///
+    /// TradingView-style cluster extension: the label is one connected box of up to three
+    /// independently-toggleable parts — a title chip (the series' `title` in a darker shade of
+    /// the label color, left of the price text), the price text itself, and a candle-close
+    /// countdown row stacked below, spanning the cluster's full width. The cluster renders while
+    /// ANY part is enabled (e.g. `lastValueVisible: false` still leaves title chip + countdown).
+    /// The overlap pass runs on the cluster's total height, and the axis-facing corners of the
+    /// cluster's outer edges are rounded (internal boundaries stay sharp).
     pub(super) fn append_last_value_label<F>(&self, labels: &mut Vec<AxisLabel>, measure: &F)
     where
         F: Fn(&str) -> f64,
@@ -679,15 +748,26 @@ impl ChartEngine {
         let Some((from, to)) = self.visible_range_for_frame() else {
             return;
         };
-        let height = self.options.get().layout.font_size + 2.5 * 2.0;
+        let row_height = self.options.get().layout.font_size + 2.5 * 2.0;
         let mut right: Vec<LastValueLabel> = Vec::new();
         let mut left: Vec<LastValueLabel> = Vec::new();
         for (pi, pane) in self.panes.iter().enumerate() {
             for series in &self.series {
-                if !series.visible || !series.last_value_visible {
+                if !series.visible || series.pane_index != pi {
                     continue;
                 }
-                if series.pane_index != pi {
+                let show_price = series.last_value_visible;
+                let title = if series.title_visible && !series.title.is_empty() {
+                    Some(series.title.clone())
+                } else {
+                    None
+                };
+                let countdown = if series.countdown_visible {
+                    self.series_countdown_text(series.id)
+                } else {
+                    None
+                };
+                if !show_price && title.is_none() && countdown.is_none() {
                     continue;
                 }
                 let target = series_scale_target(series);
@@ -696,10 +776,10 @@ impl ChartEngine {
                 if plot.is_empty() || scale.is_empty() {
                     continue;
                 }
-                // A custom series' label tracks the last VISIBLE non-whitespace item's current
-                // value and bar color, recorded per frame by the host (Phase C-c; reference
-                // lastValueData(false) over the custom plot row's Close slot).
-                if series.kind == SeriesKind::Custom {
+                // The cluster anchors at the last VISIBLE bar's value in the series' bar color,
+                // exactly like the plain label (reference series.ts lastValueData(false));
+                // a custom series reads its host-recorded frame values instead (Phase C-c).
+                let (y, color, text) = if series.kind == SeriesKind::Custom {
                     let Some(last) = series.custom_frame.last_visible else {
                         continue;
                     };
@@ -715,49 +795,38 @@ impl ChartEngine {
                         scale,
                         scale.price_to_logical_value(last.value, base_value),
                     );
-                    let (group, align) = if target == PriceScaleTarget::Left {
-                        (&mut left, pane.left_scale.options().align_labels)
-                    } else {
-                        (&mut right, pane.price_scale.options().align_labels)
-                    };
-                    group.push(LastValueLabel {
-                        text,
-                        y,
-                        height,
-                        color: last.color,
-                        align,
-                    });
-                    continue;
-                }
-                // reference series.ts lastValueData(false): the label tracks the last *visible*
-                // bar; whitespace rows are skipped (the reference's plot list omits them).
-                let Some(row) = plot.last_non_whitespace_row(to) else {
-                    continue;
-                };
-                let close = plot.value_at(row, PlotValueIndex::Close);
-                if !close.is_finite() {
-                    continue;
-                }
-                let Some(base_value) = self.series_base_value(series.id, from) else {
-                    continue;
-                };
-                let y = scale.price_to_coordinate(close, base_value);
-                if y < 0.0 || y > self.pane_h {
-                    continue;
-                }
-                let baseline = if series.kind == SeriesKind::Baseline {
-                    self.resolved_baseline_price(series.id, from, to)
+                    (y, last.color, text)
                 } else {
-                    None
+                    // whitespace rows are skipped (the reference's plot list omits them).
+                    let Some(row) = plot.last_non_whitespace_row(to) else {
+                        continue;
+                    };
+                    let close = plot.value_at(row, PlotValueIndex::Close);
+                    if !close.is_finite() {
+                        continue;
+                    }
+                    let Some(base_value) = self.series_base_value(series.id, from) else {
+                        continue;
+                    };
+                    let y = scale.price_to_coordinate(close, base_value);
+                    if y < 0.0 || y > self.pane_h {
+                        continue;
+                    }
+                    let baseline = if series.kind == SeriesKind::Baseline {
+                        self.resolved_baseline_price(series.id, from, to)
+                    } else {
+                        None
+                    };
+                    let color = self.series_bar_color(series, row, baseline);
+                    // The series' OWN priceFormat drives its last-value label (reference
+                    // series-price-axis-view.ts text, via the scale's series formatter).
+                    let text = self.format_series_value(
+                        series,
+                        scale,
+                        scale.price_to_logical_value(close, base_value),
+                    );
+                    (y, color, text)
                 };
-                let color = self.series_bar_color(series, row, baseline);
-                // The series' OWN priceFormat drives its last-value label (reference
-                // series-price-axis-view.ts text, via the scale's series formatter).
-                let text = self.format_series_value(
-                    series,
-                    scale,
-                    scale.price_to_logical_value(close, base_value),
-                );
                 // reference appends overlay (no-scale) series' labels to the pane's default axis
                 // (price-axis-widget.ts:601-607); the engine's default axis is the right one.
                 // The label's `alignLabels` comes from the axis it lands on.
@@ -766,10 +835,21 @@ impl ChartEngine {
                 } else {
                     (&mut right, pane.price_scale.options().align_labels)
                 };
+                let top_height = if show_price || title.is_some() {
+                    row_height
+                } else {
+                    0.0
+                };
+                let countdown_height = if countdown.is_some() { row_height } else { 0.0 };
                 group.push(LastValueLabel {
-                    text,
-                    y,
-                    height,
+                    price_text: show_price.then_some(text),
+                    title,
+                    countdown,
+                    // The price row stays centered on the value coordinate; the countdown row
+                    // hangs below, so the cluster center shifts down by half the countdown row.
+                    y: y + countdown_height / 2.0,
+                    height: top_height + countdown_height,
+                    top_height,
                     color,
                     align,
                 });
@@ -784,38 +864,203 @@ impl ChartEngine {
             (left, PriceScaleTarget::Left),
         ] {
             for label in group {
-                let width = 1.0 + 5.0 + 5.0 + 5.0 + measure(&label.text);
-                let (x, align, background_x) = if target == PriceScaleTarget::Left {
-                    (
-                        self.pane_left - 10.0,
-                        AxisTextAlign::Right,
-                        self.pane_left - width,
-                    )
-                } else {
-                    (
-                        self.pane_left + self.pane_w + 10.0,
-                        AxisTextAlign::Left,
-                        self.pane_left + self.pane_w,
-                    )
-                };
-                labels.push(AxisLabel {
-                    text: label.text,
-                    x,
-                    y: label.y,
-                    color: label.color.contrast_text(),
-                    align,
-                    midpoint: AxisTextMidpoint::Label,
-                    bold: false,
-                    background: Some((
-                        background_x,
-                        label.y - label.height / 2.0,
-                        width,
-                        label.height,
-                        label.color,
-                    )),
-                });
+                // Plain single-box label (no chip, no countdown): the reference-shaped emission,
+                // byte-identical to pre-cluster behavior.
+                if label.title.is_none() && label.countdown.is_none() {
+                    let Some(text) = label.price_text else {
+                        continue;
+                    };
+                    let width = 1.0 + 5.0 + 5.0 + 5.0 + measure(&text);
+                    let (x, align, background_x) = if target == PriceScaleTarget::Left {
+                        (
+                            self.pane_left - 10.0,
+                            AxisTextAlign::Right,
+                            self.pane_left - width,
+                        )
+                    } else {
+                        (
+                            self.pane_left + self.pane_w + 10.0,
+                            AxisTextAlign::Left,
+                            self.pane_left + self.pane_w,
+                        )
+                    };
+                    labels.push(AxisLabel {
+                        text,
+                        x,
+                        y: label.y,
+                        color: label.color.contrast_text(),
+                        align,
+                        midpoint: AxisTextMidpoint::Label,
+                        bold: false,
+                        background: Some((
+                            background_x,
+                            label.y - label.height / 2.0,
+                            width,
+                            label.height,
+                            label.color,
+                        )),
+                        background_corners: AxisLabelCorners::for_align(align),
+                        measure_extra: 0.0,
+                    });
+                    continue;
+                }
+                self.append_last_value_cluster(labels, &label, target, measure);
             }
         }
+    }
+
+    /// Emit one TradingView-style last-value cluster (see `append_last_value_label`): one
+    /// connected box whose top row holds the title chip (darker shade, left) + price area and
+    /// whose optional countdown row spans the full width below. Box width covers the widest row;
+    /// each row's text is centered in its area. Axis-facing outer corners are rounded (right
+    /// corners on the right strip, left corners on the left strip); internal boundaries and the
+    /// chart-facing side stay sharp. On the left strip the chip is the leftmost (axis-facing)
+    /// top-row box, so it carries that side's rounded corners instead of the price area.
+    fn append_last_value_cluster<F>(
+        &self,
+        labels: &mut Vec<AxisLabel>,
+        label: &LastValueLabel,
+        target: PriceScaleTarget,
+        measure: &F,
+    ) where
+        F: Fn(&str) -> f64,
+    {
+        let right_strip = target != PriceScaleTarget::Left;
+        let text_color = label.color.contrast_text();
+        let chip_color = label.color.darken(0.72);
+        let title_w = label.title.as_deref().map(measure);
+        let chip_w = title_w.map(|w| w + 10.0).unwrap_or(0.0);
+        let price_w = label.price_text.as_deref().map(measure).unwrap_or(0.0);
+        let countdown_w = label.countdown.as_deref().map(measure).unwrap_or(0.0);
+        let width = 1.0 + 5.0 + 5.0 + 5.0 + (chip_w + price_w).max(countdown_w);
+        let box_x = if right_strip {
+            self.pane_left + self.pane_w
+        } else {
+            self.pane_left - width
+        };
+        let top_y = label.y - label.height / 2.0;
+        let has_countdown = label.countdown.is_some();
+        let text_align = if right_strip {
+            AxisTextAlign::Left
+        } else {
+            AxisTextAlign::Right
+        };
+        // Centered text anchor for a box segment: on the right strip text left-aligns at the
+        // computed x, on the left strip it right-aligns (the anchor is the text's right edge).
+        let centered_x = |seg_x: f64, seg_w: f64, text_w: f64| {
+            if right_strip {
+                seg_x + (seg_w - text_w) / 2.0
+            } else {
+                seg_x + seg_w - (seg_w - text_w) / 2.0
+            }
+        };
+        if label.top_height > 0.0 {
+            let row_mid_y = top_y + label.top_height / 2.0;
+            if let (Some(title), Some(title_w)) = (&label.title, title_w) {
+                labels.push(AxisLabel {
+                    text: title.clone(),
+                    x: centered_x(box_x, chip_w, title_w),
+                    y: row_mid_y,
+                    color: text_color,
+                    align: text_align,
+                    midpoint: AxisTextMidpoint::Label,
+                    bold: false,
+                    background: Some((box_x, top_y, chip_w, label.top_height, chip_color)),
+                    background_corners: if right_strip {
+                        AxisLabelCorners::NONE
+                    } else {
+                        AxisLabelCorners {
+                            top_left: true,
+                            bottom_left: !has_countdown,
+                            ..AxisLabelCorners::NONE
+                        }
+                    },
+                    measure_extra: 0.0,
+                });
+            }
+            let area_x = box_x + chip_w;
+            let area_w = width - chip_w;
+            let axis_side_top = if right_strip {
+                AxisLabelCorners {
+                    top_right: true,
+                    bottom_right: !has_countdown,
+                    ..AxisLabelCorners::NONE
+                }
+            } else {
+                // On the left strip the price area is axis-facing only when no chip covers it.
+                AxisLabelCorners {
+                    top_left: label.title.is_none(),
+                    bottom_left: label.title.is_none() && !has_countdown,
+                    ..AxisLabelCorners::NONE
+                }
+            };
+            labels.push(AxisLabel {
+                text: label.price_text.clone().unwrap_or_default(),
+                x: centered_x(area_x, area_w, price_w),
+                y: row_mid_y,
+                color: text_color,
+                align: text_align,
+                midpoint: AxisTextMidpoint::Label,
+                bold: false,
+                background: Some((area_x, top_y, area_w, label.top_height, label.color)),
+                background_corners: axis_side_top,
+                // The negotiated strip width must cover the chip + price row as a unit.
+                measure_extra: chip_w,
+            });
+        }
+        if let Some(countdown) = &label.countdown {
+            let countdown_y = top_y + label.top_height;
+            let countdown_height = label.height - label.top_height;
+            // A countdown-only cluster's top edge is the cluster's top edge, so the countdown
+            // box carries the top axis-facing corner as well.
+            let standalone = label.top_height == 0.0;
+            labels.push(AxisLabel {
+                text: countdown.clone(),
+                x: centered_x(box_x, width, countdown_w),
+                y: countdown_y + countdown_height / 2.0,
+                color: text_color,
+                align: text_align,
+                midpoint: AxisTextMidpoint::Label,
+                bold: false,
+                background: Some((box_x, countdown_y, width, countdown_height, label.color)),
+                background_corners: if right_strip {
+                    AxisLabelCorners {
+                        top_right: standalone,
+                        bottom_right: true,
+                        ..AxisLabelCorners::NONE
+                    }
+                } else {
+                    AxisLabelCorners {
+                        top_left: standalone,
+                        bottom_left: true,
+                        ..AxisLabelCorners::NONE
+                    }
+                },
+                measure_extra: 0.0,
+            });
+        }
+    }
+
+    /// The series' candle-close countdown text (TradingView-style `countdown_visible`): the time
+    /// until the inferred next bar close — `last_time + interval` minus the host clock — clamped
+    /// at zero and formatted by magnitude. The interval is the median of the last up-to-10
+    /// inter-bar deltas of the series' own bar times (fallback: the last delta). `None` (the row
+    /// hides) with fewer than two bars or no installed host clock (`now_override`).
+    pub(crate) fn series_countdown_text(&self, id: SeriesId) -> Option<String> {
+        let now = self.now_override?;
+        let plot = self.data.plot(id);
+        let indices = plot.indices();
+        // Only the tail (up to 11 bars → 10 deltas) feeds the inference.
+        let tail = &indices[indices.len().saturating_sub(11)..];
+        let times = self.data.merged_times();
+        let tail_times: Vec<i64> = tail
+            .iter()
+            .filter_map(|i| times.get(*i as usize).copied())
+            .collect();
+        let interval = median_bar_interval(&tail_times)?;
+        let last_time = *tail_times.last()?;
+        let remaining = (last_time as f64 + interval - now).max(0.0);
+        Some(format_countdown_remaining(remaining))
     }
 
     pub(super) fn append_crosshair_labels<F>(&self, labels: &mut Vec<AxisLabel>, measure: &F)
@@ -901,6 +1146,8 @@ impl ChartEngine {
                             height,
                             label_bg,
                         )),
+                        background_corners: AxisLabelCorners::for_align(align),
+                        measure_extra: 0.0,
                     });
                 }
             }
@@ -928,6 +1175,8 @@ impl ChartEngine {
                     midpoint: AxisTextMidpoint::StableTime,
                     bold: false,
                     background: Some((box_x, self.pane_h + 1.0, width, height, label_bg)),
+                    background_corners: AxisLabelCorners::BOTTOM,
+                    measure_extra: 0.0,
                 });
             }
         }

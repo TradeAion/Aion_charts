@@ -99,6 +99,19 @@ impl Color {
         }
     }
 
+    /// Darker shade of this color: every sRGB channel scaled by `factor` (clamped to 0..=1),
+    /// alpha preserved. Used for the title chip of the last-value label cluster, which renders
+    /// in a darker shade of the label color (TradingView-style).
+    pub fn darken(&self, factor: f64) -> Color {
+        let f = factor.clamp(0.0, 1.0);
+        Color::rgba(
+            (self.r() as f64 * f).round() as u8,
+            (self.g() as f64 * f).round() as u8,
+            (self.b() as f64 * f).round() as u8,
+            self.a(),
+        )
+    }
+
     /// CSS `#rrggbb` string (ignores alpha).
     pub fn to_hex(&self) -> String {
         format!("#{:02x}{:02x}{:02x}", self.r(), self.g(), self.b())
@@ -188,6 +201,21 @@ mod tests {
             Color::rgb(0, 0, 0)
         );
         assert_eq!(Color::rgb(0x26, 0xa6, 0x9a).to_hex(), "#26a69a");
+    }
+
+    #[test]
+    fn darken_scales_channels_and_preserves_alpha() {
+        assert_eq!(
+            Color::rgb(0xef, 0x53, 0x50).darken(0.72),
+            Color::rgb(172, 60, 58)
+        );
+        // Alpha passes through untouched; the factor clamps to 0..=1.
+        assert_eq!(
+            Color::rgba(100, 200, 50, 0x80).darken(0.5),
+            Color::rgba(50, 100, 25, 0x80)
+        );
+        assert_eq!(Color::rgb(10, 20, 30).darken(2.0), Color::rgb(10, 20, 30));
+        assert_eq!(Color::rgb(10, 20, 30).darken(-1.0), Color::rgb(0, 0, 0));
     }
 
     #[test]

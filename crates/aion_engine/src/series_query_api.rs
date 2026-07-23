@@ -218,6 +218,9 @@ impl ChartEngine {
             s.crosshair_marker_border_width.into(),
         );
         insert("last_value_visible", s.last_value_visible.into());
+        insert("title", s.title.clone().into());
+        insert("title_visible", s.title_visible.into());
+        insert("countdown_visible", s.countdown_visible.into());
         insert("price_line_visible", s.price_line_visible.into());
         insert("price_line_source", s.price_line_source.into());
         insert("price_line_width", s.price_line_width.into());
@@ -274,6 +277,21 @@ impl ChartEngine {
                 "last_value_visible" => {
                     if let Some(v) = value.as_bool() {
                         s.last_value_visible = v;
+                    }
+                }
+                "title" => {
+                    if let Some(v) = value.as_str() {
+                        s.title = v.to_string();
+                    }
+                }
+                "title_visible" => {
+                    if let Some(v) = value.as_bool() {
+                        s.title_visible = v;
+                    }
+                }
+                "countdown_visible" => {
+                    if let Some(v) = value.as_bool() {
+                        s.countdown_visible = v;
                     }
                 }
                 "price_line_visible" => {

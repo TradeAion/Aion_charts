@@ -787,6 +787,8 @@ impl ChartInner {
                 midpoint: AxisTextMidpoint::Label,
                 bold: false,
                 background: Some((background_x, y - height / 2.0, width, height, background)),
+                background_corners: AxisLabelCorners::for_align(align),
+                measure_extra: 0.0,
             });
         }
     }
@@ -842,6 +844,8 @@ impl ChartInner {
                 midpoint: AxisTextMidpoint::StableTime,
                 bold: false,
                 background: Some((box_x, self.pane_h + 1.0, width, height, background)),
+                background_corners: AxisLabelCorners::BOTTOM,
+                measure_extra: 0.0,
             });
         }
     }

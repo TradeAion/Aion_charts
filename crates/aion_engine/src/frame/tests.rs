@@ -1432,3 +1432,350 @@ fn allow_bold_labels_gates_major_time_ticks() {
         "no bold time labels when allowBoldLabels is off"
     );
 }
+
+// ---- TradingView-style last-value cluster: title chip + price + candle-close countdown ----
+
+#[test]
+fn countdown_interval_is_the_median_of_recent_deltas() {
+    use super::axis::median_bar_interval;
+    // Fewer than two bars (or no positive delta) hides the countdown.
+    assert_eq!(median_bar_interval(&[]), None);
+    assert_eq!(median_bar_interval(&[100]), None);
+    assert_eq!(median_bar_interval(&[5, 5, 5]), None);
+    // Single-delta fallback: the last delta.
+    assert_eq!(median_bar_interval(&[100, 460]), Some(360.0));
+    assert_eq!(median_bar_interval(&[0, 60, 120, 180]), Some(60.0));
+    // A single outlier delta does not move the median.
+    let mut times: Vec<i64> = (0..20).map(|i| i * 60).collect();
+    times[15] = 14 * 60 + 10;
+    assert_eq!(median_bar_interval(&times), Some(60.0));
+    // Only the last 11 bars (10 deltas) feed the inference: an old irregular regime is dropped.
+    let mut times: Vec<i64> = (0..20).map(|i| i * 60).collect();
+    times[1] = 5;
+    times[2] = 6;
+    assert_eq!(median_bar_interval(&times), Some(60.0));
+}
+
+#[test]
+fn countdown_format_covers_all_three_ranges() {
+    use super::axis::format_countdown_remaining as fmt;
+    // < 1h: zero-padded mm:ss (floored to whole seconds, clamped at zero).
+    assert_eq!(fmt(50.0), "00:50");
+    assert_eq!(fmt(59.9), "00:59");
+    assert_eq!(fmt(60.0), "01:00");
+    assert_eq!(fmt(3599.0), "59:59");
+    assert_eq!(fmt(-3.0), "00:00");
+    // < 1d: h:mm:ss.
+    assert_eq!(fmt(3600.0), "1:00:00");
+    assert_eq!(fmt(3661.0), "1:01:01");
+    assert_eq!(fmt(86399.0), "23:59:59");
+    // >= 1d: "Xd Xh".
+    assert_eq!(fmt(86400.0), "1d 0h");
+    assert_eq!(fmt(2.0 * 86400.0 + 5.0 * 3600.0 + 120.0), "2d 5h");
+}
+
+/// One line series on 60s bars ending at t=240, close 12.5; the host clock pins the countdown.
+fn countdown_chart() -> ChartEngine {
+    let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
+    chart.series[0].kind = SeriesKind::Line;
+    let times = [0.0, 60.0, 120.0, 180.0, 240.0];
+    let values = [10.0, 11.0, 12.0, 11.5, 12.5];
+    chart
+        .set_series_data(0, &times, &values, &values, &values, &values)
+        .unwrap();
+    chart.time_scale.set_width(800.0);
+    chart.fit_content();
+    chart
+}
+
+fn boxed_labels(chart: &mut ChartEngine) -> Vec<AxisLabel> {
+    chart
+        .build_axis_frame(80.0, |t| t.len() as f64 * 7.0)
+        .labels
+        .into_iter()
+        .filter(|l| l.background.is_some())
+        .collect()
+}
+
+#[test]
+fn countdown_text_tracks_the_pinned_host_clock() {
+    let mut chart = countdown_chart();
+    chart.series[0].countdown_visible = true;
+    // Headless determinism: no host clock, no countdown row at all.
+    assert_eq!(chart.series_countdown_text(0), None);
+    assert_eq!(boxed_labels(&mut chart).len(), 1); // the plain price label only
+                                                   // 60s interval, last bar t=240: next close 300.
+    chart.now_override = Some(250.0);
+    assert_eq!(chart.series_countdown_text(0).as_deref(), Some("00:50"));
+    chart.now_override = Some(299.7);
+    assert_eq!(chart.series_countdown_text(0).as_deref(), Some("00:00"));
+    // Past the close the remaining time clamps at zero instead of going negative.
+    chart.now_override = Some(480.0);
+    assert_eq!(chart.series_countdown_text(0).as_deref(), Some("00:00"));
+}
+
+#[test]
+fn last_value_cluster_rows_toggle_independently() {
+    let mut chart = countdown_chart();
+    chart.now_override = Some(250.0);
+    chart.series[0].title = "NDQ".to_string();
+    chart.series[0].countdown_visible = true;
+
+    // All three parts on: chip + price area + countdown, stacked in one connected box.
+    let labels = boxed_labels(&mut chart);
+    assert_eq!(labels.len(), 3);
+    let chip = labels
+        .iter()
+        .find(|l| l.text == "NDQ")
+        .expect("title chip label");
+    let price = labels
+        .iter()
+        .find(|l| l.text == "12.50")
+        .expect("price label");
+    let countdown = labels
+        .iter()
+        .find(|l| l.text == "00:50")
+        .expect("countdown label");
+    let Some((chip_x, chip_y, chip_w, chip_h, chip_bg)) = chip.background else {
+        panic!("chip is boxed")
+    };
+    let Some((price_x, price_y, price_w, price_h, price_bg)) = price.background else {
+        panic!("price area is boxed")
+    };
+    let Some((cd_x, cd_y, cd_w, cd_h, cd_bg)) = countdown.background else {
+        panic!("countdown row is boxed")
+    };
+    // The chip is a darker shade of the label color; the other rows keep the series bar color.
+    assert_eq!(chip_bg, LINE.darken(0.72));
+    assert_eq!(price_bg, LINE);
+    assert_eq!(cd_bg, LINE);
+    // One connected box: chip flush left of the price area, the countdown row below spanning
+    // the full cluster width, all rows the same height.
+    assert_eq!(chip_y, price_y);
+    assert!((chip_x + chip_w - price_x).abs() < 1e-9);
+    assert!((price_y + price_h - cd_y).abs() < 1e-9);
+    assert!((cd_x - chip_x).abs() < 1e-9);
+    assert!((cd_w - (price_x + price_w - chip_x)).abs() < 1e-9);
+    assert_eq!(chip_h, price_h);
+    assert_eq!(price_h, cd_h);
+    // All cluster texts share the contrast-pick text color.
+    assert_eq!(chip.color, LINE.contrast_text());
+    assert_eq!(price.color, LINE.contrast_text());
+    assert_eq!(countdown.color, LINE.contrast_text());
+
+    // Price off, title + countdown on: the cluster still renders (chip + countdown + the empty
+    // price area box), with no price text.
+    chart.series[0].last_value_visible = false;
+    let labels = boxed_labels(&mut chart);
+    assert_eq!(labels.len(), 3);
+    assert!(labels.iter().any(|l| l.text == "NDQ"));
+    assert!(labels.iter().any(|l| l.text == "00:50"));
+    assert!(labels.iter().all(|l| l.text != "12.50"));
+    // The empty price area box still paints between chip and right edge (one connected box).
+    let area = labels
+        .iter()
+        .find(|l| l.text.is_empty())
+        .expect("empty price area box");
+    assert!(matches!(area.background, Some((.., c)) if c == LINE));
+
+    // Title off, price + countdown on: no chip; the price area spans the top row's full width.
+    chart.series[0].last_value_visible = true;
+    chart.series[0].title_visible = false;
+    let labels = boxed_labels(&mut chart);
+    assert_eq!(labels.len(), 2);
+    assert!(labels.iter().all(|l| l.text != "NDQ"));
+    assert!(labels.iter().any(|l| l.text == "12.50"));
+    assert!(labels.iter().any(|l| l.text == "00:50"));
+
+    // Countdown off, title + price on: no countdown row below.
+    chart.series[0].title_visible = true;
+    chart.series[0].countdown_visible = false;
+    let labels = boxed_labels(&mut chart);
+    assert_eq!(labels.len(), 2);
+    assert!(labels.iter().any(|l| l.text == "NDQ"));
+    assert!(labels.iter().all(|l| l.text != "00:50"));
+
+    // Everything off: no cluster at all.
+    chart.series[0].last_value_visible = false;
+    chart.series[0].title_visible = false;
+    assert!(boxed_labels(&mut chart).is_empty());
+}
+
+#[test]
+fn last_value_cluster_counts_down_only_with_data_and_interval() {
+    let mut chart = countdown_chart();
+    chart.now_override = Some(250.0);
+    chart.series[0].countdown_visible = true;
+    chart.series[0].last_value_visible = false;
+    // A countdown-only cluster renders (no top row).
+    let labels = boxed_labels(&mut chart);
+    assert_eq!(labels.len(), 1);
+    assert_eq!(labels[0].text, "00:50");
+    // A series with a single bar has no interval: no countdown row, and with the price label
+    // off no cluster at all.
+    chart
+        .set_series_data(0, &[240.0], &[12.0], &[12.0], &[12.0], &[12.0])
+        .unwrap();
+    assert!(boxed_labels(&mut chart).is_empty());
+}
+
+#[test]
+fn boxed_axis_labels_select_the_axis_facing_corners() {
+    // Plain last-value label on the right strip: right corners rounded.
+    let mut chart = countdown_chart();
+    let labels = boxed_labels(&mut chart);
+    assert_eq!(labels.len(), 1);
+    assert_eq!(labels[0].background_corners, AxisLabelCorners::RIGHT);
+
+    // The same label on the left strip rounds the left corners.
+    chart.series[0].left_scale = true;
+    let labels = boxed_labels(&mut chart);
+    assert_eq!(labels.len(), 1);
+    assert_eq!(labels[0].background_corners, AxisLabelCorners::LEFT);
+    chart.series[0].left_scale = false;
+
+    // The crosshair price label follows its strip; the time label rounds the bottom corners.
+    chart.crosshair = Some((400.0, 250.0));
+    let labels = boxed_labels(&mut chart);
+    let price = labels
+        .iter()
+        .find(|l| l.midpoint == AxisTextMidpoint::Label)
+        .expect("crosshair price label");
+    assert_eq!(price.background_corners, AxisLabelCorners::RIGHT);
+    let time = labels
+        .iter()
+        .find(|l| l.midpoint == AxisTextMidpoint::StableTime)
+        .expect("crosshair time label");
+    assert_eq!(time.background_corners, AxisLabelCorners::BOTTOM);
+    chart.crosshair = None;
+
+    // Cluster: only the outer axis-facing corners round; internal boundaries stay sharp.
+    chart.now_override = Some(250.0);
+    chart.series[0].title = "NDQ".to_string();
+    chart.series[0].countdown_visible = true;
+    let labels = boxed_labels(&mut chart);
+    let corners_of = |text: &str| {
+        labels
+            .iter()
+            .find(|l| l.text == text)
+            .unwrap_or_else(|| panic!("label {text}"))
+            .background_corners
+    };
+    assert_eq!(corners_of("NDQ"), AxisLabelCorners::NONE); // chip: chart-facing + internal only
+    assert_eq!(
+        corners_of("12.50"),
+        AxisLabelCorners {
+            top_right: true,
+            ..AxisLabelCorners::NONE
+        }
+    );
+    assert_eq!(
+        corners_of("00:50"),
+        AxisLabelCorners {
+            bottom_right: true,
+            ..AxisLabelCorners::NONE
+        }
+    );
+
+    // Without the countdown row the top row takes over the bottom axis-facing corner.
+    chart.series[0].countdown_visible = false;
+    let labels = boxed_labels(&mut chart);
+    let corners_of = |text: &str| {
+        labels
+            .iter()
+            .find(|l| l.text == text)
+            .unwrap_or_else(|| panic!("label {text}"))
+            .background_corners
+    };
+    assert_eq!(corners_of("12.50"), AxisLabelCorners::RIGHT);
+
+    // On the left strip the chip (leftmost top-row box) carries the axis-facing corners.
+    chart.series[0].left_scale = true;
+    chart.series[0].countdown_visible = true;
+    let labels = boxed_labels(&mut chart);
+    let corners_of = |text: &str| {
+        labels
+            .iter()
+            .find(|l| l.text == text)
+            .unwrap_or_else(|| panic!("label {text}"))
+            .background_corners
+    };
+    assert_eq!(
+        corners_of("NDQ"),
+        AxisLabelCorners {
+            top_left: true,
+            ..AxisLabelCorners::NONE
+        }
+    );
+    assert_eq!(corners_of("12.50"), AxisLabelCorners::NONE);
+    assert_eq!(
+        corners_of("00:50"),
+        AxisLabelCorners {
+            bottom_left: true,
+            ..AxisLabelCorners::NONE
+        }
+    );
+
+    // A countdown-only cluster rounds both axis-facing corners on its single row.
+    chart.series[0].last_value_visible = false;
+    chart.series[0].title_visible = false;
+    let labels = boxed_labels(&mut chart);
+    assert_eq!(labels.len(), 1);
+    assert_eq!(
+        labels[0].background_corners,
+        AxisLabelCorners {
+            top_left: true,
+            bottom_left: true,
+            ..AxisLabelCorners::NONE
+        }
+    );
+}
+
+#[test]
+fn axis_width_negotiation_covers_the_widest_cluster_row() {
+    let measure = |t: &str| t.len() as f64 * 7.0;
+    let mut chart = countdown_chart();
+    let plain = chart.optimal_price_axis_width_for(PriceScaleTarget::Right, measure);
+    // Tick + price texts are 5 chars here; the plain strip covers the widest label.
+    assert_eq!(plain, 56.0);
+
+    // A long countdown row ("23:59:59", 8 chars) widens the strip. next_close = 240 + 60.
+    chart.series[0].countdown_visible = true;
+    chart.now_override = Some(300.0 - 86399.0);
+    let with_countdown = chart.optimal_price_axis_width_for(PriceScaleTarget::Right, measure);
+    assert_eq!(with_countdown, 78.0); // 77 snapped up to even
+    assert!(with_countdown > plain);
+
+    // The title chip + price row is measured as a unit (chip width includes its padding).
+    chart.now_override = Some(250.0); // "00:50" — narrower than chip + price
+    chart.series[0].title = "NDQ".to_string();
+    let with_cluster = chart.optimal_price_axis_width_for(PriceScaleTarget::Right, measure);
+    // top row: chip (3 chars = 21) + 10 padding + price (5 chars = 35) = 66.
+    assert_eq!(with_cluster, 88.0); // 87 snapped up to even
+}
+
+#[test]
+fn last_value_cluster_overlap_resolution_uses_the_total_height() {
+    let mut chart = two_identical_line_series();
+    chart.now_override = Some(12.0);
+    chart.series[0].countdown_visible = true;
+    chart.series[1].countdown_visible = true;
+    let labels = chart
+        .build_axis_frame(80.0, |t| t.len() as f64 * 7.0)
+        .labels;
+    // Two colliding two-row clusters: the overlap pass pushes them two full rows apart
+    // (measured between the price rows, which share each cluster's layout).
+    let row_height = 12.0 + 2.5 * 2.0;
+    let mut price_ys: Vec<f64> = labels
+        .iter()
+        .filter(|l| l.background.is_some() && l.text == "12.50")
+        .map(|l| l.y)
+        .collect();
+    price_ys.sort_by(|a, b| a.total_cmp(b));
+    assert_eq!(price_ys.len(), 2);
+    let gap = price_ys[1] - price_ys[0];
+    assert!(
+        (gap - 2.0 * row_height).abs() < 1e-9,
+        "two-row clusters must be pushed two box heights apart, got {gap}"
+    );
+}

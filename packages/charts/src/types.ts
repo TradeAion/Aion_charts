@@ -488,6 +488,20 @@ export interface series_options {
   visible: boolean;
   /** Show the last-value badge on the price scale (reference `lastValueVisible`, default `true`). */
   last_value_visible?: boolean;
+  /**
+   * reference `title` (default `""`): the series' display name, shown as a chip in a darker
+   * shade of the label color at the front of the last-value label cluster when `title_visible`
+   * holds (TradingView-style).
+   */
+  title?: string;
+  /** Show the `title` chip in the last-value cluster (TradingView-style; default `true`). */
+  title_visible?: boolean;
+  /**
+   * Stack a candle-close countdown row below the price inside the last-value cluster
+   * (TradingView-style; default `false`). The package ticks a 1s timer while any visible
+   * series with data has this on.
+   */
+  countdown_visible?: boolean;
   /** Show the series price line at the last value (reference `priceLineVisible`, default `true`). */
   price_line_visible?: boolean;
   /** Value the price line tracks (reference `PriceLineSource`): 0 LastBar (default), 1 LastVisible. */

@@ -27,6 +27,14 @@ impl ChartInner {
         // ---- layout (price axis width negotiated against the price labels) ----
         self.recompute_layout(false);
 
+        // Feed the engine clock for the candle-close countdown labels: the host-pinned value
+        // when `set_now_seconds` installed one (the package's 1s countdown timer), else the
+        // browser's system time — the engine itself is headless and owns no clock.
+        let now = self
+            .now_override
+            .unwrap_or_else(|| js_sys::Date::now() / 1000.0);
+        self.engine.set_now_seconds(now);
+
         // time tick marks: built once (needs &mut), shared by GPU grid + 2D labels.
         // Font comes from `layout` (reference `fontSize`/`fontFamily`): it drives the tick-density
         // estimate, host text measurement, and glyph drawing so all three agree. The label
@@ -439,12 +447,25 @@ impl ChartInner {
                 // Backgrounds are bitmap-aligned geometry, matching the reference's bitmap-coordinate pass.
                 // `to_css` keeps alpha so custom (e.g. price-line) label colors stay translucent.
                 ctx.set_fill_style_str(&color.to_css());
-                ctx.fill_rect(
-                    (x * dpr).round(),
-                    (y * dpr).round(),
-                    (w * dpr).round(),
-                    (h * dpr).round(),
-                );
+                let bx = (x * dpr).round();
+                let by = (y * dpr).round();
+                let bw = (w * dpr).round();
+                let bh = (h * dpr).round();
+                if label.background_corners.is_empty() {
+                    ctx.fill_rect(bx, by, bw, bh);
+                } else {
+                    // TradingView-style side radius: only the engine-selected (axis-facing)
+                    // corners round — 2 CSS px, scaled to bitmap px like the box itself.
+                    fill_boxed_label_background(
+                        ctx,
+                        bx,
+                        by,
+                        bw,
+                        bh,
+                        2.0 * dpr,
+                        label.background_corners,
+                    );
+                }
             }
             self.draw_axis_label_texts(std::iter::once(label), dpr, font_family, font_size)?;
         }
@@ -535,6 +556,47 @@ impl ChartInner {
         }
         Ok(())
     }
+}
+
+/// Fill a boxed axis label's background with per-corner rounding (TradingView-style side
+/// radius): the path is built manually from lines and quadratic arcs — corners flagged in
+/// `corners` get `radius`, the rest stay sharp. The radius clamps to half the box so thin
+/// boxes keep a well-formed path. Coordinates are bitmap px (the axis context is unscaled here).
+fn fill_boxed_label_background(
+    ctx: &CanvasRenderingContext2d,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    radius: f64,
+    corners: AxisLabelCorners,
+) {
+    let r = radius.max(0.0).min(w / 2.0).min(h / 2.0);
+    let pick = |on: bool| if on { r } else { 0.0 };
+    let tl = pick(corners.top_left);
+    let tr = pick(corners.top_right);
+    let br = pick(corners.bottom_right);
+    let bl = pick(corners.bottom_left);
+    ctx.begin_path();
+    ctx.move_to(x + tl, y);
+    ctx.line_to(x + w - tr, y);
+    if tr > 0.0 {
+        ctx.quadratic_curve_to(x + w, y, x + w, y + tr);
+    }
+    ctx.line_to(x + w, y + h - br);
+    if br > 0.0 {
+        ctx.quadratic_curve_to(x + w, y + h, x + w - br, y + h);
+    }
+    ctx.line_to(x + bl, y + h);
+    if bl > 0.0 {
+        ctx.quadratic_curve_to(x, y + h, x, y + h - bl);
+    }
+    ctx.line_to(x, y + tl);
+    if tl > 0.0 {
+        ctx.quadratic_curve_to(x, y, x + tl, y);
+    }
+    ctx.close_path();
+    ctx.fill();
 }
 
 pub(super) fn measure_text_ctx(

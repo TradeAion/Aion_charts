@@ -167,6 +167,65 @@ pub enum AxisTextMidpoint {
     StableTime,
 }
 
+/// Per-corner rounding selection for a boxed axis label's background (painted with a 2 CSS px
+/// radius by the host). A boxed label rounds only its axis-facing side — the corners pointing
+/// away from the pane — and keeps the chart-facing side sharp: right-strip labels round their
+/// right corners, left-strip labels their left corners, time-strip labels their bottom corners.
+/// The last-value cluster selects per row instead: the axis-facing corners of the cluster's
+/// top and bottom edges only, with sharp internal boundaries.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AxisLabelCorners {
+    pub top_left: bool,
+    pub top_right: bool,
+    pub bottom_left: bool,
+    pub bottom_right: bool,
+}
+
+impl AxisLabelCorners {
+    pub const NONE: Self = Self {
+        top_left: false,
+        top_right: false,
+        bottom_left: false,
+        bottom_right: false,
+    };
+    /// Right side (right price strip: the axis-facing side is the label's right edge).
+    pub const RIGHT: Self = Self {
+        top_left: false,
+        top_right: true,
+        bottom_left: false,
+        bottom_right: true,
+    };
+    /// Left side (left price strip).
+    pub const LEFT: Self = Self {
+        top_left: true,
+        top_right: false,
+        bottom_left: true,
+        bottom_right: false,
+    };
+    /// Bottom side (time strip below the pane).
+    pub const BOTTOM: Self = Self {
+        top_left: false,
+        top_right: false,
+        bottom_left: true,
+        bottom_right: true,
+    };
+
+    /// The whole-side selection for a single-row boxed label from its text alignment: `Left`
+    /// (text starting at the right strip's left edge) rounds the right corners, `Right` the
+    /// left corners, and `Center` (time-axis boxes below the pane) the bottom corners.
+    pub fn for_align(align: AxisTextAlign) -> Self {
+        match align {
+            AxisTextAlign::Left => Self::RIGHT,
+            AxisTextAlign::Right => Self::LEFT,
+            AxisTextAlign::Center => Self::BOTTOM,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == Self::NONE
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct AxisLabel {
     pub text: String,
@@ -177,6 +236,13 @@ pub struct AxisLabel {
     pub midpoint: AxisTextMidpoint,
     pub bold: bool,
     pub background: Option<(f64, f64, f64, f64, Color)>,
+    /// Rounded-corner selection for `background` (see [`AxisLabelCorners`]); `NONE` paints the
+    /// plain sharp rectangle.
+    pub background_corners: AxisLabelCorners,
+    /// Extra width (media px) this label contributes to the axis-width negotiation beyond its
+    /// own text. The last-value cluster puts it on the price-area label so the negotiated
+    /// strip covers the title chip + price row (each label is otherwise measured alone).
+    pub measure_extra: f64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

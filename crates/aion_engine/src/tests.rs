@@ -1482,6 +1482,9 @@ fn series_options_json_covers_the_ts_field_set() {
         "visible",
         "price_scale_id",
         "pane",
+        "title",
+        "title_visible",
+        "countdown_visible",
     ] {
         assert!(options.get(key).is_some(), "missing key {key}");
     }
@@ -1504,6 +1507,10 @@ fn series_options_json_covers_the_ts_field_set() {
     assert_eq!(options["visible"], true);
     assert_eq!(options["price_scale_id"], "right");
     assert_eq!(options["pane"], 0);
+    // TradingView-style last-value cluster options: LWC-parity defaults.
+    assert_eq!(options["title"], "");
+    assert_eq!(options["title_visible"], true);
+    assert_eq!(options["countdown_visible"], false);
 
     // Set state round-trips with colors and flags intact.
     chart.series[0].up_color = Some("#26a69a".to_string());
@@ -1683,7 +1690,10 @@ fn series_apply_options_json_round_trips_all_new_fields() {
         "base": 42.5,
         "invert_filled_area": true,
         "open_visible": false,
-        "thin_bars": false
+        "thin_bars": false,
+        "title": "NDQ",
+        "title_visible": false,
+        "countdown_visible": true
     }"##;
     assert!(chart.series_apply_options_json(0, patch));
     let options: serde_json::Value =
@@ -1716,6 +1726,9 @@ fn series_apply_options_json_round_trips_all_new_fields() {
     assert_eq!(options["invert_filled_area"], true);
     assert_eq!(options["open_visible"], false);
     assert_eq!(options["thin_bars"], false);
+    assert_eq!(options["title"], "NDQ");
+    assert_eq!(options["title_visible"], false);
+    assert_eq!(options["countdown_visible"], true);
 
     // Round-trip parity: re-applying the serialized options is a fixed point.
     let serialized = chart.series_options_json(0).unwrap();
