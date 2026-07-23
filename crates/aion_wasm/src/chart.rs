@@ -464,18 +464,32 @@ impl AionChart {
         let callback = Closure::wrap(Box::new(move |entries: js_sys::Array| {
             let rect = container_cb.get_bounding_client_rect();
             let (css_w, css_h) = (rect.width().max(1.0), rect.height().max(1.0));
+            let dpr = web_sys::window()
+                .map(|w| w.device_pixel_ratio())
+                .unwrap_or(1.0);
             // Prefer the exact device-pixel content box; fall back to round(css*dpr).
             let device = entries
                 .get(0)
                 .dyn_into::<web_sys::ResizeObserverEntry>()
                 .ok()
                 .and_then(|e| device_pixel_box(&e));
-            let (bw, bh) = device.unwrap_or_else(|| {
-                let dpr = web_sys::window()
-                    .map(|w| w.device_pixel_ratio())
-                    .unwrap_or(1.0);
-                ((css_w * dpr).round(), (css_h * dpr).round())
-            });
+            let (bw, bh) = match device {
+                Some((dw, dh)) => {
+                    // Bogus-report guard: at dpr != 1 the device box must exceed the CSS box.
+                    // When it comes back equal (some engines/emulators report CSS px here), the
+                    // report is untrustworthy — use round(css*dpr) instead of downscaling to
+                    // a blurry dpr-1 bitmap.
+                    if dpr > 1.0
+                        && (dw - css_w).abs() <= 1.0
+                        && (dh - css_h).abs() <= 1.0
+                    {
+                        ((css_w * dpr).round(), (css_h * dpr).round())
+                    } else {
+                        (dw, dh)
+                    }
+                }
+                None => ((css_w * dpr).round(), (css_h * dpr).round()),
+            };
             apply_device_size(
                 &inner,
                 &gpu_pane,
