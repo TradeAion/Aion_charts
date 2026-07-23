@@ -555,11 +555,17 @@ export function install_gestures(chart: chart_impl): () => void {
       kinetic?.add_position(p.x, performance.now());
       apply_price_pan(p.y);
     }
-    // Crosshair: a hover over an axis strip leaves the crosshair at its last position (the reference's
-    // axis strips are separate widgets that never forward moves to the pane). During an active
-    // captured drag keep feeding positions; the engine clamps them into the pane.
+    // Crosshair: a hover over an axis strip is a pane mouseleave in the reference (its axis
+    // strips are separate widgets) — the crosshair HIDES, and the hovered-source state clears
+    // with it. During an active captured drag keep feeding positions; the engine clamps them
+    // into the pane (the reference's document-level drag listeners do the same).
     if (pointers.size > 0 || (price_axis_target_at(p) === null && !is_time_axis(p))) {
       set_crosshair(p.x, p.y);
+    } else if (last_crosshair !== null) {
+      last_crosshair = null;
+      wasm.clear_crosshair();
+      chart.clear_hover();
+      chart.emit_crosshair_left();
     }
     // Hover cursor feedback (no button pressed), resolved AFTER the crosshair feed refreshed
     // the hover hit-test, so a primitive's `hit_test` cursor applies on the same move it

@@ -6,32 +6,50 @@
      scale it down to the device, squishing the UI and adding a fractional CSS scale on top
      of the canvas bitmap. user-scalable=no stops native pinch-zoom fighting the chart. -->
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-<title>Aion Charts — @aion/charts demo</title>
+<title>Aion Charts — @tradeaion/charts demo</title>
 <style>
   html, body { margin: 0; height: 100%; background: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif; }
   #wrap { display: flex; flex-direction: column; height: 100%; }
-  #bar { padding: 8px 12px; font-size: 13px; color: #191919; border-bottom: 1px solid #e0e3eb; display: flex; gap: 14px 18px; align-items: center; flex-wrap: wrap; }
-  #bar .group { display: flex; gap: 8px; align-items: center; padding-right: 14px; border-right: 1px solid #e0e3eb; }
-  #bar .group:last-child { border-right: none; }
+  #bar { padding: 6px 12px; font-size: 13px; color: #191919; border-bottom: 1px solid #e0e3eb;
+         display: flex; gap: 4px 10px; align-items: stretch; flex-wrap: wrap; }
+  #bar .group { position: relative; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+                padding: 10px 10px 4px; margin-top: 2px; border: 1px solid #e0e3eb; border-radius: 6px; }
+  #bar .group::before { content: attr(data-caption); position: absolute; top: -8px; left: 8px;
+                padding: 0 5px; background: #fff; font-size: 9.5px; font-weight: 600; letter-spacing: 0.07em;
+                text-transform: uppercase; color: #787b86; }
   #bar label { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }
   #bar input[type="color"] { width: 24px; height: 20px; padding: 0; border: 1px solid #d0d3da; border-radius: 3px; background: none; cursor: pointer; }
   #bar input[type="range"] { width: 72px; vertical-align: middle; }
-  #bar .brand { background:#26a69a; color:#fff; padding:2px 6px; border-radius:3px; font-weight: bold; }
+  #bar .brand { align-self: center; background:#26a69a; color:#fff; padding:2px 6px; border-radius:3px; font-weight: bold; }
+  #bar .hint { color: #787b86; font-size: 11px; }
+  #status { align-self: center; margin-left: auto; color: #787b86; }
   /* The library creates and manages the canvases inside this container. */
   #chart_container { flex: 1; position: relative; touch-action: none; overscroll-behavior: none; }
-  #status { color: #787b86; }
   /* crosshair-move legend (top-left, over the pane) driven by subscribe_crosshair_move */
   #legend { position: absolute; top: 8px; left: 8px; z-index: 3; font-size: 12px; color: #191919;
             background: rgba(255,255,255,0.7); padding: 3px 7px; border-radius: 3px; pointer-events: none;
             font-variant-numeric: tabular-nums; }
+  /* Page chrome follows the chart theme (synced by sync_page_theme below). */
+  body[data-theme="dark"] { background: #0a0a0a; }
+  body[data-theme="dark"] #bar { background: #0a0a0a; color: #e5e7eb; border-bottom-color: #23262e; }
+  body[data-theme="dark"] #bar .group { border-color: #23262e; }
+  body[data-theme="dark"] #bar .group::before { background: #0a0a0a; color: #9aa0ac; }
+  body[data-theme="dark"] #bar label { color: #e5e7eb; }
+  body[data-theme="dark"] #bar select,
+  body[data-theme="dark"] #bar input[type="text"] { background: #16191f; color: #e5e7eb; border: 1px solid #2b2f38; border-radius: 3px; }
+  body[data-theme="dark"] #bar button { background: #16191f; color: #e5e7eb; border: 1px solid #2b2f38; border-radius: 3px; cursor: pointer; }
+  body[data-theme="dark"] #bar input[type="color"] { border-color: #2b2f38; background: #16191f; }
+  body[data-theme="dark"] #bar .hint { color: #9aa0ac; }
+  body[data-theme="dark"] #status { color: #9aa0ac; }
+  body[data-theme="dark"] #legend { color: #e5e7eb; background: rgba(10,10,10,0.7); }
 </style>
 </head>
 <body>
 <div id="wrap">
   <div id="bar">
-    <span class="brand">@aion/charts</span>
+    <span class="brand">@tradeaion/charts</span>
 
-    <div class="group" id="type_group">
+    <div class="group" id="type_group" data-caption="Series">
       <label><input type="radio" name="series" value="candlestick" checked> candles</label>
       <label><input type="radio" name="series" value="bar"> bars</label>
       <label><input type="radio" name="series" value="line"> line</label>
@@ -39,28 +57,8 @@
       <label><input type="radio" name="series" value="baseline"> baseline</label>
     </div>
 
-    <div class="group">
-      <label><input type="checkbox" id="grid_toggle" checked> grid</label>
-      <label>color <input type="color" id="grid_color" value="#d6dcde"></label>
-      <label>style
-        <select id="grid_style">
-          <option value="0" selected>solid</option>
-          <option value="1">dotted</option>
-          <option value="2">dashed</option>
-          <option value="3">large dashed</option>
-          <option value="4">sparse dotted</option>
-        </select>
-      </label>
-      <label>theme
-        <select id="theme_select">
-          <option value="light" selected>light</option>
-          <option value="dark">dark</option>
-        </select>
-      </label>
-    </div>
-
     <!-- candle/bar colors: body, wick, and border per direction + part visibility -->
-    <div class="group" id="candle_style">
+    <div class="group" id="candle_style" data-caption="Candle style">
       <label>up <input type="color" id="up_color" value="#26a69a"></label>
       <label>down <input type="color" id="down_color" value="#ef5350"></label>
       <label>wick up <input type="color" id="wick_up_color" value="#26a69a"></label>
@@ -73,19 +71,22 @@
     </div>
 
     <!-- line/area stroke -->
-    <div class="group" id="line_style" hidden>
+    <div class="group" id="line_style" data-caption="Line style" hidden>
       <label>color <input type="color" id="line_color" value="#2196f3"></label>
       <label>width <input type="range" id="line_width" min="1" max="8" step="1" value="3"><span id="line_width_val">3</span></label>
     </div>
 
     <!-- area fill -->
-    <div class="group" id="area_style" hidden>
+    <div class="group" id="area_style" data-caption="Area style" hidden>
       <label>fill <input type="color" id="area_top" value="#2edc87"></label>
     </div>
 
-    <div class="group">
+    <div class="group" data-caption="Overlays">
       <label><input type="checkbox" id="sma_toggle"> SMA(20)</label>
       <label><input type="checkbox" id="vol_toggle"> volume</label>
+    </div>
+
+    <div class="group" data-caption="Plugins">
       <label title="Pane primitive (plugin platform): alternating day shading behind the series"><input type="checkbox" id="bands_toggle"> day bands</label>
       <label title="Series primitive (plugin platform): position band with a price-axis tag on the main series"><input type="checkbox" id="pos_band_toggle"> position band</label>
       <label title="Series primitive (plugin platform): autoscale-expanding band beyond the data"><input type="checkbox" id="scale_band_toggle"> scale band</label>
@@ -94,8 +95,8 @@
       <label title="Built-in plugin (reference createTextWatermark): two-line watermark painted through the overlay-text hook"><input type="checkbox" id="plugin_watermark_toggle"> plugin watermark</label>
     </div>
 
-    <div class="group">
-      <label>crosshair
+    <div class="group" data-caption="Crosshair">
+      <label>mode
         <select id="cross_mode">
           <option value="0" selected>normal</option>
           <option value="1">magnet</option>
@@ -118,8 +119,24 @@
       <label><input type="checkbox" id="cross_label_visible" checked> labels</label>
     </div>
 
-    <!-- axis text font (reference layout.fontFamily/fontSize, engine store-driven) -->
-    <div class="group">
+    <div class="group" data-caption="Chart">
+      <label>theme
+        <select id="theme_select">
+          <option value="light" selected>light</option>
+          <option value="dark">dark</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="grid_toggle" checked> grid</label>
+      <label>grid color <input type="color" id="grid_color" value="#d6dcde"></label>
+      <label>grid style
+        <select id="grid_style">
+          <option value="0" selected>solid</option>
+          <option value="1">dotted</option>
+          <option value="2">dashed</option>
+          <option value="3">large dashed</option>
+          <option value="4">sparse dotted</option>
+        </select>
+      </label>
       <label>font
         <select id="font_family">
           <option value="-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif" selected>system</option>
@@ -130,24 +147,29 @@
       <label>size <input type="range" id="font_size" min="9" max="20" step="1" value="12"><span id="font_size_val">12</span></label>
     </div>
 
+    <div class="group" data-caption="Series chrome" title="Built-in last-price line and last-value axis label on the main series (reference defaults: both on; the line follows the bar direction color)">
+      <label><input type="checkbox" id="price_line_toggle" checked> price line</label>
+      <label><input type="checkbox" id="last_value_toggle" checked> last value</label>
+    </div>
+
     <!-- price/time axis cosmetics: border (reference borderColor/borderVisible) + text (textColor) -->
-    <div class="group">
-      <label>axis border <input type="color" id="axis_border_color" value="#f5f5f5"></label>
-      <label><input type="checkbox" id="axis_border_visible" checked> visible</label>
-      <label>axis text <input type="color" id="axis_text_color" value="#0a0a0a"></label>
+    <div class="group" data-caption="Axes">
+      <label>border <input type="color" id="axis_border_color" value="#f5f5f5"></label>
+      <label><input type="checkbox" id="axis_border_visible" checked> borders</label>
+      <label>text <input type="color" id="axis_text_color" value="#0a0a0a"></label>
       <label>separator <input type="color" id="pane_separator_color" value="#2b2b43"></label>
     </div>
 
     <!-- watermark (reference v4 shape) -->
-    <div class="group" id="watermark_group">
-      <label><input type="checkbox" id="wm_visible"> watermark</label>
+    <div class="group" id="watermark_group" data-caption="Watermark">
+      <label><input type="checkbox" id="wm_visible"> show</label>
       <label>text <input type="text" id="wm_text" value="AION" size="6"></label>
       <label>color <input type="color" id="wm_color" value="#b0b8c4"></label>
       <label>size <input type="range" id="wm_size" min="16" max="160" step="4" value="72"><span id="wm_size_val">72</span></label>
     </div>
 
     <!-- interaction toggles: axis drag-to-scale, mouse kinetic (off by default, reference parity) -->
-    <div class="group" id="interaction_group" title="Drag a price/time axis to scale it; keyboard: arrows pan (Ctrl = fast), +/- zoom, Home fit, Esc clear">
+    <div class="group" id="interaction_group" data-caption="Interaction" title="Drag a price/time axis to scale it; keyboard: arrows pan (Ctrl = fast), +/- zoom, Home fit, Esc clear">
       <label><input type="checkbox" id="axis_scale_toggle" checked> axis drag-scale</label>
       <label><input type="checkbox" id="kinetic_toggle"> mouse kinetic</label>
       <span class="hint">drag axes · Ctrl+←→ fast scroll · flick coasts on touch</span>
@@ -158,7 +180,7 @@
   <div id="chart_container"><div id="legend">O — H — L — C —</div></div>
 </div>
 <script type="module">
-// Built from the real package distribution. The demo build copies @aion/charts' published
+// Built from the real package distribution. The demo build copies @tradeaion/charts' published
 // artifacts; it does not compile or wire an engine of its own.
 import { create_chart, create_series_markers, create_text_watermark, theme_options, theme_palette } from "./dist/aion_charts.js";
 import { generate_fixture_data } from "./fixture_data.js";
@@ -582,6 +604,8 @@ function apply_main_style() {
 
 // Grid controls drive both families (vert + horz) at once; the engine stores them separately,
 // so a package consumer can style each family independently (reference lineStyle 0–4).
+// Follow-or-pin: until the user pins a custom color, grid/axis colors track the theme tokens.
+const theme_color_touched = { grid: false, axis_border: false, axis_text: false };
 function apply_grid_style() {
   const color = document.getElementById("grid_color").value;
   const style = Number(document.getElementById("grid_style").value);
@@ -589,8 +613,12 @@ function apply_grid_style() {
   chart.apply_options({ grid: { vertLines: { color, style, visible }, horzLines: { color, style, visible } } });
 }
 document.getElementById("grid_toggle").addEventListener("change", apply_grid_style);
-document.getElementById("grid_color").addEventListener("input", apply_grid_style);
+document.getElementById("grid_color").addEventListener("input", () => { theme_color_touched.grid = true; apply_grid_style(); });
 document.getElementById("grid_style").addEventListener("change", apply_grid_style);
+
+// Built-in last-price line + last-value label toggles (main series).
+document.getElementById("price_line_toggle").addEventListener("change", (e) => main.apply_options({ price_line_visible: e.target.checked }));
+document.getElementById("last_value_toggle").addEventListener("change", (e) => main.apply_options({ last_value_visible: e.target.checked }));
 
 document.getElementById("up_color").addEventListener("input", () => main.apply_options({ up_color: document.getElementById("up_color").value }));
 document.getElementById("down_color").addEventListener("input", () => main.apply_options({ down_color: document.getElementById("down_color").value }));
@@ -698,9 +726,10 @@ function apply_axis_border() {
     timeScale: { borderColor, borderVisible },
   });
 }
-document.getElementById("axis_border_color").addEventListener("input", apply_axis_border);
+document.getElementById("axis_border_color").addEventListener("input", () => { theme_color_touched.axis_border = true; apply_axis_border(); });
 document.getElementById("axis_border_visible").addEventListener("change", apply_axis_border);
 document.getElementById("axis_text_color").addEventListener("input", (e) => {
+  theme_color_touched.axis_text = true;
   chart.apply_options({ layout: { textColor: e.target.value } });
 });
 
@@ -738,13 +767,37 @@ apply_interaction();
 
 // Theme presets come from the package's style settings file (theme.ts); applying one maps its
 // tokens onto the chart options live (background + axis borders + axis text), then the pickers
-// are synced so the controls reflect the active palette.
+// are synced so the controls reflect the active palette. The page chrome follows too.
+function sync_page_theme(theme) {
+  document.body.dataset.theme = theme;
+  document.getElementById("theme_select").value = theme;
+}
 document.getElementById("theme_select").addEventListener("change", (e) => {
+  const palette = theme_palette(e.target.value);
+  // theme_options now includes the grid lines (grid follows the border token per theme).
   chart.apply_options(theme_options(e.target.value));
-  document.getElementById("axis_border_color").value = theme_palette(e.target.value).border;
-  document.getElementById("axis_text_color").value = theme_palette(e.target.value).text;
+  // Follow-or-pin: untouched pickers adopt the new theme tokens; pinned colors are re-applied
+  // after the theme patch so a user's explicit choice always wins.
+  if (!theme_color_touched.axis_border) document.getElementById("axis_border_color").value = palette.border;
   apply_axis_border();
+  if (!theme_color_touched.axis_text) document.getElementById("axis_text_color").value = palette.text;
+  chart.apply_options({ layout: { textColor: palette.text } });
+  if (!theme_color_touched.grid) document.getElementById("grid_color").value = palette.grid;
+  apply_grid_style();
+  sync_page_theme(e.target.value);
 });
+// Honor ?theme= on first load: apply the chart theme and sync the pickers (parity fixtures pin
+// their own palette and must not be touched).
+if (requested_theme !== "light" && parity_fixture === null) {
+  const palette = theme_palette(requested_theme);
+  chart.apply_options(theme_options(requested_theme));
+  document.getElementById("axis_border_color").value = palette.border;
+  apply_axis_border();
+  document.getElementById("axis_text_color").value = palette.text;
+  document.getElementById("grid_color").value = palette.grid;
+  apply_grid_style();
+}
+sync_page_theme(requested_theme);
 sync_style_visibility("candlestick");
 
 // crosshair-move subscription → OHLC legend (the public event API); a hovered primitive
