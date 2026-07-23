@@ -862,26 +862,30 @@ impl ChartEngine {
             }
         }
         if ch.vert_line.label_visible && x_css <= self.pane_w && self.time_axis_visible {
-            let index = self.snapped_crosshair_index(x_css, from, to);
-            let text = self.format_crosshair_ts(self.data.merged_times()[index as usize]);
-            let width = measure(&text) + 9.0 * 2.0;
-            let height = font_size + 3.0 + 3.0;
-            let x = self.pane_left + self.time_scale.index_to_coordinate(index);
-            let box_x = (x - width / 2.0).clamp(
-                self.pane_left,
-                (self.pane_left + self.pane_w - width).max(self.pane_left),
-            );
-            let label_bg = css_color(&ch.vert_line.label_background_color, CROSSHAIR_LABEL_BG);
-            labels.push(AxisLabel {
-                text,
-                x: box_x + width / 2.0,
-                y: self.pane_h + 1.0 + height / 2.0,
-                color: label_bg.contrast_text(),
-                align: AxisTextAlign::Center,
-                midpoint: AxisTextMidpoint::StableTime,
-                bold: false,
-                background: Some((box_x, self.pane_h + 1.0, width, height, label_bg)),
-            });
+            let index = self.snapped_crosshair_index(x_css);
+            // reference `indexToTime` returns null in the empty area — the time label is hidden
+            // when the snapped index has no bar (past either data edge).
+            if index >= 0 && (index as usize) < self.data.merged_times().len() {
+                let text = self.format_crosshair_ts(self.data.merged_times()[index as usize]);
+                let width = measure(&text) + 9.0 * 2.0;
+                let height = font_size + 3.0 + 3.0;
+                let x = self.pane_left + self.time_scale.index_to_coordinate(index);
+                let box_x = (x - width / 2.0).clamp(
+                    self.pane_left,
+                    (self.pane_left + self.pane_w - width).max(self.pane_left),
+                );
+                let label_bg = css_color(&ch.vert_line.label_background_color, CROSSHAIR_LABEL_BG);
+                labels.push(AxisLabel {
+                    text,
+                    x: box_x + width / 2.0,
+                    y: self.pane_h + 1.0 + height / 2.0,
+                    color: label_bg.contrast_text(),
+                    align: AxisTextAlign::Center,
+                    midpoint: AxisTextMidpoint::StableTime,
+                    bold: false,
+                    background: Some((box_x, self.pane_h + 1.0, width, height, label_bg)),
+                });
+            }
         }
     }
 }

@@ -395,14 +395,14 @@ fn do_not_snap_to_hidden_series_indices_moves_to_a_visible_bar() {
     let x2 = chart.time_scale.index_to_coordinate(2);
 
     // Default (off): the snapped index stays on the hidden-only bar.
-    assert_eq!(chart.snapped_crosshair_index(x2, from, to), 2);
+    assert_eq!(chart.snapped_crosshair_index(x2), 2);
 
     // On: it moves to the nearest visible-series bar; the tie resolves left (reference `indexOf(min)`).
     chart
         .options
         .apply_str(r#"{"crosshair":{"doNotSnapToHiddenSeriesIndices":true}}"#)
         .unwrap();
-    assert_eq!(chart.snapped_crosshair_index(x2, from, to), 1);
+    assert_eq!(chart.snapped_crosshair_index(x2), 1);
 
     // The drawn vertical line follows the moved index.
     chart.crosshair = Some((x2, 120.0));
@@ -1327,5 +1327,46 @@ fn custom_series_autoscale_contribution_merges_through_the_custom_base_value() {
     assert!(
         from < 1.0 || to > 2.0,
         "stale range must survive a dropped contribution"
+    );
+}
+
+#[test]
+fn crosshair_follows_the_cursor_into_the_empty_area() {
+    // Two empty slots on the right (reference `rightOffset` > 0): hovering past the last bar
+    // keeps the crosshair following the cursor onto the empty slot instead of sticking to the
+    // last bar; the time label hides there (reference `indexToTime` ? null).
+    let mut chart = crosshair_chart();
+    chart.set_right_offset(2.0);
+    chart.build_frame();
+    let empty_x = chart.time_scale.index_to_coordinate(3);
+    chart.crosshair = Some((empty_x, 120.0));
+    let frame = chart.build_frame();
+    let empty_slot_x = chart.time_scale.index_to_coordinate(3).round() as i32;
+    let last_bar_x = chart.time_scale.index_to_coordinate(2).round() as i32;
+    assert!(empty_slot_x != last_bar_x);
+    assert!(
+        frame.panes[0]
+            .main
+            .iter()
+            .any(|p| matches!(p, Prim::VLine { x, .. } if *x == empty_slot_x)),
+        "vertical line must follow the cursor into the empty area"
+    );
+    let axis = chart.build_axis_frame(80.0, |t| t.len() as f64 * 7.0);
+    assert!(
+        !axis
+            .labels
+            .iter()
+            .any(|l| l.background.is_some() && l.midpoint == AxisTextMidpoint::StableTime),
+        "no time label in the empty area"
+    );
+
+    // Control: hovering a real bar still shows the time label.
+    chart.crosshair = Some((chart.time_scale.index_to_coordinate(2), 120.0));
+    let axis = chart.build_axis_frame(80.0, |t| t.len() as f64 * 7.0);
+    assert!(
+        axis.labels
+            .iter()
+            .any(|l| l.background.is_some() && l.midpoint == AxisTextMidpoint::StableTime),
+        "time label present over a real bar"
     );
 }

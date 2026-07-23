@@ -20,7 +20,7 @@ impl ChartEngine {
         if self.crosshair_mode == CrosshairMode::Hidden {
             return;
         }
-        let index = self.snapped_crosshair_index(x_css, from, to);
+        let index = self.snapped_crosshair_index(x_css);
         let snapped_x = self.time_scale.index_to_coordinate(index);
         let ch = self.options.get().crosshair;
         let vert_color = css_color(&ch.vert_line.color, CROSSHAIR_COLOR);
@@ -150,8 +150,16 @@ impl ChartEngine {
         ))
     }
 
-    pub(super) fn snapped_crosshair_index(&self, x_css: f64, from: i64, to: i64) -> i64 {
-        let index = self.time_scale.coordinate_to_index(x_css).clamp(from, to);
+    pub(super) fn snapped_crosshair_index(&self, x_css: f64) -> i64 {
+        // reference `setAndSaveCurrentPosition` clamps into visibleStrictRange — the FULL visible
+        // window including the empty area (right offset), NOT the data-bounded range. In the
+        // empty area the index lands on a hypothetical slot: the vertical line follows the
+        // cursor there, while magnet/markers/the time label see no bar (exact searches miss).
+        let index = self.time_scale.coordinate_to_index(x_css);
+        let index = match self.time_scale.visible_strict_range() {
+            Some(strict) => index.clamp(strict.left(), strict.right()),
+            None => index,
+        };
         self.snap_index_to_visible_series(index)
     }
 
@@ -237,9 +245,9 @@ impl ChartEngine {
         x_css: f64,
         y_css: f64,
         from: i64,
-        to: i64,
+        _to: i64,
     ) -> (f64, f64) {
-        let index = self.snapped_crosshair_index(x_css, from, to);
+        let index = self.snapped_crosshair_index(x_css);
         let (default_scale, default_base) = self.pane_default_scale(pane_index, from);
         let price = default_scale.coordinate_to_price(y_css, default_base);
         if matches!(
