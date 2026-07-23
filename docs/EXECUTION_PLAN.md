@@ -173,13 +173,16 @@ buffer; swappable for a typed-array ABI later without changing the plugin API).
 
 ## Phase 4 — Release
 
-- [ ] 4.1 Create `@aion` npm org; `NPM_TOKEN` repo secret.
+- [ ] 4.1 Create `@aion` npm org; `NPM_TOKEN` repo secret. **(user action — steps in the progress log)**
+- [x] 4.2a Pre-release validation: `npm publish --dry-run` runs the full prepublish chain and
+      reports a valid 13-file, 362 kB tarball with public access; fixed a dry-run env leak into
+      the pack smoke test. — 2026-07-23
 - [ ] 4.2 Tag `v0.1.0` → CI publishes; verify `bun add @aion/charts` (primary) and
       `npm i @aion/charts` in a fresh Vite + webpack + plain-server consumer.
 - [ ] 4.3 Optional: React/Vue/Svelte thin wrappers (separate packages; framework-agnostic core
       stays as-is).
-- [ ] 4.4 Docs: update root README install section; archive this plan's phases into
-      PRODUCTION_ROADMAP.md as they land.
+- [x] 4.4 Docs: root README install section (bun-primary); phases archived into
+      PRODUCTION_ROADMAP.md. — 2026-07-23
 
 ---
 
@@ -234,6 +237,13 @@ buffer; swappable for a typed-array ABI later without changing the plugin API).
   `Prim::Text` glyph engine (plugin text uses the overlay hook). Playwright **28/28**, 270 cargo
   tests, clippy clean, pack smoke green. Remaining: 3.6/C-e (optional raw-canvas escape hatch),
   Phase 4 release.
+- 2026-07-23 — **Phase 4 prep done (4.2a + 4.4).** `npm publish --dry-run` validated end-to-end
+  (fixed the `npm_config_dry_run` leak into the pack smoke test). To ship v0.1.0 (user actions):
+  1. create the `@aion` org on npmjs.com; 2. generate a granular access token with publish rights
+  and add it as the `NPM_TOKEN` repo secret (GitHub → Settings → Secrets → Actions); 3. commit
+  these doc updates, then `git tag v0.1.0 && git push origin v0.1.0` — the publish CI job builds
+  and publishes after all gates pass; 4. verify in a fresh consumer: `bun add @aion/charts` then
+  `import { create_chart } from "@aion/charts"`.
 - 2026-07-21 — **Wave-1 verification pass.** Independent live-browser probe (defaults, apply→
   options round-trips, render) caught a fidelity bug: new color options round-tripped normalized
   (`#FF0000`→`#ff0000`) — fields were stored as parsed `Color`. Fixed to verbatim CSS strings with

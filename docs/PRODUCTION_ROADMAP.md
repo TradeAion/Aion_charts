@@ -855,6 +855,44 @@ Progress is appended here as phases land (newest last).
   coasts when the toggle is on (160.95 → 300.40), and Ctrl+ArrowLeft eases exactly 10 bars
   older.
 
+- 2026-07-21 — **Interaction parity 1:1 vs LWC 5.2 (verified against vendored source).** Full
+  inventory diff followed by fixes: crosshair clamps into the pane instead of vanishing over
+  axes and persists after mouse-up; primary-button-only gestures + middle-click autoscroll
+  suppression; wheel deltaMode ×32/×120 + Windows-Chromium DPR correction + horizontal-wheel
+  `scrollChart`; pinch ported to LWC's anchored `(scale−prev)×5`; touch path rebuilt on raw touch
+  events with direction classification and release-to-page scrolling; 240 ms long-press tracking
+  mode with `on_next_tap`/`on_touch_end` exit; double-tap axis reset (30 px/500 ms); kinetic
+  ported from `KineticAnimation` (15 px sampling, 50 ms window, 0.2–7 px/ms clamps, 0.997 decay);
+  price pan blocked while autoscale is on (strict LWC). Playwright 10/10.
+
+- 2026-07-21 — **LWC API breadth closed (execution plan Phases 1–2, tracked in
+  docs/EXECUTION_PLAN.md).** ~40 items: full per-series styling (lastValueVisible with LWC label
+  overlap resolution, priceLine family, lineStyle dashes frame-built for backend identity,
+  crosshairMarker family, baseline quadrant gradients, histogram base, invertFilledArea, bar
+  openVisible/thinBars), per-data-point colors (RGBA channels aligned through dedupe/update/
+  insert), per-series priceFormat (price/volume/percent/custom + JS formatter), verbatim CSS
+  color round-trips, whitespace data items, shiftVisibleRangeOnNewBar compensation, series.pop/
+  lastValueData/priceFormatter, programmatic crosshair, locale+dateFormat, primary-series
+  removal + seriesOrder, explicit pane management (add/remove/swap/moveTo/getSeries/
+  preserveEmptyPane), full price/time axis cosmetics, vertical gradient background, separator
+  hover band. Every phase shipped with a live browser probe; 221 cargo tests + Playwright 10/10
+  at each checkpoint.
+
+- 2026-07-21 — **Plugin platform landed (Phase 3).** A-first hybrid per PLUGIN_PLATFORM_DESIGN.md:
+  pane + series primitives emit backend-neutral Prim commands (JSON command buffer, one
+  marshalling pass per frame), z-ordered under/main/top, lifecycle + series-bound draw contexts,
+  axis labels; `autoscale_info` engine contributions; LWC `hitTestPane` precedence + per-kind
+  series hit tests (`hovered_series`, `hovered_object_id`, hit cursor, `hovered_series_on_top`);
+  `add_custom_series` with engine-owned time mapping (LWC rounded-candles ported line-for-line);
+  markers + watermark re-expressed as plugins with a 0-diff parity proof. Playwright 28/28.
+
+- 2026-07-23 — **Publish readiness validated (Phase 4 prep).** `npm publish --dry-run` runs the
+  full prepublish chain (clean → wasm build → bundle → types → pack smoke) and reports a valid
+  13-file, 362 kB tarball with public access. Fixed a dry-run leak (`npm_config_dry_run`
+  propagated into the pack smoke test's inner `npm pack`). Remaining for v0.1.0: create the
+  `@aion` npm org, add `NPM_TOKEN` to repo secrets, push tag `v0.1.0` — the CI publish job does
+  the rest; then verify `bun add @aion/charts` (primary) and `npm i` in fresh consumers.
+
 ## 11. Revised execution order
 
 The active plan is now different from the original scaffolding sequence. The earlier sequence is

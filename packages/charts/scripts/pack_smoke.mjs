@@ -22,8 +22,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const pkg_dir = fileURLToPath(new URL("..", import.meta.url));
 const scratch = mkdtempSync(join(tmpdir(), "aion-pack-smoke-"));
 
+// When invoked from `npm publish --dry-run` (prepublishOnly), the parent leaks its dry-run
+// config into our nested npm calls — strip it so the inner `npm pack` really writes a tarball.
+const env = { ...process.env };
+delete env.npm_config_dry_run;
+
 const run = (cmd, args, cwd) =>
-  execFileSync(cmd, args, { cwd, encoding: "utf8", shell: process.platform === "win32" }).trim();
+  execFileSync(cmd, args, { cwd, env, encoding: "utf8", shell: process.platform === "win32" }).trim();
 
 try {
   // 1. Pack and inspect the tarball file list.
