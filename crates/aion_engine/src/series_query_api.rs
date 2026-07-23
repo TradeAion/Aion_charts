@@ -1,4 +1,4 @@
-//! Series data/coordinate queries mirroring the LWC series API (`price_to_coordinate`,
+//! Series data/coordinate queries mirroring the reference series API (`price_to_coordinate`,
 //! `data_by_index`, `bars_in_logical_range`, ...). Extracted from `lib.rs`.
 
 use super::*;
@@ -37,9 +37,9 @@ impl ChartEngine {
             .map(|series| series.kind)
     }
 
-    /// Apply a per-series `priceFormat` JSON patch (LWC `series.applyOptions({ priceFormat })`):
+    /// Apply a per-series `priceFormat` JSON patch (reference `series.applyOptions({ priceFormat })`):
     /// `{"type":"price"|"volume"|"percent"|"custom", "precision"?, "min_move"?}` (`minMove`
-    /// accepted as an alias). Absent keys keep their current values (LWC merge semantics).
+    /// accepted as an alias). Absent keys keep their current values (reference merge semantics).
     /// Switching to a non-custom type clears any installed custom formatter fn;
     /// `{type:"custom"}` keeps the installed fn. Returns false for a malformed patch, an
     /// unknown type, or an unknown/removed id.
@@ -81,7 +81,7 @@ impl ChartEngine {
         true
     }
 
-    /// Install the host formatter fn for a custom price format (LWC
+    /// Install the host formatter fn for a custom price format (reference
     /// `priceFormat: {type:'custom', formatter}`): switches the series to
     /// [`PriceFormatKind::Custom`], keeping its precision/min_move. A `None` return from the
     /// callback falls back to the built-in price formatter. Returns false for an
@@ -98,12 +98,12 @@ impl ChartEngine {
     /// Reconstruct the series' current options as a snake_case JSON object (TS
     /// `series_options` field names). Unset color overrides serialize as `""` — the
     /// follow-body/engine-default state the setters already accept. Every color slot is
-    /// stored as a verbatim CSS string and returned exactly as applied (LWC `options()`
+    /// stored as a verbatim CSS string and returned exactly as applied (reference `options()`
     /// parity); unparseable strings fall back to their default at render time. `None` for
     /// an unknown or removed series.
     pub fn series_options_json(&self, id: SeriesId) -> Option<String> {
         let s = self.series.iter().find(|s| s.id == id && !s.removed)?;
-        // Verbatim CSS color slots (LWC stores the applied string): `""` when unset.
+        // Verbatim CSS color slots (reference stores the applied string): `""` when unset.
         let verbatim = |value: &Option<String>| value.clone().unwrap_or_default();
         let line_type = match s.line_type {
             LineType::WithSteps => "stepped",
@@ -117,7 +117,7 @@ impl ChartEngine {
         } else {
             "right"
         };
-        // LWC PriceFormat wire form; a custom format's fn is not serializable (LWC `options()`
+        // reference PriceFormat wire form; a custom format's fn is not serializable (reference `options()`
         // returns it, but the JSON boundary carries only the declarative keys).
         let price_format = match s.price_format.kind {
             PriceFormatKind::Price => serde_json::json!({
@@ -125,7 +125,7 @@ impl ChartEngine {
                 "precision": s.price_format.precision,
                 "min_move": s.price_format.min_move,
             }),
-            // LWC's `PriceFormatVolume` is exactly `{type: "volume"}` — precision is an accepted
+            // the reference's `PriceFormatVolume` is exactly `{type: "volume"}` — precision is an accepted
             // apply-time superset (drives the volume formatter) but is not serialized back.
             PriceFormatKind::Volume => serde_json::json!({
                 "type": "volume",
@@ -231,7 +231,7 @@ impl ChartEngine {
         Some(serde_json::Value::Object(out).to_string())
     }
 
-    /// Merge a snake_case JSON patch of series style options into the series (LWC
+    /// Merge a snake_case JSON patch of series style options into the series (reference
     /// `ISeriesApi.applyOptions` semantics): only keys present in the patch are touched, keys
     /// with the wrong type are ignored, and unknown keys are skipped silently. Colors follow
     /// the keep/clear/pin contract of the candle part colors (`""` clears an override back to
@@ -244,7 +244,7 @@ impl ChartEngine {
         let Some(s) = self.series.iter_mut().find(|s| s.id == id && !s.removed) else {
             return false;
         };
-        // Verbatim CSS color slots (LWC parity): any non-empty string is stored as-is —
+        // Verbatim CSS color slots (reference parity): any non-empty string is stored as-is —
         // including named colors the renderer cannot parse, which fall back to the default
         // at render time — so `options()` returns exactly what was applied. `""` clears.
         let color_string_slot = |slot: &mut Option<String>, value: &serde_json::Value| {
@@ -281,7 +281,7 @@ impl ChartEngine {
                         s.price_line_visible = v;
                     }
                 }
-                // LWC PriceLineSource (0 LastBar, 1 LastVisible).
+                // reference PriceLineSource (0 LastBar, 1 LastVisible).
                 "price_line_source" => {
                     if let Some(v) = u8_bounded(value, 1) {
                         s.price_line_source = v;
@@ -375,7 +375,7 @@ impl ChartEngine {
                         s.thin_bars = v;
                     }
                 }
-                // Unknown keys are ignored gracefully (LWC applyOptions merge semantics).
+                // Unknown keys are ignored gracefully (reference applyOptions merge semantics).
                 _ => {}
             }
         }
@@ -417,7 +417,7 @@ impl ChartEngine {
             .collect()
     }
 
-    /// Format one value with the series' resolved price format, backing LWC
+    /// Format one value with the series' resolved price format, backing reference
     /// `series.priceFormatter()` (series.ts `_recreateFormatter`): the custom fn when the
     /// format is `custom` (a `None`/declining return falls through), then the built-in for
     /// the format kind, then the chart-level `localization.priceFormatter`, and finally the
@@ -444,10 +444,10 @@ impl ChartEngine {
         self.price_formatter.format(value)
     }
 
-    /// LWC `ISeriesApi.lastValueData(globalLast)` (iseries-api.ts:321, series.ts:158-211):
+    /// reference `ISeriesApi.lastValueData(globalLast)` (iseries-api.ts:321, series.ts:158-211):
     /// the last (global) or last VISIBLE non-whitespace bar's close, formatted with the
     /// series' price format, plus its UTC-seconds time. Whitespace bars are skipped exactly
-    /// like LWC's whitespace-filtered plot list. `None` (serialized as "" at the boundary)
+    /// like the reference's whitespace-filtered plot list. `None` (serialized as "" at the boundary)
     /// when the series is unknown/removed, has no real bars, or (visible mode) no real bar
     /// at or left of the visible right edge.
     pub fn series_last_value_data(&self, id: SeriesId, global_last: bool) -> Option<String> {
@@ -497,7 +497,7 @@ impl ChartEngine {
         )
     }
 
-    /// LWC `barsInLogicalRange`, including its gap behavior and fractional bars-before/after
+    /// reference `barsInLogicalRange`, including its gap behavior and fractional bars-before/after
     /// results. Times are original UTC seconds of the first/last series bars inside the range.
     pub fn series_bars_in_logical_range(
         &self,

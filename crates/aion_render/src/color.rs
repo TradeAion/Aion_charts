@@ -90,7 +90,7 @@ impl Color {
     }
 
     /// Contrast text color for a label on this background — black on light, white on dark.
-    /// Approximates LWC's `generateContrastColors`.
+    /// Approximates the reference's `generateContrastColors`.
     pub fn contrast_text(&self) -> Color {
         if self.luminance() > 160.0 {
             Color::rgb(0, 0, 0)

@@ -31,7 +31,7 @@ impl VolumeFormatter {
     fn format_number(&self, value: f64) -> String {
         let pow = 10f64.powi(self.precision as i32);
         let v = (value * pow).round() / pow;
-        // trim trailing zeros like LWC's implementation does (it formats then strips .0+)
+        // trim trailing zeros like the reference's implementation does (it formats then strips .0+)
         let s = format!("{:.*}", self.precision as usize, v);
         if s.contains('.') {
             s.trim_end_matches('0').trim_end_matches('.').to_string()

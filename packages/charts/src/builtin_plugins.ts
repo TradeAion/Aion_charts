@@ -1,14 +1,14 @@
 /**
- * Built-in plugins (plugin platform Phase 3.5) — Aion's ports of lightweight-charts v5's own
+ * Built-in plugins (plugin platform Phase 3.5) — Aion's ports of the reference charting library v5's own
  * plugin surface, re-expressed on the primitive platform (primitives.ts):
  *
- * - {@link create_series_markers} mirrors LWC's `createSeriesMarkers` (plugins/series-markers):
+ * - {@link create_series_markers} mirrors the reference's `createSeriesMarkers` (plugins/series-markers):
  *   a series primitive whose pane view records the exact geometry the engine's built-in
  *   marker builder emits (crates/aion_engine/src/frame/series_geometry.rs `build_markers_frame`,
  *   ported below with `Math.fround` discipline so the decoded prims are bit-identical), with
  *   marker text painted through the overlay-text hook (the engine's own marker text path is
  *   the overlay too — frame/axis.rs `append_marker_labels`).
- * - {@link create_text_watermark} mirrors LWC's `createTextWatermark` (plugins/text-watermark):
+ * - {@link create_text_watermark} mirrors the reference's `createTextWatermark` (plugins/text-watermark):
  *   a pane primitive laying its lines out from the `text_views` info and painting through the
  *   overlay-text hook (the same slot the engine's chart-level `watermark` option paints in).
  *
@@ -36,13 +36,13 @@ import type {
 import type { pane_api, series_api, series_marker } from "./types.js";
 
 // ---------------------------------------------------------------------------------------------
-// Series markers (LWC plugins/series-markers)
+// Series markers (reference plugins/series-markers)
 // ---------------------------------------------------------------------------------------------
 
-/** Options for {@link create_series_markers} (LWC `SeriesMarkersOptions`). */
+/** Options for {@link create_series_markers} (reference `SeriesMarkersOptions`). */
 export interface series_markers_options {
   /**
-   * Expand the owning series' price scale so marker shapes stay visible (LWC `autoScale`,
+   * Expand the owning series' price scale so marker shapes stay visible (reference `autoScale`,
    * default `true`). See the module header for the pixel-margin vs price-bounds divergence.
    */
   auto_scale?: boolean;
@@ -50,7 +50,7 @@ export interface series_markers_options {
   z_order?: primitive_z_order;
 }
 
-/** Handle returned by {@link create_series_markers} (LWC `ISeriesMarkersPluginApi`). */
+/** Handle returned by {@link create_series_markers} (reference `ISeriesMarkersPluginApi`). */
 export interface series_markers_handle {
   /** Replace the markers (pass `[]` to remove them all) and repaint. */
   set_markers(markers: readonly series_marker[]): void;
@@ -244,7 +244,7 @@ class series_markers_primitive implements series_primitive {
     const from = this.visible_from;
     const to = this.visible_to;
     for (const marker of this.normalized) {
-      // `time_to_x` resolves only exact bar times (LWC no-snap), so markers at non-bar times
+      // `time_to_x` resolves only exact bar times (reference no-snap), so markers at non-bar times
       // are skipped like the engine's `binary_search` miss.
       const x = ctx.time_to_x(marker.time);
       if (x === null) continue;
@@ -379,7 +379,7 @@ class series_markers_primitive implements series_primitive {
   }
 
   /**
-   * Autoscale contribution (LWC `autoScale`). The engine's marker auto-scale applies pixel
+   * Autoscale contribution (reference `autoScale`). The engine's marker auto-scale applies pixel
    * internal margins; the platform's `{min, max}` contract can only widen the price range, so
    * the margins (frame/mod.rs `marker_auto_scale_margins`, same math) are converted with the
    * cached slope. `from`/`to` are always cached first — the renderer's visible-range gate
@@ -405,7 +405,7 @@ class series_markers_primitive implements series_primitive {
 }
 
 /**
- * Create a series markers plugin on `series` (LWC `createSeriesMarkers`). The markers paint
+ * Create a series markers plugin on `series` (reference `createSeriesMarkers`). The markers paint
  * through the plugin platform's command-recording path, so they are pixel-identical across
  * the WebGPU and Canvas2D backends — and to the engine's built-in `series.set_markers` output
  * when both sides run with `auto_scale: false` (see the module header for the autoscale
@@ -436,7 +436,7 @@ export function create_series_markers(
     options?.z_order ?? "normal",
   );
   const handle = series.attach_primitive(primitive);
-  // LWC's wrapper sets the initial markers after attach, so the update repaints through the
+  // the reference's wrapper sets the initial markers after attach, so the update repaints through the
   // injected `request_update`.
   if (markers !== undefined) {
     primitive.set_markers(markers);
@@ -449,10 +449,10 @@ export function create_series_markers(
 }
 
 // ---------------------------------------------------------------------------------------------
-// Text watermark (LWC plugins/text-watermark)
+// Text watermark (reference plugins/text-watermark)
 // ---------------------------------------------------------------------------------------------
 
-/** One text line of a {@link text_watermark_options} watermark (LWC `TextWatermarkLineOptions`). */
+/** One text line of a {@link text_watermark_options} watermark (reference `TextWatermarkLineOptions`). */
 export interface text_watermark_line_options {
   /** Text of the line (word wrapping is not supported). */
   text: string;
@@ -460,7 +460,7 @@ export interface text_watermark_line_options {
   color?: string;
   /** Font size in CSS px. Default `48`. */
   fontSize?: number;
-  /** Font family. Default LWC's font stack. */
+  /** Font family. Default the reference's font stack. */
   fontFamily?: string;
   /** Font style prefix (e.g. `"bold"`, `"italic"`). Default `''`. */
   fontStyle?: string;
@@ -468,7 +468,7 @@ export interface text_watermark_line_options {
   lineHeight?: number;
 }
 
-/** Options for {@link create_text_watermark} (LWC `TextWatermarkOptions`). */
+/** Options for {@link create_text_watermark} (reference `TextWatermarkOptions`). */
 export interface text_watermark_options {
   /** Horizontal alignment inside the pane. Default `'center'`. */
   horzAlign?: "left" | "center" | "right";
@@ -478,16 +478,16 @@ export interface text_watermark_options {
   lines?: text_watermark_line_options[];
 }
 
-// LWC `defaultFontFamily` (helpers/make-font.ts).
+// reference `defaultFontFamily` (helpers/make-font.ts).
 const watermark_default_font_family =
   "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
 
-/** LWC `makeFont`: the CSS font shorthand for a line (zoomed sizes included). */
+/** reference `makeFont`: the CSS font shorthand for a line (zoomed sizes included). */
 function make_font(size: number, family: string, style: string): string {
   return style === "" ? `${size}px ${family}` : `${style} ${size}px ${family}`;
 }
 
-// Shared text measurement for the zoom-to-fit computation (LWC measures with its render
+// Shared text measurement for the zoom-to-fit computation (reference measures with its render
 // context; an offscreen context with the same font string measures identically). Created
 // lazily so importing the package stays side-effect-free outside the browser.
 let watermark_measure_ctx: CanvasRenderingContext2D | null = null;
@@ -511,9 +511,9 @@ interface watermark_line {
 }
 
 /**
- * Create a text watermark on `pane` (LWC `createTextWatermark`). Painted through the plugin
+ * Create a text watermark on `pane` (reference `createTextWatermark`). Painted through the plugin
  * platform's overlay-text hook — the same slot the engine's chart-level `watermark` option
- * paints in (below the axis chrome, above the pane, identical on both backends) — with LWC's
+ * paints in (below the axis chrome, above the pane, identical on both backends) — with the reference's
  * line stacking, zoom-to-fit, and alignment math (plugins/text-watermark/pane-renderer.ts).
  *
  * @example
@@ -544,7 +544,7 @@ export function create_text_watermark(pane: pane_api, options?: text_watermark_o
     text_views(info: primitive_text_context): primitive_text_view[] {
       const media_width = info.pane_width / info.hpr;
       const media_height = info.pane_height / info.vpr;
-      // Per-line zoom-to-fit and the stacked text height (LWC's renderer, first pass).
+      // Per-line zoom-to-fit and the stacked text height (the reference's renderer, first pass).
       const laid: { line: watermark_line; font: string; zoom: number }[] = [];
       let text_height = 0;
       for (const line of lines) {
@@ -581,7 +581,7 @@ export function create_text_watermark(pane: pane_api, options?: text_watermark_o
           x: info.pane_left + x * info.hpr,
           y: info.pane_top + offset * info.vpr,
           color: line.color,
-          // LWC scales the context by `zoom`; scaling the font size is the same layout.
+          // reference scales the context by `zoom`; scaling the font size is the same layout.
           font: zoom === 1 ? font : make_font(line.font_size * zoom, line.font_family, line.font_style),
           align,
           baseline: "top",

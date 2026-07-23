@@ -1,7 +1,7 @@
 # Aion Charts — Engine Architecture Plan (Rust + WebGPU + WASM)
 
 Goal: a production trading-chart engine with the **visual fidelity and API ergonomics of
-lightweight-charts** and the **long-term extensibility of a TradingView-class platform**
+the reference charting library** and the **long-term extensibility of a TradingView-class platform**
 (indicators, drawings, multi-pane, plugins), powered by Rust compiled to WASM rendering through
 WebGPU (with a WebGL2 fallback path).
 
@@ -9,11 +9,11 @@ Companion document: [RENDERING_SPEC.md](RENDERING_SPEC.md) — the exact pixel m
 
 ---
 
-## 1. What we learned from lightweight-charts (and keep)
+## 1. What we learned from the reference charting library (and keep)
 
 Their architecture is a textbook layered MVC and it maps cleanly onto Rust:
 
-| LWC layer | Responsibility | Aion equivalent |
+| reference layer | Responsibility | Aion equivalent |
 |---|---|---|
 | `api/` | Public façade, options merging, data validation | TS package `@aion/charts` + `aion-api` (Rust) |
 | `model/` | ChartModel, Pane, Series, TimeScale, PriceScale, Crosshair, DataLayer | `aion-core` crate (pure, platform-free) |
@@ -26,7 +26,7 @@ Key ideas we keep verbatim:
 1. **Integer time-point indices** as the horizontal domain; timestamps only matter at the data
    boundary and for label formatting. The union of all series' times forms the shared point list.
 2. **Media(CSS)-space model, bitmap-space rasterization** — every primitive is positioned in CSS px
-   floats and converted with `round(v * pixelRatio)` at encode time. This is *the* reason LWC looks
+   floats and converted with `round(v * pixelRatio)` at encode time. This is *the* reason reference looks
    crisp; we reproduce it exactly (see spec §2–§7 parity/rounding rules).
 3. **Invalidation mask** with levels None/Cursor/Light/Full + explicit time-scale invalidation
    queue, merged and flushed once per RAF.
@@ -62,7 +62,7 @@ What we deliberately change:
 
 Naming convention (project-wide): **snake_case everywhere** — crate names, module/file names, and
 the public TypeScript API (`create_chart`, `add_series`, `set_data`), diverging deliberately from
-lightweight-charts' camelCase.
+the reference charting library's camelCase.
 
 ```
 aion_charts/
@@ -77,17 +77,17 @@ aion_charts/
 │  │  │  ├─ scale/        # horz_scale_behavior trait + time/price impls, tick_marks,
 │  │  │  │                # price_tick_span, weight generator
 │  │  │  ├─ format/       # price/percent/volume/date/time formatters, text width abstraction
-│  │  │  └─ options/      # all option structs + defaults (mirror LWC defaults)
+│  │  │  └─ options/      # all option structs + defaults (mirror reference defaults)
 │  ├─ aion_render/        # DrawList IR: primitives, layers, text runs; no gpu deps
 │  ├─ aion_render_wgpu/   # wgpu backend: pipelines, glyph atlas, batching, surfaces
 │  ├─ aion_wasm/          # wasm-bindgen shell: DOM events, ResizeObserver, RAF, clipboard,
 │  │                      # canvas surface creation, JS callback plumbing
 │  └─ aion_native/        # tiny-skia host for headless PNGs & golden tests
 ├─ packages/
-│  └─ charts/             # TypeScript API package (thin, mirrors LWC API semantics, snake_case)
+│  └─ charts/             # TypeScript API package (thin, mirrors reference API semantics, snake_case)
 ├─ docs/
 └─ tests/
-   ├─ goldens/            # image-diff tests vs lightweight-charts reference renders
+   ├─ goldens/            # image-diff tests vs the reference charting library's renders
    └─ unit/
 ```
 
@@ -102,14 +102,14 @@ construct a separate chart-like scene.
 
 ## 3. Core model (aion-core)
 
-Direct port of the LWC model with Rust idioms:
+Direct port of the reference model with Rust idioms:
 
 - `ChartModel { time_scale, panes: Vec<Pane>, crosshair, magnet, options, serieses: SlotMap<SeriesId, Series> }`
 - `Pane { data_sources, left/right PriceScale + overlay scales, stretch_factor, grid }`
 - `Series` is an enum-dispatched struct over `SeriesKind` (Candlestick, Bar, Line, Area, Baseline,
   Histogram, Custom) sharing one plot-row storage.
 - **Storage: SoA.** `PlotList` = `{ indices: Vec<u32>, time_keys: Vec<i64>, values: [Vec<f64>; 4] }`
-  (open/high/low/close; single-value series alias all four like LWC does). Binary search on indices;
+  (open/high/low/close; single-value series alias all four like reference does). Binary search on indices;
   chunked min-max cache (chunk = 30) for autoscale, as in the spec §14.
 - `DataLayer` maintains the merged time-point list and per-series rows with the same
   `firstChangedPointIndex` diffing + incremental single-bar update path (spec §14) — this is what
@@ -131,13 +131,13 @@ trait HorzScaleBehavior {
 
 - Formatters ported 1:1 (price formatter with U+2212 minus, percent, volume, date/time with the
   same format tokens). Locale month/day names via a small embedded table + optional JS `Intl`
-  callback override (LWC allows `localization.timeFormatter`/`priceFormatter` — we expose the same
+  callback override (reference allows `localization.timeFormatter`/`priceFormatter` — we expose the same
   as JS callbacks; they're called only for visible labels, so the JS boundary cost is negligible).
-- Timezone policy = LWC policy: engine is UTC/naive; support timezones by (a) user-side timestamp
+- Timezone policy = reference policy: engine is UTC/naive; support timezones by (a) user-side timestamp
   shifting, (b) `timeFormatter`/`tickMarkFormatter` overrides, (c) optional built-in tz shifting
   behind a `chrono-tz` feature for the Rust-native use case.
 
-Numerics note: LWC math is f64 everywhere (JS). We use f64 in the model and convert to f32 only
+Numerics note: reference math is f64 everywhere (JS). We use f64 in the model and convert to f32 only
 inside draw-list encoding, after media→bitmap rounding — this keeps price math exact for
 crypto-scale values (1e-8 ticks) and avoids f32 jitter when zoomed into large timestamps.
 
@@ -145,7 +145,7 @@ crypto-scale values (1e-8 ticks) and avoids f32 jitter when zoomed into large ti
 
 ## 4. View layer & draw-list IR (aion-render)
 
-Views keep LWC's caching discipline (`_dataInvalidated / _optionsInvalidated / _invalidated`,
+Views keep the reference's caching discipline (`_dataInvalidated / _optionsInvalidated / _invalidated`,
 `visibleTimedValues` slicing) but emit a **DrawList** instead of calling Canvas2D:
 
 ```rust
@@ -169,13 +169,13 @@ struct DrawList { panes: Vec<PaneLayers>, axes: ..., background: ... }
 Design points:
 
 - Candles/wicks/histograms are **Rect runs** — thousands of same-color rects collapse into one
-  instanced draw. Color batching mirrors LWC's `fillStyle` caching by sorting runs per color
+  instanced draw. Color batching mirrors the reference's `fillStyle` caching by sorting runs per color
   *while preserving z within a series pass* (wicks → borders → bodies).
-- Dashed lines: implemented in the polyline shader via distance-along-line (we carry the LWC dash
+- Dashed lines: implemented in the polyline shader via distance-along-line (we carry the reference dash
   patterns and the accumulated dash-offset behavior across color changes).
 - The two-canvas trick becomes **two layers per pane rendered into the same surface**, but with the
   static layer cached in an offscreen texture: on `Cursor` invalidation we only re-encode the top
-  layer and composite `static_texture + top layer` — same perf characteristics as LWC, one canvas.
+  layer and composite `static_texture + top layer` — same perf characteristics as reference, one canvas.
 - Gradients: vertical linear only (background, area) — trivially in-shader.
 
 ## 5. WebGPU backend (aion-render-wgpu)
@@ -186,7 +186,7 @@ Pipelines (all `Rgba8Unorm`/`Bgra8Unorm`, premultiplied alpha, single render pas
    crosshair lines, axis label boxes without radius). Vertex expansion in shader from
    `{i32 x,y,w,h, u32 color}` instance buffer. No MSAA needed — edges are pixel-aligned by
    construction, which *exactly* matches Canvas2D fillRect output.
-2. **Polyline** — CPU-tessellated triangle strips (round joins per LWC `lineJoin:'round'`,
+2. **Polyline** — CPU-tessellated triangle strips (round joins per reference `lineJoin:'round'`,
    butt caps) with edge AA via signed-distance feathering (1px smoothstep), dash pattern via
    per-vertex arc-length. CPU tessellation (lyon or hand-rolled) is fine: visible points ≤ ~4k
    after conflation; a line strip re-tessellates only on Light invalidation.
@@ -202,8 +202,8 @@ Text stack:
   `yMidCorrection` trick (measure ascent/descent, center on the label box) — this is what makes
   axis text look like Canvas2D `textBaseline:'middle'`.
 - Text measurement (`TextWidthCache`, 200-entry LRU keyed by string with digit-normalization like
-  LWC) lives in `aion-core` behind a `MeasureText` trait implemented by the glyph engine.
-- Font default: same stack as LWC (`-apple-system, ..., sans-serif`) — we load the platform
+  reference) lives in `aion-core` behind a `MeasureText` trait implemented by the glyph engine.
+- Font default: same stack as reference (`-apple-system, ..., sans-serif`) — we load the platform
   sans via `local()` queries in JS and pass the bytes in; ship a bundled fallback (e.g. Inter)
   for deterministic tests.
 
@@ -246,7 +246,7 @@ Frame loop & surfaces:
 
 ### 6.1 JS/TS package (`@aion/charts`)
 
-Mirror the LWC v5 API surface so users (and our future platform code) get a familiar contract:
+Mirror the reference v5 API surface so users (and our future platform code) get a familiar contract:
 
 ```ts
 const chart = create_chart(container, options?);
@@ -264,9 +264,9 @@ chart.subscribe_crosshair_move/subscribe_click/subscribe_dbl_click, chart.take_s
 chart.apply_options(), chart.remove()
 ```
 
-(API is a semantic mirror of lightweight-charts v5 but named in snake_case per project convention.)
+(API is a semantic mirror of the reference charting library v5 but named in snake_case per project convention.)
 
-- Options objects are structurally identical to LWC's (defaults from spec §15) → drop-in
+- Options objects are structurally identical to the reference's (defaults from spec §15) → drop-in
   migration story and we can reuse their docs/mental model.
 - Data crossing the boundary: `setData` accepts JS arrays but immediately packs to typed arrays
   (`Float64Array` time/o/h/l/c + color side-tables) in the TS layer; the WASM side reads via one
@@ -280,7 +280,7 @@ chart.apply_options(), chart.remove()
 
 ### 6.2 Input handling
 
-Port LWC's `MouseEventHandler` gesture recognizer to TS in the shell (tap/double-tap/long-tap,
+Port the reference's `MouseEventHandler` gesture recognizer to TS in the shell (tap/double-tap/long-tap,
 pressed-move, pinch with distance ratio, page-scroll heuristics, `preventDefault` rules,
 double-click 500ms window) and forward normalized gestures to Rust:
 `gesture(kind, x, y, extra)` — the model code (scroll/scale/kinetic/tracking-mode) lives in Rust.
@@ -288,17 +288,17 @@ Wheel handling per spec §1.1 (delta modes, Windows-Chrome DPR correction).
 
 ### 6.3 Plugin system (critical for the TradingView ambition)
 
-Three tiers, mirroring LWC's proven design (spec §16, LWC `plugins/`):
+Three tiers, mirroring the reference's proven design (spec §16, reference `plugins/`):
 
 1. **Rust plugins (first-party, fast path)** — traits compiled in:
    `SeriesPrimitive`, `PanePrimitive`, `CustomSeries` (own the value→plot mapping + draw),
    each contributing z-ordered draw-list fragments + hit-test + autoscale + axis views. All
    built-ins (series markers, price lines, up/down markers, watermarks) are implemented as these,
-   proving the API like LWC does.
+   proving the API like reference does.
 2. **JS plugins (compat path)** — a `CanvasRenderingContext2D`-like recording proxy: JS primitive's
-   `draw(target)` receives a recorder implementing the ~20 ctx methods LWC plugins actually use
+   `draw(target)` receives a recorder implementing the ~20 ctx methods reference plugins actually use
    (fillRect, moveTo/lineTo/stroke, arc, fillText, roundRect, save/restore, transforms); commands
-   are decoded into DrawList prims. This lets the existing LWC plugin ecosystem (and user
+   are decoded into DrawList prims. This lets the existing reference plugin ecosystem (and user
    drawings written against it) run mostly unmodified. Document the unsupported exotica
    (e.g. `createPattern`, arbitrary clip paths) and add on demand.
 3. **Drawings/tools layer (future)** — built on tier 1 with serialized state, hit-testing from the
@@ -307,14 +307,14 @@ Three tiers, mirroring LWC's proven design (spec §16, LWC `plugins/`):
 ### 6.4 Indicator/compute layer
 
 Keep the engine data-in/draw-out. Indicators are producers that own output series — the same model
-as LWC's `indicator-examples`. `aion_indicators` contains pure SMA, EMA, and Bollinger functions;
+as the reference's `indicator-examples`. `aion_indicators` contains pure SMA, EMA, and Bollinger functions;
 `ChartEngine` binds their outputs to ordinary line series and recomputes them on source updates.
 The core does not know indicator formulas, and the browser does not calculate chart data.
 
 ### 6.5 Multi-chart & layouts
 
 `createChart` instances share one wgpu `Device/Queue/Atlas` via a module-level singleton (big
-memory win for 8-chart layouts). Time-scale sync = the LWC pattern
+memory win for 8-chart layouts). Time-scale sync = the reference pattern
 (`subscribeVisibleLogicalRangeChange` → `setVisibleLogicalRange`) exposed natively:
 `synchronizeTimeScales(chartA, chartB)` helper in TS.
 
@@ -334,7 +334,7 @@ Targets (mid-range laptop, 4k-wide chart):
 
 Mechanisms:
 
-- Visible-range slicing before any per-bar work (LWC does this; keep it).
+- Visible-range slicing before any per-bar work (reference does this; keep it).
 - Streaming updates append time-point weights incrementally; full tick-weight rebuilds are reserved
   for initial loads or historical/middle edits.
 - SoA + retained frame allocation: `ChartEngine::build_frame_into` and the WASM GPU groups pool
@@ -343,7 +343,7 @@ Mechanisms:
 - Coordinate conversion is a tight SIMD-friendly loop (`indexesToCoordinates`,
   `barPricesToCoordinates` are branch-free affine transforms — spec §1).
 - Static/top layer split (§4) makes crosshair-only frames ~free.
-- Data conflation (LWC v5 has it when barSpacing < 1/DPR px) is now viewport bounded across the
+- Data conflation (reference v5 has it when barSpacing < 1/DPR px) is now viewport bounded across the
   series set: line/area/baseline retain bucket endpoints and close extrema; candles/bars retain
   first-open, max-high, min-low, and last-close; histograms retain the greatest magnitude. The
   1M load/streaming gates pass; repeatable pan/zoom/crosshair measurements remain.
@@ -356,15 +356,15 @@ Mechanisms:
 
 ## 8. Fidelity & testing strategy
 
-1. **Port the math with its tests.** LWC has unit tests for tick span, formatters, data layer,
+1. **Port the math with its tests.** reference has unit tests for tick span, formatters, data layer,
    plot list. Port test vectors into Rust unit tests (`tests/unit`).
 2. **Golden-image diffing.** Render fixed scenarios (candles at bar spacings 0.5–50, DPR 1/1.25/2/3,
    both themes, axis label edge cases, dashed styles, histograms with tiny spacing) in
-   lightweight-charts via headless Chromium → PNG; render the same scene in `aion-native` → PNG;
+   the reference charting library via headless Chromium → PNG; render the same scene in `aion-native` → PNG;
    assert per-pixel diff within tolerance (rects must be *exact*; AA lines/text get a small
    perceptual tolerance). These live in `tests/goldens` and run in CI.
 3. **Interaction parity tests.** Scripted gesture sequences (wheel-zoom at x, drag, pinch, axis
-   drag/double-click) asserting `(barSpacing, rightOffset, priceRange)` match LWC values to 1e-9 —
+   drag/double-click) asserting `(barSpacing, rightOffset, priceRange)` match reference values to 1e-9 —
    the formulas in spec §1 are deterministic, so this is exact.
 4. Property tests on scales (roundtrip `price↔coordinate`, `index↔coordinate`, autoscale
    invariants, log-formula switching).
@@ -393,14 +393,14 @@ time tick marks (weights) for vertical grid. Then first goldens.
 **Phase 2 — Axes & text (2–3 wks). PARTIALLY DONE.**
 
 Text architecture decision (2026-07): axes render on a **stacked Canvas2D overlay**, not the
-GPU — mirroring LWC's per-cell canvas layout. The package owns separate WebGPU and Canvas2D pane
+GPU — mirroring the reference's per-cell canvas layout. The package owns separate WebGPU and Canvas2D pane
 canvases so it can fail over after device loss; a third full-size Canvas2D canvas sits exactly on
 top, transparent except over the axis strips and receiving input. The
 headless engine now emits an `AxisFrame` containing label content, placement, separators, label
 boxes, bold emphasis, and an explicit midpoint policy. The policies distinguish actual-glyph
 price-label correction, uncorrected ordinary/marker time labels, and stable crosshair-time
 correction. The browser supplies only font measurement and executes `fillText`/`fillRect` in media
-coordinates under a DPR transform, matching the canvas coordinate contract used by LWC.
+coordinates under a DPR transform, matching the canvas coordinate contract used by reference.
 This gives native, premium axis text (the product goal) while all chart layout/format decisions
 stay in Rust. The GPU
 label atlas + textured-quad pipeline are kept, constructed-but-idle, reserved for future
@@ -415,18 +415,18 @@ weight, en-US tick formatter), crosshair axis labels (dark boxes + white text), 
 font rasterization, and label-specific midpoint semantics. Remaining: label overlap resolution,
 `Intl` locale hook, edge tick marks, rounded crosshair-label corners, axis drag-scale gestures,
 deterministic native text, and closing fractional-DPR compositor/antialiasing gaps.
-*Exit: goldens of full chart with both axes match LWC.*
+*Exit: goldens of full chart with both axes match reference.*
 
 **Phase 3 — Interaction (2–3 wks).** Gesture recognizer, wheel/pinch zoom, pan, axis drag scale,
 double-click reset, kinetic scroll, crosshair + magnet + tracking mode (touch), axis crosshair
 labels, hit testing, click/crosshair subscriptions. Interaction parity tests.
-*Exit: feels identical to LWC side-by-side.*
+*Exit: feels identical to reference side-by-side.*
 
 **Phase 4 — Series completeness & streaming (2–3 wks). PARTIALLY DONE.** Done: line + area
 series (CPU-tessellated polyline stroke with round joins, gradient area fill, 4x MSAA for edge
 AA — pixel-aligned rects/text stay bit-identical), triangle pipeline, MSAA frame target,
 `update()` streaming path, new-bar shift, **magnet crosshair** (Normal/Magnet/MagnetOHLC/Hidden,
-default Normal — a deliberate divergence from LWC's Magnet default; Magnet/MagnetOHLC snap the
+default Normal — a deliberate divergence from the reference's Magnet default; Magnet/MagnetOHLC snap the
 horizontal line to close/OHLC when enabled), **crosshair marker** (white halo
 + series-color disc on line/area), **last-value price line + colored axis label** (dashed line
 to last close, contrast text), and viewport-bounded conflation for line/area/baseline, OHLC, and
@@ -445,7 +445,7 @@ primitives, watermark, screenshot, autoSize, multi-chart device sharing, time-sc
 
 **Phase 6 — Plugin surface & hardening (ongoing).** JS plugin recorder, series/pane primitive JS
 API, custom series API, WebGL2/Canvas2D fallback executor, perf pass (1M-bar benchmarks),
-docs site with LWC-style examples, drawings/tools groundwork.
+docs site with reference-style examples, drawings/tools groundwork.
 
 ---
 
@@ -457,8 +457,8 @@ docs site with LWC-style examples, drawings/tools groundwork.
 | WebGPU availability / context loss | wgpu GL backend + Canvas2D DrawList executor; device-lost → recreate & full invalidate |
 | JS↔WASM chattiness | Typed-array batching, lazy event params, callbacks only for visible labels |
 | f32 precision at deep zoom | f64 model math; translate-then-scale in encode so vertex coords stay small |
-| Scope creep toward TradingView | Phases 1–4 ship a LWC-equivalent product; platform features are additive because the plugin/z-order/pane architecture is in from day one |
-| LWC behavioral corner cases (axis width shake, label overlap, whitespace) | We ported the *reasons* (grow-fast/shrink-lazy, parity snapping, prevEdge) into the spec; goldens catch regressions |
+| Scope creep toward TradingView | Phases 1–4 ship a reference-equivalent product; platform features are additive because the plugin/z-order/pane architecture is in from day one |
+| reference behavioral corner cases (axis width shake, label overlap, whitespace) | We ported the *reasons* (grow-fast/shrink-lazy, parity snapping, prevEdge) into the spec; goldens catch regressions |
 
 ---
 

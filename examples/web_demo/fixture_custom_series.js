@@ -1,20 +1,20 @@
 /**
- * Port of LWC's plugin-examples `rounded-candles-series` to the Aion custom-series contract
- * (plugin platform Phase C-c). Source: tmp/lightweight-charts/plugin-examples/src/plugins/
+ * Port of the reference's plugin-examples `rounded-candles-series` to the Aion custom-series contract
+ * (plugin platform Phase C-c). Source: tmp/refsrc/plugin-examples/src/plugins/
  * rounded-candles-series/{rounded-candles-series.ts,renderer.ts} plus the dimension helpers in
  * src/helpers/dimensions/{positions,candles,crosshair-width}.ts.
  *
- * The draw body mirrors LWC's `_drawImpl` 1:1: the same up/down rule (close vs the PREVIOUS
+ * The draw body mirrors the reference's `_drawImpl` 1:1: the same up/down rule (close vs the PREVIOUS
  * close — the example's own rule), the same crisp-position math, the same media-px `radius`
  * used as a bitmap radius. The only adaptation is the coordinate space: Aion's render context
- * carries absolute BITMAP px (item x and `price_to_y` outputs), where LWC's renderer receives
+ * carries absolute BITMAP px (item x and `price_to_y` outputs), where the reference's renderer receives
  * pane-media coordinates and scales by `horizontal/verticalPixelRatio` inside its
  * `useBitmapCoordinateSpace` scope — so the helpers below run at pixelRatio 1, with widths
- * pre-scaled by `ctx.dpr` (the exact value LWC's `positionsLine(x, hpr, w)` computes).
+ * pre-scaled by `ctx.dpr` (the exact value the reference's `positionsLine(x, hpr, w)` computes).
  * `ctx.round_rect` stands in for the canvas `roundRect`; `ctx.rect` for `fillRect`.
  */
 
-// --- LWC helpers/dimensions/positions.ts (verbatim) ----------------------------------------
+// --- reference helpers/dimensions/positions.ts (verbatim) ----------------------------------------
 function centreOffset(lineBitmapWidth) {
   return Math.floor(lineBitmapWidth * 0.5);
 }
@@ -34,7 +34,7 @@ function positionsBox(position1Media, position2Media, pixelRatio) {
   };
 }
 
-// --- LWC helpers/dimensions/candles.ts (verbatim) ------------------------------------------
+// --- reference helpers/dimensions/candles.ts (verbatim) ------------------------------------------
 function optimalCandlestickWidth(barSpacing, pixelRatio) {
   const barSpacingSpecialCaseFrom = 2.5;
   const barSpacingSpecialCaseTo = 4;
@@ -61,7 +61,7 @@ function candlestickWidth(barSpacing, horizontalPixelRatio) {
   return width;
 }
 
-// --- LWC helpers/dimensions/crosshair-width.ts (verbatim) ----------------------------------
+// --- reference helpers/dimensions/crosshair-width.ts (verbatim) ----------------------------------
 function gridAndCrosshairBitmapWidth(horizontalPixelRatio) {
   return Math.max(1, Math.floor(horizontalPixelRatio));
 }
@@ -70,13 +70,13 @@ function gridAndCrosshairMediaWidth(horizontalPixelRatio) {
 }
 
 /**
- * The LWC `RoundedCandleSeries` pane view as an Aion `custom_series_pane_view`.
- * `overrides` matches LWC's `RoundedCandleSeriesOptions` rendering options (they stay
+ * The reference `RoundedCandleSeries` pane view as an Aion `custom_series_pane_view`.
+ * `overrides` matches the reference's `RoundedCandleSeriesOptions` rendering options (they stay
  * plugin-side here, like every plugin rendering option); `hooks.on_render` is a demo/test
  * observability hook receiving each frame's visible items.
  */
 export function rounded_candles_pane_view(overrides = {}, hooks = {}) {
-  // LWC rounded-candles-series.ts `defaultOptions` (rendering half; the engine half —
+  // reference rounded-candles-series.ts `defaultOptions` (rendering half; the engine half —
   // `customStyleDefaults.color` — arrives via `default_options` below).
   const options = {
     upColor: "#26a69a",
@@ -87,16 +87,16 @@ export function rounded_candles_pane_view(overrides = {}, hooks = {}) {
     ...overrides,
   };
   return {
-    // LWC RoundedCandleSeries.priceValueBuilder.
+    // reference RoundedCandleSeries.priceValueBuilder.
     price_value_builder: (item) => [item.high, item.low, item.close],
-    // LWC RoundedCandleSeries.isWhitespace.
+    // reference RoundedCandleSeries.isWhitespace.
     is_whitespace: (item) => item.close === undefined,
-    // LWC customStyleDefaults (custom-series.ts): the engine's custom-series `color` default.
+    // reference customStyleDefaults (custom-series.ts): the engine's custom-series `color` default.
     default_options: { color: "#2196f3" },
     render(ctx) {
       hooks.on_render?.(ctx.items);
       if (ctx.items.length === 0) return;
-      // LWC renderer.ts _drawImpl: up when close >= the PREVIOUS bar's close (the example's
+      // reference renderer.ts _drawImpl: up when close >= the PREVIOUS bar's close (the example's
       // own rule — not the open).
       let lastClose = -Infinity;
       const bars = ctx.items.map(({ x, item }) => {
@@ -112,7 +112,7 @@ export function rounded_candles_pane_view(overrides = {}, hooks = {}) {
         };
       });
       const radius = options.radius(ctx.bar_spacing);
-      // _drawWicks: LWC runs positionsLine(x, hpr, gridAndCrosshairMediaWidth(hpr)); the width
+      // _drawWicks: reference runs positionsLine(x, hpr, gridAndCrosshairMediaWidth(hpr)); the width
       // collapses to gridAndCrosshairBitmapWidth, and x is already bitmap here.
       const wickBitmapWidth = Math.round(gridAndCrosshairMediaWidth(ctx.dpr) * ctx.dpr);
       for (const bar of bars) {
@@ -123,9 +123,9 @@ export function rounded_candles_pane_view(overrides = {}, hooks = {}) {
           bar.isUp ? options.wickUpColor : options.wickDownColor,
         );
       }
-      // _drawCandles: "we want this in media width therefore using 1" (LWC comment), then
+      // _drawCandles: "we want this in media width therefore using 1" (reference comment), then
       // positionsLine scales by the ratio — exactly Math.round(mediaWidth * ctx.dpr) here.
-      // LWC falls back to fillRect when the canvas lacks roundRect; Aion's analogue for a
+      // reference falls back to fillRect when the canvas lacks roundRect; Aion's analogue for a
       // zero radius is `rect` (a zero-radius roundRect is a plain rect, and the crisp quad
       // family keeps the backends pixel-identical — the rounded path renders when radius > 0).
       const bodyBitmapWidth = Math.round(candlestickWidth(ctx.bar_spacing, 1) * ctx.dpr);

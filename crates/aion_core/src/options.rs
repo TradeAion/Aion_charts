@@ -1,6 +1,6 @@
-//! Chart option structs, LWC-matching defaults, and `apply_options` deep-merge (roadmap Phase A2).
+//! Chart option structs, reference-matching defaults, and `apply_options` deep-merge (roadmap Phase A2).
 //!
-//! lightweight-charts exposes deeply-nested option objects and an `applyOptions(partial)` that
+//! the reference charting library exposes deeply-nested option objects and an `applyOptions(partial)` that
 //! **deep-merges** a partial patch into the current options (`helpers/merge.ts`): nested objects
 //! are merged key-by-key so an update to `grid.vertLines.color` leaves every sibling untouched,
 //! while scalars and arrays replace wholesale. We reproduce that contract exactly.
@@ -8,10 +8,10 @@
 //! Rather than hand-roll a merge per struct, options are held as a canonical `serde_json::Value`
 //! seeded from the typed defaults; a patch (also JSON, straight from the JS boundary) is
 //! deep-merged into it, and typed views are produced by deserializing on demand. This mirrors
-//! LWC's runtime object merge 1:1 and makes partial updates and round-tripping free.
+//! the reference's runtime object merge 1:1 and makes partial updates and round-tripping free.
 //!
-//! Colors are kept as CSS strings (as in LWC); the render layer parses them. `LineStyle` is the
-//! numeric wire form LWC uses (0 Solid, 1 Dotted, 2 Dashed, 3 LargeDashed, 4 SparseDotted).
+//! Colors are kept as CSS strings (as in reference); the render layer parses them. `LineStyle` is the
+//! numeric wire form reference uses (0 Solid, 1 Dotted, 2 Dashed, 3 LargeDashed, 4 SparseDotted).
 //!
 //! Scope note: this covers the chart-level visual groups (layout, grid, crosshair), the axis
 //! strips' border cosmetics (`leftPriceScale`/`rightPriceScale`/`timeScale`), and the top-level
@@ -22,7 +22,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-/// LWC `LineStyle` (`renderers/draw-line.ts`), numeric wire form.
+/// reference `LineStyle` (`renderers/draw-line.ts`), numeric wire form.
 pub mod line_style {
     pub const SOLID: u8 = 0;
     pub const DOTTED: u8 = 1;
@@ -31,7 +31,7 @@ pub mod line_style {
     pub const SPARSE_DOTTED: u8 = 4;
 }
 
-/// LWC `CrosshairMode` (`model/crosshair.ts`), numeric wire form.
+/// reference `CrosshairMode` (`model/crosshair.ts`), numeric wire form.
 pub mod crosshair_mode {
     pub const NORMAL: u8 = 0;
     pub const MAGNET: u8 = 1;
@@ -62,7 +62,7 @@ fn default_font_family() -> String {
     "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif".into()
 }
 
-/// `layout.background` — solid only for now (LWC also has a vertical gradient variant).
+/// `layout.background` — solid only for now (reference also has a vertical gradient variant).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BackgroundOptions {
@@ -94,7 +94,7 @@ impl Default for BackgroundOptions {
 pub struct PanesOptions {
     #[serde(rename = "separatorColor")]
     pub separator_color: String,
-    /// LWC `panes.separatorHoverColor` (default `rgba(178, 181, 189, 0.2)`): the hover band
+    /// reference `panes.separatorHoverColor` (default `rgba(178, 181, 189, 0.2)`): the hover band
     /// painted over a separator by the gesture layer.
     #[serde(rename = "separatorHoverColor")]
     pub separator_hover_color: String,
@@ -202,18 +202,18 @@ pub struct CrosshairOptions {
     pub vert_line: CrosshairLineOptions,
     #[serde(rename = "horzLine")]
     pub horz_line: CrosshairLineOptions,
-    /// [`crosshair_mode`] value (default Magnet, matching LWC).
+    /// [`crosshair_mode`] value (default Magnet, matching reference).
     pub mode: u8,
-    /// LWC `doNotSnapToHiddenSeriesIndices` (default false): when true, the crosshair's snapped
+    /// reference `doNotSnapToHiddenSeriesIndices` (default false): when true, the crosshair's snapped
     /// bar index moves to the nearest index that has a bar in any visible series.
     #[serde(rename = "doNotSnapToHiddenSeriesIndices")]
     pub do_not_snap_to_hidden_series_indices: bool,
 }
 
-/// Chart-level options of a pane price-axis strip: visibility plus the LWC border cosmetics
+/// Chart-level options of a pane price-axis strip: visibility plus the reference border cosmetics
 /// (`price-scale.options.ts`: `borderVisible`/`borderColor`) and the label cosmetics the
 /// engine keeps per scale (`alignLabels`/`ticksVisible`/`entireTextOnly`/`minimumWidth`/
-/// `textColor` — LWC applies these chart-level groups to every pane's scale, pane.ts
+/// `textColor` — reference applies these chart-level groups to every pane's scale, pane.ts
 /// `applyScaleOptions`). Scale math and per-series scale options are owned by
 /// `PriceScaleCore`; `visible` determines whether layout reserves and paints the strip.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -224,19 +224,19 @@ pub struct PriceAxisOptions {
     pub border_visible: bool,
     #[serde(rename = "borderColor")]
     pub border_color: String,
-    /// LWC `alignLabels` (default true).
+    /// reference `alignLabels` (default true).
     #[serde(rename = "alignLabels")]
     pub align_labels: bool,
-    /// LWC `ticksVisible` (default false).
+    /// reference `ticksVisible` (default false).
     #[serde(rename = "ticksVisible")]
     pub ticks_visible: bool,
-    /// LWC `entireTextOnly` (default false).
+    /// reference `entireTextOnly` (default false).
     #[serde(rename = "entireTextOnly")]
     pub entire_text_only: bool,
-    /// LWC `minimumWidth` (default 0).
+    /// reference `minimumWidth` (default 0).
     #[serde(rename = "minimumWidth")]
     pub minimum_width: f64,
-    /// LWC `textColor` (default `None` = follow `layout.textColor`).
+    /// reference `textColor` (default `None` = follow `layout.textColor`).
     #[serde(rename = "textColor")]
     pub text_color: Option<String>,
 }
@@ -247,7 +247,7 @@ impl PriceAxisOptions {
             visible,
             border_visible: true,
             border_color: axis_border_color(),
-            // LWC defaults (price-scale-options-defaults.ts).
+            // reference defaults (price-scale-options-defaults.ts).
             align_labels: true,
             ticks_visible: false,
             entire_text_only: false,
@@ -289,22 +289,22 @@ impl Default for CrosshairOptions {
         Self {
             vert_line: CrosshairLineOptions::default(),
             horz_line: CrosshairLineOptions::default(),
-            mode: crosshair_mode::NORMAL, // deliberate divergence from LWC's Magnet default
+            mode: crosshair_mode::NORMAL, // deliberate divergence from the reference's Magnet default
             do_not_snap_to_hidden_series_indices: false,
         }
     }
 }
 
-/// `watermark` — a large text label painted inside the pane (`api/options/watermark`, LWC v4
+/// `watermark` — a large text label painted inside the pane (`api/options/watermark`, reference v4
 /// shape). Aion draws it on the shared Canvas2D overlay above the series (a deliberate divergence
-/// from LWC's behind-series placement: it is the only text path that stays pixel-identical across
+/// from the reference's behind-series placement: it is the only text path that stays pixel-identical across
 /// the WebGPU and Canvas2D pane backends). Colors are CSS strings so alpha is preserved verbatim.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WatermarkOptions {
     pub visible: bool,
     pub text: String,
-    /// CSS color (default fully transparent, matching LWC — a watermark shows only once colored).
+    /// CSS color (default fully transparent, matching reference — a watermark shows only once colored).
     pub color: String,
     #[serde(rename = "fontSize")]
     pub font_size: f64,
@@ -371,7 +371,7 @@ impl Default for ChartOptions {
     }
 }
 
-/// Recursively deep-merge `patch` into `dst`, matching LWC `helpers/merge.ts`: when both sides of
+/// Recursively deep-merge `patch` into `dst`, matching reference `helpers/merge.ts`: when both sides of
 /// a key are JSON objects, merge them key-by-key; otherwise `patch` replaces `dst` wholesale
 /// (scalars, arrays, and null all overwrite). A `null` in `patch` explicitly sets the key to null.
 pub fn deep_merge(dst: &mut Value, patch: &Value) {
@@ -404,7 +404,7 @@ impl Default for ChartOptionsStore {
 }
 
 impl ChartOptionsStore {
-    /// Start from the LWC-matching defaults.
+    /// Start from the reference-matching defaults.
     pub fn new() -> Self {
         Self {
             value: serde_json::to_value(ChartOptions::default()).expect("options serialize"),
@@ -451,7 +451,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn defaults_match_lwc() {
+    fn defaults_match_reference() {
         let o = ChartOptions::default();
         assert_eq!(o.layout.background.color, "#FFFFFF");
         assert_eq!(o.layout.text_color, "#191919");
@@ -473,7 +473,7 @@ mod tests {
         assert_eq!(o.left_price_scale.border_color, "#2B2B43");
         assert!(o.time_scale.border_visible);
         assert_eq!(o.time_scale.border_color, "#2B2B43");
-        // Watermark defaults: hidden, transparent, 48px centered (LWC v4).
+        // Watermark defaults: hidden, transparent, 48px centered (reference v4).
         assert!(!o.watermark.visible);
         assert_eq!(o.watermark.color, "rgba(0, 0, 0, 0)");
         assert_eq!(o.watermark.font_size, 48.0);

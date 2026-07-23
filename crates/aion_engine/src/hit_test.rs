@@ -1,4 +1,4 @@
-//! Series hit testing (LWC v5.2 `hitTestPane`/`hitTestSeriesRange`/`hitTestLineSeries` ports).
+//! Series hit testing (reference v5.2 `hitTestPane`/`hitTestSeriesRange`/`hitTestLineSeries` ports).
 //!
 //! Geometry is computed in media (CSS) px — x from the pane's left edge, y from the chart's
 //! top — the same space the frame builders' coordinate converters produce, so a hit exactly
@@ -6,18 +6,18 @@
 //! (`visible_ohlc`/`visible_line_rows`/`visible_histogram_rows`), keeping the tested geometry
 //! identical to the drawn geometry at any bar spacing.
 //!
-//! Per-kind rules (ports, with the LWC default `hitTestTolerance` of 3 px):
-//! - candlestick/bar: `hitTestSeriesRange` over the bar's full high–low span (LWC
+//! Per-kind rules (ports, with the reference default `hitTestTolerance` of 3 px):
+//! - candlestick/bar: `hitTestSeriesRange` over the bar's full high–low span (reference
 //!   bars-pane-view-base.ts uses `highY..lowY` — no body/wick distinction), inside the bar's
 //!   horizontal slot (midpoints between adjacent bars, `barSpacing/2` at the edges).
 //! - histogram: the same range test over `value..base`.
 //! - line/area/baseline: `hitTestLineSeries` — distance to the stroke polyline (or the
 //!   step/curve expansion) within `lineWidth/2 + tolerance` (width 1 when `lineVisible` is
-//!   off), point-marker discs within `radius + tolerance`, and LWC's single-visible-point
-//!   horizontal segment. The area/baseline fills carry no hit test, exactly like LWC
+//!   off), point-marker discs within `radius + tolerance`, and the reference's single-visible-point
+//!   horizontal segment. The area/baseline fills carry no hit test, exactly like reference
 //!   (no renderer implements `hitTest` in v5.2).
 //!
-//! Cross-series arbitration ports LWC's `isBetterHit`: point-style hits beat strokes/ranges,
+//! Cross-series arbitration ports the reference's `isBetterHit`: point-style hits beat strokes/ranges,
 //! otherwise the smaller distance wins, and equal-distance non-point ties keep the paint
 //! order (the caller walks topmost-first, so ties resolve to the topmost series).
 
@@ -28,10 +28,10 @@ use aion_render::draw_list::LineType;
 use crate::frame::{pane_scale, series_scale_target};
 use crate::{ChartEngine, SeriesKind};
 
-/// LWC `SeriesOptionsCommon.hitTestTolerance` default (series-options-defaults.ts:15).
+/// reference `SeriesOptionsCommon.hitTestTolerance` default (series-options-defaults.ts:15).
 const HIT_TEST_TOLERANCE: f64 = 3.0;
 
-/// LWC `HitTestPriority` (model/internal-hit-test.ts): the class a series hit belongs to.
+/// reference `HitTestPriority` (model/internal-hit-test.ts): the class a series hit belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SeriesHitKind {
     /// Range-style hit (bar/candle/histogram interval).
@@ -42,7 +42,7 @@ pub enum SeriesHitKind {
     Point,
 }
 
-/// One series' hit-test outcome (LWC `InternalHitTestCandidate` plus the series identity).
+/// One series' hit-test outcome (reference `InternalHitTestCandidate` plus the series identity).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SeriesHit {
     pub series: SeriesId,
@@ -52,7 +52,7 @@ pub struct SeriesHit {
 }
 
 impl SeriesHit {
-    /// Port of LWC `isBetterHit`: a point hit beats any non-point hit; otherwise the smaller
+    /// Port of reference `isBetterHit`: a point hit beats any non-point hit; otherwise the smaller
     /// distance wins and equal-distance non-point ties lose (preserving the caller's
     /// topmost-first walk order).
     pub fn is_better_than(&self, current: &SeriesHit) -> bool {
@@ -66,7 +66,7 @@ impl SeriesHit {
     }
 }
 
-/// LWC `distanceToSegment` (renderers/hit-test-common.ts).
+/// reference `distanceToSegment` (renderers/hit-test-common.ts).
 fn distance_to_segment(x: f64, y: f64, x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
     let dx = x2 - x1;
     let dy = y2 - y1;
@@ -78,7 +78,7 @@ fn distance_to_segment(x: f64, y: f64, x1: f64, y1: f64, x2: f64, y2: f64) -> f6
     (x - (x1 + dx * clamped)).hypot(y - (y1 + dy * clamped))
 }
 
-/// LWC `hitTestSeriesRange` (renderers/range-hit-test.ts): horizontal slots bounded by the
+/// reference `hitTestSeriesRange` (renderers/range-hit-test.ts): horizontal slots bounded by the
 /// midpoints between adjacent items (`barSpacing/2` at the data edges), vertical range from
 /// the item's `rangeProvider`; inside the range the distance is 0, within tolerance outside
 /// it the distance to the nearer edge. `items` is `(x, geometry_time, range_start_y,
@@ -130,7 +130,7 @@ fn hit_test_series_range(
     min_distance.is_finite().then_some(min_distance)
 }
 
-/// LWC `getControlPoints` (renderers/walk-line.ts), tension 6.
+/// reference `getControlPoints` (renderers/walk-line.ts), tension 6.
 fn control_points(points: &[(f64, f64)], from: usize, to: usize) -> [(f64, f64); 2] {
     const CURVE_TENSION: f64 = 6.0;
     let before_from = points[from.saturating_sub(1)];
@@ -147,7 +147,7 @@ fn control_points(points: &[(f64, f64)], from: usize, to: usize) -> [(f64, f64);
     ]
 }
 
-/// LWC `distanceToBezierCurve` (renderers/line-hit-test.ts): 12-step polyline approximation.
+/// reference `distanceToBezierCurve` (renderers/line-hit-test.ts): 12-step polyline approximation.
 fn distance_to_bezier_curve(x: f64, y: f64, points: [(f64, f64); 4]) -> f64 {
     const STEPS: usize = 12;
     let cubic = |p0: f64, p1: f64, p2: f64, p3: f64, t: f64| {
@@ -170,12 +170,12 @@ fn distance_to_bezier_curve(x: f64, y: f64, points: [(f64, f64); 4]) -> f64 {
     min_distance
 }
 
-/// LWC `hitTestLineSeries` (renderers/line-hit-test.ts): point markers and the
+/// reference `hitTestLineSeries` (renderers/line-hit-test.ts): point markers and the
 /// single-visible-point segment report `Point`, stroke segments report `Line`. Aion's
 /// `visible_line_rows` selection already produces the drawn item set, so the items here are
-/// exactly the visible points (LWC instead indexes into its full item list by the extended
+/// exactly the visible points (reference instead indexes into its full item list by the extended
 /// visible range — same set at the pane edges Aion draws).
-#[allow(clippy::too_many_arguments)] // mirrors the LWC renderer-data signature
+#[allow(clippy::too_many_arguments)] // mirrors the reference renderer-data signature
 fn hit_test_line_series(
     points: &[(f64, f64)],
     x: f64,
@@ -224,7 +224,7 @@ fn hit_test_line_series(
         let first = points[index - 1];
         let second = points[index];
         // isWithinHorizontalSweep against the segment's horizontal bounds (with the control
-        // points included for curves, as in LWC).
+        // points included for curves, as in reference).
         let (left, right) = match line_type {
             LineType::Curved => {
                 let [cp1, cp2] = control_points(points, index - 1, index);
@@ -265,7 +265,7 @@ fn hit_test_line_series(
 impl ChartEngine {
     /// The stacked pane containing chart-top-relative media y `y_css`, or `None` when it
     /// falls between panes, on the time-axis strip, or off the chart. Hit testing is
-    /// restricted to the pane under the cursor (LWC hit-tests only the hovered pane widget).
+    /// restricted to the pane under the cursor (reference hit-tests only the hovered pane widget).
     pub fn pane_at_y(&self, y_css: f64) -> Option<usize> {
         if !y_css.is_finite() {
             return None;
@@ -278,13 +278,13 @@ impl ChartEngine {
     /// Hit-test one series at pane-relative media px `(x_css, y_css)` (x from the pane's left
     /// edge, y from the chart's top), independent of any other series. `None` for a hidden,
     /// removed, pane-less, or unscaled series, or a miss. Per-kind geometry and tolerances
-    /// are the LWC ports documented at the module level.
+    /// are the reference ports documented at the module level.
     pub fn hit_test_one_series(&self, id: SeriesId, x_css: f64, y_css: f64) -> Option<SeriesHit> {
         if !x_css.is_finite() || !y_css.is_finite() {
             return None;
         }
         let series = self.series.iter().find(|s| s.id == id)?;
-        // LWC gates a series' pane-view hit test on visibility (series-pane-view-base.ts).
+        // reference gates a series' pane-view hit test on visibility (series-pane-view-base.ts).
         if !series.visible || series.removed || series.pane_index >= self.panes.len() {
             return None;
         }
@@ -365,7 +365,7 @@ impl ChartEngine {
                     )
                 })
                 .collect::<Vec<_>>();
-                // LWC line-hit-test-pane-view-base.ts: width 1 when the stroke is hidden;
+                // reference line-hit-test-pane-view-base.ts: width 1 when the stroke is hidden;
                 // point markers join with their resolved radius (default lineWidth/2 + 2).
                 let line_width = if series.line_visible {
                     series.line_width.unwrap_or(crate::frame::LINE_WIDTH)
@@ -389,7 +389,7 @@ impl ChartEngine {
                 )
             }
             // A custom series' geometry is plugin-defined; the engine has no built-in hit for
-            // it (LWC's renderer-level `hitTest` is out of scope of the host contract).
+            // it (the reference's renderer-level `hitTest` is out of scope of the host contract).
             SeriesKind::Custom => None,
         };
         result.map(|(distance, kind)| SeriesHit {
@@ -399,9 +399,9 @@ impl ChartEngine {
         })
     }
 
-    /// The series under pane-relative media px `(x_css, y_css)` (LWC
+    /// The series under pane-relative media px `(x_css, y_css)` (reference
     /// `MouseEventParams.hoveredSeries`), or `None` off the panes/data. Walks the stable
-    /// paint order topmost-first (LWC deliberately does NOT use the temporary
+    /// paint order topmost-first (reference deliberately does NOT use the temporary
     /// hovered-on-top render order for arbitration, pane-hit-test.ts) and arbitrates
     /// competing hits with [`SeriesHit::is_better_than`].
     pub fn hit_test_series(&self, x_css: f64, y_css: f64) -> Option<SeriesId> {
@@ -421,7 +421,7 @@ impl ChartEngine {
         best.map(|hit| hit.series)
     }
 
-    /// The hovered series driving the `hoveredSeriesOnTop` render z-bump (LWC
+    /// The hovered series driving the `hoveredSeriesOnTop` render z-bump (reference
     /// `ChartModel.hoveredSource`). Hosts refresh it from their hover pipeline; a removed
     /// id never sticks.
     pub fn set_hovered_series(&mut self, id: Option<SeriesId>) {

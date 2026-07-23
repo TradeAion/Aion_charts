@@ -1,12 +1,12 @@
 //! Time-axis label formatting. Ports of
 //! `src/model/horz-scale-behavior-time/default-tick-mark-formatter.ts` (en-US behavior;
 //! an `Intl`-backed locale hook comes with the JS API) and the crosshair date-time format
-//! (`DateTimeFormatter` with LWC's default `dd MMM 'yy` date format).
+//! (`DateTimeFormatter` with the reference's default `dd MMM 'yy` date format).
 //!
-//! The date-format pattern language is tokenized here (LWC `localization.dateFormat`,
+//! The date-format pattern language is tokenized here (reference `localization.dateFormat`,
 //! formatters/format-date.ts): `dd`/`d` day, `MM`/`M`/`MMM`/`MMMM` month, `yy`/`yyyy` year,
 //! with ICU-style `'…'` quoted literals (`''` is an escaped quote). Month names come from a
-//! per-locale table (LWC `localization.locale`); the headless default is English and hosts
+//! per-locale table (reference `localization.locale`); the headless default is English and hosts
 //! inject `Intl`-derived names.
 
 use std::sync::LazyLock;
@@ -32,11 +32,11 @@ const MONTHS_LONG: [&str; 12] = [
     "December",
 ];
 
-/// LWC's default `localization.dateFormat` (chart-options-defaults.ts:36).
+/// the reference's default `localization.dateFormat` (chart-options-defaults.ts:36).
 pub const DEFAULT_DATE_FORMAT: &str = "dd MMM 'yy";
 
 /// Per-locale month-name tables backing the `MMM`/`MMMM` date-format tokens and the month
-/// tick labels (LWC `localization.locale`). The engine stays headless: hosts generate the
+/// tick labels (reference `localization.locale`). The engine stays headless: hosts generate the
 /// names (browser builds use `Intl.DateTimeFormat`) and inject them; the default is English.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MonthNames {
@@ -45,7 +45,7 @@ pub struct MonthNames {
 }
 
 impl MonthNames {
-    /// The built-in English tables (LWC's en-US `toLocaleString` output).
+    /// The built-in English tables (the reference's en-US `toLocaleString` output).
     pub fn english() -> Self {
         Self {
             short: MONTHS_SHORT.map(String::from),
@@ -123,7 +123,7 @@ pub fn format_tick_label(ts: i64, mark_type: TickMarkType) -> String {
     format_tick_label_with(ts, mark_type, english_months())
 }
 
-/// [`format_tick_label`] with per-locale month names for the `Month` mark (LWC
+/// [`format_tick_label`] with per-locale month names for the `Month` mark (reference
 /// `localization.locale` applied to the time axis).
 pub fn format_tick_label_with(ts: i64, mark_type: TickMarkType, months: &MonthNames) -> String {
     let (year, month, day) = civil_from_timestamp(ts);
@@ -142,10 +142,10 @@ pub fn format_tick_label_with(ts: i64, mark_type: TickMarkType, months: &MonthNa
     }
 }
 
-/// Format a UTC timestamp through an LWC `localization.dateFormat` pattern
+/// Format a UTC timestamp through an reference `localization.dateFormat` pattern
 /// (formatters/format-date.ts). Tokens: `d`/`dd` day of month, `M`/`MM` month number,
 /// `MMM` month short name, `MMMM` month long name, `yy` two-digit year, `yyyy` four-digit
-/// year. ICU-style `'…'` spans are literal text (`''` is an escaped quote). LWC implements
+/// year. ICU-style `'…'` spans are literal text (`''` is an escaped quote). reference implements
 /// the replacement naively, so its default `dd MMM 'yy` (an *unterminated* quote) keeps the
 /// apostrophe and still replaces `yy` — an unterminated quote here is likewise literal and
 /// tokenization continues after it. Token runs longer than the forms above degrade
@@ -194,7 +194,7 @@ pub fn format_date_pattern(ts: i64, pattern: &str, months: &MonthNames) -> Strin
                     i = end + 1;
                 }
                 None => {
-                    // Unterminated quote: literal apostrophe (LWC naive-replace parity).
+                    // Unterminated quote: literal apostrophe (reference naive-replace parity).
                     out.push('\'');
                     i += 1;
                 }
@@ -236,7 +236,7 @@ pub fn format_date_pattern(ts: i64, pattern: &str, months: &MonthNames) -> Strin
     out
 }
 
-/// Crosshair time label: LWC's default `dd MMM 'yy` date format, plus `HH:MM` when the
+/// Crosshair time label: the reference's default `dd MMM 'yy` date format, plus `HH:MM` when the
 /// time is visible (`DateTimeFormatter` joins them with spaces).
 pub fn format_crosshair_time(ts: i64, time_visible: bool, seconds_visible: bool) -> String {
     format_crosshair_time_with(
@@ -330,7 +330,7 @@ mod tests {
     #[test]
     fn date_pattern_tokens() {
         let months = MonthNames::english();
-        // LWC's documented token set (localization-options.ts dateFormat).
+        // the reference's documented token set (localization-options.ts dateFormat).
         assert_eq!(format_date_pattern(TS, "yyyy-MM-dd", &months), "2018-06-25");
         assert_eq!(format_date_pattern(TS, "dd MMM 'yy", &months), "25 Jun '18");
         assert_eq!(format_date_pattern(TS, "d M yy", &months), "25 6 18");
@@ -346,7 +346,7 @@ mod tests {
         assert_eq!(format_date_pattern(TS, "dd 'MM'", &months), "25 MM");
         assert_eq!(format_date_pattern(TS, "dd ''dd''", &months), "25 '25'");
         // Non-token letters are literal; an unterminated quote is a literal apostrophe and
-        // tokenization continues (LWC naive-replace parity — the default pattern relies on it).
+        // tokenization continues (reference naive-replace parity — the default pattern relies on it).
         assert_eq!(format_date_pattern(TS, "yyyy/MM/dd", &months), "2018/06/25");
         assert_eq!(format_date_pattern(TS, "dd 'MM", &months), "25 '06");
         // Degenerate runs: single y is literal, long M runs cap at the long name.

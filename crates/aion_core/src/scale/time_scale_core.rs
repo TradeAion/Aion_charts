@@ -9,7 +9,7 @@ use crate::helpers::mathex::clamp;
 use crate::model::range::{LogicalRange, StrictRange};
 use crate::{Coordinate, TimePointIndex};
 
-/// `Constants.MinVisibleBarsCount` in LWC.
+/// `Constants.MinVisibleBarsCount` in reference.
 const MIN_VISIBLE_BARS_COUNT: f64 = 2.0;
 
 #[derive(Clone, Debug)]
@@ -23,10 +23,10 @@ pub struct TimeScaleOptions {
     pub fix_right_edge: bool,
     pub lock_visible_time_range_on_resize: bool,
     pub right_bar_stays_on_scroll: bool,
-    /// LWC `timeScale.shiftVisibleRangeOnNewBar` (default true): shift the visible range
+    /// reference `timeScale.shiftVisibleRangeOnNewBar` (default true): shift the visible range
     /// right with new bars when the last bar is visible (time-scale.ts:165-171).
     pub shift_visible_range_on_new_bar: bool,
-    /// LWC `timeScale.allowShiftVisibleRangeOnWhitespaceReplacement` (default false): also
+    /// reference `timeScale.allowShiftVisibleRangeOnWhitespaceReplacement` (default false): also
     /// shift when the "new bar" replaces an existing whitespace time point
     /// (time-scale.ts:173-181).
     pub allow_shift_visible_range_on_whitespace_replacement: bool,
@@ -45,7 +45,7 @@ impl Default for TimeScaleOptions {
             fix_right_edge: false,
             lock_visible_time_range_on_resize: false,
             right_bar_stays_on_scroll: false,
-            // LWC defaults (time-scale-options-defaults.ts:17-18).
+            // reference defaults (time-scale-options-defaults.ts:17-18).
             shift_visible_range_on_new_bar: true,
             allow_shift_visible_range_on_whitespace_replacement: false,
             right_offset_pixels: None,
@@ -70,7 +70,7 @@ pub struct TimeScaleCore {
     scroll_start_point: Option<Coordinate>,
     scale_start_point: Option<Coordinate>,
     common_transition_start_state: Option<TransitionState>,
-    /// Host-pushed "all scaling and scrolling disabled" flag (LWC
+    /// Host-pushed "all scaling and scrolling disabled" flag (reference
     /// `_isAllScalingAndScrollingDisabled`, time-scale.ts:975-986): forces fix-edge semantics.
     interaction_disabled: bool,
 }
@@ -113,7 +113,7 @@ impl TimeScaleCore {
         self.points_len
     }
 
-    /// Base index or 0 when unset (matches LWC's `baseIndex()` getter).
+    /// Base index or 0 when unset (matches the reference's `baseIndex()` getter).
     pub fn base_index(&self) -> TimePointIndex {
         self.base_index.unwrap_or(0)
     }
@@ -264,9 +264,9 @@ impl TimeScaleCore {
         self.correct_offset();
     }
 
-    // --- option mutation (LWC `applyOptions({ timeScale })`) ---
+    // --- option mutation (reference `applyOptions({ timeScale })`) ---
 
-    /// Minimum bar spacing in CSS px (LWC `minBarSpacing`, default 0.5). Ignored if non-positive.
+    /// Minimum bar spacing in CSS px (reference `minBarSpacing`, default 0.5). Ignored if non-positive.
     /// Re-clamps the current spacing/offset against the new floor.
     pub fn set_min_bar_spacing(&mut self, min_bar_spacing: f64) {
         if min_bar_spacing.is_finite() && min_bar_spacing > 0.0 {
@@ -276,7 +276,7 @@ impl TimeScaleCore {
         }
     }
 
-    /// LWC `applyOptions({ barSpacing })`: write the option *and* apply it live. Zoom/scroll
+    /// reference `applyOptions({ barSpacing })`: write the option *and* apply it live. Zoom/scroll
     /// gestures use `set_bar_spacing`, which deliberately leaves the configured option alone.
     pub fn apply_bar_spacing_option(&mut self, bar_spacing: f64) {
         if bar_spacing.is_finite() && bar_spacing > 0.0 {
@@ -285,7 +285,7 @@ impl TimeScaleCore {
         }
     }
 
-    /// LWC `applyOptions({ rightOffset })`: write the option *and* apply it live.
+    /// reference `applyOptions({ rightOffset })`: write the option *and* apply it live.
     pub fn apply_right_offset_option(&mut self, offset: f64) {
         if offset.is_finite() {
             self.options.right_offset = offset;
@@ -293,7 +293,7 @@ impl TimeScaleCore {
         }
     }
 
-    /// Maximum bar spacing in CSS px (LWC `maxBarSpacing`, default 0 = the half-width cap,
+    /// Maximum bar spacing in CSS px (reference `maxBarSpacing`, default 0 = the half-width cap,
     /// time-scale.ts:1052-1059). Ignored if negative or non-finite. Re-clamps the current
     /// spacing/offset against the new cap.
     pub fn set_max_bar_spacing(&mut self, max_bar_spacing: f64) {
@@ -304,7 +304,7 @@ impl TimeScaleCore {
         }
     }
 
-    /// LWC `rightOffsetPixels`: pin the right offset in pixels. The pixel value converts to a
+    /// reference `rightOffsetPixels`: pin the right offset in pixels. The pixel value converts to a
     /// bar offset through the current bar spacing and is then preserved across zoom, exactly
     /// like `_checkRightOffsetPixels` (time-scale.ts:1247-1252). Ignored if non-finite.
     pub fn set_right_offset_pixels(&mut self, pixels: f64) {
@@ -317,7 +317,7 @@ impl TimeScaleCore {
         }
     }
 
-    /// LWC `fixLeftEdge`: prevent scrolling past the first data point on the left.
+    /// reference `fixLeftEdge`: prevent scrolling past the first data point on the left.
     pub fn set_fix_left_edge(&mut self, fix: bool) {
         self.options.fix_left_edge = fix;
         self.do_fix_left_edge();
@@ -325,39 +325,39 @@ impl TimeScaleCore {
         self.correct_offset();
     }
 
-    /// LWC `fixRightEdge`: prevent scrolling past the last data point on the right.
+    /// reference `fixRightEdge`: prevent scrolling past the last data point on the right.
     pub fn set_fix_right_edge(&mut self, fix: bool) {
         self.options.fix_right_edge = fix;
         self.correct_offset();
     }
 
-    /// LWC `lockVisibleTimeRangeOnResize`: keep the visible range constant across width changes by
+    /// reference `lockVisibleTimeRangeOnResize`: keep the visible range constant across width changes by
     /// rescaling bar spacing (applied on the next `set_width`).
     pub fn set_lock_visible_time_range_on_resize(&mut self, lock: bool) {
         self.options.lock_visible_time_range_on_resize = lock;
     }
 
-    /// LWC `rightBarStaysOnScroll`.
+    /// reference `rightBarStaysOnScroll`.
     pub fn set_right_bar_stays_on_scroll(&mut self, stays: bool) {
         self.options.right_bar_stays_on_scroll = stays;
     }
 
-    /// LWC `shiftVisibleRangeOnNewBar` (time-scale.ts:165-171). Read by the data-sync
+    /// reference `shiftVisibleRangeOnNewBar` (time-scale.ts:165-171). Read by the data-sync
     /// compensation in the engine (chart-model.ts:968-983).
     pub fn set_shift_visible_range_on_new_bar(&mut self, shift: bool) {
         self.options.shift_visible_range_on_new_bar = shift;
     }
 
-    /// LWC `allowShiftVisibleRangeOnWhitespaceReplacement` (time-scale.ts:173-181).
+    /// reference `allowShiftVisibleRangeOnWhitespaceReplacement` (time-scale.ts:173-181).
     pub fn set_allow_shift_visible_range_on_whitespace_replacement(&mut self, allow: bool) {
         self.options
             .allow_shift_visible_range_on_whitespace_replacement = allow;
     }
 
-    /// Host-pushed "all scaling and scrolling disabled" flag (LWC
+    /// Host-pushed "all scaling and scrolling disabled" flag (reference
     /// `_isAllScalingAndScrollingDisabled`, time-scale.ts:975-986). The host's gesture flags live
     /// outside the scale, so it pushes the aggregate state here; while set, every fix-edge
-    /// decision behaves as if both `fixLeftEdge` and `fixRightEdge` were on (LWC time-scale.ts:657-659).
+    /// decision behaves as if both `fixLeftEdge` and `fixRightEdge` were on (reference time-scale.ts:657-659).
     pub fn set_interaction_disabled(&mut self, disabled: bool) {
         if self.interaction_disabled == disabled {
             return;
@@ -368,7 +368,7 @@ impl TimeScaleCore {
         self.correct_offset();
     }
 
-    /// Effective fix-edge flags (LWC `isLeftEdgeFixed`/`isRightEdgeFixed`,
+    /// Effective fix-edge flags (reference `isLeftEdgeFixed`/`isRightEdgeFixed`,
     /// time-scale.ts:658-659): the option, or the host-pushed all-interaction-disabled flag.
     fn fix_left_edge(&self) -> bool {
         self.options.fix_left_edge || self.interaction_disabled
@@ -773,11 +773,11 @@ mod tests {
     #[test]
     fn max_bar_spacing_option_caps_zoom_and_zero_restores_default() {
         let mut s = scale(400.0, 6.0, 0.0, 500, 300);
-        // LWC `maxBarSpacing` overrides the half-width default cap.
+        // reference `maxBarSpacing` overrides the half-width default cap.
         s.set_max_bar_spacing(10.0);
         s.set_bar_spacing(50.0);
         assert_eq!(s.bar_spacing(), 10.0);
-        // 0 disables the option (LWC default), restoring the half-width cap.
+        // 0 disables the option (reference default), restoring the half-width cap.
         s.set_max_bar_spacing(0.0);
         s.set_bar_spacing(10_000.0);
         assert_eq!(s.bar_spacing(), 200.0);
@@ -789,7 +789,7 @@ mod tests {
 
     #[test]
     fn right_offset_pixels_converts_through_current_bar_spacing() {
-        // LWC time-scale.ts:1247-1252: the pixel offset becomes a bar offset via the current
+        // reference time-scale.ts:1247-1252: the pixel offset becomes a bar offset via the current
         // bar spacing, and a later spacing change rescales it to hold the pixels constant.
         let mut s = scale(400.0, 6.0, 0.0, 500, 300);
         s.set_right_offset_pixels(60.0);
@@ -806,7 +806,7 @@ mod tests {
 
     #[test]
     fn interaction_disabled_forces_fix_edge_semantics() {
-        // LWC time-scale.ts:657-659: with every scroll/scale flag off, the scale behaves as if
+        // reference time-scale.ts:657-659: with every scroll/scale flag off, the scale behaves as if
         // both edges were fixed.
         let mut s = scale(400.0, 8.0, 0.0, 500, 300);
         s.set_interaction_disabled(true);

@@ -7,7 +7,7 @@
 //! would silently corrupt indices or panic in `reindex_all`.
 //!
 //! This module is the single choke point that makes that assumption safe to hold. Unlike
-//! lightweight-charts' `data-validators.ts` (which only `assert`s in dev builds and throws in
+//! the reference charting library's `data-validators.ts` (which only `assert`s in dev builds and throws in
 //! prod), we *repair* what we can and *report* what we changed, so a production embedder gets a
 //! rendered chart plus a diagnostic instead of a thrown error or a dead canvas.
 //!
@@ -15,7 +15,7 @@
 //! 1. **Length mismatch** between the time and value columns is unrecoverable → [`Err`].
 //! 2. **Non-finite / out-of-safe-range** rows (NaN, ±Inf, |v| beyond [`MAX_SAFE_VALUE`], or a
 //!    non-finite time) are dropped and counted — **except** a row whose four values are all
-//!    NaN, which is kept as an explicit **whitespace** row (LWC's `{time}`-only item,
+//!    NaN, which is kept as an explicit **whitespace** row (the reference's `{time}`-only item,
 //!    data-consumer.ts `isWhitespaceData`): a real bar never has all four NaN, and for
 //!    single-value series a NaN value is whitespace. Whitespace rows occupy their time point
 //!    but draw nothing; genuinely malformed rows (a partial NaN set, ±Inf, out-of-range) are
@@ -24,7 +24,7 @@
 //! 4. **Duplicate** timestamps collapse **last-wins** (the last occurrence in the *original*
 //!    input for that timestamp survives — matching a streaming `update()` overwriting a bar).
 
-/// LWC's safe magnitude bound (`data-validators.ts`): `Number.MAX_SAFE_INTEGER / 100`.
+/// the reference's safe magnitude bound (`data-validators.ts`): `Number.MAX_SAFE_INTEGER / 100`.
 pub const MAX_SAFE_VALUE: f64 = 9_007_199_254_740_991.0 / 100.0;
 /// Symmetric lower bound.
 pub const MIN_SAFE_VALUE: f64 = -MAX_SAFE_VALUE;
@@ -98,7 +98,7 @@ fn safe(v: f64) -> bool {
     v.is_finite() && (MIN_SAFE_VALUE..=MAX_SAFE_VALUE).contains(&v)
 }
 
-/// Whether the four values form an explicit whitespace row (LWC `{time}`-only item): all
+/// Whether the four values form an explicit whitespace row (reference `{time}`-only item): all
 /// four are NaN. A real bar never has all four NaN; single-value series alias one value
 /// into all four slots, so a NaN value is whitespace there as well.
 pub fn is_whitespace_values(values: [f64; 4]) -> bool {
@@ -124,12 +124,12 @@ pub fn sanitize_ohlc(
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct SanitizedOhlcStyled {
     pub data: SanitizedOhlc,
-    /// The three LWC data-item color channels (body/wick/border) after the repair pipeline;
+    /// The three reference data-item color channels (body/wick/border) after the repair pipeline;
     /// each is empty (channel absent) or aligned with `data`'s rows.
     pub colors: [Vec<u32>; 3],
 }
 
-/// [`sanitize_ohlc`] carrying per-row data-item color channels (LWC series-bar-colorer.ts).
+/// [`sanitize_ohlc`] carrying per-row data-item color channels (reference series-bar-colorer.ts).
 /// Every present channel must match the time column's length (a mismatch is unrecoverable,
 /// like the OHLC columns); within a channel, `0` means "no override at this row". The repair
 /// policy treats the channels as part of their row: invalid rows drop them, the stable sort
@@ -203,7 +203,7 @@ fn sanitize_rows<P: Clone>(
     let mut report = ValidationReport::default();
 
     // 1. Keep only finite, in-range rows; remember original order for stable sort + last-wins.
-    //    All-NaN rows survive as explicit whitespace (LWC `{time}`-only items).
+    //    All-NaN rows survive as explicit whitespace (reference `{time}`-only items).
     let mut rows: Vec<(i64, [f64; 4], usize, P)> = Vec::with_capacity(n);
     for i in 0..n {
         let t = times[i];
@@ -305,7 +305,7 @@ pub fn sanitize_ohlc_owned(
 
 /// Sanitize a single streaming point. Returns `None` (with no effect on the chart) when the point
 /// is non-finite or out of range, so a bad tick is dropped instead of corrupting the series.
-/// An all-NaN value set is a valid whitespace update (LWC `series.update` with a `{time}`-only
+/// An all-NaN value set is a valid whitespace update (reference `series.update` with a `{time}`-only
 /// item replaces the bar with whitespace); a partial NaN set or ±Inf is a bad tick.
 pub fn sanitize_point(time: f64, values: [f64; 4]) -> Option<(i64, [f64; 4])> {
     if !time.is_finite() || !(is_whitespace_values(values) || values.iter().copied().all(safe)) {
@@ -360,7 +360,7 @@ mod tests {
 
     #[test]
     fn all_nan_rows_are_kept_as_whitespace() {
-        // LWC `{time}`-only items: an all-NaN row is explicit whitespace, not invalid data.
+        // reference `{time}`-only items: an all-NaN row is explicit whitespace, not invalid data.
         let nan = f64::NAN;
         let s = sanitize_ohlc(
             &[1.0, 2.0, 3.0],

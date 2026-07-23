@@ -4,7 +4,7 @@ use super::conflation::{VisibleHistogramRow, VisibleOhlc};
 use super::*;
 
 #[test]
-fn marker_geometry_tracks_lwc_spacing_buckets() {
+fn marker_geometry_tracks_reference_spacing_buckets() {
     assert_eq!(marker_envelope_size(0.5), 10.0);
     assert_eq!(marker_envelope_size(6.0), 10.0);
     assert_eq!(marker_envelope_size(20.0), 18.0);
@@ -15,7 +15,7 @@ fn marker_geometry_tracks_lwc_spacing_buckets() {
 }
 
 #[test]
-fn marker_autoscale_margins_match_lwc_position_rules() {
+fn marker_autoscale_margins_match_reference_position_rules() {
     let marker = |position| crate::Marker {
         time: 0,
         position,
@@ -185,7 +185,7 @@ fn crosshair_chart() -> ChartEngine {
 #[test]
 fn crosshair_clamps_into_pane_instead_of_vanishing() {
     let mut chart = crosshair_chart();
-    // LWC pane-widget.ts:714-719: out-of-range positions clamp instead of hiding the crosshair.
+    // reference pane-widget.ts:714-719: out-of-range positions clamp instead of hiding the crosshair.
     chart.crosshair = Some((10_000.0, 10_000.0));
     assert_eq!(chart.clamped_crosshair(), Some((799.0, 499.0)));
     let frame = chart.build_frame();
@@ -397,7 +397,7 @@ fn do_not_snap_to_hidden_series_indices_moves_to_a_visible_bar() {
     // Default (off): the snapped index stays on the hidden-only bar.
     assert_eq!(chart.snapped_crosshair_index(x2, from, to), 2);
 
-    // On: it moves to the nearest visible-series bar; the tie resolves left (LWC `indexOf(min)`).
+    // On: it moves to the nearest visible-series bar; the tie resolves left (reference `indexOf(min)`).
     chart
         .options
         .apply_str(r#"{"crosshair":{"doNotSnapToHiddenSeriesIndices":true}}"#)
@@ -415,7 +415,7 @@ fn do_not_snap_to_hidden_series_indices_moves_to_a_visible_bar() {
 }
 
 /// Two identical line series on the right scale (same last close => colliding label
-/// candidates, the case LWC's overlap resolution exists for).
+/// candidates, the case the reference's overlap resolution exists for).
 fn two_identical_line_series() -> ChartEngine {
     let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
     chart.series[0].kind = SeriesKind::Line;
@@ -445,14 +445,14 @@ fn last_value_labels_cover_every_visible_series_and_resolve_overlap() {
             .collect::<Vec<_>>()
     };
 
-    // LWC SeriesPriceAxisView: every visible series with lastValueVisible gets a label on its
+    // reference SeriesPriceAxisView: every visible series with lastValueVisible gets a label on its
     // scale, in the series' bar color (the line color for a line series — not up/down).
     let labels = boxed(&mut chart);
     assert_eq!(labels.len(), 2);
     assert!(labels
         .iter()
         .all(|l| matches!(l.background, Some((.., c)) if c == LINE)));
-    // LWC `_fixLabelOverlap`: colliding labels are pushed apart by their box height.
+    // reference `_fixLabelOverlap`: colliding labels are pushed apart by their box height.
     let height = 12.0 + 2.5 * 2.0;
     let gap = (labels[0].y - labels[1].y).abs();
     assert!(
@@ -464,7 +464,7 @@ fn last_value_labels_cover_every_visible_series_and_resolve_overlap() {
     chart.series[1].last_value_visible = false;
     assert_eq!(boxed(&mut chart).len(), 1);
 
-    // A hidden series loses its label entirely (LWC series-price-axis-view.ts:24).
+    // A hidden series loses its label entirely (reference series-price-axis-view.ts:24).
     chart.series[1].last_value_visible = true;
     chart.set_series_visible(1, false);
     assert_eq!(boxed(&mut chart).len(), 1);
@@ -474,7 +474,7 @@ fn last_value_labels_cover_every_visible_series_and_resolve_overlap() {
 fn last_value_label_tracks_the_last_visible_bar() {
     let mut chart = two_identical_line_series();
     chart.series[1].last_value_visible = false;
-    // Scroll one bar past the right edge: the label follows the last *visible* bar (LWC
+    // Scroll one bar past the right edge: the label follows the last *visible* bar (reference
     // series.ts lastValueData(false)), not the series' final bar.
     chart.set_right_offset(-1.0);
     let labels = chart
@@ -493,7 +493,7 @@ fn last_value_label_tracks_the_last_visible_bar() {
 }
 
 #[test]
-fn price_line_family_renders_per_series_with_lwc_defaults() {
+fn price_line_family_renders_per_series_with_reference_defaults() {
     let mut chart = two_identical_line_series();
     let dashed_ylines = |chart: &mut ChartEngine| {
         chart.build_frame().panes[0]
@@ -512,7 +512,7 @@ fn price_line_family_renders_per_series_with_lwc_defaults() {
             .collect::<Vec<_>>()
     };
 
-    // LWC priceLineVisible default true: every visible series gets a built-in last-price
+    // reference priceLineVisible default true: every visible series gets a built-in last-price
     // line (dashed, 1px, following the bar color — the line color for a line series).
     let lines = dashed_ylines(&mut chart);
     assert_eq!(lines.len(), 2);
@@ -591,7 +591,7 @@ fn dashed_line_style_splits_the_polyline_into_solid_runs() {
         .unwrap();
     chart.time_scale.set_width(800.0);
     chart.fit_content();
-    chart.series[0].line_style = 2; // LWC LineStyle.Dashed
+    chart.series[0].line_style = 2; // reference LineStyle.Dashed
 
     let frame = chart.build_frame();
     let runs: Vec<_> = frame.panes[0]
@@ -671,7 +671,7 @@ fn line_visible_false_keeps_area_fill_but_drops_the_stroke() {
     chart.fit_content();
     chart.series[0].line_visible = false;
 
-    // LWC lineVisible: the fill stays, the stroke goes.
+    // reference lineVisible: the fill stays, the stroke goes.
     let frame = chart.build_frame();
     assert!(frame.panes[0]
         .main
@@ -697,7 +697,7 @@ fn line_visible_false_keeps_area_fill_but_drops_the_stroke() {
 }
 
 #[test]
-fn point_markers_radius_option_overrides_the_lwc_auto_default() {
+fn point_markers_radius_option_overrides_the_reference_auto_default() {
     let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
     chart.series[0].kind = SeriesKind::Line;
     let times = [1.0, 2.0, 3.0];
@@ -718,7 +718,7 @@ fn point_markers_radius_option_overrides_the_lwc_auto_default() {
             })
             .expect("point marker circle")
     };
-    // LWC auto radius (line-pane-view.ts): lineWidth / 2 + 2 = 3.5 at the default width 3.
+    // reference auto radius (line-pane-view.ts): lineWidth / 2 + 2 = 3.5 at the default width 3.
     assert_eq!(radius(&mut chart), 3.5);
     chart.series[0].point_markers_radius = Some(6.0);
     assert_eq!(radius(&mut chart), 6.0);
@@ -740,7 +740,7 @@ fn crosshair_marks_cover_all_line_series_with_per_series_options() {
             .collect::<Vec<_>>()
     };
 
-    // LWC crosshair-marks-pane-view: one mark per visible line-like series at the crosshair
+    // reference crosshair-marks-pane-view: one mark per visible line-like series at the crosshair
     // index. Defaults: radius 4 + border 2, border = chart background, fill = bar color.
     let marks = circles(&mut chart);
     assert_eq!(marks.len(), 4);
@@ -780,7 +780,7 @@ fn baseline_quadrant_options_flow_into_fills_strokes_and_marker() {
     chart.fit_content();
     let frame = chart.build_frame();
 
-    // LWC baselineStyleDefaults: two-stop gradients per quadrant (alphas 0.28 -> 71, 0.05 -> 13).
+    // reference baselineStyleDefaults: two-stop gradients per quadrant (alphas 0.28 -> 71, 0.05 -> 13).
     assert!(frame.panes[0].main.iter().any(|p| matches!(
         p,
         Prim::AreaFill { gradient, .. }
@@ -793,7 +793,7 @@ fn baseline_quadrant_options_flow_into_fills_strokes_and_marker() {
             if gradient.top == Color::rgba(0xef, 0x53, 0x50, 13)
                 && gradient.bottom == Color::rgba(0xef, 0x53, 0x50, 71)
     )));
-    // One continuous solid stroke per quadrant in the LWC line colors.
+    // One continuous solid stroke per quadrant in the reference line colors.
     assert!(frame.panes[0].main.iter().any(|p| matches!(
         p,
         Prim::Polyline { color, .. } if *color == Color::rgb(0x26, 0xa6, 0x9a)
@@ -913,7 +913,7 @@ fn invert_filled_area_flips_the_area_base_to_the_pane_top() {
     };
     // Default: fill from the line down to the pane bottom (500 at dpr 1).
     assert_eq!(base_y(&mut chart), 500.0);
-    // LWC invertFilledArea: fill from the pane top down to the line.
+    // reference invertFilledArea: fill from the pane top down to the line.
     chart.series[0].invert_filled_area = true;
     assert_eq!(base_y(&mut chart), 0.0);
 }
@@ -944,7 +944,7 @@ fn bar_open_visible_and_thin_bars_reach_the_builder() {
             .collect::<Vec<_>>()
     };
 
-    // LWC barStyleDefaults (openVisible true, thinBars true): body + open/close ticks per bar,
+    // reference barStyleDefaults (openVisible true, thinBars true): body + open/close ticks per bar,
     // body capped to the 1px crisp width.
     let rs = rects(&mut chart);
     assert_eq!(rs.len(), 3 * 5);
@@ -961,7 +961,7 @@ fn bar_open_visible_and_thin_bars_reach_the_builder() {
     assert_eq!(rs.len(), 2 * 5);
 }
 
-// --- per-data-point colors (LWC data-item colors, series-bar-colorer.ts) ---
+// --- per-data-point colors (reference data-item colors, series-bar-colorer.ts) ---
 
 const POINT_RED: u32 = 0xFF0000FF;
 const POINT_GREEN: u32 = 0x00FF00FF;
@@ -1004,7 +1004,7 @@ fn candlestick_per_point_colors_override_each_channel() {
     assert!(has(POINT_RED), "custom body color drawn");
     assert!(has(POINT_GREEN), "custom wick color drawn");
     assert!(has(POINT_BLUE), "custom border color drawn");
-    // The uncolored bars keep the LWC up-color resolution.
+    // The uncolored bars keep the reference up-color resolution.
     assert!(has(0x26A69AFF), "series up color still drawn");
 }
 
@@ -1068,7 +1068,7 @@ fn line_per_point_colors_split_the_stroke_and_color_markers() {
         .unwrap();
     chart.time_scale.set_width(800.0);
     chart.fit_content();
-    // Points 0,1 default (blue), points 2,3 red. LWC walkLine: the segment leaving a point
+    // Points 0,1 default (blue), points 2,3 red. reference walkLine: the segment leaving a point
     // takes the point's color, so the runs are [0..2] blue and [2..3] red, sharing point 2.
     assert!(chart.set_series_point_colors(0, Some(vec![0, 0, POINT_RED, POINT_RED]), None, None));
     let frame = chart.build_frame();
@@ -1096,7 +1096,7 @@ fn line_per_point_colors_split_the_stroke_and_color_markers() {
     let start_of_red = pool[runs[1].0 as usize];
     assert_eq!(end_of_blue, start_of_red);
 
-    // Point markers take their own point's color (LWC draw-series-point-markers.ts).
+    // Point markers take their own point's color (reference draw-series-point-markers.ts).
     let marker_fills: Vec<Color> = frame.panes[0]
         .main
         .iter()
@@ -1125,7 +1125,7 @@ fn area_per_point_colors_split_only_the_stroke() {
     chart.fit_content();
     assert!(chart.set_series_point_colors(0, Some(vec![0, POINT_RED, 0]), None, None));
     let frame = chart.build_frame();
-    // The fill keeps the series-level gradient (documented deviation; LWC's `lineColor` data
+    // The fill keeps the series-level gradient (documented deviation; the reference's `lineColor` data
     // field affects only the stroke).
     assert!(frame.panes[0].main.iter().any(|p| matches!(
         p,
@@ -1148,7 +1148,7 @@ fn area_per_point_colors_split_only_the_stroke() {
 fn last_value_label_background_honors_the_per_point_color() {
     let mut chart = ohlc_chart(SeriesKind::Candlestick, 3);
     // The final bar carries a custom body color: the last-value label (and the built-in
-    // last-price line) follow it (LWC series-bar-colorer.ts).
+    // last-price line) follow it (reference series-bar-colorer.ts).
     assert!(chart.set_series_point_colors(0, Some(vec![0, 0, POINT_RED]), None, None));
     let axis = chart.build_axis_frame(80.0, |t| t.len() as f64 * 7.0);
     assert!(axis
@@ -1190,7 +1190,7 @@ fn custom_series_emits_no_prims_but_marks_its_paint_slot() {
     assert_eq!(marks[1].0, custom);
     assert_eq!(marks[0].1, marks[1].1);
     assert!(frame.panes[0].main.is_empty());
-    // ...and its time-only rows still anchor the base index (LWC's custom plot rows carry
+    // ...and its time-only rows still anchor the base index (the reference's custom plot rows carry
     // values, so they count), exactly like a built-in kind with real bars.
     assert_eq!(chart.time_scale.base_index(), 3);
 }
@@ -1230,7 +1230,7 @@ fn custom_series_last_value_line_and_label_follow_the_frame_values() {
         p,
         Prim::HLine { color, style: LineStyle::Dashed, .. } if *color == visible.color
     )));
-    // The last-value axis label always tracks the visible record (LWC lastValueData(false)).
+    // The last-value axis label always tracks the visible record (reference lastValueData(false)).
     let axis = chart.build_axis_frame(80.0, |t| t.len() as f64 * 7.0);
     assert!(axis.labels.iter().any(
         |l| matches!(l.background, Some((.., c)) if c == visible.color) && l.text == "104.00"
@@ -1257,7 +1257,7 @@ fn custom_series_last_value_data_and_base_value_come_from_the_frame_values() {
             }),
         },
     );
-    // LWC `ISeriesApi.lastValueData`: global vs visible, formatted with the series' price format.
+    // reference `ISeriesApi.lastValueData`: global vs visible, formatted with the series' price format.
     let global: serde_json::Value =
         serde_json::from_str(&chart.series_last_value_data(custom, true).unwrap()).unwrap();
     assert_eq!(global["value"].as_f64().unwrap(), 103.5);

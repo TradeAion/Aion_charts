@@ -1,6 +1,6 @@
 //! Pure price-axis layout policy shared by the browser host and native unit tests.
 
-/// LWC grows the axis as soon as labels need more space, but a marks-only repaint does not trigger
+/// reference grows the axis as soon as labels need more space, but a marks-only repaint does not trigger
 /// a full layout merely to shrink it. A resize/full layout may accept the smaller measurement.
 pub(crate) fn negotiated_axis_width(current: f64, measured: f64, allow_shrink: bool) -> f64 {
     if allow_shrink || current <= 0.0 {

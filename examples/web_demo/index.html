@@ -89,9 +89,9 @@
       <label title="Pane primitive (plugin platform): alternating day shading behind the series"><input type="checkbox" id="bands_toggle"> day bands</label>
       <label title="Series primitive (plugin platform): position band with a price-axis tag on the main series"><input type="checkbox" id="pos_band_toggle"> position band</label>
       <label title="Series primitive (plugin platform): autoscale-expanding band beyond the data"><input type="checkbox" id="scale_band_toggle"> scale band</label>
-      <label title="Custom series (plugin platform): the LWC rounded-candles plugin example, drawn by the plugin"><input type="checkbox" id="custom_toggle"> rounded candles</label>
-      <label title="Built-in plugin (LWC createSeriesMarkers): the markers fixture drawn by the plugin platform — A/B against ?feature=markers (engine markers)"><input type="checkbox" id="plugin_markers_toggle"> plugin markers</label>
-      <label title="Built-in plugin (LWC createTextWatermark): two-line watermark painted through the overlay-text hook"><input type="checkbox" id="plugin_watermark_toggle"> plugin watermark</label>
+      <label title="Custom series (plugin platform): the reference rounded-candles plugin example, drawn by the plugin"><input type="checkbox" id="custom_toggle"> rounded candles</label>
+      <label title="Built-in plugin (reference createSeriesMarkers): the markers fixture drawn by the plugin platform — A/B against ?feature=markers (engine markers)"><input type="checkbox" id="plugin_markers_toggle"> plugin markers</label>
+      <label title="Built-in plugin (reference createTextWatermark): two-line watermark painted through the overlay-text hook"><input type="checkbox" id="plugin_watermark_toggle"> plugin watermark</label>
     </div>
 
     <div class="group">
@@ -118,7 +118,7 @@
       <label><input type="checkbox" id="cross_label_visible" checked> labels</label>
     </div>
 
-    <!-- axis text font (LWC layout.fontFamily/fontSize, engine store-driven) -->
+    <!-- axis text font (reference layout.fontFamily/fontSize, engine store-driven) -->
     <div class="group">
       <label>font
         <select id="font_family">
@@ -130,7 +130,7 @@
       <label>size <input type="range" id="font_size" min="9" max="20" step="1" value="12"><span id="font_size_val">12</span></label>
     </div>
 
-    <!-- price/time axis cosmetics: border (LWC borderColor/borderVisible) + text (textColor) -->
+    <!-- price/time axis cosmetics: border (reference borderColor/borderVisible) + text (textColor) -->
     <div class="group">
       <label>axis border <input type="color" id="axis_border_color" value="#f5f5f5"></label>
       <label><input type="checkbox" id="axis_border_visible" checked> visible</label>
@@ -138,7 +138,7 @@
       <label>separator <input type="color" id="pane_separator_color" value="#2b2b43"></label>
     </div>
 
-    <!-- watermark (LWC v4 shape) -->
+    <!-- watermark (reference v4 shape) -->
     <div class="group" id="watermark_group">
       <label><input type="checkbox" id="wm_visible"> watermark</label>
       <label>text <input type="text" id="wm_text" value="AION" size="6"></label>
@@ -146,7 +146,7 @@
       <label>size <input type="range" id="wm_size" min="16" max="160" step="4" value="72"><span id="wm_size_val">72</span></label>
     </div>
 
-    <!-- interaction toggles: axis drag-to-scale, mouse kinetic (off by default, LWC parity) -->
+    <!-- interaction toggles: axis drag-to-scale, mouse kinetic (off by default, reference parity) -->
     <div class="group" id="interaction_group" title="Drag a price/time axis to scale it; keyboard: arrows pan (Ctrl = fast), +/- zoom, Home fit, Esc clear">
       <label><input type="checkbox" id="axis_scale_toggle" checked> axis drag-scale</label>
       <label><input type="checkbox" id="kinetic_toggle"> mouse kinetic</label>
@@ -230,7 +230,7 @@ if (parity_fixture !== null) {
     vertLines: { color: palette.grid },
     horzLines: { color: palette.grid },
   };
-  // Keep the cross-library fidelity gate pinned to LWC's axis-border default; the package
+  // Keep the cross-library fidelity gate pinned to the reference's axis-border default; the package
   // theme palette (theme.ts) must not leak into the comparison.
   chart_options.timeScale = { borderColor: "#2B2B43" };
   chart_options.leftPriceScale = { ...(chart_options.leftPriceScale ?? {}), borderColor: "#2B2B43" };
@@ -280,7 +280,7 @@ if (requested_feature === "markers") {
     overlay: true,
     scale_margins: { top: 0.82, bottom: 0 },
     histogram_updown: true,
-    // matches the LWC reference fixture (priceLineVisible/lastValueVisible: false)
+    // matches the reference fixture (priceLineVisible/lastValueVisible: false)
     price_line_visible: false,
     last_value_visible: false,
   });
@@ -288,7 +288,7 @@ if (requested_feature === "markers") {
 }
 
 // ---- pane primitive demo (plugin platform Phase C-a) -----------------------------------------
-// Alternating day-shading bands behind the series (LWC zOrder "bottom"), attached to pane 0 via
+// Alternating day-shading bands behind the series (reference zOrder "bottom"), attached to pane 0 via
 // the public pane_api.attach_primitive. The renderer records Prim draw commands (no raw canvas),
 // so the bands are identical on the WebGPU and Canvas2D backends. Off by default so the fidelity
 // fixtures don't shift; `?feature=primitive` enables it for fixtures/tests.
@@ -371,7 +371,7 @@ function position_band_primitive(entry_price) {
     },
     // Hovering the band shows a move cursor and flows "position-band" into the mouse-event
     // params' hovered_object_id (plus hovered_series, since a series primitive's source IS
-    // the series — LWC parity).
+    // the series — reference parity).
     hit_test(x, y) {
       if (band !== null && x >= band.x0 && x <= band.x1 && y >= band.y_top && y <= band.y_bottom) {
         return { external_id: "position-band", cursor_style: "move", z_order: "top" };
@@ -439,7 +439,7 @@ window.__set_scale_band = set_scale_band; // test hook
 window.__scale_band_active = () => scale_band_handle !== null; // test hook
 
 // ---- custom series demo (plugin platform Phase C-c) -----------------------------------------
-// The LWC plugin-examples rounded-candles series, ported to the custom-series contract
+// The reference plugin-examples rounded-candles series, ported to the custom-series contract
 // (fixture_custom_series.js): the engine owns the time mapping/autoscale, the plugin draws
 // each bar through the command-recording render context — identical on both backends. Off by
 // default so the fidelity fixtures don't shift; `?feature=custom_series` enables it.
@@ -457,7 +457,7 @@ function set_custom_series(on) {
       }),
     );
     // The demo's candle data transformed into the plugin's item shape (OHLC + optional
-    // `rounded`; LWC's RoundedCandleSeriesData).
+    // `rounded`; the reference's RoundedCandleSeriesData).
     custom_series.set_data(data.map((bar) => ({
       time: bar.time, open: bar.open, high: bar.high, low: bar.low, close: bar.close,
     })));
@@ -475,7 +475,7 @@ window.__set_custom_series = set_custom_series; // test hook
 window.__custom_series_active = () => custom_series !== null; // test hook
 window.__custom_destroy_count = () => custom_destroy_count; // test hook
 
-// ---- built-in plugins (plugin platform Phase 3.5: LWC's own plugin surface) ----------------
+// ---- built-in plugins (plugin platform Phase 3.5: the reference's own plugin surface) ----------------
 // Plugin markers: the same markers fixture the engine-markers path (`?feature=markers`) uses,
 // drawn by `create_series_markers` on the primitive platform — a visual A/B against the
 // engine's built-in markers. Plugin watermark: `create_text_watermark` on pane 0. Both off by
@@ -495,7 +495,7 @@ window.__set_plugin_markers = set_plugin_markers; // test hook
 window.__plugin_markers_active = () => plugin_markers_handle !== null; // test hook
 window.__plugin_markers_handle = () => plugin_markers_handle; // test hook
 // Engine markers with the same fixture (the parity A/B counterpart); `?feature=markers` keeps
-// its default-options form for the LWC fidelity fixture.
+// its default-options form for the reference fidelity fixture.
 window.__set_engine_markers = (on, options) => main.set_markers(on ? marker_fixture(data) : [], options); // test hook
 let plugin_watermark_handle = null;
 function set_plugin_watermark(on) {
@@ -556,7 +556,7 @@ function sync_style_visibility(kind) {
 }
 
 // Wick/border pickers pin an explicit color only once touched; until then the engine's
-// LWC-parity fallback keeps each wick/border following its direction's body color, so the
+// reference parity fallback keeps each wick/border following its direction's body color, so the
 // body pickers alone recolor the whole candle.
 const candle_part_touched = { wick_up: false, wick_down: false, border_up: false, border_down: false };
 
@@ -581,7 +581,7 @@ function apply_main_style() {
 }
 
 // Grid controls drive both families (vert + horz) at once; the engine stores them separately,
-// so a package consumer can style each family independently (LWC lineStyle 0–4).
+// so a package consumer can style each family independently (reference lineStyle 0–4).
 function apply_grid_style() {
   const color = document.getElementById("grid_color").value;
   const style = Number(document.getElementById("grid_style").value);
@@ -648,7 +648,7 @@ document.getElementById("cross_mode").addEventListener("change", (e) => {
   chart.apply_options({ crosshair: { mode: Number(e.target.value) } });
 });
 
-// Crosshair cosmetics drive both lines at once; the engine stores them per line (LWC parity).
+// Crosshair cosmetics drive both lines at once; the engine stores them per line (reference parity).
 function apply_crosshair_style() {
   const color = document.getElementById("cross_color").value;
   const width = Number(document.getElementById("cross_width").value);
@@ -704,7 +704,7 @@ document.getElementById("axis_text_color").addEventListener("input", (e) => {
   chart.apply_options({ layout: { textColor: e.target.value } });
 });
 
-// ---- watermark (LWC v4 shape) — drawn on the overlay above the series ----
+// ---- watermark (reference v4 shape) — drawn on the overlay above the series ----
 function apply_watermark() {
   chart.apply_options({ watermark: {
     visible: document.getElementById("wm_visible").checked,
@@ -722,9 +722,9 @@ document.getElementById("wm_size").addEventListener("input", (e) => {
   apply_watermark();
 });
 
-// ---- interaction toggles: axis drag-to-scale + mouse kinetic. LWC/TradingView defaults:
+// ---- interaction toggles: axis drag-to-scale + mouse kinetic. reference/TradingView defaults:
 // coasting is a touch behavior (kineticScroll.mouse = false), so mouse kinetic is OFF here by
-// default; the checkbox exists to demo it. Touch kinetic stays on regardless (LWC parity).
+// default; the checkbox exists to demo it. Touch kinetic stays on regardless (reference parity).
 function apply_interaction() {
   const mouse_kinetic = document.getElementById("kinetic_toggle").checked;
   chart.apply_options({

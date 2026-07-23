@@ -6,9 +6,9 @@ import pixelmatch from "pixelmatch";
 import { PNG } from "pngjs";
 
 const fixture = JSON.parse(readFileSync(new URL("../fixtures/d1/candles.json", import.meta.url), "utf8"));
-const lwc_baseline = JSON.parse(readFileSync(new URL("../fixtures/d1/lwc-5.2-baseline.json", import.meta.url), "utf8"));
-const lwc_matrix = JSON.parse(readFileSync(new URL("../fixtures/d1/lwc-5.2-matrix.json", import.meta.url), "utf8"));
-const lwc_features = JSON.parse(readFileSync(new URL("../fixtures/d1/lwc-5.2-features.json", import.meta.url), "utf8"));
+const reference_baseline = JSON.parse(readFileSync(new URL("../fixtures/d1/reference-baseline.json", import.meta.url), "utf8"));
+const reference_matrix = JSON.parse(readFileSync(new URL("../fixtures/d1/reference-matrix.json", import.meta.url), "utf8"));
+const reference_features = JSON.parse(readFileSync(new URL("../fixtures/d1/reference-features.json", import.meta.url), "utf8"));
 const repository_root = fileURLToPath(new URL("../../..", import.meta.url));
 const test_port = Number.parseInt(process.env.AION_TEST_PORT ?? "4174", 10);
 const test_base_url = `http://127.0.0.1:${test_port}`;
@@ -110,26 +110,26 @@ function changed_footprint(base, feature) {
   return { pixels, bounds: pixels === 0 ? null : { min_x, min_y, max_x, max_y } };
 }
 
-function regional_fidelity_report(aion, lwc, pixel_ratio, price_axis_width = fixture.price_axis_width) {
-  expect([aion.width, aion.height]).toEqual([lwc.width, lwc.height]);
+function regional_fidelity_report(aion, reference, pixel_ratio, price_axis_width = fixture.price_axis_width) {
+  expect([aion.width, aion.height]).toEqual([reference.width, reference.height]);
   const pane_width = Math.round((fixture.css_width - price_axis_width) * pixel_ratio);
   const pane_height = Math.round((fixture.css_height - fixture.time_axis_height) * pixel_ratio);
   const regions = {
-    full: [aion, lwc],
-    pane: [crop_png(aion, 0, 0, pane_width, pane_height), crop_png(lwc, 0, 0, pane_width, pane_height)],
+    full: [aion, reference],
+    pane: [crop_png(aion, 0, 0, pane_width, pane_height), crop_png(reference, 0, 0, pane_width, pane_height)],
     price_axis: [
       crop_png(aion, pane_width, 0, aion.width - pane_width, pane_height),
-      crop_png(lwc, pane_width, 0, lwc.width - pane_width, pane_height),
+      crop_png(reference, pane_width, 0, reference.width - pane_width, pane_height),
     ],
     time_axis: [
       crop_png(aion, 0, pane_height, pane_width, aion.height - pane_height),
-      crop_png(lwc, 0, pane_height, pane_width, lwc.height - pane_height),
+      crop_png(reference, 0, pane_height, pane_width, reference.height - pane_height),
     ],
   };
   const report = {};
   const visuals = {};
-  for (const [name, [aion_region, lwc_region]] of Object.entries(regions)) {
-    const stats = image_stats(aion_region, lwc_region);
+  for (const [name, [aion_region, reference_region]] of Object.entries(regions)) {
+    const stats = image_stats(aion_region, reference_region);
     report[name] = {
       total_pixels: stats.total_pixels,
       different_pixels: stats.different_pixels,
@@ -270,7 +270,7 @@ test("native and browser Canvas2D panes consume the same fixture", async ({ page
   expect(stats.different_pixels).toBe(0);
 });
 
-test("public time and price scale handles are engine-owned and LWC-compatible", async ({ page }) => {
+test("public time and price scale handles are engine-owned and reference-compatible", async ({ page }) => {
   await page.goto("/?runtimeTest=presentedFrame&backend=canvas2d");
   await wait_for_chart(page);
   const result = await page.evaluate(async () => {
@@ -295,8 +295,8 @@ test("public time and price scale handles are engine-owned and LWC-compatible", 
     const scrolled = time.scroll_position();
     time.reset_time_scale();
     const reset_options = time.options();
-    // With LWC `restoreDefault` semantics the applied bar_spacing 12 persists through the reset;
-    // restore the fixture spacing for the downstream LWC-reference comparisons.
+    // With reference `restoreDefault` semantics the applied bar_spacing 12 persists through the reset;
+    // restore the fixture spacing for the downstream reference comparisons.
     time.apply_options({ bar_spacing: 6 });
     const query_logical_range = time.get_visible_logical_range();
     const queried_data = main.data();
@@ -394,7 +394,7 @@ test("public time and price scale handles are engine-owned and LWC-compatible", 
   expect(result.time_result.logical_roundtrip).toBe(100);
   expect(result.time_result.time_coordinate_matches).toBe(true);
   expect(result.scrolled).toBe(0);
-  // LWC `restoreDefault` restores from the *configured* options (time-scale.ts), so the
+  // reference `restoreDefault` restores from the *configured* options (time-scale.ts), so the
   // bar_spacing applied above (12) survives reset_time_scale — options() reports it back.
   expect(result.reset_options).toEqual({
     bar_spacing: 12,
@@ -437,10 +437,10 @@ test("public time and price scale handles are engine-owned and LWC-compatible", 
   expect(result.chart_price_width).toBe(result.price_width);
   expect(result.overlay_width).toBe(0);
 
-  await page.goto("/lwc_reference.html");
+  await page.goto("/reference.html");
   await page.waitForFunction(() => document.documentElement.dataset.ready === "true");
-  const lwc_modes = await page.evaluate(async (source_price) => {
-    const { chart, series } = window.__lwc_reference;
+  const reference_modes = await page.evaluate(async (source_price) => {
+    const { chart, series } = window.__reference;
     const scale = chart.priceScale("right");
     chart.timeScale().applyOptions({ barSpacing: 6, rightOffset: 0 });
     scale.applyOptions({
@@ -474,8 +474,8 @@ test("public time and price scale handles are engine-owned and LWC-compatible", 
       },
     };
   }, result.source_price);
-  const lwc_series_queries = await page.evaluate((logical_range) => {
-    const { series } = window.__lwc_reference;
+  const reference_series_queries = await page.evaluate((logical_range) => {
+    const { series } = window.__reference;
     const values = series.data();
     const bars = series.barsInLogicalRange(logical_range);
     return {
@@ -493,26 +493,26 @@ test("public time and price scale handles are engine-owned and LWC-compatible", 
       type: series.seriesType().toLowerCase(),
     };
   }, result.series_queries.logical_range);
-  expect(result.series_queries.bars).toEqual(lwc_series_queries.bars);
-  expect(result.series_queries.exact).toEqual(lwc_series_queries.exact);
-  expect(result.series_queries.missing).toEqual(lwc_series_queries.missing);
-  expect(result.series_queries.nearest_right).toEqual(lwc_series_queries.nearest_right);
-  expect(result.series_queries.length).toBe(lwc_series_queries.length);
-  expect(result.series_queries.first).toEqual(lwc_series_queries.first);
-  expect(result.series_queries.last).toEqual(lwc_series_queries.last);
-  expect(result.series_queries.type).toBe(lwc_series_queries.type);
-  expect(result.percentage_range.from).toBeCloseTo(lwc_modes.percentage.range.from, 9);
-  expect(result.percentage_range.to).toBeCloseTo(lwc_modes.percentage.range.to, 9);
-  expect(result.percentage_coordinate).toBeCloseTo(lwc_modes.percentage.coordinate, 7);
-  expect(result.percentage_width).toBe(lwc_modes.percentage.width);
-  expect(result.percentage_logical_range).toEqual(lwc_modes.percentage.logical_range);
-  expect(result.log_coordinate).toBeCloseTo(lwc_modes.log.coordinate, 7);
-  expect(result.log_range).toEqual(lwc_modes.log.range);
-  expect(result.indexed_range.from).toBeCloseTo(lwc_modes.indexed.range.from, 9);
-  expect(result.indexed_range.to).toBeCloseTo(lwc_modes.indexed.range.to, 9);
-  expect(result.indexed_coordinate).toBeCloseTo(lwc_modes.indexed.coordinate, 7);
-  expect(result.price_width).toBe(lwc_modes.indexed.width);
-  expect(result.indexed_logical_range).toEqual(lwc_modes.indexed.logical_range);
+  expect(result.series_queries.bars).toEqual(reference_series_queries.bars);
+  expect(result.series_queries.exact).toEqual(reference_series_queries.exact);
+  expect(result.series_queries.missing).toEqual(reference_series_queries.missing);
+  expect(result.series_queries.nearest_right).toEqual(reference_series_queries.nearest_right);
+  expect(result.series_queries.length).toBe(reference_series_queries.length);
+  expect(result.series_queries.first).toEqual(reference_series_queries.first);
+  expect(result.series_queries.last).toEqual(reference_series_queries.last);
+  expect(result.series_queries.type).toBe(reference_series_queries.type);
+  expect(result.percentage_range.from).toBeCloseTo(reference_modes.percentage.range.from, 9);
+  expect(result.percentage_range.to).toBeCloseTo(reference_modes.percentage.range.to, 9);
+  expect(result.percentage_coordinate).toBeCloseTo(reference_modes.percentage.coordinate, 7);
+  expect(result.percentage_width).toBe(reference_modes.percentage.width);
+  expect(result.percentage_logical_range).toEqual(reference_modes.percentage.logical_range);
+  expect(result.log_coordinate).toBeCloseTo(reference_modes.log.coordinate, 7);
+  expect(result.log_range).toEqual(reference_modes.log.range);
+  expect(result.indexed_range.from).toBeCloseTo(reference_modes.indexed.range.from, 9);
+  expect(result.indexed_range.to).toBeCloseTo(reference_modes.indexed.range.to, 9);
+  expect(result.indexed_coordinate).toBeCloseTo(reference_modes.indexed.coordinate, 7);
+  expect(result.price_width).toBe(reference_modes.indexed.width);
+  expect(result.indexed_logical_range).toEqual(reference_modes.indexed.logical_range);
 
   await page.goto("/?runtimeTest=presentedFrame&backend=canvas2d&leftScale=1&dpr=1");
   await wait_for_chart(page);
@@ -536,10 +536,10 @@ test("public time and price scale handles are engine-owned and LWC-compatible", 
   expect(aion_left.pane_width + aion_left.left_width).toBe(fixture.css_width);
   expect(aion_left.roundtrip).toBeCloseTo(aion_left.source_price, 9);
 
-  await page.goto("/lwc_reference.html?leftScale=1");
+  await page.goto("/reference.html?leftScale=1");
   await page.waitForFunction(() => document.documentElement.dataset.ready === "true");
-  const lwc_left = await page.evaluate((source_price) => {
-    const { chart, series } = window.__lwc_reference;
+  const reference_left = await page.evaluate((source_price) => {
+    const { chart, series } = window.__reference;
     return {
       left_width: chart.priceScale("left").width(),
       right_width: chart.priceScale("right").width(),
@@ -549,61 +549,61 @@ test("public time and price scale handles are engine-owned and LWC-compatible", 
       logical_range: chart.timeScale().getVisibleLogicalRange(),
     };
   }, aion_left.source_price);
-  expect(aion_left.left_width).toBe(lwc_left.left_width);
-  expect(aion_left.right_width).toBe(lwc_left.right_width);
-  expect(aion_left.pane_width).toBe(lwc_left.pane_width);
-  expect(aion_left.range).toEqual(lwc_left.range);
-  expect(aion_left.coordinate).toBeCloseTo(lwc_left.coordinate, 7);
-  expect(aion_left.logical_range).toEqual(lwc_left.logical_range);
+  expect(aion_left.left_width).toBe(reference_left.left_width);
+  expect(aion_left.right_width).toBe(reference_left.right_width);
+  expect(aion_left.pane_width).toBe(reference_left.pane_width);
+  expect(aion_left.range).toEqual(reference_left.range);
+  expect(aion_left.coordinate).toBeCloseTo(reference_left.coordinate, 7);
+  expect(aion_left.logical_range).toEqual(reference_left.logical_range);
 });
 
-test("LWC 5.2 reference is deterministic and reports Aion fidelity", async ({ page }, test_info) => {
+test("reference 5.2 reference is deterministic and reports Aion fidelity", async ({ page }, test_info) => {
   await page.goto("/?runtimeTest=presentedFrame&backend=canvas2d");
   await wait_for_chart(page);
   const aion = PNG.sync.read(await page.screenshot({ animations: "disabled", fullPage: false }));
 
-  await page.goto("/lwc_reference.html");
+  await page.goto("/reference.html");
   await page.waitForFunction(() => document.documentElement.dataset.ready === "true");
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  const capture_lwc = async () => page.screenshot({ animations: "disabled", fullPage: false });
-  const lwc_first = await capture_lwc();
-  const lwc_second = await capture_lwc();
-  expect(lwc_second.equals(lwc_first), "the pinned LWC fixture must itself be deterministic").toBe(true);
-  const lwc = PNG.sync.read(lwc_first);
+  const capture_reference = async () => page.screenshot({ animations: "disabled", fullPage: false });
+  const reference_first = await capture_reference();
+  const reference_second = await capture_reference();
+  expect(reference_second.equals(reference_first), "the pinned reference fixture must itself be deterministic").toBe(true);
+  const reference = PNG.sync.read(reference_first);
 
   // Comparing presented pages puts both libraries through the same Chromium compositor and avoids
-  // the unequal public screenshot resolutions (Aion is device-pixel-sized; LWC is CSS-sized).
+  // the unequal public screenshot resolutions (Aion is device-pixel-sized; reference is CSS-sized).
   const expected_size = [
     Math.round(fixture.css_width * fixture.pixel_ratio),
     Math.round(fixture.css_height * fixture.pixel_ratio),
   ];
   expect([aion.width, aion.height]).toEqual(expected_size);
-  expect([lwc.width, lwc.height]).toEqual(expected_size);
+  expect([reference.width, reference.height]).toEqual(expected_size);
 
-  const { report, visuals } = regional_fidelity_report(aion, lwc, fixture.pixel_ratio);
+  const { report, visuals } = regional_fidelity_report(aion, reference, fixture.pixel_ratio);
   await test_info.attach("aion.png", { body: PNG.sync.write(aion), contentType: "image/png" });
-  await test_info.attach("lwc-5.2.0.png", { body: PNG.sync.write(lwc), contentType: "image/png" });
-  await test_info.attach("aion-lwc-diff.png", { body: PNG.sync.write(visuals.full), contentType: "image/png" });
-  console.log(`Aion/LWC 5.2 fidelity report: ${JSON.stringify(report)}`);
-  await test_info.attach("aion-lwc-report.json", {
-    body: Buffer.from(JSON.stringify({ fixture: fixture.name, lwc_version: "5.2.0", regions: report }, null, 2)),
+  await test_info.attach("reference-5.2.0.png", { body: PNG.sync.write(reference), contentType: "image/png" });
+  await test_info.attach("aion-reference-diff.png", { body: PNG.sync.write(visuals.full), contentType: "image/png" });
+  console.log(`Aion/reference 5.2 fidelity report: ${JSON.stringify(report)}`);
+  await test_info.attach("aion-reference-report.json", {
+    body: Buffer.from(JSON.stringify({ fixture: fixture.name, ref_version: "5.2.0", regions: report }, null, 2)),
     contentType: "application/json",
   });
 
   // This gate currently establishes a reproducible upstream reference and makes divergence
   // visible. The explicit ceilings prevent fidelity regressions and are lowered region-by-region
   // as Aion closes each measured gap; they are intentionally not represented as pixel parity.
-  expect(lwc_baseline.fixture).toBe(fixture.name);
-  expect(lwc_baseline.lwc_version).toBe("5.2.0");
-  for (const [name, ceiling] of Object.entries(lwc_baseline.maximum_perceptual_difference)) {
-    expect(report[name].perceptual_percent / 100, `${name} exceeded its recorded LWC fidelity ceiling`).toBeLessThanOrEqual(ceiling);
+  expect(reference_baseline.fixture).toBe(fixture.name);
+  expect(reference_baseline.ref_version).toBe("5.2.0");
+  for (const [name, ceiling] of Object.entries(reference_baseline.maximum_perceptual_difference)) {
+    expect(report[name].perceptual_percent / 100, `${name} exceeded its recorded reference fidelity ceiling`).toBeLessThanOrEqual(ceiling);
   }
 });
 
-test("LWC spacing, DPR, and theme matrix reports regional fidelity", async ({ browser }, test_info) => {
-  expect(lwc_matrix.fixture).toBe(fixture.name);
-  expect(lwc_matrix.lwc_version).toBe("5.2.0");
-  const cases = lwc_matrix.cases;
+test("reference spacing, DPR, and theme matrix reports regional fidelity", async ({ browser }, test_info) => {
+  expect(reference_matrix.fixture).toBe(fixture.name);
+  expect(reference_matrix.ref_version).toBe("5.2.0");
+  const cases = reference_matrix.cases;
   const matrix = {};
   for (const entry of cases) {
     const context = await browser.newContext({
@@ -631,48 +631,48 @@ test("LWC spacing, DPR, and theme matrix reports regional fidelity", async ({ br
     ]);
     const aion = PNG.sync.read(await matrix_page.screenshot({ animations: "disabled", fullPage: false }));
 
-    await matrix_page.goto(`${test_base_url}/lwc_reference.html?${query}`);
+    await matrix_page.goto(`${test_base_url}/reference.html?${query}`);
     await matrix_page.waitForFunction(() => document.documentElement.dataset.ready === "true");
     await matrix_page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    const lwc_spacing = Number(await matrix_page.getAttribute("html", "data-bar-spacing"));
-    expect(lwc_spacing).toBeCloseTo(entry.spacing, 9);
-    const lwc_range = JSON.parse(await matrix_page.getAttribute("html", "data-visible-logical-range"));
-    const lwc_axis_width = Number(await matrix_page.getAttribute("html", "data-price-axis-width"));
-    expect(aion_axis_width).toBe(lwc_axis_width);
-    const lwc_price_extent = await matrix_page.evaluate(() => [
-      window.__lwc_reference.series.coordinateToPrice(0),
-      window.__lwc_reference.series.coordinateToPrice(window.__lwc_reference.chart.panes()[0].getHeight() - 1),
+    const reference_spacing = Number(await matrix_page.getAttribute("html", "data-bar-spacing"));
+    expect(reference_spacing).toBeCloseTo(entry.spacing, 9);
+    const reference_range = JSON.parse(await matrix_page.getAttribute("html", "data-visible-logical-range"));
+    const reference_axis_width = Number(await matrix_page.getAttribute("html", "data-price-axis-width"));
+    expect(aion_axis_width).toBe(reference_axis_width);
+    const reference_price_extent = await matrix_page.evaluate(() => [
+      window.__reference.series.coordinateToPrice(0),
+      window.__reference.series.coordinateToPrice(window.__reference.chart.panes()[0].getHeight() - 1),
     ]);
-    const lwc = PNG.sync.read(await matrix_page.screenshot({ animations: "disabled", fullPage: false }));
+    const reference = PNG.sync.read(await matrix_page.screenshot({ animations: "disabled", fullPage: false }));
     expect([aion.width, aion.height]).toEqual([
       Math.round(fixture.css_width * entry.dpr),
       Math.round(fixture.css_height * entry.dpr),
     ]);
-    const { report, visuals } = regional_fidelity_report(aion, lwc, entry.dpr, aion_axis_width);
+    const { report, visuals } = regional_fidelity_report(aion, reference, entry.dpr, aion_axis_width);
     matrix[entry.name] = report;
-    console.log(`${entry.name}: axis ${aion_axis_width}px, ranges Aion ${JSON.stringify(aion_range)} LWC ${JSON.stringify(lwc_range)}, price extents Aion ${JSON.stringify(aion_price_extent)} LWC ${JSON.stringify(lwc_price_extent)}; ${JSON.stringify(report)}`);
+    console.log(`${entry.name}: axis ${aion_axis_width}px, ranges Aion ${JSON.stringify(aion_range)} reference ${JSON.stringify(reference_range)}, price extents Aion ${JSON.stringify(aion_price_extent)} reference ${JSON.stringify(reference_price_extent)}; ${JSON.stringify(report)}`);
     if (entry.spacing === 50) {
       await test_info.attach(`${entry.name}-aion.png`, { body: PNG.sync.write(aion), contentType: "image/png" });
-      await test_info.attach(`${entry.name}-lwc.png`, { body: PNG.sync.write(lwc), contentType: "image/png" });
+      await test_info.attach(`${entry.name}-reference.png`, { body: PNG.sync.write(reference), contentType: "image/png" });
       await test_info.attach(`${entry.name}-diff.png`, { body: PNG.sync.write(visuals.full), contentType: "image/png" });
     }
     await context.close();
   }
-  await test_info.attach("aion-lwc-matrix.json", {
-    body: Buffer.from(JSON.stringify({ lwc_version: "5.2.0", cases: matrix }, null, 2)),
+  await test_info.attach("aion-reference-matrix.json", {
+    body: Buffer.from(JSON.stringify({ ref_version: "5.2.0", cases: matrix }, null, 2)),
     contentType: "application/json",
   });
   for (const entry of cases) {
     const report = matrix[entry.name];
     for (const [region, ceiling] of Object.entries(entry.maximum)) {
-      expect(report[region].perceptual_percent / 100, `${entry.name}/${region} exceeded its LWC ceiling`).toBeLessThanOrEqual(ceiling);
+      expect(report[region].perceptual_percent / 100, `${entry.name}/${region} exceeded its reference ceiling`).toBeLessThanOrEqual(ceiling);
     }
   }
 });
 
-test("LWC marker and overlay-volume fixtures report regional fidelity", async ({ browser }, test_info) => {
-  expect(lwc_features.fixture).toBe(fixture.name);
-  expect(lwc_features.lwc_version).toBe("5.2.0");
+test("reference marker and overlay-volume fixtures report regional fidelity", async ({ browser }, test_info) => {
+  expect(reference_features.fixture).toBe(fixture.name);
+  expect(reference_features.ref_version).toBe("5.2.0");
   const feature_reports = {};
   const captures = {};
   for (const feature of ["base", "markers", "volume"]) {
@@ -700,26 +700,26 @@ test("LWC marker and overlay-volume fixtures report regional fidelity", async ({
     ]);
     const aion = PNG.sync.read(await feature_page.screenshot({ animations: "disabled", fullPage: false }));
 
-    await feature_page.goto(`${test_base_url}/lwc_reference.html?${query}`);
+    await feature_page.goto(`${test_base_url}/reference.html?${query}`);
     await feature_page.waitForFunction(() => document.documentElement.dataset.ready === "true");
-    const lwc_axis_width = Number(await feature_page.getAttribute("html", "data-price-axis-width"));
-    const lwc_range = JSON.parse(await feature_page.getAttribute("html", "data-visible-logical-range"));
-    const lwc_price_extent = await feature_page.evaluate(() => [
-      window.__lwc_reference.series.coordinateToPrice(0),
-      window.__lwc_reference.series.coordinateToPrice(window.__lwc_reference.chart.panes()[0].getHeight() - 1),
+    const reference_axis_width = Number(await feature_page.getAttribute("html", "data-price-axis-width"));
+    const reference_range = JSON.parse(await feature_page.getAttribute("html", "data-visible-logical-range"));
+    const reference_price_extent = await feature_page.evaluate(() => [
+      window.__reference.series.coordinateToPrice(0),
+      window.__reference.series.coordinateToPrice(window.__reference.chart.panes()[0].getHeight() - 1),
     ]);
-    expect(axis_width).toBe(lwc_axis_width);
-    expect(aion_range).toEqual(lwc_range);
-    expect(aion_price_extent[0]).toBeCloseTo(lwc_price_extent[0], 9);
-    expect(aion_price_extent[1]).toBeCloseTo(lwc_price_extent[1], 9);
-    const lwc = PNG.sync.read(await feature_page.screenshot({ animations: "disabled", fullPage: false }));
-    const { report, visuals } = regional_fidelity_report(aion, lwc, fixture.pixel_ratio, axis_width);
-    captures[feature] = { aion, lwc };
-    console.log(`${feature} ranges: Aion ${JSON.stringify(aion_range)} LWC ${JSON.stringify(lwc_range)}, price extents Aion ${JSON.stringify(aion_price_extent)} LWC ${JSON.stringify(lwc_price_extent)}`);
+    expect(axis_width).toBe(reference_axis_width);
+    expect(aion_range).toEqual(reference_range);
+    expect(aion_price_extent[0]).toBeCloseTo(reference_price_extent[0], 9);
+    expect(aion_price_extent[1]).toBeCloseTo(reference_price_extent[1], 9);
+    const reference = PNG.sync.read(await feature_page.screenshot({ animations: "disabled", fullPage: false }));
+    const { report, visuals } = regional_fidelity_report(aion, reference, fixture.pixel_ratio, axis_width);
+    captures[feature] = { aion, reference };
+    console.log(`${feature} ranges: Aion ${JSON.stringify(aion_range)} reference ${JSON.stringify(reference_range)}, price extents Aion ${JSON.stringify(aion_price_extent)} reference ${JSON.stringify(reference_price_extent)}`);
     feature_reports[feature] = report;
     console.log(`${feature}: ${JSON.stringify(report)}`);
     await test_info.attach(`${feature}-aion.png`, { body: PNG.sync.write(aion), contentType: "image/png" });
-    await test_info.attach(`${feature}-lwc.png`, { body: PNG.sync.write(lwc), contentType: "image/png" });
+    await test_info.attach(`${feature}-reference.png`, { body: PNG.sync.write(reference), contentType: "image/png" });
     await test_info.attach(`${feature}-diff.png`, { body: PNG.sync.write(visuals.full), contentType: "image/png" });
     await context.close();
   }
@@ -727,18 +727,18 @@ test("LWC marker and overlay-volume fixtures report regional fidelity", async ({
   for (const feature of ["markers", "volume"]) {
     footprints[feature] = {
       aion: changed_footprint(captures.base.aion, captures[feature].aion),
-      lwc: changed_footprint(captures.base.lwc, captures[feature].lwc),
+      reference: changed_footprint(captures.base.reference, captures[feature].reference),
     };
   }
   console.log(`feature footprints: ${JSON.stringify(footprints)}`);
-  await test_info.attach("aion-lwc-features.json", {
-    body: Buffer.from(JSON.stringify({ lwc_version: "5.2.0", features: feature_reports, footprints }, null, 2)),
+  await test_info.attach("aion-reference-features.json", {
+    body: Buffer.from(JSON.stringify({ ref_version: "5.2.0", features: feature_reports, footprints }, null, 2)),
     contentType: "application/json",
   });
-  for (const entry of lwc_features.cases) {
+  for (const entry of reference_features.cases) {
     const report = feature_reports[entry.name];
     for (const [region, ceiling] of Object.entries(entry.maximum)) {
-      expect(report[region].perceptual_percent / 100, `${entry.name}/${region} exceeded its LWC ceiling`).toBeLessThanOrEqual(ceiling);
+      expect(report[region].perceptual_percent / 100, `${entry.name}/${region} exceeded its reference ceiling`).toBeLessThanOrEqual(ceiling);
     }
   }
 });

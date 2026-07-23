@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "fixture": "candles-1000-default-light",
-  "lwc_version": "5.2.0",
+  "ref_version": "5.2.0",
   "capture": "Chromium presented page at DPR 1.5",
   "measured_2026_07_18": {
     "full": 0.03368344907407408,

@@ -2,7 +2,7 @@
   "name": "@tradeaion/charts",
   "version": "0.1.0",
   "type": "module",
-  "description": "Aion Charts public TypeScript API (snake_case, semantics mirror lightweight-charts v5)",
+  "description": "Aion Charts public TypeScript API (snake_case, semantics mirror the reference charting library v5)",
   "license": "MIT",
   "author": "TradeAion",
   "repository": {
@@ -20,8 +20,7 @@
     "finance",
     "webgpu",
     "wasm",
-    "rust",
-    "lightweight-charts"
+    "rust"
   ],
   "engines": {
     "node": ">=18"

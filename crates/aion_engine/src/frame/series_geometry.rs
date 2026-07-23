@@ -6,7 +6,7 @@ use aion_core::TimePointIndex;
 
 /// Emit a polyline stroke. A solid style emits a single `Polyline` prim (the backends expand
 /// `line_type` themselves, as before). Any dashed style is expanded with `line_type` and split
-/// into solid dash sub-segments here in the frame builder — LWC `setLineDash` semantics on the
+/// into solid dash sub-segments here in the frame builder — reference `setLineDash` semantics on the
 /// device-px path (draw-line.ts `getDashPattern`) — because the WebGPU tessellator has no dash
 /// concept; generating the gap geometry once keeps both backends pixel-identical by
 /// construction.
@@ -57,7 +57,7 @@ fn push_line_stroke(
     }
 }
 
-/// Per-point-color stroke runs over a resolved per-point color list, porting LWC walkLine's
+/// Per-point-color stroke runs over a resolved per-point color list, porting reference walkLine's
 /// style splitting (renderers/walk-line.ts): the segment from point `i` to `i+1` takes
 /// `colors[i]` — `changeStyle` strokes the accumulated old-style path up to and including the
 /// point where the new style first appears, so a point's color governs the segment leaving it,
@@ -101,7 +101,7 @@ impl ChartEngine {
         let grid = self.options.get().grid;
         let vert = css_color(&grid.vert_lines.color, GRID);
         let horz = css_color(&grid.horz_lines.color, GRID);
-        // LWC lineStyle (0 solid … 4 sparse-dotted); the backends expand dash patterns into
+        // reference lineStyle (0 solid … 4 sparse-dotted); the backends expand dash patterns into
         // segment rects identically (RENDERING_SPEC.md §6).
         let vert_style = crate::line_style_from_u8(grid.vert_lines.style);
         let horz_style = crate::line_style_from_u8(grid.horz_lines.style);
@@ -134,7 +134,7 @@ impl ChartEngine {
         }
     }
 
-    #[allow(clippy::too_many_arguments)] // mirrors the LWC renderer-data signature
+    #[allow(clippy::too_many_arguments)] // mirrors the reference renderer-data signature
     pub(super) fn build_candles_frame(
         &self,
         rs: ResolvedSeries,
@@ -158,7 +158,7 @@ impl ChartEngine {
             .into_iter()
             .map(|bar| {
                 let rising = bar.close >= bar.open;
-                // LWC data-item colors (series-bar-colorer.ts Candlestick arm): a per-point
+                // reference data-item colors (series-bar-colorer.ts Candlestick arm): a per-point
                 // override wins over the series' up/down resolution for its own channel.
                 let point = |channel: PointColorChannel| {
                     self.data
@@ -202,7 +202,7 @@ impl ChartEngine {
         );
     }
 
-    #[allow(clippy::too_many_arguments)] // mirrors the LWC renderer-data signature
+    #[allow(clippy::too_many_arguments)] // mirrors the reference renderer-data signature
     pub(super) fn build_bars_frame(
         &self,
         rs: ResolvedSeries,
@@ -230,7 +230,7 @@ impl ChartEngine {
                 high_y: scale.price_to_coordinate(bar.high, rs.base_value),
                 low_y: scale.price_to_coordinate(bar.low, rs.base_value),
                 close_y: scale.price_to_coordinate(bar.close, rs.base_value),
-                // LWC data-item color (series-bar-colorer.ts Bar arm): a per-point `color`
+                // reference data-item color (series-bar-colorer.ts Bar arm): a per-point `color`
                 // overrides the bar's up/down body color.
                 color: self
                     .data
@@ -256,7 +256,7 @@ impl ChartEngine {
         );
     }
 
-    #[allow(clippy::too_many_arguments)] // mirrors the LWC renderer-data signature
+    #[allow(clippy::too_many_arguments)] // mirrors the reference renderer-data signature
     pub(super) fn build_histogram_frame(
         &self,
         rs: ResolvedSeries,
@@ -270,7 +270,7 @@ impl ChartEngine {
         let plot = self.data.plot(rs.id);
         let idxs = plot.indices();
         let c = plot.column(PlotValueIndex::Close);
-        // LWC HistogramStyleOptions.base (histogram-renderer.ts): columns grow from this price
+        // reference HistogramStyleOptions.base (histogram-renderer.ts): columns grow from this price
         // level (default 0).
         let base = scale.price_to_coordinate(rs.base, rs.base_value);
         let solid = if rs.color != LINE {
@@ -293,7 +293,7 @@ impl ChartEngine {
             .into_iter()
             .map(|item| {
                 let r = item.source_row;
-                // LWC data-item color (series-bar-colorer.ts Histogram arm): a per-point
+                // reference data-item color (series-bar-colorer.ts Histogram arm): a per-point
                 // `color` wins over both the series `color` and the up/down volume tint.
                 let color = match self.data.point_color(rs.id, PointColorChannel::Body, r) {
                     Some(c) => Color(c),
@@ -340,7 +340,7 @@ impl ChartEngine {
         );
     }
 
-    #[allow(clippy::too_many_arguments)] // mirrors the LWC renderer-data signature
+    #[allow(clippy::too_many_arguments)] // mirrors the reference renderer-data signature
     pub(super) fn build_line_frame(
         &self,
         rs: ResolvedSeries,
@@ -385,7 +385,7 @@ impl ChartEngine {
         } else {
             LINE
         };
-        // LWC data-item colors (series-bar-colorer.ts Line/Area arms — area reads `lineColor`,
+        // reference data-item colors (series-bar-colorer.ts Line/Area arms — area reads `lineColor`,
         // mapped onto the body channel): a per-point color governs the stroke segment leaving
         // its point and the point marker. Resolved per visible point, falling back to the
         // series stroke color. `None` when no visible point overrides — the single-prim path
@@ -408,7 +408,7 @@ impl ChartEngine {
                     .collect::<Vec<_>>()
             });
         if rs.kind == SeriesKind::Area {
-            // LWC `invertFilledArea` (area-renderer-base.ts): fill from the pane's top edge
+            // reference `invertFilledArea` (area-renderer-base.ts): fill from the pane's top edge
             // down to the line instead of from the line down to the pane's bottom edge.
             let base_y = if rs.invert_filled_area {
                 band_top
@@ -416,7 +416,7 @@ impl ChartEngine {
                 band_bottom
             };
             // Deviation: the area fill keeps the series-level gradient even with per-point
-            // colors — LWC's `color`/`lineColor` data-item field affects only the stroke
+            // colors — the reference's `color`/`lineColor` data-item field affects only the stroke
             // (per-point `topColor`/`bottomColor` fill overrides are not modeled).
             out.push(Prim::AreaFill {
                 first_point: first,
@@ -429,7 +429,7 @@ impl ChartEngine {
                 },
             });
         }
-        // LWC `lineVisible` (line-renderer-base.ts): the stroke is skipped; an area keeps its
+        // reference `lineVisible` (line-renderer-base.ts): the stroke is skipped; an area keeps its
         // fill and a line series keeps only its point markers.
         if rs.line_visible {
             let width = (rs.line_width * vpr) as f32;
@@ -437,7 +437,7 @@ impl ChartEngine {
                 Some(colors) => {
                     // Per-point colors: one stroke run per maximal equal-color span (the
                     // walkLine split). With steps/curves each run expands independently, and a
-                    // dashed style restarts its pattern per run — LWC keeps dash offset and
+                    // dashed style restarts its pattern per run — reference keeps dash offset and
                     // splits the step corner at the color change; those sub-segment details are
                     // not modeled (documented deviation; Simple lines are exact).
                     for (start, end, run_color) in color_runs(colors) {
@@ -490,7 +490,7 @@ impl ChartEngine {
             }
         }
         if rs.point_markers {
-            // LWC `pointMarkersRadius` default (line-pane-view.ts): `lineWidth / 2 + 2`. LWC
+            // reference `pointMarkersRadius` default (line-pane-view.ts): `lineWidth / 2 + 2`. reference
             // draws the markers unconditionally once enabled (draw-series-point-markers.ts),
             // each in its point's own resolved color.
             let radius = rs.point_markers_radius.unwrap_or(rs.line_width / 2.0 + 2.0);
@@ -508,7 +508,7 @@ impl ChartEngine {
         }
     }
 
-    #[allow(clippy::too_many_arguments)] // mirrors the LWC renderer-data signature
+    #[allow(clippy::too_many_arguments)] // mirrors the reference renderer-data signature
     pub(super) fn build_baseline_frame(
         &self,
         rs: ResolvedSeries,
@@ -539,7 +539,7 @@ impl ChartEngine {
         };
         let baseline_y = scale.price_to_coordinate(baseline_price, rs.base_value);
         // Per-quadrant stroke polylines (device px), accumulated across segments so a dashed
-        // style walks the whole quadrant path instead of restarting per segment (LWC strokes
+        // style walks the whole quadrant path instead of restarting per segment (reference strokes
         // one path per side of the baseline).
         let mut top_stroke: Vec<[f32; 2]> = Vec::new();
         let mut bottom_stroke: Vec<[f32; 2]> = Vec::new();
@@ -565,7 +565,7 @@ impl ChartEngine {
                 let first = points.len() as u32;
                 points.push([(s0.0 * hpr) as f32, (s0.1 * vpr) as f32]);
                 points.push([(s1.0 * hpr) as f32, (s1.1 * vpr) as f32]);
-                // LWC baselineStyleDefaults: each quadrant fills with a two-stop gradient —
+                // reference baselineStyleDefaults: each quadrant fills with a two-stop gradient —
                 // color1 at the line, color2 at the baseline. Below the baseline the gradient
                 // runs from the baseline (bottomFillColor1) down to the line
                 // (bottomFillColor2), which the shared area-fill mechanism expresses with the
@@ -648,7 +648,7 @@ impl ChartEngine {
                 continue;
             };
             for line in &series.price_lines {
-                // LWC `lineVisible`: the axis label survives a hidden line.
+                // reference `lineVisible`: the axis label survives a hidden line.
                 if !line.line_visible {
                     continue;
                 }
@@ -698,7 +698,7 @@ impl ChartEngine {
                 let Some(row) = plot.search(index, MismatchDirection::None) else {
                     continue;
                 };
-                // LWC markers at a whitespace bar have no price to anchor to
+                // reference markers at a whitespace bar have no price to anchor to
                 // (series-markers pane-view getPrice returns undefined) — nothing is drawn.
                 if plot.is_whitespace_row(row) {
                     continue;
@@ -790,7 +790,7 @@ impl ChartEngine {
     ) {
         let pane = &self.panes[pane_index];
         for series in &self.series {
-            // LWC SeriesPriceLinePaneView: one built-in last-price line per visible series
+            // reference SeriesPriceLinePaneView: one built-in last-price line per visible series
             // with `priceLineVisible` (default true), drawn on the series' own price scale.
             if !series.visible || !series.price_line_visible {
                 continue;
@@ -801,7 +801,7 @@ impl ChartEngine {
             let scale = pane_scale(pane, series_scale_target(series));
             // A custom series' last value comes from the host-recorded frame values (Phase
             // C-c): the plugin's current value (the LAST `priceValueBuilder` element, the
-            // Close slot of LWC's custom plot-row mapping) of the last non-whitespace item —
+            // Close slot of the reference's custom plot-row mapping) of the last non-whitespace item —
             // global, or visible per `priceLineSource`.
             if series.kind == SeriesKind::Custom {
                 if scale.is_empty() {
@@ -837,9 +837,9 @@ impl ChartEngine {
             if plot.is_empty() || scale.is_empty() {
                 continue;
             }
-            // LWC PriceLineSource (series.ts lastValueData): LastBar follows the series'
+            // reference PriceLineSource (series.ts lastValueData): LastBar follows the series'
             // final bar, LastVisible the last bar at or left of the visible right edge.
-            // Whitespace rows are skipped (LWC's plot list never contains them).
+            // Whitespace rows are skipped (the reference's plot list never contains them).
             let row = if series.price_line_source == 1 {
                 plot.last_non_whitespace_row(to)
             } else {
@@ -860,7 +860,7 @@ impl ChartEngine {
             } else {
                 None
             };
-            // LWC `priceLineColor` default '' (series.ts priceLineColor): follow the bar color.
+            // reference `priceLineColor` default '' (series.ts priceLineColor): follow the bar color.
             // The pinned CSS string parses here; an unparseable string falls back to ''.
             let color = series
                 .price_line_color
@@ -871,7 +871,7 @@ impl ChartEngine {
                 y: (scale.price_to_coordinate(close, base_value) * vpr).round() as i32,
                 x0: 0,
                 x1: width,
-                // LWC horizontal-line-renderer.ts:65 scales lineWidth by the HORIZONTAL ratio
+                // reference horizontal-line-renderer.ts:65 scales lineWidth by the HORIZONTAL ratio
                 // (kept verbatim, including the ratio choice).
                 width: 1f64.max((series.price_line_width * hpr).floor()) as i32,
                 style: crate::line_style_from_u8(series.price_line_style),
@@ -881,7 +881,7 @@ impl ChartEngine {
     }
 
     pub(super) fn build_last_pulse_frame(&self, out: &mut Vec<Prim>, hpr: f64, vpr: f64) {
-        // The pulse anchors on the primary series (LWC's single last-price animation source);
+        // The pulse anchors on the primary series (the reference's single last-price animation source);
         // with id 0 tombstoned it falls back to the first visible, non-removed series.
         let Some(series) = self.primary_series() else {
             return;
@@ -896,7 +896,7 @@ impl ChartEngine {
         if plot.is_empty() || scale.is_empty() {
             return;
         }
-        // Last non-whitespace bar (LWC's whitespace-filtered last row).
+        // Last non-whitespace bar (the reference's whitespace-filtered last row).
         let Some(last) = plot.last_non_whitespace_row(TimePointIndex::MAX) else {
             return;
         };

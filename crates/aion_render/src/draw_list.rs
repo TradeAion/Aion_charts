@@ -1,6 +1,6 @@
 //! Draw-list IR consumed by rendering backends.
 //!
-//! Two coordinate flavors, mirroring the Canvas2D split lightweight-charts relies on
+//! Two coordinate flavors, mirroring the Canvas2D split the reference charting library relies on
 //! (see RENDERING_SPEC.md preamble):
 //! - integer **bitmap** rects (`Rect`, `RectFrame`, `HLine`, `VLine`) — crisp, no AA;
 //! - float bitmap-space geometry (`Polyline`, `AreaFill`, `RoundRect`, `Circle`, `Text`) — AA'd.
@@ -122,7 +122,7 @@ pub enum Prim {
         c: [f32; 2],
         color: Color,
     },
-    /// Vertical gradient over `rect` (bitmap px) — the LWC `layout.background`
+    /// Vertical gradient over `rect` (bitmap px) — the reference `layout.background`
     /// `VerticalGradient` painted per pane (pane-widget.ts `_drawBackground` spans the pane's
     /// own bitmap, so a stacked pane each gets the full top→bottom ramp).
     Background { rect: [f32; 4], gradient: Gradient },

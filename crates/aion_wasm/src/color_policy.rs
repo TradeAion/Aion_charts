@@ -1,9 +1,9 @@
 //! Per-direction color-override resolution for the series color options.
 //!
 //! The wasm boundary distinguishes three JS inputs so a pinned color can be *un-pinned* back to
-//! its follow state (LWC parity): `undefined` = keep the current value, `""` = clear the
+//! its follow state (reference parity): `undefined` = keep the current value, `""` = clear the
 //! override (follow the direction's default/body color), any string = pin it **verbatim**
-//! (LWC `series.options()` returns the applied string). The string is parsed only at render
+//! (reference `series.options()` returns the applied string). The string is parsed only at render
 //! time, where an unparseable value falls back to the default — so named colors and future
 //! CSS forms round-trip through `options()` exactly as applied.
 

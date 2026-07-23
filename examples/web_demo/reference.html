@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Lightweight Charts 5.2.0 reference fixture</title>
+<title>Reference 5.2.0 fixture</title>
 <style>
   html, body, #chart { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #fff; }
 </style>
@@ -11,6 +11,7 @@
 <body>
 <div id="chart"></div>
 <script type="module">
+// the reference charting library (dev-only fidelity harness)
 import {
   CandlestickSeries,
   ColorType,
@@ -76,9 +77,9 @@ if (requested_feature === "markers") {
 }
 await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
-// The test consumes only LWC's public API. Exposing the handles merely lets Playwright wait for
+// The test consumes only the reference's public API. Exposing the handles merely lets Playwright wait for
 // the asynchronous canvas paint and capture the official composed screenshot.
-window.__lwc_reference = { chart, fixture, series, feature_handle };
+window.__reference = { chart, fixture, series, feature_handle };
 document.documentElement.dataset.barSpacing = String(chart.timeScale().options().barSpacing);
 document.documentElement.dataset.visibleLogicalRange = JSON.stringify(chart.timeScale().getVisibleLogicalRange());
 document.documentElement.dataset.priceAxisWidth = String(chart.priceScale(requested_left_scale ? "left" : "right").width());

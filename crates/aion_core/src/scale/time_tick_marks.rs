@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use crate::TimePointIndex;
 
-/// Exact values from LWC's `TickMarkWeight` (`horz-scale-behavior-time/types.ts`).
+/// Exact values from the reference's `TickMarkWeight` (`horz-scale-behavior-time/types.ts`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum TickMarkWeight {
@@ -49,7 +49,7 @@ pub fn civil_from_timestamp(ts: i64) -> (i64, u32, u32) {
     civil_from_days(ts.div_euclid(86_400))
 }
 
-/// Intraday boundary divisors in seconds, smallest to largest (LWC iterates largest first).
+/// Intraday boundary divisors in seconds, smallest to largest (reference iterates largest first).
 const INTRADAY_DIVISORS: [(i64, TickMarkWeight); 8] = [
     (1, TickMarkWeight::Second),
     (60, TickMarkWeight::Minute1),
@@ -206,7 +206,7 @@ impl TimeTickMarks {
                     }
                 }
 
-                // saturating: sentinels are i64::MAX/MIN (LWC uses ±Infinity)
+                // saturating: sentinels are i64::MAX/MIN (reference uses ±Infinity)
                 if right_index.saturating_sub(current_index) >= max_indexes_per_mark
                     && current_index.saturating_sub(left_index) >= max_indexes_per_mark
                 {
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn civil_date_conversion() {
-        // 2018-06-25T04:00:00Z (LWC's doc example timestamp)
+        // 2018-06-25T04:00:00Z (the reference's doc example timestamp)
         assert_eq!(civil_from_timestamp(1_529_899_200), (2018, 6, 25));
         // epoch
         assert_eq!(civil_from_timestamp(0), (1970, 1, 1));

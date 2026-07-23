@@ -309,7 +309,7 @@ pub fn execute(
                 }
             }
             Prim::Background { rect, gradient } => {
-                // LWC pane-widget.ts `_drawBackground`: the two-stop ramp spans the pane rect.
+                // reference pane-widget.ts `_drawBackground`: the two-stop ramp spans the pane rect.
                 let [x, y, w, h] = *rect;
                 target.set_fill_vgradient(y, y + h, gradient.top, gradient.bottom);
                 target.fill_rect(x, y, w, h);
@@ -321,7 +321,7 @@ pub fn execute(
 
 /// The fill's vertical gradient extent and its first/last x. The gradient runs from the
 /// geometrically highest edge (`y_top`) to the lowest (`y_bottom`): normally
-/// [topmost point, base_y], but inverted (LWC `invertFilledArea` / baseline segments under the
+/// [topmost point, base_y], but inverted (reference `invertFilledArea` / baseline segments under the
 /// base level) it runs [base_y, lowest point] — matching the per-vertex shading of the wgpu
 /// tessellator stop-for-stop.
 fn area_extent(pts: &[LinePoint], base_y: f32) -> (f32, f32, f32, f32) {

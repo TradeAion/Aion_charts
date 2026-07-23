@@ -35,7 +35,7 @@ pub fn magnet_snap(cursor_coord: f64, candidates: &[(f64, f64)]) -> Option<f64> 
 /// Port of the candidate pick in `Magnet.align` (model/magnet.ts:80-83): candidates are y
 /// coordinates, each converted on its own series' price scale; the one nearest the cursor
 /// coordinate wins and is returned as a *coordinate* (the caller converts it back to a price
-/// on the pane's default scale). Ties resolve to the earliest candidate, matching LWC's stable
+/// on the pane's default scale). Ties resolve to the earliest candidate, matching the reference's stable
 /// sort. Returns `None` when there are no candidates (caller keeps the raw cursor price).
 pub fn magnet_snap_coordinate(cursor_coord: f64, candidates: &[f64]) -> Option<f64> {
     let mut best: Option<f64> = None;
@@ -87,7 +87,7 @@ mod tests {
 
     #[test]
     fn coordinate_pick_tie_goes_to_the_earliest_candidate() {
-        // equidistant candidates: LWC's stable sort keeps the first inserted
+        // equidistant candidates: the reference's stable sort keeps the first inserted
         assert_eq!(magnet_snap_coordinate(100.0, &[90.0, 110.0]), Some(90.0));
     }
 }

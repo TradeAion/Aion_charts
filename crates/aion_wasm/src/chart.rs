@@ -1,6 +1,6 @@
 //! The chart object exported to JS.
 //!
-//! Hybrid rendering, mirroring lightweight-charts' per-cell canvas layout:
+//! Hybrid rendering, mirroring the reference charting library's per-cell canvas layout:
 //! - the **pane** (grid, series, crosshair lines) is drawn with WebGPU or the shared Canvas2D
 //!   fallback;
 //! - the **axes** (borders, tick labels, crosshair axis labels) are drawn natively on a
@@ -64,7 +64,7 @@ extern "C" {
 
 static NEXT_RUNTIME_ID: AtomicU32 = AtomicU32::new(1);
 
-// lightweight-charts default palette (RENDERING_SPEC.md §2.5, §7, §8, §15)
+// the reference charting library default palette (RENDERING_SPEC.md §2.5, §7, §8, §15)
 // Axis palette (as CSS color strings for the 2D overlay)
 const BORDER_CSS: &str = "#2B2B43";
 // TradingView-style volume: translucent green on up bars, red on down bars.
@@ -198,7 +198,7 @@ pub(super) struct PrimitiveOverlayText {
     pub(super) baseline: String,
 }
 
-/// One attached pane primitive (LWC `IPanePrimitive`, adapted to a plain JS object by the TS
+/// One attached pane primitive (reference `IPanePrimitive`, adapted to a plain JS object by the TS
 /// package): the pane index it draws on plus the retained object itself.
 struct PanePrimitiveEntry {
     id: u32,
@@ -206,7 +206,7 @@ struct PanePrimitiveEntry {
     obj: js_sys::Object,
 }
 
-/// One attached series primitive (LWC `ISeriesPrimitive`, Phase C-b): the owning series id
+/// One attached series primitive (reference `ISeriesPrimitive`, Phase C-b): the owning series id
 /// plus the retained object. The pane/scale binding is re-resolved from the series each frame,
 /// so the views follow the series across pane moves and scale rebinding.
 struct SeriesPrimitiveEntry {
@@ -513,19 +513,19 @@ impl AionChart {
     }
 
     /// Remove a series (and any indicators derived from it). Returns true if a live series
-    /// was removed; any id may be removed (LWC `removeSeries`) — "primary series" consumers
+    /// was removed; any id may be removed (reference `removeSeries`) — "primary series" consumers
     /// fall back to the first visible non-removed series.
     pub fn remove_series(&mut self, id: u32) -> bool {
         self.inner.borrow_mut().remove_series(id)
     }
 
-    /// LWC v5.2 `ISeriesApi.pop(count)`: remove the last `count` data points (count clamps
+    /// reference v5.2 `ISeriesApi.pop(count)`: remove the last `count` data points (count clamps
     /// to the data length; per-point colors shift along). Returns the new data length.
     pub fn series_pop(&mut self, id: u32, count: u32) -> u32 {
         self.inner.borrow_mut().series_pop(id, count)
     }
 
-    /// LWC `ISeriesApi.lastValueData(globalLast)`: JSON `{"value","formatted","time"}` of
+    /// reference `ISeriesApi.lastValueData(globalLast)`: JSON `{"value","formatted","time"}` of
     /// the last (`global_last` true) or last visible (false) non-whitespace bar, the value
     /// formatted with the series' price format. "" when there is no such bar.
     pub fn series_last_value_data(&self, id: u32, global_last: bool) -> String {
@@ -538,13 +538,13 @@ impl AionChart {
         self.inner.borrow().series_format_price(id, value)
     }
 
-    /// Series ids in current render order (topmost LAST) as a JSON array — LWC
+    /// Series ids in current render order (topmost LAST) as a JSON array — reference
     /// `chart.seriesOrder()` backing.
     pub fn series_order_json(&self) -> String {
         self.inner.borrow().series_order_json()
     }
 
-    /// LWC `chart.setSeriesOrder`: reorder which series paints on top. Every live series id
+    /// reference `chart.setSeriesOrder`: reorder which series paints on top. Every live series id
     /// must be present exactly once, else the call is rejected (false, no state change).
     pub fn set_series_order(&mut self, ids: Vec<u32>) -> bool {
         self.inner.borrow_mut().set_series_order(ids)
@@ -634,7 +634,7 @@ impl AionChart {
             .update_series_bar(series_id, time, open, high, low, close);
     }
 
-    /// Per-data-point color overrides (LWC data-item colors). Each channel is a `Uint32Array`
+    /// Per-data-point color overrides (reference data-item colors). Each channel is a `Uint32Array`
     /// of packed RGBA values — `0xRRGGBBAA` (e.g. opaque red = `0xFF0000FF`, half-alpha green
     /// = `0x00FF0080`) — or `undefined`/`null`/empty for absent. Within a present channel, a
     /// `0` entry means "no override at this row" (a fully transparent color is not renderable,
@@ -659,7 +659,7 @@ impl AionChart {
     /// per-point color channels (`undefined` = no custom color for that channel; packed RGBA
     /// `0xRRGGBBAA` as in [`set_series_point_colors`]). Append-new-time vs replace-last
     /// semantics mirror the plain update.
-    #[allow(clippy::too_many_arguments)] // mirrors update_series_bar plus the three LWC color slots
+    #[allow(clippy::too_many_arguments)] // mirrors update_series_bar plus the three reference color slots
     pub fn update_series_bar_styled(
         &mut self,
         id: u32,
@@ -677,7 +677,7 @@ impl AionChart {
             .update_series_bar_styled(id, time, open, high, low, close, body, wick, border);
     }
 
-    /// Apply a per-series `priceFormat` (LWC PriceFormat) as JSON:
+    /// Apply a per-series `priceFormat` (reference PriceFormat) as JSON:
     /// `{"type":"price"|"volume"|"percent", "precision"?, "min_move"?}` or
     /// `{"type":"custom", "min_move"?}` (keeps a formatter installed via
     /// [`set_series_price_formatter`]; switching to a non-custom type clears it). Malformed
@@ -688,7 +688,7 @@ impl AionChart {
             .series_apply_price_format_json(id, json);
     }
 
-    /// LWC `priceFormat: {type:"custom", formatter}`: install the series' custom formatter fn
+    /// reference `priceFormat: {type:"custom", formatter}`: install the series' custom formatter fn
     /// `(price: number) => string`. A throw or non-string result falls back to the built-in
     /// price formatter. The fn is cleared by applying a non-custom `priceFormat` type.
     pub fn set_series_price_formatter(&mut self, id: u32, formatter: js_sys::Function) {
@@ -813,13 +813,13 @@ impl AionChart {
         self.inner.borrow_mut().remove_price_line(id);
     }
 
-    /// Merge a JSON options patch into an existing price line (LWC `IPriceLine.applyOptions`;
+    /// Merge a JSON options patch into an existing price line (reference `IPriceLine.applyOptions`;
     /// snake_case keys, camelCase aliases accepted). Call `render()` after.
     pub fn price_line_apply_options(&mut self, id: u32, json: &str) {
         self.inner.borrow_mut().price_line_apply_options(id, json);
     }
 
-    /// The price line's full options as a snake_case JSON string (LWC `IPriceLine.options`;
+    /// The price line's full options as a snake_case JSON string (reference `IPriceLine.options`;
     /// "" for an unknown id).
     pub fn price_line_options_json(&self, id: u32) -> String {
         self.inner.borrow().price_line_options_json(id)
@@ -829,7 +829,7 @@ impl AionChart {
     pub fn set_series_markers(&mut self, series_id: u32, json: &str) {
         self.inner.borrow_mut().set_series_markers(series_id, json);
     }
-    /// Toggle marker pixel margins in price-scale autoscaling (enabled by default, as in LWC).
+    /// Toggle marker pixel margins in price-scale autoscaling (enabled by default, as in reference).
     pub fn set_series_markers_auto_scale(&mut self, series_id: u32, enabled: bool) {
         self.inner
             .borrow_mut()
@@ -888,47 +888,47 @@ impl AionChart {
         self.inner.borrow_mut().set_pane_height(i, height_css);
     }
 
-    /// LWC v5 `chart.addPane(preserveEmptyPane)`: append a pane and return its index.
+    /// reference v5 `chart.addPane(preserveEmptyPane)`: append a pane and return its index.
     pub fn add_pane(&mut self, preserve_empty: bool) -> u32 {
         self.inner.borrow_mut().add_pane(preserve_empty)
     }
 
-    /// LWC `chart.removePane`: refuses the last remaining pane and stale indices (false).
+    /// reference `chart.removePane`: refuses the last remaining pane and stale indices (false).
     /// The pane's series become pane-less (they keep data but render/scale nowhere until
     /// re-assigned); panes below shift one index up. Call `render()` after.
     pub fn remove_pane(&mut self, index: u32) -> bool {
         self.inner.borrow_mut().remove_pane(index)
     }
 
-    /// LWC `chart.swapPanes`: the two panes trade places — series assignments, stretch
+    /// reference `chart.swapPanes`: the two panes trade places — series assignments, stretch
     /// factors, scales, and preserve flags ride along. Call `render()` after.
     pub fn swap_panes(&mut self, first: u32, second: u32) -> bool {
         self.inner.borrow_mut().swap_panes(first, second)
     }
 
-    /// LWC `IPaneApi.moveTo`: relocate the pane (with its series) to a new index. False for
+    /// reference `IPaneApi.moveTo`: relocate the pane (with its series) to a new index. False for
     /// a stale index. Call `render()` after.
     pub fn pane_move_to(&mut self, index: u32, target: u32) -> bool {
         self.inner.borrow_mut().pane_move_to(index, target)
     }
 
-    /// LWC `IPaneApi.preserveEmptyPane` (false for a stale index).
+    /// reference `IPaneApi.preserveEmptyPane` (false for a stale index).
     pub fn pane_preserve_empty(&self, index: u32) -> bool {
         self.inner.borrow().pane_preserve_empty(index)
     }
 
-    /// LWC `IPaneApi.setPreserveEmptyPane`: an empty pane collapses on the next series
+    /// reference `IPaneApi.setPreserveEmptyPane`: an empty pane collapses on the next series
     /// removal/move-out unless this flag holds it open.
     pub fn pane_set_preserve_empty(&mut self, index: u32, flag: bool) {
         self.inner.borrow_mut().pane_set_preserve_empty(index, flag);
     }
 
-    /// LWC `IPaneApi.getSeries`: the pane's live series ids in render order (bottom first).
+    /// reference `IPaneApi.getSeries`: the pane's live series ids in render order (bottom first).
     pub fn pane_series_ids(&self, index: u32) -> Vec<u32> {
         self.inner.borrow().pane_series_ids(index)
     }
 
-    /// Attach a pane primitive (LWC `IPaneApi.attachPrimitive`, plugin platform Phase C-a):
+    /// Attach a pane primitive (reference `IPaneApi.attachPrimitive`, plugin platform Phase C-a):
     /// a plain JS object with optional `attached`/`detached`/`update_all_views`/`pane_views`/
     /// `price_axis_views`/`time_axis_views` hooks. Its `pane_views()` renderers record Prim
     /// commands through a host-built draw context instead of touching a canvas, so the output
@@ -940,13 +940,13 @@ impl AionChart {
             .attach_pane_primitive(pane, primitive)
     }
 
-    /// Detach a pane primitive by id (LWC `IPaneApi.detachPrimitive`): fires its `detached`
+    /// Detach a pane primitive by id (reference `IPaneApi.detachPrimitive`): fires its `detached`
     /// hook and drops the retained JS object. False for an unknown id. Call `render()` after.
     pub fn detach_pane_primitive(&mut self, id: u32) -> bool {
         self.inner.borrow_mut().detach_pane_primitive(id)
     }
 
-    /// Attach a series primitive (LWC `ISeriesApi.attachPrimitive`, plugin platform Phase C-b):
+    /// Attach a series primitive (reference `ISeriesApi.attachPrimitive`, plugin platform Phase C-b):
     /// a plain JS object like [`attach_pane_primitive`] plus an optional `autoscale_info(from,
     /// to)` hook merged into the owning series' price-scale range. Its `pane_views()` renderers
     /// get the same command-recording context, except `price_to_y(price)` is bound to the
@@ -958,14 +958,14 @@ impl AionChart {
             .attach_series_primitive(series_id, primitive)
     }
 
-    /// Detach a series primitive by id (LWC `ISeriesApi.detachPrimitive`): fires its `detached`
+    /// Detach a series primitive by id (reference `ISeriesApi.detachPrimitive`): fires its `detached`
     /// hook and drops the retained JS object. False for an unknown id. Removing the owning
     /// series auto-detaches all its primitives. Call `render()` after.
     pub fn detach_series_primitive(&mut self, id: u32) -> bool {
         self.inner.borrow_mut().detach_series_primitive(id)
     }
 
-    /// Add a custom series (plugin platform Phase C-c; LWC `IChartApi.addCustomSeries`): a
+    /// Add a custom series (plugin platform Phase C-c; reference `IChartApi.addCustomSeries`): a
     /// user-defined series type whose pane view (`price_value_builder`, `is_whitespace?`,
     /// `render`, plus optional `default_options`/`destroy`) renders each bar through the
     /// command-recording draw context, so its output is pixel-identical on both backends.
@@ -978,14 +978,14 @@ impl AionChart {
             .add_custom_series(pane_view, adopt_primary)
     }
 
-    /// Replace a custom series' items (LWC `ISeriesApi.setData`): a JS array of `{time, ...}`
+    /// Replace a custom series' items (reference `ISeriesApi.setData`): a JS array of `{time, ...}`
     /// objects (times in UTC seconds). The raw items are stored host-side verbatim; their
     /// times enter the engine as whitespace-style rows. Call `render()` after.
     pub fn set_custom_series_data(&mut self, id: u32, items: js_sys::Array) {
         self.inner.borrow_mut().set_custom_series_data(id, items);
     }
 
-    /// Streaming update of a custom series (LWC `ISeriesApi.update`): append a new time or
+    /// Streaming update of a custom series (reference `ISeriesApi.update`): append a new time or
     /// replace the item at an existing one. Call `render()` after.
     pub fn update_custom_series_item(&mut self, id: u32, item: JsValue) {
         self.inner.borrow_mut().update_custom_series_item(id, item);
@@ -1005,7 +1005,7 @@ impl AionChart {
             .custom_series_data_by_index(id, index, mismatch)
     }
 
-    /// Merge a snake_case JSON patch of price-scale options into one pane scale (LWC
+    /// Merge a snake_case JSON patch of price-scale options into one pane scale (reference
     /// `priceScale.applyOptions`; unknown keys ignored). Keys: `mode`, `auto_scale`,
     /// `invert_scale`, `scale_margins`, `align_labels`, `ticks_visible`, `entire_text_only`,
     /// `minimum_width`, `text_color` (`""`/`null` = follow `layout.textColor`).
@@ -1015,7 +1015,7 @@ impl AionChart {
             .price_scale_apply_options_json(pane, target, json);
     }
 
-    /// One pane scale's full options as a snake_case JSON string (LWC `priceScale.options()`;
+    /// One pane scale's full options as a snake_case JSON string (reference `priceScale.options()`;
     /// "" for an unknown pane/target).
     pub fn price_scale_options_json(&self, pane: u32, target: u8) -> String {
         self.inner.borrow().price_scale_options_json(pane, target)
@@ -1030,25 +1030,25 @@ impl AionChart {
         self.inner.borrow_mut().set_time_visible(visible);
     }
 
-    /// LWC `timeScale.visible` (default true): reserve/paint the whole time-axis strip. When
+    /// reference `timeScale.visible` (default true): reserve/paint the whole time-axis strip. When
     /// false the strip collapses to zero height. Distinct from `set_time_visible`, which only
     /// governs label content.
     pub fn set_time_axis_visible(&mut self, visible: bool) {
         self.inner.borrow_mut().set_time_axis_visible(visible);
     }
 
-    /// LWC `timeScale.ticksVisible` (default false): tick marks beside the time-axis labels.
+    /// reference `timeScale.ticksVisible` (default false): tick marks beside the time-axis labels.
     pub fn set_time_ticks_visible(&mut self, visible: bool) {
         self.inner.borrow_mut().set_time_ticks_visible(visible);
     }
 
-    /// LWC `timeScale.minimumHeight` (CSS px; 0 = the 28px auto height): floor for the
+    /// reference `timeScale.minimumHeight` (CSS px; 0 = the 28px auto height): floor for the
     /// time-axis strip height.
     pub fn set_time_axis_minimum_height(&mut self, height: f64) {
         self.inner.borrow_mut().set_time_axis_minimum_height(height);
     }
 
-    /// LWC `timeScale.tickMarkMaxCharacterLength` (default 8; 0 restores it): tick-label
+    /// reference `timeScale.tickMarkMaxCharacterLength` (default 8; 0 restores it): tick-label
     /// width cap in characters, driving tick density.
     pub fn set_tick_mark_max_character_length(&mut self, n: u32) {
         self.inner
@@ -1057,65 +1057,65 @@ impl AionChart {
     }
 
     /// Set the hovered pane separator for the `layout.panes.separatorHoverColor` band
-    /// (LWC pane-separator.ts hover handle; -1 = none). Call `render()` to repaint.
+    /// (reference pane-separator.ts hover handle; -1 = none). Call `render()` to repaint.
     pub fn set_separator_hover(&mut self, index: i32) {
         self.inner.borrow_mut().set_separator_hover(index);
     }
 
-    /// LWC `timeScale.secondsVisible`: include seconds in time labels.
+    /// reference `timeScale.secondsVisible`: include seconds in time labels.
     pub fn set_seconds_visible(&mut self, visible: bool) {
         self.inner.borrow_mut().set_seconds_visible(visible);
     }
 
-    /// LWC `timeScale.minBarSpacing` (CSS px).
+    /// reference `timeScale.minBarSpacing` (CSS px).
     pub fn set_min_bar_spacing(&mut self, spacing: f64) {
         self.inner.borrow_mut().set_min_bar_spacing(spacing);
     }
 
-    /// LWC `timeScale.maxBarSpacing` (CSS px; 0 restores the default half-width cap).
+    /// reference `timeScale.maxBarSpacing` (CSS px; 0 restores the default half-width cap).
     pub fn set_max_bar_spacing(&mut self, spacing: f64) {
         self.inner.borrow_mut().set_max_bar_spacing(spacing);
     }
 
-    /// LWC `timeScale().applyOptions({ barSpacing })`: write the option and apply it live.
+    /// reference `timeScale().applyOptions({ barSpacing })`: write the option and apply it live.
     pub fn apply_bar_spacing_option(&mut self, spacing: f64) {
         self.inner.borrow_mut().apply_bar_spacing_option(spacing);
     }
 
-    /// LWC `timeScale().applyOptions({ rightOffset })`: write the option and apply it live.
+    /// reference `timeScale().applyOptions({ rightOffset })`: write the option and apply it live.
     pub fn apply_right_offset_option(&mut self, offset: f64) {
         self.inner.borrow_mut().apply_right_offset_option(offset);
     }
 
-    /// LWC `timeScale.rightOffsetPixels` (px): pin the right offset in pixels, converting to a
-    /// bar offset via the current bar spacing exactly like LWC time-scale.ts.
+    /// reference `timeScale.rightOffsetPixels` (px): pin the right offset in pixels, converting to a
+    /// bar offset via the current bar spacing exactly like reference time-scale.ts.
     pub fn set_right_offset_pixels(&mut self, pixels: f64) {
         self.inner.borrow_mut().set_right_offset_pixels(pixels);
     }
 
-    /// LWC `timeScale.fixLeftEdge`.
+    /// reference `timeScale.fixLeftEdge`.
     pub fn set_fix_left_edge(&mut self, fix: bool) {
         self.inner.borrow_mut().set_fix_left_edge(fix);
     }
 
-    /// LWC `timeScale.fixRightEdge`.
+    /// reference `timeScale.fixRightEdge`.
     pub fn set_fix_right_edge(&mut self, fix: bool) {
         self.inner.borrow_mut().set_fix_right_edge(fix);
     }
 
-    /// LWC `timeScale.lockVisibleTimeRangeOnResize`.
+    /// reference `timeScale.lockVisibleTimeRangeOnResize`.
     pub fn set_lock_visible_time_range_on_resize(&mut self, lock: bool) {
         self.inner
             .borrow_mut()
             .set_lock_visible_time_range_on_resize(lock);
     }
 
-    /// LWC `timeScale.rightBarStaysOnScroll`.
+    /// reference `timeScale.rightBarStaysOnScroll`.
     pub fn set_right_bar_stays_on_scroll(&mut self, stays: bool) {
         self.inner.borrow_mut().set_right_bar_stays_on_scroll(stays);
     }
 
-    /// LWC `timeScale.shiftVisibleRangeOnNewBar` (default true): when the last bar is
+    /// reference `timeScale.shiftVisibleRangeOnNewBar` (default true): when the last bar is
     /// visible, the view follows newly appended bars; scrolled back, the same bars stay.
     pub fn set_shift_visible_range_on_new_bar(&mut self, shift: bool) {
         self.inner
@@ -1123,7 +1123,7 @@ impl AionChart {
             .set_shift_visible_range_on_new_bar(shift);
     }
 
-    /// LWC `timeScale.allowShiftVisibleRangeOnWhitespaceReplacement` (default false): also
+    /// reference `timeScale.allowShiftVisibleRangeOnWhitespaceReplacement` (default false): also
     /// follow when the new bar replaces an existing whitespace time point.
     pub fn set_allow_shift_visible_range_on_whitespace_replacement(&mut self, allow: bool) {
         self.inner
@@ -1131,46 +1131,46 @@ impl AionChart {
             .set_allow_shift_visible_range_on_whitespace_replacement(allow);
     }
 
-    /// LWC `localization.dateFormat` (default `dd MMM \'yy`): the crosshair time-label
+    /// reference `localization.dateFormat` (default `dd MMM \'yy`): the crosshair time-label
     /// pattern. Tokens: `dd`/`d`, `MM`/`M`/`MMM`/`MMMM`, `yy`/`yyyy`, `'…'` quoted literals.
     pub fn set_date_format(&mut self, pattern: &str) {
         self.inner.borrow_mut().set_date_format(pattern);
     }
 
-    /// LWC `localization.locale`: regenerate the engine's month-name tables from
+    /// reference `localization.locale`: regenerate the engine's month-name tables from
     /// `Intl.DateTimeFormat` for this locale (drives the `MMM`/`MMMM` date-format tokens and
     /// the month tick labels). Unsupported tags warn and keep the current tables.
     pub fn set_locale(&mut self, locale: &str) {
         self.inner.borrow_mut().set_locale(locale);
     }
 
-    /// Push the host's "all scaling and scrolling disabled" aggregate (LWC
+    /// Push the host's "all scaling and scrolling disabled" aggregate (reference
     /// `_isAllScalingAndScrollingDisabled`): forces fix-edge semantics on the time scale.
     pub fn set_interaction_disabled(&mut self, disabled: bool) {
         self.inner.borrow_mut().set_interaction_disabled(disabled);
     }
 
-    /// LWC `localization.priceFormatter`: `(price: number) => string`. Pass `null` to clear.
+    /// reference `localization.priceFormatter`: `(price: number) => string`. Pass `null` to clear.
     pub fn set_price_formatter(&mut self, f: Option<js_sys::Function>) {
         self.inner.borrow_mut().set_price_formatter(f);
     }
 
-    /// LWC `timeScale.tickMarkFormatter`: `(timeSeconds, tickMarkType) => string`. `null` clears.
+    /// reference `timeScale.tickMarkFormatter`: `(timeSeconds, tickMarkType) => string`. `null` clears.
     pub fn set_tick_mark_formatter(&mut self, f: Option<js_sys::Function>) {
         self.inner.borrow_mut().set_tick_mark_formatter(f);
     }
 
-    /// LWC `localization.timeFormatter`: `(timeSeconds: number) => string`. Pass `null` to clear.
+    /// reference `localization.timeFormatter`: `(timeSeconds: number) => string`. Pass `null` to clear.
     pub fn set_time_formatter(&mut self, f: Option<js_sys::Function>) {
         self.inner.borrow_mut().set_time_formatter(f);
     }
 
-    /// 0 = normal, 1 = magnet (LWC default), 2 = hidden, 3 = magnet OHLC.
+    /// 0 = normal, 1 = magnet (reference default), 2 = hidden, 3 = magnet OHLC.
     pub fn set_crosshair_mode(&mut self, mode: u8) {
         self.inner.borrow_mut().set_crosshair_mode(mode);
     }
 
-    /// Deep-merge a JSON options patch (LWC `applyOptions` semantics) — e.g.
+    /// Deep-merge a JSON options patch (reference `applyOptions` semantics) — e.g.
     /// `{"grid":{"vertLines":{"color":"#334"}},"layout":{"background":{"color":"#111"}}}`.
     /// Malformed JSON is ignored with a console warning. Call `render()` after (roadmap Phase A2).
     pub fn apply_options(&mut self, patch_json: &str) {
@@ -1188,7 +1188,7 @@ impl AionChart {
         self.inner.borrow().series_options_json(id)
     }
 
-    /// Merge a snake_case JSON patch of series style options (LWC `series.applyOptions`;
+    /// Merge a snake_case JSON patch of series style options (reference `series.applyOptions`;
     /// unknown keys are ignored gracefully). Call `render()` after.
     pub fn series_apply_options_json(&mut self, id: u32, json: &str) {
         self.inner.borrow_mut().series_apply_options_json(id, json);
@@ -1239,7 +1239,7 @@ impl AionChart {
     /// Hover hit testing (plugin platform Phase C-d): the primitive object and/or series
     /// under pane-relative CSS px `(x_css, y_css)` as a JSON
     /// `{"series_id":number|null,"object_id":string|null,"cursor":string|null}` (see the
-    /// inner method for the LWC arbitration). Also refreshes the engine's hovered series
+    /// inner method for the reference arbitration). Also refreshes the engine's hovered series
     /// for the `hoveredSeriesOnTop` z-bump, so call `render()` afterwards.
     pub fn hover_at(&mut self, x_css: f64, y_css: f64) -> String {
         self.inner.borrow_mut().hover_at(x_css, y_css)
@@ -1249,7 +1249,7 @@ impl AionChart {
     pub fn clear_hover(&mut self) {
         self.inner.borrow_mut().engine.set_hovered_series(None);
     }
-    /// LWC `chart.setCrosshairPosition(price, time, series)`: position the crosshair at a
+    /// reference `chart.setCrosshairPosition(price, time, series)`: position the crosshair at a
     /// data point with no DOM event — `time` must resolve exactly to a bar (false
     /// otherwise); x is that bar's coordinate and y the price mapped through the given
     /// series' price scale. A following `render()` shows it.
@@ -1258,7 +1258,7 @@ impl AionChart {
             .borrow_mut()
             .set_crosshair_position(price, time, series_id)
     }
-    /// LWC `chart.clearCrosshairPosition`: clear the crosshair along with any saved origin,
+    /// reference `chart.clearCrosshairPosition`: clear the crosshair along with any saved origin,
     /// so later scale changes cannot resurrect it.
     pub fn clear_crosshair_position(&mut self) {
         self.inner.borrow_mut().clear_crosshair_position();
@@ -1399,7 +1399,7 @@ impl AionChart {
     pub fn logical_to_coordinate(&self, logical: f64) -> Option<f64> {
         self.inner.borrow().logical_to_coordinate(logical)
     }
-    /// Logical index for a UTC-seconds timestamp. `find_nearest` follows LWC lower-bound rules.
+    /// Logical index for a UTC-seconds timestamp. `find_nearest` follows reference lower-bound rules.
     pub fn time_to_index(&self, time: f64, find_nearest: bool) -> Option<i64> {
         self.inner.borrow().time_to_index(time, find_nearest)
     }

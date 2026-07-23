@@ -2,7 +2,7 @@
 
 Path from the current engine (renders candles/bars/line/area/histogram/baseline, multiple panes,
 both axes, crosshair, zoom/pan/streaming) to a **near-production charting library on par with
-lightweight-charts (LWC) v5.2.0**, with the plugin/pane architecture in place for the
+the reference charting library v5.2.0**, with the plugin/pane architecture in place for the
 TradingView-class ambition.
 
 Companion docs: [ARCHITECTURE.md](ARCHITECTURE.md) (crate layout, phase status),
@@ -15,7 +15,7 @@ phase ordering in ARCHITECTURE.md §9 where they disagree — see "Reordering ra
 
 - **Aion:** ~9,600 lines Rust across `aion_core` / `aion_engine` / `aion_render` /
   `aion_render_wgpu` / `aion_wasm` / `aion_native`, plus an ~800-line TypeScript façade.
-- **LWC v5.2.0 reference** (`tmp/lightweight-charts/`): ~30,300 lines TS.
+- **reference v5.2.0 source** (`tmp/refsrc/`): ~30,300 lines TS.
 
 **Strong (done well):** core scale math (price scale 4 modes + log, time scale, tick spans),
 plot list + data layer, invalidate mask, magnet crosshair, formatters; candle/bar/line/area/
@@ -24,7 +24,7 @@ headless `ChartEngine` frames; native PNG/golden coverage; and a working multi-p
 multi-series TypeScript package.
 
 **The defining gaps:** the package boundary and headless/rendering seam are now repaired. The
-remaining production distance is parity and breadth: broader LWC-level subscriptions/plugins,
+remaining production distance is parity and breadth: broader reference-level subscriptions/plugins,
 text and axis parity across backends, a tested no-WebGPU runtime matrix, performance at very large
 data volumes, and broader visual goldens.
 
@@ -43,9 +43,9 @@ shared-memory design.
 
 ---
 
-## 2. Gap map (LWC has it → Aion doesn't)
+## 2. Gap map (reference has it → Aion doesn't)
 
-| Area | LWC reference | Aion status | Severity |
+| Area | Reference library | Aion status | Severity |
 |---|---|---|---|
 | Public TS API | `api/chart-api.ts`, `series-api.ts`, handles | façade plus chart/series/time/price-scale handles present; event/plugin breadth remains | 🟡 Med |
 | Options system | deep-merge, ~8 groups, per-series | deep-merge and common chart/series options present | 🟡 Med |
@@ -61,7 +61,7 @@ shared-memory design.
 | Plugins / primitives | series + pane primitives, custom series, JS recorder | none | 🟡 Med (platform) |
 | Watermark | text + image | none | 🟡 Med |
 | Fallback backend | Canvas2D executor | Full Chromium runtime matrix wired and verified; cross-browser CI and full-frame parity pending | 🟡 Med (reach) |
-| Golden tests | (planned) | exact WebGPU/Canvas2D/native parity plus pinned LWC DPR/spacing/theme/feature matrices | 🟢 Low (safety) |
+| Golden tests | (planned) | exact WebGPU/Canvas2D/native parity plus pinned reference DPR/spacing/theme/feature matrices | 🟢 Low (safety) |
 | Data conflation | `data-conflater.ts` (1M+ pts) | viewport-bounded line/area/baseline, OHLC, and histogram conflation present | 🟢 Low (perf) |
 | Yield-curve / price horz | pluggable horz behaviors | time only | 🟢 Low |
 
@@ -109,7 +109,7 @@ Canvas2D, native PNG, goldens, and the demo are consumers of that same engine an
   is now asserted across the two pane adapters. The public composed screenshot path is
   pixel-identical whether the live chart uses WebGPU or Canvas2D, and separate UI-free browser
   captures of the actually presented WebGPU/Canvas2D frames are byte-identical for the
-  deterministic 1,000-bar fixture. Native/browser CI automation and the LWC matrix remain.
+  deterministic 1,000-bar fixture. Native/browser CI automation and the reference matrix remain.
 - **R6. Engine-owned indicators and retained frames.** Rust-native SMA/EMA/Bollinger producers now
   own ordinary line-series outputs; typed-array ingestion avoids the temporary slice-copy path for
   clean feeds; `ChartFrame` and WebGPU groups are rebuilt into retained buffers; `AxisFrame`
@@ -117,13 +117,13 @@ Canvas2D, native PNG, goldens, and the demo are consumers of that same engine an
 
 ### Phase A — Make it a consumable library  ✅ complete; breadth follow-up remains
 
-*Exit: `npm install @aion/charts`, feed OHLC, get a styled chart, wire a tooltip — the LWC
+*Exit: `npm install @aion/charts`, feed OHLC, get a styled chart, wire a tooltip — the reference
 "getting started" story works end to end.*
 
 - **A1. Real TS API façade.** `create_chart(container, options?) → IChartApi`-equivalent;
   `add_series(kind, options?) → series handle` (object, not a `u32`); `series.set_data/update`;
   `chart.remove()`. Typed-array packing at the boundary (no per-bar JS objects).
-- **A2. Options system.** New `aion_core::options` module mirroring LWC defaults (RENDERING_SPEC
+- **A2. Options system.** New `aion_core::options` module mirroring reference defaults (RENDERING_SPEC
   §15): layout, grid, crosshair, time_scale, right/left price_scale, localization, per-series.
   `apply_options` deep-merge on chart / series / scale.
 - **A3. Data validation.** Port `data-validators.ts`: monotonic time, dedupe, NaN rejection,
@@ -136,9 +136,9 @@ Canvas2D, native PNG, goldens, and the demo are consumers of that same engine an
   headless engine renders and compare immutable snapshots, so panning/zooming/fit-content can
   notify consumers without moving chart state into the browser shell.
 
-### Phase B — Core feature parity  ✅ complete; additive LWC breadth remains
+### Phase B — Core feature parity  ✅ complete; additive reference breadth remains
 
-*Exit: volume + an indicator pane render; series set matches LWC.*
+*Exit: volume + an indicator pane render; series set matches reference.*
 
 - **B1. Multi-pane:** panes, separators, drag-resize, per-pane stub price axes, `move_to_pane`,
   stretch factors.
@@ -152,12 +152,12 @@ Canvas2D, native PNG, goldens, and the demo are consumers of that same engine an
 - **C1. Primitives:** `SeriesPrimitive` / `PanePrimitive` / `CustomSeries` Rust traits with
   z-ordered draw-list fragments + hit-test + autoscale + axis views.
 - **C2. JS plugin recorder:** a `CanvasRenderingContext2D`-like proxy decoding the ~20 ctx methods
-  LWC plugins use into DrawList prims — runs the existing LWC plugin ecosystem mostly unmodified.
+  reference plugins use into DrawList prims — runs the existing reference plugin ecosystem mostly unmodified.
 - **C3. Watermark** (text/image), attribution logo, `autoSize`.
 
 ### Phase D — Hardening  🔴 next execution priority
 
-- **D1. Golden-image harness:** headless Chromium renders LWC PNGs; `aion_native` renders ours;
+- **D1. Golden-image harness:** headless Chromium renders reference PNGs; `aion_native` renders ours;
   per-pixel diff (rects exact, AA/text small tolerance). Protects fidelity claims + catches
   regressions across A–C. The package now exposes `take_screenshot()`, which returns a
   device-pixel-sized canvas composed from a synchronous retained-frame Canvas2D execution and the
@@ -165,7 +165,7 @@ Canvas2D, native PNG, goldens, and the demo are consumers of that same engine an
   WebGPU/Canvas2D artifacts. A pinned Playwright/SwiftShader runner performs exact PNG comparison
   and preserves source/diff artifacts on failure. The same runner invokes the native renderer from
   a shared JSON fixture and compares raw pane pixels before compositor scaling. WebGPU, Canvas2D and
-  native parity are proven for the baseline fixture. The pinned LWC 5.2.0 reference is now
+  native parity are proven for the baseline fixture. The pinned reference 5.2.0 reference is now
   deterministic and measured for the default light fixture: 3.368% perceptual full-frame difference
   (pane 3.254%, price axis 6.818%, time axis 2.083%), protected by explicit regional regression
   ceilings. A second versioned matrix now covers DPR 1/1.25/2/3, spacings 0.5/6/50, and both light
@@ -181,7 +181,7 @@ Canvas2D, native PNG, goldens, and the demo are consumers of that same engine an
   request failure, and event-driven device loss are verified in Chromium with the chart still
   rendered. Screenshot capture deliberately executes the same retained frame through the warm
   Canvas2D pane because Chromium exposes presented WebGPU canvases as transparent to synchronous
-  in-page reads. Remaining exit work is the wider browser/device CI matrix and LWC reference-image
+  in-page reads. Remaining exit work is the wider browser/device CI matrix and reference-image
   parity.
 - **D3. Data conflation** + 1M-bar benchmarks. Viewport-bounded conflation is implemented for
   line/area/baseline, candles/bars (first-open, max-high, min-low, last-close), and histograms
@@ -192,7 +192,7 @@ Canvas2D, native PNG, goldens, and the demo are consumers of that same engine an
 
 ## 5. Definition of "near production ready"
 
-- [x] `@aion/charts` installs and runs the LWC getting-started example unmodified in spirit.
+- [x] `@aion/charts` installs and runs the reference getting-started example unmodified in spirit.
 - [x] Options parity for the common groups; `apply_options` deep-merge works.
 - [x] Malformed data is rejected with clear errors, never a wasm panic.
 - [x] Volume + at least one indicator pane render correctly with independent scales.
@@ -200,7 +200,7 @@ Canvas2D, native PNG, goldens, and the demo are consumers of that same engine an
 - [ ] Renders in browsers without WebGPU through automatic capability fallback, including a
       browser/device matrix and a device-loss recovery check (the explicit Canvas2D backend path
       already works).
-- [x] Golden tests green vs LWC across bar spacings 0.5–50 and DPR 1/1.25/2/3, with
+- [x] Golden tests green vs reference across bar spacings 0.5–50 and DPR 1/1.25/2/3, with
       versioned regional ceilings while fractional-DPR refinement continues.
 - [ ] 60 fps pan/zoom at 10 series × 50k visible bars; 1M-bar load < 300 ms, with conflation when
       bars are sub-pixel at the current zoom.
@@ -258,7 +258,7 @@ Progress is appended here as phases land (newest last).
   `visible_logical_range` + setter, `visible_time_range` + setter. Verified in-browser: price/time
   roundtrips exact, off-chart queries return `undefined`, setters apply.
 - 2026-07-12 — **A2 done** (options system). `aion_core::options`: serde-backed structs with
-  LWC-matching defaults (layout/grid/crosshair) + `ChartOptionsStore` doing LWC `merge`-semantics
+  reference-matching defaults (layout/grid/crosshair) + `ChartOptionsStore` doing reference `merge`-semantics
   deep-merge (nested objects merge key-by-key; scalars/arrays/null replace). `aion_render::Color`
   gained `#rgb`/`#rgba` shorthand + `rgb()/rgba()` parsing. Wired `apply_options` / `options_json`
   into the wasm chart; grid colors+visibility, crosshair line colors+visibility, and the
@@ -271,11 +271,11 @@ Progress is appended here as phases land (newest last).
   applies options); `add_series(kind, options?)` → series handle (`set_data`/`update`/`set_type`/
   `apply_options`, typed-array packing at the boundary); `time_scale()` (fit/visible-range get+set/
   coord conversions); `price_to_coordinate`/`coordinate_to_price`; `apply_options`/`options`;
-  `resize`/`remove`. `autoSize` gates the ResizeObserver (LWC parity; off ⇒ manual sizing, keeps
+  `resize`/`remove`. `autoSize` gates the ResizeObserver (reference parity; off ⇒ manual sizing, keeps
   the engine embeddable/testable). Build: `wasm-pack` → `packages/charts/pkg`, esbuild bundles a
   self-contained ESM into `examples/web_demo/dist/`. The demo now consumes the published API only
   (raw-wasm wiring + inline gestures removed). Verified in-browser: candles render via the façade
-  (LWC palette), overlay line series + `apply_options` deep-merge reach pixels, coordinate/range
+  (reference palette), overlay line series + `apply_options` deep-merge reach pixels, coordinate/range
   APIs return correct values, full chart screenshot. tsc + wasm builds green.
   Next: A5 (subscriptions — needs Rust→JS callback plumbing).
 - 2026-07-12 — **A5 done → Phase A COMPLETE.** Subscriptions: `subscribe_crosshair_move` /
@@ -341,7 +341,7 @@ Progress is appended here as phases land (newest last).
   three types render distinct geometry (simple 2680 px, stepped 3354, curved 2734). Remaining B3:
   baseline series, point markers, last-price animation.
 - 2026-07-12 — **B3 increment 2 done** (point markers). Line/area series can draw a filled disc at
-  each data point, gated on bar spacing (≥ 2·r+2) so discs never merge — matching LWC's hide-below-
+  each data point, gated on bar spacing (≥ 2·r+2) so discs never merge — matching the reference's hide-below-
   threshold behavior. `set_series_point_markers(id, bool)` → façade `add_series(kind, {
   point_markers: true })`. Verified in-browser: zoomed in (bar spacing 46) markers add 358 px;
   zoomed out (0.75) they add 0 (hidden). Remaining B3: baseline series, last-price animation.
@@ -393,7 +393,7 @@ Progress is appended here as phases land (newest last).
   the change): replace-last drives autoscale (price 130 → y≈108.8, was y≈196.6 for 100); appending a
   new max time grows the merged set by exactly one (visible `to` 999→1000, `fit_content` spans it,
   new time maps to a real on-canvas x). tsc + wasm builds green.
-- 2026-07-14 — **Phase B polish: `chart.panes()` handle API (LWC `IPaneApi` parity).** `chart.panes()`
+- 2026-07-14 — **Phase B polish: `chart.panes()` handle API (reference `IPaneApi` parity).** `chart.panes()`
   now returns a `pane_api[]` (one per stacked pane), each with `pane_index()`, `get_height()`,
   `set_height(px)`, `get_stretch_factor()`, `set_stretch_factor(n)`. Engine gained
   `pane_height`/`pane_stretch` getters and `set_pane_stretch`/`set_pane_height` (the latter reuses
@@ -438,7 +438,7 @@ Progress is appended here as phases land (newest last).
   `examples/scene.rs` that renders a full chart-like scene (background gradient + grid + 6
   candlesticks with wicks/bodies + area fill + polyline + dashed price line + circle marker) to a
   PNG — inspected directly and correct. Workspace now 144 tests green (core 96, render 45,
-  native 3). Next: wire a golden-diff harness (render LWC reference PNGs, compare per-pixel with
+  native 3). Next: wire a golden-diff harness (render reference PNGs, compare per-pixel with
   rect-exact / AA-tolerant thresholds), and the web-sys `Canvas2d` target for in-browser fallback.
 - 2026-07-14 — **Phase D1: golden-image regression harness.** `diff_pixmaps(a, b, tolerance)`
   reports differing-pixel count / max channel delta / fraction; the reference scene moved into
@@ -447,7 +447,7 @@ Progress is appended here as phases land (newest last).
   (`tests/golden.rs`) that re-renders and asserts <0.1% drift (per-channel tolerance 2, so a
   tiny-skia patch bump won't spuriously fail), with a negative-control test proving the diff
   actually detects a changed scene. Regenerate deliberately via the `scene` example. This is the
-  regression net the roadmap wants across A–C; LWC-reference PNGs drop in as more goldens once a
+  regression net the roadmap wants across A–C; reference PNGs drop in as more goldens once a
   headless-Chromium pipeline exists. Workspace 146 tests green (native 3 unit + 2 golden). Next:
   web-sys `Canvas2d` target + WebGPU-absent fallback wiring in `aion_wasm`.
 - 2026-07-14 — **Phase D2 increment 3: web-sys `Canvas2d` target (`aion_wasm::canvas2d_target`).**
@@ -486,7 +486,7 @@ Progress is appended here as phases land (newest last).
      tris (area fills / line strokes) *before* the quad bucket — so the grid painted *over* line and
      area series (and visually chopped up the stroke, reading as "not smoothed"). Added a
      `DrawGroup.under_quads` bucket drawn first (before fills/strokes); grid now builds into its own
-     `grid_prims` list routed there, so it sits under the series like LWC. Verified in-browser: 0
+     `grid_prims` list routed there, so it sits under the series like reference. Verified in-browser: 0
      gray grid pixels on top of the area fill, grid still visible above it.
   2. **TradingView-style volume.** The demo showed volume in a separate pane with a divider and a
      single (green) color. Reworked to an **overlay** on the price pane's bottom band (existing B2
@@ -509,7 +509,7 @@ Progress is appended here as phases land (newest last).
 - 2026-07-17 — **Roadmap rebaseline after architecture recovery.** Phase R1/R2/R3/R4/R6,
   Phase A's core library shell, and Phase B's core feature set are complete in substance. The
   active critical path moves to R5/D1/D2 contract and runtime parity: automatic fallback when
-  WebGPU is unavailable, device-loss recovery, full-frame cross-backend comparisons, LWC-reference
+  WebGPU is unavailable, device-loss recovery, full-frame cross-backend comparisons, reference
   goldens, and large-data conflation/benchmarks. Phase C plugin work follows once that contract is
   stable.
 - 2026-07-17 — **D2/R5 runtime increment.** The public package now exposes `chart.backend()` for
@@ -561,7 +561,7 @@ Progress is appended here as phases land (newest last).
   snapshots from the headless WASM adapter; double-click still performs the default fit-content
   action, and callback payloads are cloned before delivery. TypeScript typecheck, package bundle,
   and the browser demo preview are clean. Remaining breadth work is richer scale handles, plugins,
-  and other LWC compatibility surfaces.
+  and other reference compatibility surfaces.
 - 2026-07-18 — **D2 live device-loss recovery completed.** Startup fallback alone was insufficient:
   a browser canvas cannot switch from a WebGPU context to Canvas2D after initialization. The public
   package now owns dedicated WebGPU and warm Canvas2D pane canvases plus the axis/input overlay,
@@ -588,7 +588,7 @@ Progress is appended here as phases land (newest last).
   `createImageBitmap` return transparency), so a separate `runtimeTest=presentedFrame` mode removes
   all non-chart UI for external browser capture. Independent 1280×720 WebGPU and Canvas2D captures
   of that mode were byte-identical. This closes one browser cross-backend parity increment; native/
-  LWC goldens over the full spacing, DPR, theme, and feature matrix remain.
+  reference goldens over the full spacing, DPR, theme, and feature matrix remain.
 - 2026-07-18 — **D1/R5 external browser parity runner completed.** The web demo now includes a
   no-cache Node static server and pinned Playwright, PNG, and pixel-diff dependencies. Its Chromium
   project runs full Chrome-for-Testing in new-headless mode, explicitly selects Dawn's SwiftShader
@@ -606,60 +606,60 @@ Progress is appended here as phases land (newest last).
   emits a PNG through tiny-skia. The Playwright suite invokes that native binary, extracts the raw
   browser Canvas2D pane, and compares all 1,902,654 pixels: 0 differ, maximum/mean channel delta 0.
   Axis text remains outside this comparison because native has no font adapter yet. Browser backend
-  plus native parity now passes 3/3; the next D1 gap is the LWC reference and axis/text matrix.
-- 2026-07-18 — **D1 pinned LWC reference begun.** The browser harness now installs Lightweight
+  plus native parity now passes 3/3; the next D1 gap is the reference library and axis/text matrix.
+- 2026-07-18 — **D1 pinned reference begun.** The browser harness now installs Lightweight
   Charts 5.2.0 exactly, renders the same deterministic 1,000-bar fixture through its public API,
-  proves two LWC captures are byte-stable, and measures Aion against LWC after the same Chromium
+  proves two reference captures are byte-stable, and measures Aion against reference after the same Chromium
   compositor. The first honest baseline is 3.41% perceptual difference for the full frame, with
   separate pane (3.25%), price-axis (7.68%), and time-axis (2.16%) results. Versioned ceilings make
   regressions fail without misrepresenting the current result as parity. The next D1 work is to
   reduce those gaps and expand the matrix across DPR, spacing, theme, markers, and overlays.
-- 2026-07-18 — **First LWC-measured axis correction.** Aion's Canvas2D axis adapter now applies
-  LWC's actual-glyph-bounds vertical midpoint correction to price labels and its stable `Apr0`
+- 2026-07-18 — **First reference-measured axis correction.** Aion's Canvas2D axis adapter now applies
+  the reference's actual-glyph-bounds vertical midpoint correction to price labels and its stable `Apr0`
   sample correction to centered time labels. Price-axis perceptual difference fell from 7.68% to
   6.92% and mean channel error from 7.68 to 5.85; time-axis output held at 2.16%. The full-frame
   result improved from 3.41% to 3.38%, and the versioned ceilings were tightened accordingly.
-- 2026-07-18 — **D1 LWC spacing/DPR/theme matrix and two engine fixes.** Added public
+- 2026-07-18 — **D1 reference spacing/DPR/theme matrix and two engine fixes.** Added public
   `time_scale().apply_options({ bar_spacing, right_offset })` backed by headless `ChartEngine`
-  state, then established seven regional LWC cases across DPR 1/1.25/2/3, spacing 0.5/6/50, and
+  state, then established seven regional reference cases across DPR 1/1.25/2/3, spacing 0.5/6/50, and
   light/dark themes. The matrix exposed that hidden series still contributed to autoscale and that
   Aion shrank its price axis eagerly after a range narrowed. Hidden series are now excluded at the
-  authoritative engine autoscale layer, while the browser layout follows LWC's grow-fast/
+  authoritative engine autoscale layer, while the browser layout follows the reference's grow-fast/
   shrink-only-on-full-layout rule. In the spacing-50 case, axis width, visible logical range, and
-  price extent now match LWC; full-frame difference fell from 10.26% to 1.15%, pane difference
+  price extent now match reference; full-frame difference fell from 10.26% to 1.15%, pane difference
   from 10.52% to 0.88%, and price-axis difference from 11.68% to 5.45%. At DPR 1/spacing 6 the pane
   is byte-identical. Every case has a checked-in measured baseline and explicit regression ceiling.
-- 2026-07-18 — **D1 LWC marker/overlay feature matrix and marker correction.** Added shared marker
-  and volume data modules consumed through the public Aion and LWC 5.2 APIs, plus a no-feature
+- 2026-07-18 — **D1 reference marker/overlay feature matrix and marker correction.** Added shared marker
+  and volume data modules consumed through the public Aion and reference 5.2 APIs, plus a no-feature
   control at DPR 1.5 / spacing 6 so feature cost is measurable independently of existing raster
   differences. The gate exposed five engine defects: fixed-size markers, midpoint-anchored `inBar`
   markers instead of close anchoring, incorrect text offsets, triangle-only arrows, and markers
-  surviving a hidden series. The headless frame producer now follows LWC's spacing buckets,
+  surviving a hidden series. The headless frame producer now follows the reference's spacing buckets,
   shape-specific dimensions, close anchoring and label layout, emits arrow heads plus stems, and
   skips invisible series. Marker pane difference is 0.869% versus the 0.827% control—only 0.042
   percentage points of feature-specific divergence with marker autoscale disabled. Overlay volume is 1.627% and is now protected
   by its own versioned ceiling. A diagnostic maximum-volume bar matched its value, x coordinate,
-  top/base coordinates and 8-device-pixel width; the excess changed area comes from LWC's layered-
+  top/base coordinates and 8-device-pixel width; the excess changed area comes from the reference's layered-
   canvas gap smearing at fractional DPR rather than divergent headless scale geometry.
 - 2026-07-18 — **Default marker-autoscale parity completed.** Marker autoscale margins now live in
-  `ChartEngine`, use LWC's spacing-dependent `shapeHeight × 1.5 + margin × 2` contract, take the
+  `ChartEngine`, use the reference's spacing-dependent `shapeHeight × 1.5 + margin × 2` contract, take the
   maximum per price scale, distinguish above/below/in-bar positions, reset when markers or series
   visibility change, and work on overlay scales and stacked panes. The public
-  `set_markers(markers, { auto_scale })` option can disable the default. The LWC feature fixture now
+  `set_markers(markers, { auto_scale })` option can disable the default. The reference feature fixture now
   runs with default autoscale enabled and asserts identical visible logical ranges, public price
   extents, and axis widths. Its pane difference is 0.880% versus the 0.827% control. Remaining work
   is fractional-DPR raster refinement, richer scale/API handles, and the Phase C plugin surface.
 - 2026-07-18 — **D1 media-coordinate axis-text contract completed.** The headless `AxisFrame` now
   records the semantic midpoint policy and weight of every label: price labels use their actual
   glyph bounds, ordinary time ticks use no midpoint correction and bold only the maximum visible
-  weight, marker labels use no correction, and crosshair time uses LWC's stable `Apr0` correction.
+  weight, marker labels use no correction, and crosshair time uses the reference's stable `Apr0` correction.
   The browser adapter renders these labels with a 12px media-coordinate font under a DPR transform,
-  matching LWC's canvas model instead of approximating it with a rounded device-pixel font. At
-  DPR 1 / spacing 6 the pane and time axis are byte-identical to LWC and both axis regions have zero
+  matching the reference's canvas model instead of approximating it with a rounded device-pixel font. At
+  DPR 1 / spacing 6 the pane and time axis are byte-identical to reference and both axis regions have zero
   perceptual difference. The pinned DPR 1.5 baseline improved to 3.368% full-frame, 6.818% price-
   axis, and 2.083% time-axis difference. Fractional-DPR compositor/antialiasing refinement remains;
   label selection, placement, emphasis, and midpoint policy are no longer browser-owned behavior.
-- 2026-07-18 — **Richer LWC scale handles moved behind the headless boundary.** Pure time-scale
+- 2026-07-18 — **Richer reference scale handles moved behind the headless boundary.** Pure time-scale
   queries and mutations that still lived in the WASM host—time/index/logical conversion, visible
   ranges, scrolling, real-time/reset behavior, and scale dimensions—now live on `ChartEngine`.
   The public time-scale handle adds `scroll_position`, `scroll_to_position`,
@@ -670,36 +670,36 @@ Progress is appended here as phases land (newest last).
   gate verifies the handles and the engine has dedicated host-free tests.
 - 2026-07-18 — **All four price-scale modes integrated through the engine.** Normal, logarithmic,
   percentage, and indexed-to-100 modes now transform each series' visible raw range using its
-  LWC-compatible first-visible base before merging autoscale ranges. Every renderer, marker,
+  reference-compatible first-visible base before merging autoscale ranges. Every renderer, marker,
   price line, last-value/crosshair label, and series coordinate conversion uses that stable base.
-  Public scale margins are now the authoritative LWC defaults (`0.2/0.1` main, `0.8/0` overlay)
+  Public scale margins are now the authoritative reference defaults (`0.2/0.1` main, `0.8/0` overlay)
   instead of being duplicated as hidden pane padding. Axis label formatting and optimal-width
   negotiation moved from WASM into `ChartEngine`, with the browser supplying glyph metrics only.
-  The browser gate matches LWC exactly for percentage range, 66px axis width, visible logical
+  The browser gate matches reference exactly for percentage range, 66px axis width, visible logical
   range, and series coordinate; logarithmic API range/coordinate and indexed range/width/logical-
   window/coordinate also match exactly.
 - 2026-07-18 — **Series data/range query surface completed behind the engine boundary.** Public
   `data`, `data_by_index`, `bars_in_logical_range`, `series_type`, and data-change subscriptions
   query the engine-owned merged logical index rather than retaining a duplicate JavaScript data
-  model. Sparse-gap and fractional before/after semantics are compared directly with LWC in the
+  model. Sparse-gap and fractional before/after semantics are compared directly with reference in the
   browser gate.
 - 2026-07-18 — **True left price scales completed through the shared frame contract.** Each pane
-  now owns independent left, right and overlay scale state and series can select the LWC-style
+  now owns independent left, right and overlay scale state and series can select the reference-style
   `priceScaleId: "left"`. A visible left strip reserves width before the time scale is laid out;
   the engine records that pane origin, shifts all backend-neutral geometry, scopes the frame
   scissor to the translated pane, and emits right-aligned left-axis labels. WebGPU, Canvas2D,
   screenshots and native consumers therefore receive the same geometry instead of a browser-only
-  painted axis. A paired browser fixture matches LWC's left width, raw range, series coordinate,
+  painted axis. A paired browser fixture matches the reference's left width, raw range, series coordinate,
   round trip and logical window exactly. Remaining API breadth is richer event payloads and the
   lower-priority compatibility tail.
 - 2026-07-18 — **Fractional-DPR pane scaling now uses the actual bitmap/media ratio.** Frame
   production derives horizontal and vertical pane ratios from independently rounded bitmap
-  dimensions, matching LWC/fancy-canvas instead of assuming they always equal the nominal device
+  dimensions, matching reference/fancy-canvas instead of assuming they always equal the nominal device
   pixel ratio. The existing seven-case matrix remains green and unchanged at its current rounded
   primitive positions, which narrows the remaining measured gap to browser compositor/text/AA
   behavior rather than a pane-scale coordinate error.
 - 2026-07-20 — **Engineering-hygiene pass.** (1) Default crosshair mode is now Normal — a
-  deliberate divergence from LWC's Magnet default. (2) Production paths no longer carry abortable
+  deliberate divergence from the reference's Magnet default. (2) Production paths no longer carry abortable
   panics: invariant expects/unwraps in the scale cores, plot list, data layer, tick-span
   decomposition, frame conflation, and the wasm render path degrade gracefully instead of killing
   the wasm instance. (3) Lint enforcement: rustfmt normalization, `[workspace.lints]` (unsafe
@@ -712,19 +712,19 @@ Progress is appended here as phases land (newest last).
   tests and the seven-case browser matrix stayed green throughout.
 
 - 2026-07-20 — **Candlestick per-part colors: wick/border up/down + part visibility.** Candlesticks
-  now expose the full LWC color surface: `wick_up_color`/`wick_down_color`,
+  now expose the full reference color surface: `wick_up_color`/`wick_down_color`,
   `border_up_color`/`border_down_color`, and `wick_visible`/`border_visible` join
   `up_color`/`down_color` in `series_options`. `SeriesEntry` carries the six optional overrides and
-  the frame resolver applies LWC fallback semantics — an unset wick/border color follows its
+  the frame resolver applies reference fallback semantics — an unset wick/border color follows its
   direction's body color and both parts default visible — so default rendering is unchanged (the
-  DPR-1/spacing-6 pane stays byte-identical to LWC 5.2; all seven browser gates green). The
+  DPR-1/spacing-6 pane stays byte-identical to reference 5.2; all seven browser gates green). The
   renderer already had independent body/border/wick channels on `CandleItem`; this change plumbs
   the engine → wasm → TS path (`set_series_wick_colors`, `set_series_border_colors`,
   `set_series_wick_visible`, `set_series_border_visible`) and adds demo pickers that pin an
   explicit color only once touched, preserving the body-color fallback until then.
 
 - 2026-07-20 — **Axis border cosmetics through the options store.** The axis overlay previously
-  painted every strip border from a hardcoded `#2B2B43`. `PriceAxisOptions` gains LWC's
+  painted every strip border from a hardcoded `#2B2B43`. `PriceAxisOptions` gains the reference's
   `borderVisible`/`borderColor` and a new `timeScale` group carries the same pair for the time
   axis (behavioral time-scale options stay in `TimeScaleCore` until the Phase B fold-in). The
   host axis pass parses the per-strip colors with a default fallback; pane separators share the
@@ -739,7 +739,7 @@ Progress is appended here as phases land (newest last).
   the options tree. Light: `oklch(1 0 0)` → `#ffffff` / border `#f5f5f5`. Dark: `oklch(0.145 0 0)`
   → `#0a0a0b` / border `#16191f`. `create_chart` applies the selected theme under caller options
   (engine deep-merge), so explicit leaves always win; `theme` is a package-level key stripped
-  before forwarding. The engine keeps LWC reference defaults (parity anchor); parity fixtures pin
+  before forwarding. The engine keeps reference defaults (parity anchor); parity fixtures pin
   `#2B2B43` borders explicitly, and `run_backend_parity` now passes the demo's full chart options
   to its forced-Canvas2D twin instead of relying on defaults accidentally matching. Demo: theme
   select applies a palette live and syncs the axis-border picker. Browser-verified: default light
@@ -758,7 +758,7 @@ Progress is appended here as phases land (newest last).
 
 - 2026-07-20 — **Grid line styles honored end-to-end.** `build_grid_frame` hardcoded
   `LineStyle::Solid` even though the options store, the `Prim` lines, both executors' identical
-  dash-segment expansion, and the native `StrokeDash` path already carried the full LWC style
+  dash-segment expansion, and the native `StrokeDash` path already carried the full reference style
   set. The builder now maps the stored `lineStyle` (0 solid … 4 sparse-dotted) per family, so
   dotted/dashed/large-dashed/sparse-dotted render with the spec's §6 patterns; per-family colors
   were already store-driven. New engine test pins style+color flow; browser probe shows textbook
@@ -796,9 +796,9 @@ Progress is appended here as phases land (newest last).
   crosshair 858→3456 px at width 4, label bg recolor+hide, separator recolor, wick pin/unpin
   14969→0).
 
-- 2026-07-21 — **Watermark (LWC v4 shape).** `watermark` options group (visible/text/color/
+- 2026-07-21 — **Watermark (reference v4 shape).** `watermark` options group (visible/text/color/
   fontSize/fontFamily/fontStyle/horzAlign/vertAlign; default color `rgba(0,0,0,0)` exactly like
-  LWC) flows through the options store with a camelCase merge test. Rendering is deliberately on
+  reference) flows through the options store with a camelCase merge test. Rendering is deliberately on
   the shared 2D overlay *above* the series — the one text path that stays pixel-identical across
   the WebGPU and Canvas2D pane backends (behind-series placement needs the GPU glyph-atlas text
   path, tracked under the plugin platform); media-coordinate drawing keeps it crisp at fractional
@@ -817,56 +817,56 @@ Progress is appended here as phases land (newest last).
   Remaining perf work: browser-side present-time measurement and a hard CI gate once thresholds
   prove stable across runners.
 
-- 2026-07-21 — **Interaction parity fixes, proven against LWC source.** The initial axis-drag
+- 2026-07-21 — **Interaction parity fixes, proven against reference source.** The initial axis-drag
   implementation used guessed incremental `exp(dx*K)` models. Ground truth was established two
-  ways: the LWC 5.2.0 source (local `tmp/lightweight-charts` checkout) and empirical probes of the
+  ways: the reference 5.2.0 source (local `tmp/refsrc` checkout) and empirical probes of the
   pinned reference build. Findings and fixes: (1) **Keyboard scroll was inverted** — ArrowLeft
   showed newer data; TradingView's Left means back-in-time. The engine's `rightOffset` sign was
-  already LWC-consistent (larger = newer), so only the key mapping changed: Left = older, Right =
+  already reference-consistent (larger = newer), so only the key mapping changed: Left = older, Right =
   newer, Ctrl/Shift = 10-bar step, eased over ~160 ms for the platform's smooth keyboard feel
-  (mirrors LWC's `scrollToOffsetAnimated`). (2) **Time-axis drag was inverted** — drag right
-  zoomed in; LWC zooms *out*. Replaced with an exact port of `TimeScale.scaleTo` (start-relative
+  (mirrors the reference's `scrollToOffsetAnimated`). (2) **Time-axis drag was inverted** — drag right
+  zoomed in; reference zooms *out*. Replaced with an exact port of `TimeScale.scaleTo` (start-relative
   ratio of distances-from-right). (3) **Price-axis drag direction was correct but the model was
   wrong** (~5x oversensitive incremental exp); replaced with an exact port of `PriceScale.scaleTo`
   (drag-start snapshot scaled around center, `(startY + (h-1)*0.2)/(currentY + (h-1)*0.2)`, min
-  0.1), now also a no-op in percentage/indexed modes like LWC. Probes show measured coefficients
-  matching the LWC formulas to 9–10 significant digits; all ten browser gates, oxlint, and tsc
-  stay green. Wheel-over-axis behavior was checked too — LWC 5.2 zooms *time* there, which we
+  0.1), now also a no-op in percentage/indexed modes like reference. Probes show measured coefficients
+  matching the reference formulas to 9–10 significant digits; all ten browser gates, oxlint, and tsc
+  stay green. Wheel-over-axis behavior was checked too — reference 5.2 zooms *time* there, which we
   already match.
 
 - 2026-07-21 — **Free 2D dragging: vertical price pan.** The pane drag only scrolled time, so the
-  chart felt vertically locked. LWC pans both axes in one drag (`pane-widget.ts` →
+  chart felt vertically locked. reference pans both axes in one drag (`pane-widget.ts` →
   `scrollPriceTo` + `scrollTimeTo`), and `PriceScale.scrollTo` shifts the press-time range
   snapshot by `dy * span/(h-1)` (drag down = range up, candles follow the cursor). That formula
-  is now ported into the recognizer with a deliberate TradingView-flavored extension: where LWC
+  is now ported into the recognizer with a deliberate TradingView-flavored extension: where reference
   no-ops under autoscale, the first drag captures the autoscale-resolved range and turns it
   manual (the TradingView feel the user expects); double-clicking the axis re-enables autoscale
-  as before. Touch honors `vert_touch_drag`; inverted scales flip the delta like LWC. Probe:
+  as before. Touch honors `vert_touch_drag`; inverted scales flip the delta like reference. Probe:
   60 px drag shifts the range by 2.3493337717350755 vs the formula's 2.3493337717350555 (13
   significant digits), the reverse drag restores the exact original range, and a diagonal drag
   pans time and price in one motion. All ten browser gates, oxlint, and tsc green.
 
-- 2026-07-21 — **Kinetic default corrected to LWC parity.** The package already defaulted to
-  LWC's `kineticScroll: { touch: true, mouse: false }`, but the demo force-enabled mouse coasting
+- 2026-07-21 — **Kinetic default corrected to reference parity.** The package already defaulted to
+  the reference's `kineticScroll: { touch: true, mouse: false }`, but the demo force-enabled mouse coasting
   via a checked-by-default toggle. TradingView's feel is: normal drags stop dead on release, and
   the smooth-scroll sensation comes from the keyboard (Ctrl+←/→, which now eases ~160 ms). The
-  demo toggle is now **"mouse kinetic", off by default**, leaving touch coasting on per LWC.
+  demo toggle is now **"mouse kinetic", off by default**, leaving touch coasting on per reference.
   Probe: a mouse flick leaves the scroll position bit-identical 600 ms after release by default,
   coasts when the toggle is on (160.95 → 300.40), and Ctrl+ArrowLeft eases exactly 10 bars
   older.
 
-- 2026-07-21 — **Interaction parity 1:1 vs LWC 5.2 (verified against vendored source).** Full
+- 2026-07-21 — **Interaction parity 1:1 vs reference 5.2 (verified against vendored source).** Full
   inventory diff followed by fixes: crosshair clamps into the pane instead of vanishing over
   axes and persists after mouse-up; primary-button-only gestures + middle-click autoscroll
   suppression; wheel deltaMode ×32/×120 + Windows-Chromium DPR correction + horizontal-wheel
-  `scrollChart`; pinch ported to LWC's anchored `(scale−prev)×5`; touch path rebuilt on raw touch
+  `scrollChart`; pinch ported to the reference's anchored `(scale−prev)×5`; touch path rebuilt on raw touch
   events with direction classification and release-to-page scrolling; 240 ms long-press tracking
   mode with `on_next_tap`/`on_touch_end` exit; double-tap axis reset (30 px/500 ms); kinetic
   ported from `KineticAnimation` (15 px sampling, 50 ms window, 0.2–7 px/ms clamps, 0.997 decay);
-  price pan blocked while autoscale is on (strict LWC). Playwright 10/10.
+  price pan blocked while autoscale is on (strict reference). Playwright 10/10.
 
-- 2026-07-21 — **LWC API breadth closed (execution plan Phases 1–2, tracked in
-  docs/EXECUTION_PLAN.md).** ~40 items: full per-series styling (lastValueVisible with LWC label
+- 2026-07-21 — **reference API breadth closed (execution plan Phases 1–2, tracked in
+  docs/EXECUTION_PLAN.md).** ~40 items: full per-series styling (lastValueVisible with reference label
   overlap resolution, priceLine family, lineStyle dashes frame-built for backend identity,
   crosshairMarker family, baseline quadrant gradients, histogram base, invertFilledArea, bar
   openVisible/thinBars), per-data-point colors (RGBA channels aligned through dedupe/update/
@@ -881,9 +881,9 @@ Progress is appended here as phases land (newest last).
 - 2026-07-21 — **Plugin platform landed (Phase 3).** A-first hybrid per PLUGIN_PLATFORM_DESIGN.md:
   pane + series primitives emit backend-neutral Prim commands (JSON command buffer, one
   marshalling pass per frame), z-ordered under/main/top, lifecycle + series-bound draw contexts,
-  axis labels; `autoscale_info` engine contributions; LWC `hitTestPane` precedence + per-kind
+  axis labels; `autoscale_info` engine contributions; reference `hitTestPane` precedence + per-kind
   series hit tests (`hovered_series`, `hovered_object_id`, hit cursor, `hovered_series_on_top`);
-  `add_custom_series` with engine-owned time mapping (LWC rounded-candles ported line-for-line);
+  `add_custom_series` with engine-owned time mapping (reference rounded-candles ported line-for-line);
   markers + watermark re-expressed as plugins with a 0-diff parity proof. Playwright 28/28.
 
 - 2026-07-23 — **Publish readiness validated (Phase 4 prep).** `npm publish --dry-run` runs the
@@ -900,10 +900,10 @@ retained in the execution log for history; the next work should be:
 
 1. **D1/R5 — Contract and parity hardening.** Public screenshot, externally presented WebGPU/
    Canvas2D, and raw browser/native pane comparisons are automated and exact for the shared baseline
-   fixture. LWC-reference baselines now cover representative spacing, DPR, theme, marker, and
+   fixture. reference baselines now cover representative spacing, DPR, theme, marker, and
    overlay-volume cases, including default marker autoscale with exact public price extents. Add
    deterministic native axis text and reduce the remaining fractional-DPR axis/overlay raster
-   gaps. Browser axis semantics and the DPR-1 LWC contract are now closed.
+   gaps. Browser axis semantics and the DPR-1 reference contract are now closed.
 2. **D2 — Runtime reach.** WebGPU available, explicit Canvas2D, adapter-request failure, and live
    device-loss failover are verified in Chromium with a complete retained frame. Expand the same
    assertions across the supported browser/device CI matrix.
@@ -912,12 +912,12 @@ retained in the execution log for history; the next work should be:
    browser executor/presentation gate and verify 60 fps under the same fixtures.
 4. **API breadth.** Time-scale scrolling/reset/index/dimension methods, all four price-scale modes,
    series price-coordinate and logical-range/data helpers, and left/right/overlay price-scale
-   handles are headless-backed and browser-tested. Fill the remaining high-value LWC surface:
+   handles are headless-backed and browser-tested. Fill the remaining high-value reference surface:
    richer mouse/series event payloads and the lower-priority compatibility tail.
 5. **Phase C platform surface.** Once the draw-list and backend contract are stable, add Rust
    primitives, the JS plugin recorder, watermark, and custom-series APIs.
 6. **Release readiness.** Freeze the public API, add CI for Rust/WASM/package/browser matrices,
-   publish LWC-style examples and migration docs, and define versioned compatibility guarantees.
+   publish reference-style examples and migration docs, and define versioned compatibility guarantees.
 
 ### What “no WebGPU coverage” means
 

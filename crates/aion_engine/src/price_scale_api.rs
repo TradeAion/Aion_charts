@@ -51,7 +51,7 @@ impl ChartEngine {
         Some((range.min_value(), range.max_value()))
     }
 
-    /// Install a manual raw-value range and disable autoscale, matching LWC `setVisibleRange`.
+    /// Install a manual raw-value range and disable autoscale, matching reference `setVisibleRange`.
     pub fn set_price_scale_visible_range(
         &mut self,
         pane: usize,
@@ -361,7 +361,7 @@ impl ChartEngine {
         true
     }
 
-    /// One pane scale's full options as a snake_case JSON object (LWC `priceScale.options()`
+    /// One pane scale's full options as a snake_case JSON object (reference `priceScale.options()`
     /// shape): `mode`, `auto_scale`, `invert_scale`, `scale_margins`, and the label
     /// cosmetics (`align_labels`, `ticks_visible`, `entire_text_only`, `minimum_width`,
     /// `text_color`). `None` for an unknown pane/target.
@@ -412,12 +412,12 @@ impl ChartEngine {
             })
     }
 
-    /// First close at or to the right of the visible left edge, matching LWC series first-value
-    /// selection for percentage/indexed coordinate modes. Whitespace rows are skipped (LWC's
+    /// First close at or to the right of the visible left edge, matching reference series first-value
+    /// selection for percentage/indexed coordinate modes. Whitespace rows are skipped (the reference's
     /// plot list never contains them, so its first-value search lands on a real bar). A custom
     /// series' rows are time-only, so its first value is the host-recorded frame value (the
     /// plugin's `priceValueBuilder` current value of the first visible non-whitespace item —
-    /// LWC `firstValue` reads the custom plot row's Close slot).
+    /// reference `firstValue` reads the custom plot row's Close slot).
     pub(crate) fn series_base_value(&self, id: SeriesId, visible_from: i64) -> Option<f64> {
         let series = self.series.iter().find(|s| s.id == id)?;
         if series.kind == SeriesKind::Custom {

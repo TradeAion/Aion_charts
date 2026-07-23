@@ -3,7 +3,7 @@ name = "aion_core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Platform-free chart model: scales, ranges, invalidation, formatters (ported from lightweight-charts)"
+description = "Platform-free chart model: scales, ranges, invalidation, formatters (ported from the reference charting library)"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

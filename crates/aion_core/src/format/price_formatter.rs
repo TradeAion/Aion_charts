@@ -1,6 +1,6 @@
 //! Price formatter. Port of `src/formatters/price-formatter.ts`.
 //!
-//! Note: LWC uses U+2212 (minus sign) instead of '-' because it has the same advance width as
+//! Note: reference uses U+2212 (minus sign) instead of '-' because it has the same advance width as
 //! '+', keeping axis labels stable when values flip sign.
 
 pub const MINUS_SIGN: char = '\u{2212}';
@@ -59,7 +59,7 @@ impl PriceFormatter {
     /// Constructs from a priceFormat option: precision + minMove (e.g. precision 2, minMove 0.01).
     pub fn from_precision(precision: u32, min_move: f64) -> Self {
         let price_scale = 10i64.pow(precision);
-        // LWC computes priceScale = round(1/minMove-ish) via series options; this helper covers
+        // reference computes priceScale = round(1/minMove-ish) via series options; this helper covers
         // the common case where min_move = 10^-precision.
         let scaled_min_move = (min_move * price_scale as f64).round();
         Self::new(price_scale, scaled_min_move.max(1.0))
@@ -132,7 +132,7 @@ mod tests {
     fn integer_scale() {
         let f = PriceFormatter::new(1, 1.0);
         assert_eq!(f.format(5.2), "5");
-        assert_eq!(f.format(5.7), "5"); // floor of int part; matches LWC
+        assert_eq!(f.format(5.7), "5"); // floor of int part; matches reference
     }
 
     #[test]

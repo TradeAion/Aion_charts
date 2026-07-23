@@ -14,8 +14,8 @@ use crate::TimePointIndex;
 
 pub type SeriesId = usize;
 
-/// Per-data-item color channels (LWC data-item colors, model/series-bar-colorer.ts). `Body` is
-/// the candle/bar body color, the line/area stroke (LWC `lineColor` on area items) and point
+/// Per-data-item color channels (reference data-item colors, model/series-bar-colorer.ts). `Body` is
+/// the candle/bar body color, the line/area stroke (reference `lineColor` on area items) and point
 /// marker, and the histogram column color; `Wick`/`Border` are the candlestick parts
 /// (`wickColor`/`borderColor`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,7 +41,7 @@ struct RawSeries {
     point_colors: [Vec<u32>; POINT_COLOR_CHANNELS],
     /// Custom series (plugin platform Phase C-c): their values live host-side, so the rows
     /// here carry times only (whitespace-style) — yet they still mark real bars for the
-    /// time-scale base index (LWC's custom plot rows carry values, so they count in
+    /// time-scale base index (the reference's custom plot rows carry values, so they count in
     /// `_getBaseIndex`).
     rows_count_as_data: bool,
     /// Rebuilt against merged indices; keys are positions in `merged_times`.
@@ -112,10 +112,10 @@ impl DataLayer {
     }
 
     /// Merged index of the last point that has data (the time-scale base index), or None.
-    /// Whitespace rows (LWC `{time}`-only items) occupy time points but carry no data, so —
-    /// like LWC's `_getBaseIndex` (data-layer.ts:495-510), which reads the whitespace-filtered
+    /// Whitespace rows (reference `{time}`-only items) occupy time points but carry no data, so —
+    /// like the reference's `_getBaseIndex` (data-layer.ts:495-510), which reads the whitespace-filtered
     /// series rows — the base index is the last point holding a real bar in any series. When
-    /// every series' rows are whitespace the index is 0 (LWC's initialized `baseIndex`).
+    /// every series' rows are whitespace the index is 0 (the reference's initialized `baseIndex`).
     pub fn base_index(&self) -> Option<TimePointIndex> {
         if self.merged_times.is_empty() {
             return None;
@@ -176,7 +176,7 @@ impl DataLayer {
         self.reindex_all();
     }
 
-    /// Install the series' per-row color channels (LWC data-item colors). Each channel is
+    /// Install the series' per-row color channels (reference data-item colors). Each channel is
     /// `None`/empty for absent, or must match the series' row count exactly; a length mismatch
     /// rejects the whole call (false, no partial state). Within a channel, a `0` entry means
     /// "no override at this row" ([`POINT_COLOR_ABSENT`]).
@@ -229,10 +229,10 @@ impl DataLayer {
         self.update_styled(id, time, values, [None; POINT_COLOR_CHANNELS]);
     }
 
-    /// [`update`] plus the target bar's per-point colors (LWC `series.update` with data-item
+    /// [`update`] plus the target bar's per-point colors (reference `series.update` with data-item
     /// colors; `None` = no custom color for that channel). The color channels stay aligned
     /// with the rows in every path: appended rows push, a replaced last bar takes the new
-    /// channels (a plain `update` clears that bar's overrides, matching LWC's whole-bar
+    /// channels (a plain `update` clears that bar's overrides, matching the reference's whole-bar
     /// replacement), and a mid-history insert splices.
     pub fn update_styled(
         &mut self,
@@ -303,7 +303,7 @@ impl DataLayer {
         self.reindex_all();
     }
 
-    /// Remove the last `count` rows of a series (LWC `popSeriesData`, data-layer.ts:338-383):
+    /// Remove the last `count` rows of a series (reference `popSeriesData`, data-layer.ts:338-383):
     /// `count` 0 is a no-op, larger counts clamp to the row count. Per-point color channels
     /// truncate in lockstep with their rows, and the merged time points are rebuilt so times
     /// no series occupies anymore leave the shared axis. Returns the new row count.
@@ -551,7 +551,7 @@ mod tests {
         assert_eq!(dl.point_color(a, PointColorChannel::Body, 4), None);
         assert_eq!(dl.point_color(a, PointColorChannel::Body, 3), Some(44));
 
-        // Replace-last with a plain update clears that bar's override (LWC whole-bar
+        // Replace-last with a plain update clears that bar's override (reference whole-bar
         // replacement); a styled replace sets it.
         dl.update(a, 5, [55.0, 56.0, 54.0, 55.0]);
         assert_eq!(dl.point_color(a, PointColorChannel::Body, 4), None);
@@ -568,7 +568,7 @@ mod tests {
         set(&mut dl, b, &[3, 4], &[90.0, 95.0]);
         assert!(dl.set_point_colors(a, [Some(vec![11, 22, 33, 44]), None, None]));
 
-        // Clamp to the row count; colors shift along with their rows (LWC popSeriesData).
+        // Clamp to the row count; colors shift along with their rows (reference popSeriesData).
         assert_eq!(dl.pop(a, 10), 0);
         assert_eq!(dl.plot(a).indices(), &[] as &[i64]);
         // A's times left the merged axis; B's remain.
@@ -595,7 +595,7 @@ mod tests {
         let a = dl.add_series();
         let nan = f64::NAN;
         // A custom series (Phase C-c): time-only (whitespace-style) rows whose values live
-        // host-side. Like LWC's custom plot rows (which carry values), they count as data for
+        // host-side. Like the reference's custom plot rows (which carry values), they count as data for
         // the base index once flagged.
         dl.set_data(
             a,
@@ -605,7 +605,7 @@ mod tests {
             vec![nan, nan, nan],
             vec![nan, nan, nan],
         );
-        // Unflagged, an all-whitespace series anchors on 0 (LWC's initialized baseIndex).
+        // Unflagged, an all-whitespace series anchors on 0 (the reference's initialized baseIndex).
         assert_eq!(dl.base_index(), Some(0));
         dl.set_rows_count_as_data(a, true);
         assert_eq!(dl.base_index(), Some(2));
@@ -623,7 +623,7 @@ mod tests {
         let mut dl = DataLayer::new();
         let a = dl.add_series();
         let nan = f64::NAN;
-        // bars at 1,2,4 and explicit whitespace rows at 3,5 (LWC `{time}`-only items)
+        // bars at 1,2,4 and explicit whitespace rows at 3,5 (reference `{time}`-only items)
         dl.set_data(
             a,
             vec![1, 2, 3, 4, 5],
@@ -632,12 +632,12 @@ mod tests {
             vec![10.0, 20.0, nan, 40.0, nan],
             vec![10.0, 20.0, nan, 40.0, nan],
         );
-        // the whitespace times occupy merged slots (LWC keeps the time-scale points)
+        // the whitespace times occupy merged slots (reference keeps the time-scale points)
         assert_eq!(dl.merged_times(), &[1, 2, 3, 4, 5]);
         assert_eq!(dl.plot(a).indices(), &[0, 1, 2, 3, 4]);
         assert!(dl.plot(a).is_whitespace_row(2));
         assert!(dl.plot(a).is_whitespace_row(4));
-        // base index = the last point with real data (LWC _getBaseIndex), not the trailing ws
+        // base index = the last point with real data (reference _getBaseIndex), not the trailing ws
         assert_eq!(dl.base_index(), Some(3));
     }
 
@@ -647,7 +647,7 @@ mod tests {
         let a = dl.add_series();
         let nan = f64::NAN;
         set(&mut dl, a, &[1, 2, 3], &[10.0, 20.0, 30.0]);
-        // LWC `series.update` with a `{time}`-only item replaces the last bar with whitespace.
+        // reference `series.update` with a `{time}`-only item replaces the last bar with whitespace.
         dl.update(a, 3, [nan; 4]);
         assert!(dl.plot(a).is_whitespace_row(2));
         assert_eq!(dl.base_index(), Some(1));
@@ -655,7 +655,7 @@ mod tests {
         dl.update(a, 4, [nan; 4]);
         assert_eq!(dl.merged_times(), &[1, 2, 3, 4]);
         assert_eq!(dl.base_index(), Some(1));
-        // ...and a real bar at that whitespace time moves it again (the gated LWC shift case)
+        // ...and a real bar at that whitespace time moves it again (the gated reference shift case)
         dl.update(a, 4, [40.0, 41.0, 39.0, 40.0]);
         assert!(!dl.plot(a).is_whitespace_row(3));
         assert_eq!(dl.base_index(), Some(3));

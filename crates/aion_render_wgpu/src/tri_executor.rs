@@ -162,7 +162,7 @@ fn round_rect_to_tris(
 /// prims (they render elsewhere). Used by the order-preserving group builder in `frame.rs`.
 pub fn geom_prim_to_tris(prim: &Prim, points: &[[f32; 2]], out: &mut Vec<TriVertex>) {
     match prim {
-        // LWC `layout.background` VerticalGradient: two triangles over the pane rect with
+        // reference `layout.background` VerticalGradient: two triangles over the pane rect with
         // the stops as per-vertex colors — the same linear ramp the Canvas2D executor
         // paints with `createLinearGradient` (stop-for-stop identical).
         Prim::Background { rect, gradient } => {

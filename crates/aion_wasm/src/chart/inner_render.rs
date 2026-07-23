@@ -26,9 +26,9 @@ impl ChartInner {
         self.recompute_layout(false);
 
         // time tick marks: built once (needs &mut), shared by GPU grid + 2D labels.
-        // Font comes from `layout` (LWC `fontSize`/`fontFamily`): it drives the tick-density
+        // Font comes from `layout` (reference `fontSize`/`fontFamily`): it drives the tick-density
         // estimate, host text measurement, and glyph drawing so all three agree. The label
-        // width cap is LWC `timeScale.tickMarkMaxCharacterLength` (default 8).
+        // width cap is reference `timeScale.tickMarkMaxCharacterLength` (default 8).
         let layout = self.opts().layout;
         let font_size = layout.font_size;
         let font_family = layout.font_family;
@@ -206,8 +206,8 @@ impl ChartInner {
         // in-pane plugin text, below the axis chrome, identical on both backends.
         self.draw_primitive_overlay_texts(dpr)?;
 
-        // Axis borders come from the options store (LWC `borderColor`/`borderVisible` per strip);
-        // an unparseable color falls back to the LWC default.
+        // Axis borders come from the options store (reference `borderColor`/`borderVisible` per strip);
+        // an unparseable color falls back to the reference default.
         let fallback = Color::parse_css(BORDER_CSS).unwrap_or(Color::rgb(0x2b, 0x2b, 0x43));
         let left_border = Color::parse_css(&options.left_price_scale.border_color)
             .unwrap_or(fallback)
@@ -242,7 +242,7 @@ impl ChartInner {
             ctx.fill_rect(0.0, (pane_h * dpr).round(), bitmap_w, border_w);
         }
 
-        // LWC price-axis-widget.ts `_drawTickMarks`: 5 css px stubs from the pane edge into
+        // reference price-axis-widget.ts `_drawTickMarks`: 5 css px stubs from the pane edge into
         // the strip at each tick coordinate, in the strip's border color, gated on
         // `borderVisible && ticksVisible` (the engine already filtered on the latter).
         let tick_len = (5.0 * dpr).round();
@@ -266,7 +266,7 @@ impl ChartInner {
             ctx.fill_rect(x, (tick.y * dpr).round() - tick_off, tick_len, tick_h);
         }
 
-        // LWC time-axis-widget.ts `_drawTickMarks`: 5 css px stubs down from the top of the
+        // reference time-axis-widget.ts `_drawTickMarks`: 5 css px stubs down from the top of the
         // time strip, in the time-scale border color, same border/visibility gating.
         if options.time_scale.border_visible
             && self.engine.time_ticks_visible
@@ -280,7 +280,7 @@ impl ChartInner {
         }
 
         // Separators between stacked panes (roadmap Phase B1): a border line at each pane
-        // boundary in the LWC `layout.panes.separatorColor`; painted regardless of the time-axis
+        // boundary in the reference `layout.panes.separatorColor`; painted regardless of the time-axis
         // border's visibility since they are functional dividers, not axis chrome.
         let separator_color = Color::parse_css(&options.layout.panes.separator_color)
             .unwrap_or(fallback)
@@ -296,7 +296,7 @@ impl ChartInner {
             );
         }
 
-        // LWC pane-separator.ts hover handle (`top: -4px; height: 9px; width: 100%` over the
+        // reference pane-separator.ts hover handle (`top: -4px; height: 9px; width: 100%` over the
         // 1px separator cell): a full-width 9 css px band centered on the separator, painted
         // in `layout.panes.separatorHoverColor` while the host reports a hovered separator.
         if let Some(separator) = axis_frame
@@ -397,7 +397,7 @@ impl ChartInner {
         let ctx = &self.axis_ctx;
 
         // Z-order matters: boxed labels (last value, price lines, crosshair) must fully cover any
-        // ordinary tick label they overlap, exactly like LWC where each axis view paints its
+        // ordinary tick label they overlap, exactly like reference where each axis view paints its
         // background and text as one unit in view order. Painting all backgrounds first and all
         // texts second lets tick glyphs bleed onto the boxes, so paint in two ordered layers:
         // plain tick text first, then each boxed label's background + text.
@@ -409,7 +409,7 @@ impl ChartInner {
         )?;
         for label in axis_frame.labels.iter().filter(|l| l.background.is_some()) {
             if let Some((x, y, w, h, color)) = label.background {
-                // Backgrounds are bitmap-aligned geometry, matching LWC's bitmap-coordinate pass.
+                // Backgrounds are bitmap-aligned geometry, matching the reference's bitmap-coordinate pass.
                 // `to_css` keeps alpha so custom (e.g. price-line) label colors stay translucent.
                 ctx.set_fill_style_str(&color.to_css());
                 ctx.fill_rect(

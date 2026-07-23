@@ -10,7 +10,7 @@
  * sRGB with the exact CSS Color 4 path (OKLab → XYZ → sRGB). `create_chart` applies the
  * selected theme *under* any explicit options (the engine deep-merges), so a caller can
  * override individual leaves while keeping the rest of the palette. The engine's own
- * built-in defaults stay the LWC reference values; theming is a package-layer concern.
+ * built-in defaults stay the reference values; theming is a package-layer concern.
  */
 
 import type { chart_options, deep_partial } from "./types.js";

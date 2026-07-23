@@ -6,7 +6,7 @@
 //! scene -- crates/aion_native/tests/goldens/scene.png`).
 //!
 //! The golden is currently our own deterministic render; when a headless-Chromium reference
-//! pipeline exists, lightweight-charts PNGs drop in as additional goldens with the same diff.
+//! pipeline exists, the reference charting library's PNGs drop in as additional goldens with the same diff.
 
 use aion_native::{
     diff_pixmaps,

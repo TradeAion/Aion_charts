@@ -1,12 +1,12 @@
-//! Price-line creation and option application/serialization (LWC `createPriceLine`,
+//! Price-line creation and option application/serialization (reference `createPriceLine`,
 //! `IPriceLine.applyOptions`/`IPriceLine.options`). Headless so hosts delegate here; the
 //! wasm boundary only converts wire types. Extracted from `lib.rs`.
 
 use super::*;
 
 /// JSON patch accepted by [`ChartEngine::price_line_apply_options`]. Snake_case keys are
-/// canonical (matching the TS `price_line_options`); the LWC camelCase forms are accepted as
-/// aliases. Every field is optional — absent keys keep their current values (LWC merge).
+/// canonical (matching the TS `price_line_options`); the reference camelCase forms are accepted as
+/// aliases. Every field is optional — absent keys keep their current values (reference merge).
 #[derive(serde::Deserialize)]
 struct PriceLinePatch {
     price: Option<f64>,
@@ -37,7 +37,7 @@ fn line_style_name(style: LineStyle) -> &'static str {
     }
 }
 
-/// A patch's `line_style`: the TS string form, or the LWC numeric enum for untyped callers.
+/// A patch's `line_style`: the TS string form, or the reference numeric enum for untyped callers.
 fn parse_line_style(value: &serde_json::Value) -> Option<LineStyle> {
     match value {
         serde_json::Value::String(s) => Some(match s.as_str() {
@@ -64,8 +64,8 @@ fn update_css_slot(slot: &mut Option<String>, value: String) {
 }
 
 impl ChartEngine {
-    /// Add a horizontal price line to a series; returns its chart-unique id (LWC
-    /// `createPriceLine`). LWC defaults apply to the visibility/label extras
+    /// Add a horizontal price line to a series; returns its chart-unique id (reference
+    /// `createPriceLine`). reference defaults apply to the visibility/label extras
     /// (`price-line-options.ts`: `lineVisible`/`axisLabelVisible` true, label colors `''`).
     pub fn create_price_line(
         &mut self,
@@ -102,7 +102,7 @@ impl ChartEngine {
         }
     }
 
-    /// Merge a JSON options patch into the price line with `id` (LWC
+    /// Merge a JSON options patch into the price line with `id` (reference
     /// `IPriceLine.applyOptions`): absent keys keep their current values. Returns false for a
     /// malformed patch or an unknown id (both are host no-ops).
     pub fn price_line_apply_options(&mut self, id: u32, json: &str) -> bool {
@@ -153,7 +153,7 @@ impl ChartEngine {
         true
     }
 
-    /// The price line's full options as a snake_case JSON object (LWC `IPriceLine.options`).
+    /// The price line's full options as a snake_case JSON object (reference `IPriceLine.options`).
     /// Colors serialize as CSS strings that keep alpha; the label-color overrides serialize
     /// as `""` while following their default. `None` for an unknown id.
     pub fn price_line_options_json(&self, id: u32) -> Option<String> {

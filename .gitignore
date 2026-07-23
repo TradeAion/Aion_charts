@@ -9,7 +9,7 @@ pkg/
 playwright-report/
 test-results/
 
-# vendored lightweight-charts study copy (reference only, not part of the product)
+# vendored study copy of the reference charting library (not part of the product)
 /tmp/
 
 # editor/os noise

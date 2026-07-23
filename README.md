@@ -1,14 +1,14 @@
 # Aion Charts
 
 A production trading-chart engine in **Rust + WebGPU + WASM**, pixel-faithful to
-[lightweight-charts](https://github.com/tradingview/lightweight-charts) with a long-term
+the reference charting library with a long-term
 trajectory toward a full TradingView-class charting platform.
 
 ## Documents
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system design, crate layout, roadmap.
 - [docs/RENDERING_SPEC.md](docs/RENDERING_SPEC.md) — exact pixel math ported from
-  lightweight-charts (the fidelity contract; every renderer must match it).
+  the reference charting library (the fidelity contract; every renderer must match it).
 
 ## Workspace
 
@@ -42,4 +42,4 @@ cargo test          # core math + rendering math unit tests
 cargo clippy --all-targets
 ```
 
-The vendored lightweight-charts source in `tmp/` is a study reference only and is git-ignored.
+The vendored study copy of the reference charting library in `tmp/` is for reference only and is git-ignored.

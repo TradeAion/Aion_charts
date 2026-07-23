@@ -170,7 +170,7 @@ fn catmull_rom(p0: f64, p1: f64, p2: f64, p3: f64, t: f64) -> f64 {
 
 /// Expand a polyline according to its [`LineType`]: `Simple` is unchanged; `WithSteps` inserts a
 /// horizontal-then-vertical corner at each interval (the value holds until the next point, as in
-/// lightweight-charts); `Curved` tessellates a Catmull-Rom spline through the points.
+/// the reference charting library); `Curved` tessellates a Catmull-Rom spline through the points.
 pub fn expand_line(points: &[LinePoint], line_type: LineType) -> Vec<LinePoint> {
     match line_type {
         LineType::Simple => points.to_vec(),
@@ -224,7 +224,7 @@ pub fn build_line_stroke(
     let expanded = expand_line(points, params.line_type);
     let points = &expanded[..];
     if points.len() < 2 {
-        // single point: LWC draws a short horizontal segment of barWidth; skip until we
+        // single point: reference draws a short horizontal segment of barWidth; skip until we
         // carry barWidth here (area/line with 1 visible point is a rare edge).
         return;
     }
@@ -311,7 +311,7 @@ pub fn build_area_fill(
 
     // Gradient factor 0 at the fill's geometric top (top color), 1 at its geometric base
     // (bottom color). A normal fill spans [topmost point, base_y] below the line; an inverted
-    // one (LWC `invertFilledArea`, or a baseline segment under the base level) spans
+    // one (reference `invertFilledArea`, or a baseline segment under the base level) spans
     // [base_y, lowest point] above the line. Both directions keep the top stop at the
     // geometrically higher edge so the two backends shade identically.
     let min_y = points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min) * vpr;
@@ -688,7 +688,7 @@ mod tests {
         // L-shaped path: 5px right then 5px down. Pattern [4 on, 4 off]: the first dash
         // covers (0,0)->(4,0); the 4px gap wraps the corner (1px horizontal + 3px vertical),
         // so the second run resumes at (5,3) and continues to (5,5) — the pattern never
-        // restarts at a vertex (LWC setLineDash semantics).
+        // restarts at a vertex (reference setLineDash semantics).
         let pts = [
             LinePoint { x: 0.0, y: 0.0 },
             LinePoint { x: 5.0, y: 0.0 },

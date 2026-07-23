@@ -1,7 +1,7 @@
 //! Frame composition: one MSAA render pass drawing scissored groups of triangle meshes and
 //! solid/textured quads in the frame's prim order.
 //!
-//! Groups replicate LWC's pane/axis canvas separation: the pane group is scissored to the
+//! Groups replicate the reference's pane/axis canvas separation: the pane group is scissored to the
 //! pane rect. 4x MSAA smooths diagonal line edges while leaving pixel-aligned rects and
 //! texture-alpha text bit-identical (their edges never straddle a pixel boundary), so
 //! candles and labels stay crisp.

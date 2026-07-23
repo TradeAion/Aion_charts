@@ -39,7 +39,7 @@ mod tests {
         assert!(is_base_decimal(100));
         assert!(is_base_decimal(10000));
         assert!(!is_base_decimal(25));
-        assert!(!is_base_decimal(0) || is_base_decimal(0)); // 0: loop skipped -> true in LWC too
+        assert!(!is_base_decimal(0) || is_base_decimal(0)); // 0: loop skipped -> true in reference too
         assert!(!is_base_decimal(-100));
     }
 }

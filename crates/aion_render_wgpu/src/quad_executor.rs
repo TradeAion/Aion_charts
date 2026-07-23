@@ -4,7 +4,7 @@
 //! Canvas2D stroke coverage: a line of width `w` centered on integer coordinate `c` covers
 //! pixels `c - w/2 ..= c - w/2 + w - 1` (the half-pixel translate in
 //! `strokeInPixel`/`drawVerticalLine` makes odd widths symmetric around `c`).
-//! Dashed styles are expanded into segment rects with the LWC dash patterns
+//! Dashed styles are expanded into segment rects with the reference dash patterns
 //! (RENDERING_SPEC.md §6), phase starting at the path start like Canvas2D.
 
 use aion_render::color::Color;

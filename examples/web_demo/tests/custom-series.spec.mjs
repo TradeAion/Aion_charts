@@ -44,7 +44,7 @@ function count_different(a, b) {
   });
 }
 
-// (a) The custom series (the ported LWC rounded-candles plugin example) records the same Prim
+// (a) The custom series (the ported reference rounded-candles plugin example) records the same Prim
 // commands once per frame, so WebGPU and Canvas2D present pixel-identical frames with it active.
 // Bar spacing 3 puts the example's `radius` rule at 0, so its bodies emit crisp quad-family
 // rects — the family both backends rasterize bit-exactly (nonzero radii take the tessellated

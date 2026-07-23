@@ -1,6 +1,6 @@
 /**
- * Pane primitives (plugin platform Phase C-a) — Aion's take on lightweight-charts v5's
- * `IPanePrimitive` (LWC model/ipane-primitive.ts, api/pane-api.ts `PaneApi.attachPrimitive`).
+ * Pane primitives (plugin platform Phase C-a) — Aion's take on the reference charting library v5's
+ * `IPanePrimitive` (reference model/ipane-primitive.ts, api/pane-api.ts `PaneApi.attachPrimitive`).
  *
  * Locked design divergence (docs/PLUGIN_PLATFORM_DESIGN.md §3, A-first hybrid): a primitive
  * never touches a canvas. Its view renderers record backend-neutral draw commands through the
@@ -9,10 +9,10 @@
  * engine's own layers (`bottom` behind the series, `top` above the crosshair).
  */
 
-/** Where in the pane's layer stack a view paints (LWC `PrimitivePaneViewZOrder`). */
+/** Where in the pane's layer stack a view paints (reference `PrimitivePaneViewZOrder`). */
 export type primitive_z_order = "bottom" | "normal" | "top";
 
-/** LWC `LineStyle` wire values: 0 solid, 1 dotted, 2 dashed, 3 large-dashed, 4 sparse-dotted. */
+/** reference `LineStyle` wire values: 0 solid, 1 dotted, 2 dashed, 3 large-dashed, 4 sparse-dotted. */
 export type primitive_line_style = 0 | 1 | 2 | 3 | 4;
 
 /**
@@ -21,7 +21,7 @@ export type primitive_line_style = 0 | 1 | 2 | 3 | 4;
  * the same space the engines' geometry uses; `pane_left`/`pane_top` give the pane's origin and
  * `dpr` the nominal device pixel ratio. The converters resolve against the settled post-layout
  * scales (the pane's right price scale by default) and return `null` when a value falls off the
- * scale — mirroring LWC's `timeToCoordinate`/`priceToCoordinate` nullability.
+ * scale — mirroring the reference's `timeToCoordinate`/`priceToCoordinate` nullability.
  *
  * The context is valid only for the duration of the synchronous `renderer` call.
  */
@@ -38,7 +38,7 @@ export interface primitive_draw_context {
   readonly dpr: number;
   /** Bitmap y for a price on the pane's `target` scale (default `"right"`); `null` off-scale. */
   price_to_y(price: number, target?: "left" | "right"): number | null;
-  /** Bitmap x for an exact bar timestamp (UTC seconds); `null` when not a bar (LWC no-snap). */
+  /** Bitmap x for an exact bar timestamp (UTC seconds); `null` when not a bar (reference no-snap). */
   time_to_x(time: number): number | null;
   /** Bitmap x for a (possibly fractional) logical bar index; `null` when there is no data. */
   logical_to_x(index: number): number | null;
@@ -46,9 +46,9 @@ export interface primitive_draw_context {
   rect(x: number, y: number, w: number, h: number, color: string): void;
   /** Hollow frame filled inside the rect (Canvas2D `fillRectInnerBorder` semantics). */
   rect_frame(x: number, y: number, w: number, h: number, color: string, line_width: number): void;
-  /** Horizontal line, integer-snapped, with an LWC line style. */
+  /** Horizontal line, integer-snapped, with an reference line style. */
   hline(y: number, x1: number, x2: number, color: string, width: number, style: primitive_line_style): void;
-  /** Vertical line, integer-snapped, with an LWC line style. */
+  /** Vertical line, integer-snapped, with an reference line style. */
   vline(x: number, y1: number, y2: number, color: string, width: number, style: primitive_line_style): void;
   /** Anti-aliased polyline; `points` is a flat `[x0, y0, x1, y1, ...]` array. */
   polyline(points: readonly number[], color: string, width: number, style: primitive_line_style): void;
@@ -74,7 +74,7 @@ export interface primitive_draw_context {
 }
 
 /**
- * One paintable view of a primitive (LWC `IPanePrimitivePaneView`). `renderer` runs once per
+ * One paintable view of a primitive (reference `IPanePrimitivePaneView`). `renderer` runs once per
  * frame per view; keep it cheap.
  */
 export interface primitive_pane_view {
@@ -89,29 +89,29 @@ export interface primitive_pane_view {
 }
 
 /**
- * A primitive's hit-test result (LWC `PrimitiveHoveredItem`, reduced to Aion's arbitration
- * model: the host owns z-ordering and series-vs-primitive precedence, so LWC's `distance`,
+ * A primitive's hit-test result (reference `PrimitiveHoveredItem`, reduced to Aion's arbitration
+ * model: the host owns z-ordering and series-vs-primitive precedence, so the reference's `distance`,
  * `hitTestPriority`, `itemType`, and `isBackground` fields are not modeled — within a layer,
  * the first hit in paint order wins).
  */
 export interface primitive_hit_result {
   /** Identifier reported as `mouse_event_params.hovered_object_id` while the hit holds. */
   external_id?: string;
-  /** CSS cursor applied to the chart while the hit holds (LWC `cursorStyle`). */
+  /** CSS cursor applied to the chart while the hit holds (reference `cursorStyle`). */
   cursor_style?: string;
   /**
    * The layer the hit belongs to (default `"normal"`). A `"top"` hit always beats the series
    * hit tests; a `"normal"` hit beats its own series' built-in hit and every series below
-   * it; a `"bottom"` hit only survives when no series is hit (LWC pane-hit-test.ts).
+   * it; a `"bottom"` hit only survives when no series is hit (reference pane-hit-test.ts).
    */
   z_order?: primitive_z_order;
 }
 
 /**
- * A boxed axis label descriptor (cf. LWC `ISeriesPrimitiveAxisView`). `coordinate` is media px
+ * A boxed axis label descriptor (cf. reference `ISeriesPrimitiveAxisView`). `coordinate` is media px
  * from the pane's top edge (price axis) or the pane's left edge (time axis). `background_color`
- * (or `color` as a shorthand) fills the box; `text_color` defaults to the background's LWC
- * contrast pick. Extension over LWC: LWC exposes axis views only on series primitives; Aion
+ * (or `color` as a shorthand) fills the box; `text_color` defaults to the background's reference
+ * contrast pick. Extension over reference: reference exposes axis views only on series primitives; Aion
  * accepts them on pane primitives too (painted on the pane's right scale / the time strip).
  */
 export interface primitive_axis_label {
@@ -171,7 +171,7 @@ export interface primitive_text_context {
 }
 
 /**
- * A pane primitive (LWC `IPanePrimitive`). Plain objects and class instances both work — the
+ * A pane primitive (reference `IPanePrimitive`). Plain objects and class instances both work — the
  * package binds the methods it finds at attach time.
  */
 export interface pane_primitive {
@@ -194,7 +194,7 @@ export interface pane_primitive {
    */
   text_views?(info: primitive_text_context): primitive_text_view[];
   /**
-   * Hit test called on hover (LWC `IPanePrimitiveBase.hitTest`), in the same absolute
+   * Hit test called on hover (reference `IPanePrimitiveBase.hitTest`), in the same absolute
    * bitmap-px coordinate space the draw context uses — cache geometry from the view
    * renderers and test against it here. A hit flows to
    * `mouse_event_params.hovered_object_id` (crosshair-move/click/dbl-click) and applies
@@ -210,7 +210,7 @@ export interface pane_primitive_handle {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Series primitives (plugin platform Phase C-b) — LWC `ISeriesPrimitive` (model/iseries-primitive.ts,
+// Series primitives (plugin platform Phase C-b) — reference `ISeriesPrimitive` (model/iseries-primitive.ts,
 // api/series-api.ts `SeriesApi.attachPrimitive`). Same command-recording model as pane primitives,
 // with the binding resolved through the owning series: the views' price converter and the
 // price-axis labels use the series' own price scale (its pane's left/right scale as bound, or
@@ -229,7 +229,7 @@ export interface series_primitive_draw_context extends Omit<primitive_draw_conte
   price_to_y(price: number): number | null;
 }
 
-/** One paintable view of a series primitive (LWC `ISeriesPrimitivePaneView`). */
+/** One paintable view of a series primitive (reference `ISeriesPrimitivePaneView`). */
 export interface series_primitive_pane_view {
   /** Layer to paint into (default `"normal"`): `bottom` behind the series, `top` above all. */
   z_order?: primitive_z_order;
@@ -253,15 +253,15 @@ export interface series_axis_label extends primitive_axis_label {
 }
 
 /**
- * A series primitive (LWC `ISeriesPrimitive`). Plain objects and class instances both work —
+ * A series primitive (reference `ISeriesPrimitive`). Plain objects and class instances both work —
  * the package binds the methods it finds at attach time. A hidden series paints no views and
- * contributes no autoscale range (LWC gates a series' views and autoscale on its visibility);
+ * contributes no autoscale range (reference gates a series' views and autoscale on its visibility);
  * a pane-less series draws nowhere until re-assigned.
  */
 export interface series_primitive {
   /**
    * Called once after attach. `request_update` (injected by the package) schedules a chart
-   * repaint — call it after mutating the state the views read (LWC `requestUpdate`).
+   * repaint — call it after mutating the state the views read (reference `requestUpdate`).
    * `pane_index` is the series' current pane (absent while pane-less).
    */
   attached?(params: { series_id: number; pane_index?: number; request_update?: () => void }): void;
@@ -283,17 +283,17 @@ export interface series_primitive {
    */
   text_views?(info: primitive_text_context): primitive_text_view[];
   /**
-   * Autoscale contribution (LWC `ISeriesPrimitiveBase.autoscaleInfo`): `{min, max}` price
+   * Autoscale contribution (reference `ISeriesPrimitiveBase.autoscaleInfo`): `{min, max}` price
    * bounds merged into the owning series' price-scale range for the visible logical range
    * `from..to` — use it to expand the scale around graphics drawn outside the data's range.
    * Called every frame while attached; keep it cheap. `null` = no contribution.
    */
   autoscale_info?(from: number, to: number): { min: number; max: number } | null;
   /**
-   * Hit test called on hover (LWC `ISeriesPrimitiveBase.hitTest`), in the same absolute
+   * Hit test called on hover (reference `ISeriesPrimitiveBase.hitTest`), in the same absolute
    * bitmap-px coordinate space the draw context uses — cache geometry from the view
    * renderers and test against it here. A hit reports the owning series as
-   * `mouse_event_params.hovered_series` alongside `hovered_object_id` (LWC's hit source IS
+   * `mouse_event_params.hovered_series` alongside `hovered_object_id` (the reference's hit source IS
    * the series) and applies `cursor_style` to the chart; return `null` for a miss.
    */
   hit_test?(x: number, y: number): primitive_hit_result | null;

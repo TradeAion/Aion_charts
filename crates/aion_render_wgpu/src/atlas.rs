@@ -1,5 +1,5 @@
 //! Label atlas: whole label strings rasterized (by the host, e.g. Canvas2D) and shelf-packed
-//! into one RGBA texture. Caching whole strings mirrors LWC's `TextWidthCache` granularity —
+//! into one RGBA texture. Caching whole strings mirrors the reference's `TextWidthCache` granularity —
 //! axis labels are few and short, so string-level caching beats per-glyph complexity.
 
 use std::collections::HashMap;

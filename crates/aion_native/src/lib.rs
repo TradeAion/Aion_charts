@@ -3,7 +3,7 @@
 //! Implements [`Canvas2d`] on top of [`tiny_skia`] — a pure-Rust CPU rasterizer, no system deps —
 //! so the same `Prim` draw-list IR the WebGPU backend renders can also be rasterized to a
 //! [`tiny_skia::Pixmap`] and saved as a PNG. This is the deterministic render path the roadmap
-//! calls for: golden-image tests (compare against lightweight-charts reference PNGs) and
+//! calls for: golden-image tests (compare against the reference charting library's PNGs) and
 //! server-side chart rendering, all off-GPU.
 
 pub mod engine_scene;

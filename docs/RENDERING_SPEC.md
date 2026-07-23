@@ -1,7 +1,7 @@
 # Aion Charts — Pixel-Fidelity Rendering Specification
 
-This document captures the **exact rendering math of TradingView lightweight-charts v5** (studied from
-`tmp/lightweight-charts/src`). Our Rust/WebGPU engine must reproduce these formulas to be visually
+This document captures the **exact rendering math of the reference charting library v5** (studied from
+`tmp/refsrc/src`). Our Rust/WebGPU engine must reproduce these formulas to be visually
 indistinguishable. Every formula below is transcribed from the source with file references.
 
 Conventions:
@@ -248,7 +248,7 @@ Horizontal/vertical 1-px-class lines get the classic half-pixel correction:
 - Vertical line spans all panes; horizontal only on the pane under the cursor.
 - Position: `index = coordinateToIndex(x)` clamped to visible strict range; crosshair x snaps to
   `indexToCoordinate(index)` (bar center), i.e. **snapping to bars is index-quantized**.
-- Magnet (LWC's default mode; Aion deliberately defaults to Normal): finds, among visible series containing that index, the closest of
+- Magnet (the reference's default mode; Aion deliberately defaults to Normal): finds, among visible series containing that index, the closest of
   (Close) — or (O,H,L,C) in MagnetOHLC mode — in *pixel* space, and snaps `y`/price to it.
   In Magnet mode the horizontal line/price is locked to series values; Normal mode follows the mouse.
 - Crosshair marker (on line/area series): radius 4px circle + 2px stroke (crosshairMarkerRadius default 4).
@@ -336,7 +336,7 @@ timeVisible/secondsVisible). Labels with weight ≥ max weight on screen render 
 (if allowBoldLabels); max weight is clamped down to Hour1 for intraday sub-day weights.
 Crosshair time label and tick text use the same box metrics as the price axis
 (paddingHorizontal for width). Time is UTC-based; timezone support = shift timestamps (documented
-LWC approach) or custom tickMarkFormatter/timeFormatter.
+reference approach) or custom tickMarkFormatter/timeFormatter.
 
 ## 12. Layout & canvas layering — `chart-widget.ts`, `pane-widget.ts`
 

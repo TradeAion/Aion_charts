@@ -152,7 +152,7 @@ fn series_primitive_autoscale_is_gated_on_owning_series_visibility() {
     chart.time_scale.set_width(800.0);
     chart.fit_content();
 
-    // LWC price-scale.ts `_recalculatePriceRangeImpl` skips invisible sources, and series.ts
+    // reference price-scale.ts `_recalculatePriceRangeImpl` skips invisible sources, and series.ts
     // merges primitive ranges into the series' own autoscale info — a hidden owning series
     // therefore silences its primitives' contributions.
     chart.set_series_visible(0, false);
@@ -360,7 +360,7 @@ fn marker_autoscale_margins_are_headless_and_can_be_disabled() {
     chart.time_scale.set_width(800.0);
     chart.fit_content();
     chart.build_frame();
-    // Two fitted bars clamp marker geometry to LWC's maximum spacing bucket.
+    // Two fitted bars clamp marker geometry to the reference's maximum spacing bucket.
     assert_eq!(chart.panes[0].marker_margin_above, 48.0);
     assert_eq!(chart.panes[0].marker_margin_below, 0.0);
 
@@ -550,7 +550,7 @@ fn left_price_scale_owns_range_axis_labels_and_pane_origin() {
 }
 
 #[test]
-fn series_data_and_logical_range_queries_match_lwc_gap_semantics() {
+fn series_data_and_logical_range_queries_match_reference_gap_semantics() {
     let mut chart = ChartEngine::new(300.0, 200.0, 1.0);
     let times = (0..=10).map(|time| time as f64 * 10.0).collect::<Vec<_>>();
     let values = (0..=10).map(|value| value as f64).collect::<Vec<_>>();
@@ -793,7 +793,7 @@ fn interaction_disabled_flag_reaches_the_time_scale() {
     chart.fit_content();
     chart.set_bar_spacing(10.0);
 
-    // LWC `_isAllScalingAndScrollingDisabled`: with the flag pushed, the scale behaves as if
+    // reference `_isAllScalingAndScrollingDisabled`: with the flag pushed, the scale behaves as if
     // both edges were fixed â€” future whitespace clamps away like fixRightEdge.
     chart.set_interaction_disabled(true);
     chart.set_right_offset(5.0);
@@ -872,7 +872,7 @@ fn remove_series_tombstones_slot_and_drops_derived_indicators() {
     assert!(report.is_clean());
     assert!(chart.series_data(extra).is_empty());
 
-    // LWC `removeSeries` accepts any series: even the primary (id 0) tombstones now.
+    // reference `removeSeries` accepts any series: even the primary (id 0) tombstones now.
     assert!(chart.remove_series(0));
     assert!(!chart.remove_series(0));
 }
@@ -921,7 +921,7 @@ fn retained_frame_reuses_pane_buffers() {
 
 #[test]
 fn frame_pane_top_layer_is_retained_per_frame() {
-    // The `top` layer is host-appended (pane primitives, LWC zOrder "top") after frame
+    // The `top` layer is host-appended (pane primitives, reference zOrder "top") after frame
     // construction; the engine owns clearing it between retained-frame rebuilds exactly like
     // `under`/`main`, so a stale top prim can never survive into the next frame.
     let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
@@ -1016,7 +1016,7 @@ fn grid_line_style_and_color_flow_from_options() {
         }
     )));
 
-    // LWC numeric styles (2 dashed, 3 large-dashed) + per-family colors reach the frame.
+    // reference numeric styles (2 dashed, 3 large-dashed) + per-family colors reach the frame.
     chart
         .options
         .apply_str(
@@ -1057,7 +1057,7 @@ fn crosshair_line_style_and_width_flow_from_options() {
     chart.fit_content();
     chart.crosshair = Some((200.0, 120.0));
 
-    // Default: LWC LargeDashed crosshair at the crisp 1px width.
+    // Default: reference LargeDashed crosshair at the crisp 1px width.
     let mut frame = ChartFrame::default();
     chart.build_frame_into(&mut frame);
     assert!(frame.panes[0].main.iter().any(|p| matches!(
@@ -1077,7 +1077,7 @@ fn crosshair_line_style_and_width_flow_from_options() {
         }
     )));
 
-    // Per-line LWC numeric style (1 dotted / 2 dashed) and lineWidth reach the frame.
+    // Per-line reference numeric style (1 dotted / 2 dashed) and lineWidth reach the frame.
     chart
         .options
         .apply_str(
@@ -1289,7 +1289,7 @@ fn price_line_extras_drive_line_and_axis_label_rendering() {
             .find(|l| l.text == "target")
     };
 
-    // Defaults (LWC price-line-options.ts): line drawn, boxed label in the line color with
+    // Defaults (reference price-line-options.ts): line drawn, boxed label in the line color with
     // contrast text.
     assert!(has_line(&mut chart));
     let label = find_label(&mut chart).expect("price-line label");
@@ -1330,7 +1330,7 @@ fn price_line_options_merge_and_serialize_round_trip() {
         "",
     );
 
-    // A partial patch merges: untouched keys keep their values (LWC merge semantics).
+    // A partial patch merges: untouched keys keep their values (reference merge semantics).
     assert!(chart.price_line_apply_options(
         id,
         r#"{"price":43.5,"line_style":"large_dashed","line_width":3,"title":"T","line_visible":false}"#
@@ -1420,7 +1420,7 @@ fn chart_json_routes_timescale_behavioral_options_patch_driven_only() {
 }
 
 #[test]
-fn max_bar_spacing_and_right_offset_pixels_setters_follow_lwc() {
+fn max_bar_spacing_and_right_offset_pixels_setters_follow_reference() {
     let mut chart = ChartEngine::new(300.0, 200.0, 1.0);
     chart
         .set_series_data(
@@ -1528,7 +1528,7 @@ fn series_options_json_covers_the_ts_field_set() {
     assert_eq!(options["point_markers"], true);
     assert_eq!(options["visible"], false);
 
-    // Scale targeting maps to the LWC priceScaleId values; removed series report nothing.
+    // Scale targeting maps to the reference priceScaleId values; removed series report nothing.
     let overlay = chart.add_series(SeriesKind::Histogram);
     chart.series[overlay].overlay = true;
     let left = chart.add_series(SeriesKind::Line);
@@ -1584,8 +1584,8 @@ fn time_scale_options_json_covers_all_fields() {
 }
 
 #[test]
-fn series_style_options_default_to_lwc() {
-    // LWC defaults: api/options/series-options-defaults.ts (common) and the per-kind style
+fn series_style_options_default_to_reference() {
+    // reference defaults: api/options/series-options-defaults.ts (common) and the per-kind style
     // defaults in model/series/{line,area,baseline,bar,histogram}-series.ts.
     let chart = ChartEngine::new(800.0, 500.0, 1.0);
     let options: serde_json::Value =
@@ -1737,7 +1737,7 @@ fn series_apply_options_json_round_trips_all_new_fields() {
 #[test]
 fn series_apply_options_json_round_trips_color_strings_verbatim() {
     let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
-    // LWC stores the user's color string verbatim: hex case, rgba() spacing, and named colors
+    // reference stores the user's color string verbatim: hex case, rgba() spacing, and named colors
     // all come back from options() exactly as applied (named colors the renderer cannot parse
     // fall back to the default at render time, but still round-trip).
     assert!(chart.series_apply_options_json(
@@ -1790,7 +1790,7 @@ fn series_apply_options_json_ignores_unknown_keys_and_bad_input() {
     assert_eq!(options["price_line_width"], 1.0);
     assert_eq!(options["price_line_color"], "");
 
-    // A partial patch merges: untouched keys keep their values (LWC merge semantics).
+    // A partial patch merges: untouched keys keep their values (reference merge semantics).
     assert!(chart.series_apply_options_json(0, r#"{"line_style": 3}"#));
     let options: serde_json::Value =
         serde_json::from_str(&chart.series_options_json(0).unwrap()).unwrap();
@@ -1806,7 +1806,7 @@ fn series_apply_options_json_ignores_unknown_keys_and_bad_input() {
     assert_eq!(options["line_style"], 3);
 }
 
-// --- per-data-point colors (LWC data-item colors) ---
+// --- per-data-point colors (reference data-item colors) ---
 
 /// Line chart with four bars and a red body override on bar 1.
 fn point_colored_chart() -> ChartEngine {
@@ -1848,7 +1848,7 @@ fn point_colors_validate_lengths_and_reset_on_set_data() {
     assert!(!chart.data.has_point_colors(0));
 }
 
-/// Body-channel override at `row` (LWC data-item color), for the point-color tests.
+/// Body-channel override at `row` (reference data-item color), for the point-color tests.
 fn body_color_at(chart: &ChartEngine, id: SeriesId, row: usize) -> Option<u32> {
     chart.data.point_color(
         id,
@@ -1931,12 +1931,12 @@ fn point_colors_follow_the_winning_row_under_dedupe() {
         .is_err());
 }
 
-// --- per-series price_format (LWC PriceFormat) ---
+// --- per-series price_format (reference PriceFormat) ---
 
 #[test]
 fn price_format_defaults_and_options_round_trip() {
     let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
-    // LWC series-options-defaults.ts: {type:'price', precision:2, minMove:0.01}.
+    // reference series-options-defaults.ts: {type:'price', precision:2, minMove:0.01}.
     let options: serde_json::Value =
         serde_json::from_str(&chart.series_options_json(0).unwrap()).unwrap();
     assert_eq!(
@@ -1949,7 +1949,7 @@ fn price_format_defaults_and_options_round_trip() {
     assert!(chart.series_apply_price_format_json(0, r#"{"type": "volume", "precision": 1}"#));
     let options: serde_json::Value =
         serde_json::from_str(&chart.series_options_json(0).unwrap()).unwrap();
-    // LWC's PriceFormatVolume is exactly {type:"volume"}; the apply-time precision superset is
+    // the reference's PriceFormatVolume is exactly {type:"volume"}; the apply-time precision superset is
     // kept by the formatter but not serialized.
     assert_eq!(
         options["price_format"],
@@ -2022,7 +2022,7 @@ fn price_format_drives_last_value_label_and_ticks() {
     assert!(texts.iter().any(|t| t == "2.5M"), "{texts:?}");
     assert!(!texts.iter().any(|t| t == "2500000.00"), "{texts:?}");
 
-    // Percent format: a % sign (precision as decimal digits; see the LWC-quirk note at
+    // Percent format: a % sign (precision as decimal digits; see the reference-quirk note at
     // `format_with_price_format`).
     assert!(chart.series_apply_price_format_json(0, r#"{"type": "percent", "precision": 0}"#));
     let texts = label_texts(&mut chart);
@@ -2058,7 +2058,7 @@ fn price_format_custom_fn_invocation_and_clearing() {
             .collect::<Vec<_>>()
     };
 
-    // The custom fn drives the series' labels (LWC priceFormat.formatter).
+    // The custom fn drives the series' labels (reference priceFormat.formatter).
     assert!(chart.set_series_price_formatter(0, Box::new(|price| Some(format!("P{price:.1}"))),));
     let texts = label_texts(&mut chart);
     assert!(texts.iter().any(|t| t == "P12.0"), "{texts:?}");
@@ -2070,7 +2070,7 @@ fn price_format_custom_fn_invocation_and_clearing() {
         serde_json::json!({"type": "custom", "min_move": 0.01})
     );
 
-    // `{type:"custom"}` keeps the installed fn (LWC merge of a partial priceFormat patch).
+    // `{type:"custom"}` keeps the installed fn (reference merge of a partial priceFormat patch).
     assert!(chart.series_apply_price_format_json(0, r#"{"type": "custom", "min_move": 0.5}"#));
     let texts = label_texts(&mut chart);
     assert!(texts.iter().any(|t| t == "P12.0"), "{texts:?}");
@@ -2170,7 +2170,7 @@ fn price_format_labels_follow_their_owning_series() {
 }
 
 // ---- wave: shiftVisibleRangeOnNewBar / whitespace / pop / lastValueData / programmatic ----
-// ---- crosshair / locale / series order / verbatim colors (LWC ports; see item refs)   ----
+// ---- crosshair / locale / series order / verbatim colors (reference ports; see item refs)   ----
 
 /// Install `n` ascending real bars (close = 100 + i) on series 0 and lay out the scale.
 fn install_bars(chart: &mut ChartEngine, n: usize) {
@@ -2184,7 +2184,7 @@ fn install_bars(chart: &mut ChartEngine, n: usize) {
 
 #[test]
 fn new_bar_shift_follows_at_the_right_edge() {
-    // LWC chart-model.ts:968-983: last bar visible + shiftVisibleRangeOnNewBar (default
+    // reference chart-model.ts:968-983: last bar visible + shiftVisibleRangeOnNewBar (default
     // true) -> no right-offset compensation, the view follows the new bar.
     let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
     install_bars(&mut chart, 10);
@@ -2220,7 +2220,7 @@ fn new_bar_compensation_when_shift_disabled_at_the_edge() {
     chart.update_series_bar(0, 11.0, [109.0, 110.0, 108.0, 109.0]);
     assert_eq!(chart.right_offset(), -1.0);
     // After the compensation the last bar is outside the visible range, so the next append
-    // keeps compensating even with the option back on (LWC parity: the view stays put).
+    // keeps compensating even with the option back on (reference parity: the view stays put).
     chart.set_shift_visible_range_on_new_bar(true);
     chart.update_series_bar(0, 12.0, [110.0, 111.0, 109.0, 110.0]);
     assert_eq!(chart.right_offset(), -2.0);
@@ -2262,7 +2262,7 @@ fn time_scale_shift_options_route_via_json_and_round_trip() {
     let mut chart = ChartEngine::new(300.0, 200.0, 1.0);
     let options: serde_json::Value =
         serde_json::from_str(&chart.time_scale_options_json()).unwrap();
-    // LWC defaults (time-scale-options-defaults.ts:17-18)
+    // reference defaults (time-scale-options-defaults.ts:17-18)
     assert_eq!(options["shift_visible_range_on_new_bar"], true);
     assert_eq!(
         options["allow_shift_visible_range_on_whitespace_replacement"],
@@ -2282,7 +2282,7 @@ fn time_scale_shift_options_route_via_json_and_round_trip() {
     );
 }
 
-// ---- whitespace data items (LWC {time}-only rows) ----
+// ---- whitespace data items (reference {time}-only rows) ----
 
 #[test]
 fn whitespace_rows_draw_nothing_but_keep_their_slots() {
@@ -2300,7 +2300,7 @@ fn whitespace_rows_draw_nothing_but_keep_their_slots() {
             &[10.0, 11.0, nan, 12.0, 13.0],
         )
         .unwrap();
-    // the whitespace time keeps its merged slot (LWC keeps the time-scale point)
+    // the whitespace time keeps its merged slot (reference keeps the time-scale point)
     assert_eq!(chart.data.merged_times(), &[1, 2, 3, 4, 5]);
     chart.time_scale.set_width(800.0);
     chart.fit_content();
@@ -2327,7 +2327,7 @@ fn whitespace_update_replaces_the_bar_and_skips_last_value() {
     let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
     install_bars(&mut chart, 3);
     chart.fit_content();
-    // LWC `series.update` with a {time}-only item replaces the last bar with whitespace.
+    // reference `series.update` with a {time}-only item replaces the last bar with whitespace.
     assert!(chart.update_series_bar(0, 3.0, [nan, nan, nan, nan]));
     let data = chart.series_data(0);
     assert_eq!(data.len(), 3);
@@ -2550,7 +2550,7 @@ fn date_format_drives_the_crosshair_time_label() {
         .unwrap();
     chart.time_scale.set_width(800.0);
     chart.fit_content();
-    // LWC default `dd MMM 'yy`
+    // reference default `dd MMM 'yy`
     assert_eq!(
         crosshair_time_label(&mut chart, ts).as_deref(),
         Some("25 Jun '18")
@@ -2565,7 +2565,7 @@ fn date_format_drives_the_crosshair_time_label() {
         crosshair_time_label(&mut chart, ts).as_deref(),
         Some("June 25, 2018")
     );
-    // options JSON routing (LWC `applyOptions({ localization })`)
+    // options JSON routing (reference `applyOptions({ localization })`)
     chart
         .apply_options(r#"{"localization":{"dateFormat":"d/M/yy"}}"#)
         .unwrap();
@@ -2761,7 +2761,7 @@ fn unparseable_verbatim_colors_fall_back_at_render_time() {
     chart.series[0].up_color = Some("rebeccapurple".to_string()); // stored, unparseable
     chart.time_scale.set_width(800.0);
     chart.fit_content();
-    // the up bars render with the LWC default UP color (0x26a69a), not the stored string
+    // the up bars render with the reference default UP color (0x26a69a), not the stored string
     let up = Color::rgb(0x26, 0xa6, 0x9a);
     let frame = chart.build_frame();
     assert!(frame.panes[0]
@@ -2774,7 +2774,7 @@ fn unparseable_verbatim_colors_fall_back_at_render_time() {
     assert_eq!(options["up_color"], "rebeccapurple");
 }
 
-// ---- wave: LWC v5 panes API + scale/time cosmetics + background gradient + separator ----
+// ---- wave: reference v5 panes API + scale/time cosmetics + background gradient + separator ----
 // ---- hover (chart-api.ts/pane-api.ts, price/time-scale options, pane-separator.ts)    ----
 
 #[test]
@@ -2784,7 +2784,7 @@ fn panes_add_remove_swap_move_and_series_movement() {
     let second = chart.add_series(SeriesKind::Line);
     let third = chart.add_series(SeriesKind::Histogram);
 
-    // addPane appends and reports the new index (LWC chart-api.ts addPane).
+    // addPane appends and reports the new index (reference chart-api.ts addPane).
     let pane1 = chart.add_pane(false);
     assert_eq!(pane1, 1);
     let pane2 = chart.add_pane(true);
@@ -2797,7 +2797,7 @@ fn panes_add_remove_swap_move_and_series_movement() {
     assert_eq!(chart.pane_series_ids(0), vec![0]);
     assert_eq!(chart.pane_series_ids(1), vec![second]);
     assert_eq!(chart.pane_series_ids(2), vec![third]);
-    // Render order within a pane: bottom first (LWC pane.ts orderedSources).
+    // Render order within a pane: bottom first (reference pane.ts orderedSources).
     let fourth = chart.add_series(SeriesKind::Area);
     chart.set_series_pane(fourth, 1, 1.0);
     assert_eq!(chart.pane_series_ids(1), vec![second, fourth]);
@@ -2819,7 +2819,7 @@ fn panes_add_remove_swap_move_and_series_movement() {
     assert!(chart.move_pane(0, 0), "same-index move is a no-op success");
     assert!(!chart.move_pane(0, 9), "stale target rejected");
 
-    // removePane orphans the pane's series (LWC paneForSource -> null): they keep their
+    // removePane orphans the pane's series (reference paneForSource -> null): they keep their
     // data but render/scale nowhere; panes below shift one index up.
     assert!(chart.remove_pane(0));
     assert_eq!(chart.panes.len(), 2);
@@ -2828,7 +2828,7 @@ fn panes_add_remove_swap_move_and_series_movement() {
     assert_eq!(chart.pane_series_ids(0), vec![0]);
     assert_eq!(chart.pane_series_ids(1), vec![third]);
     // A pane-less series re-assigned to a live pane renders again (ids in z-order, not
-    // assignment order — LWC pane.ts orderedSources).
+    // assignment order — reference pane.ts orderedSources).
     chart.set_series_pane(second, 1, 1.0);
     assert_eq!(chart.pane_series_ids(1), vec![second, third]);
     assert!(!chart.remove_pane(9), "stale index rejected");
@@ -2848,7 +2848,7 @@ fn preserve_empty_pruning_on_series_removal_and_move_out() {
     chart.set_series_pane(second, 1, 1.0);
     assert_eq!(chart.panes.len(), 2);
 
-    // Moving the series back collapses the emptied, non-preserved pane (LWC
+    // Moving the series back collapses the emptied, non-preserved pane (reference
     // chart-model.ts `_cleanupIfPaneIsEmpty` on moveSeriesToPane).
     chart.set_series_pane(second, 0, 1.0);
     assert_eq!(chart.panes.len(), 1, "empty non-preserved pane collapses");
@@ -2896,7 +2896,7 @@ fn price_scale_apply_options_json_round_trip_and_chart_group_routing() {
     assert_eq!(options["minimum_width"], 80.0);
     assert_eq!(options["text_color"], "#ff0000");
 
-    // LWC defaults on an untouched scale; a stale pane answers None/false.
+    // reference defaults on an untouched scale; a stale pane answers None/false.
     let defaults: serde_json::Value = serde_json::from_str(
         &chart
             .price_scale_options_json(0, PriceScaleTarget::Left)
@@ -2932,7 +2932,7 @@ fn price_scale_apply_options_json_round_trip_and_chart_group_routing() {
     .unwrap();
     assert_eq!(cleared["text_color"], serde_json::Value::Null);
 
-    // Chart-group routing (LWC pane.ts applyScaleOptions): a `rightPriceScale` patch
+    // Chart-group routing (reference pane.ts applyScaleOptions): a `rightPriceScale` patch
     // applies the five camelCase keys to every pane's right scale, present keys only.
     let extra = chart.add_series(SeriesKind::Line);
     chart.set_series_pane(extra, 1, 1.0);
@@ -2950,7 +2950,7 @@ fn price_scale_apply_options_json_round_trip_and_chart_group_routing() {
         );
         assert!(!pane.left_scale.options().align_labels);
     }
-    // A pane added afterwards inherits the merged chart-level cosmetics (LWC Pane
+    // A pane added afterwards inherits the merged chart-level cosmetics (reference Pane
     // constructor `_createPriceScale` from the chart options).
     let pane_index = chart.add_pane(false);
     assert!(chart.panes[pane_index].price_scale.options().ticks_visible);
@@ -2962,7 +2962,7 @@ fn time_axis_options_height_floor_visibility_collapse_and_char_length() {
     let mut chart = ChartEngine::new(800.0, 500.0, 1.0);
     install_bars(&mut chart, 200);
 
-    // LWC chart-widget.ts `Math.max(optimalHeight(), minimumHeight)`: the auto 28px
+    // reference chart-widget.ts `Math.max(optimalHeight(), minimumHeight)`: the auto 28px
     // strip is floored at `minimumHeight`; `visible:false` collapses it to zero.
     assert_eq!(chart.time_axis_height(), 28.0);
     chart.set_time_axis_minimum_height(40.0);
@@ -2992,7 +2992,7 @@ fn time_axis_options_height_floor_visibility_collapse_and_char_length() {
     chart.set_time_visible(true);
 
     // tickMarkMaxCharacterLength widens/narrows the mark spacing; 0 restores the
-    // default 8 (LWC time-scale.ts `|| defaultTickMarkMaxCharacterLength`).
+    // default 8 (reference time-scale.ts `|| defaultTickMarkMaxCharacterLength`).
     let marks = |chart: &mut ChartEngine| {
         let width = (12.0 + 4.0) * 5.0 / 8.0 * f64::from(chart.tick_mark_max_character_length);
         chart.time_marks(width).len()
@@ -3060,7 +3060,7 @@ fn background_vertical_gradient_emits_a_per_pane_prim_solid_emits_none() {
         .iter()
         .any(|p| matches!(p, Prim::Background { .. })));
 
-    // LWC VerticalGradient: one prim per pane spanning that pane's full bitmap rect,
+    // reference VerticalGradient: one prim per pane spanning that pane's full bitmap rect,
     // first in the under layer (behind the grid).
     chart
         .apply_options(

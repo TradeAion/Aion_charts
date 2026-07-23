@@ -1,11 +1,11 @@
 /**
  * Pointer/wheel/keyboard gesture recognizer wired onto the axis/input overlay canvas.
  *
- * Beyond pan/zoom/crosshair it implements LWC-parity interactions:
+ * Beyond pan/zoom/crosshair it implements reference parity interactions:
  * - axis drag-to-scale (price axis = vertical, time axis = horizontal),
- * - kinetic (momentum) scroll after a flick (a faithful port of LWC's `KineticAnimation`),
- * - touch: raw touch events with LWC's direction classification — a drag the chart does not
- *   own is released so the browser scrolls the page (LWC does not use `touch-action: none`);
+ * - kinetic (momentum) scroll after a flick (a faithful port of the reference's `KineticAnimation`),
+ * - touch: raw touch events with the reference's direction classification — a drag the chart does not
+ *   own is released so the browser scrolls the page (reference does not use `touch-action: none`);
  *   long-press enters a crosshair "tracking" mode; two-finger pinch zooms,
  * - keyboard: arrows pan, +/- zoom, Home fit-content, Escape clear crosshair.
  * All behavior is gated by the resolved gesture config (`chart.gesture_config()`).
@@ -14,27 +14,27 @@
 import type { chart_impl } from "./impl.js";
 import { pane_index_of_y } from "./impl.js";
 
-const SLOP_MANHATTAN = 5; // px before a press becomes a drag (LWC CancelClick/CancelTapManhattanDistance)
+const SLOP_MANHATTAN = 5; // px before a press becomes a drag (reference CancelClick/CancelTapManhattanDistance)
 const SEP_HIT = 4; // css px hit tolerance around a pane boundary
-const LONGPRESS_MS = 240; // touch hold before entering crosshair tracking (LWC Delay.LongTap)
-const TAP_RESET_MS = 500; // window for a second tap to count as a double-tap (LWC Delay.ResetClick)
-const DBL_TAP_MANHATTAN = 30; // max distance between the taps of a double-tap (LWC DoubleTapManhattanDistance)
-const TOUCH_MOUSE_SUPPRESS_MS = 500; // ignore synthetic mouse events after a touch (LWC Delay.PreventFiresTouchEvents)
+const LONGPRESS_MS = 240; // touch hold before entering crosshair tracking (reference Delay.LongTap)
+const TAP_RESET_MS = 500; // window for a second tap to count as a double-tap (reference Delay.ResetClick)
+const DBL_TAP_MANHATTAN = 30; // max distance between the taps of a double-tap (reference DoubleTapManhattanDistance)
+const TOUCH_MOUSE_SUPPRESS_MS = 500; // ignore synthetic mouse events after a touch (reference Delay.PreventFiresTouchEvents)
 const KEY_SCROLL_MS = 160; // keyboard scroll animation (TradingView-style smooth step)
 
-// Kinetic coast constants in the px domain (LWC KineticScrollConstants; LWC divides them by the
+// Kinetic coast constants in the px domain (reference KineticScrollConstants; reference divides them by the
 // bar spacing to work in rightOffset units, we sample pointer px directly).
-const KINETIC_MIN_SPEED = 0.2; // px/ms flick speed needed to coast (LWC MinScrollSpeed)
-const KINETIC_MAX_SPEED = 7; // px/ms per-segment speed clamp (LWC MaxScrollSpeed)
-const KINETIC_DUMPING = 0.997; // per-ms velocity damping (LWC DumpingCoeff)
-const KINETIC_MIN_MOVE = 15; // px between samples (LWC ScrollMinMove)
-const KINETIC_MAX_START_DELAY = 50; // ms the last sample may lag the release (LWC MaxStartDelay)
-const KINETIC_EPSILON = 1; // px from the end position where the coast stops (LWC EpsilonDistance)
+const KINETIC_MIN_SPEED = 0.2; // px/ms flick speed needed to coast (reference MinScrollSpeed)
+const KINETIC_MAX_SPEED = 7; // px/ms per-segment speed clamp (reference MaxScrollSpeed)
+const KINETIC_DUMPING = 0.997; // per-ms velocity damping (reference DumpingCoeff)
+const KINETIC_MIN_MOVE = 15; // px between samples (reference ScrollMinMove)
+const KINETIC_MAX_START_DELAY = 50; // ms the last sample may lag the release (reference MaxStartDelay)
+const KINETIC_EPSILON = 1; // px from the end position where the coast stops (reference EpsilonDistance)
 
 type kinetic_sample = { x: number; t: number };
 
 /**
- * Faithful port of LWC `model/kinetic-animation.ts` in the px domain: release speed is the
+ * Faithful port of reference `model/kinetic-animation.ts` in the px domain: release speed is the
  * distance-weighted average of up to three consecutive same-direction segments, and the coast
  * follows `start + speed * (c^t − 1) / ln(c)`.
  */
@@ -47,7 +47,7 @@ class kinetic_animation {
   private duration_ms = 0;
   private speed = 0; // px/ms, signed
 
-  /** LWC `addPosition`: a new sample is pushed only after `KINETIC_MIN_MOVE` px of travel. */
+  /** reference `addPosition`: a new sample is pushed only after `KINETIC_MIN_MOVE` px of travel. */
   add_position(x: number, t: number): void {
     if (this.p1 !== null) {
       if (this.p1.t === t) {
@@ -62,7 +62,7 @@ class kinetic_animation {
     this.p1 = { x, t };
   }
 
-  /** LWC `start`: freeze the release speed; a no-op when the samples cannot sustain a coast. */
+  /** reference `start`: freeze the release speed; a no-op when the samples cannot sustain a coast. */
   start(x: number, t: number): void {
     if (this.p1 === null || this.p2 === null) return;
     if (t - this.p1.t > KINETIC_MAX_START_DELAY) return;
@@ -100,26 +100,26 @@ class kinetic_animation {
 
     this.anim_start = { x, t };
     this.speed = result;
-    // LWC `durationMSec`: time until the remaining travel shrinks to KINETIC_EPSILON px.
+    // reference `durationMSec`: time until the remaining travel shrinks to KINETIC_EPSILON px.
     const ln_c = Math.log(KINETIC_DUMPING);
     this.duration_ms = Math.log((KINETIC_EPSILON * ln_c) / -Math.abs(result)) / ln_c;
   }
 
-  /** LWC `getPosition`. Only meaningful while `!finished(t)`. */
+  /** reference `getPosition`. Only meaningful while `!finished(t)`. */
   position(t: number): number {
     const start = this.anim_start!;
     const dt = t - start.t;
     return start.x + (this.speed * (Math.pow(KINETIC_DUMPING, dt) - 1)) / Math.log(KINETIC_DUMPING);
   }
 
-  /** LWC `finished` (also true when `start` never engaged). */
+  /** reference `finished` (also true when `start` never engaged). */
   finished(t: number): boolean {
     if (this.anim_start === null) return true;
     return Math.min(t - this.anim_start.t, this.duration_ms) === this.duration_ms;
   }
 }
 
-/** Axis drag state, ported 1:1 from LWC's scale formulas (see `apply_axis_drag`):
+/** Axis drag state, ported 1:1 from the reference's scale formulas (see `apply_axis_drag`):
  * - price: `PriceScale.scaleTo` — snapshot scaled around its center by a start-relative ratio.
  * - time: `TimeScale.scaleTo` — bar spacing by the ratio of distances-from-right.
  */
@@ -127,7 +127,7 @@ type AxisDrag =
   | { kind: "price"; pane: number; target: number; pane_top: number; pane_h: number; start_y: number; start_from: number; start_to: number }
   | { kind: "time"; start_x: number; start_spacing: number };
 
-/** Where a press landed; drives the touch ownership rules (LWC's per-widget handlers). */
+/** Where a press landed; drives the touch ownership rules (the reference's per-widget handlers). */
 type press_region = "pane" | "price_axis" | "time_axis" | "separator";
 
 export function install_gestures(chart: chart_impl): () => void {
@@ -140,40 +140,40 @@ export function install_gestures(chart: chart_impl): () => void {
   let sep_hover = -1; // separator index last reported via set_separator_hover (-1 = none)
   let axis_drag: AxisDrag | null = null;
   let press_origin: { x: number; y: number } | null = null;
-  let moved = false; // mouse press moved past the click slop (LWC _cancelClick)
-  // Vertical price pan state (LWC `PriceScale.scrollTo`): snapshot of the dragged pane's range,
-  // armed only while the scale is NOT in autoscale (LWC `startScrollPrice` no-ops under it).
+  let moved = false; // mouse press moved past the click slop (reference _cancelClick)
+  // Vertical price pan state (reference `PriceScale.scrollTo`): snapshot of the dragged pane's range,
+  // armed only while the scale is NOT in autoscale (reference `startScrollPrice` no-ops under it).
   let price_pan: { pane: number; target: number; start_y: number; from: number; to: number; pane_h: number; invert: boolean } | null = null;
   let last_pan_x: number | null = null;
 
-  // --- touch-only state (mirrors the LWC `MouseEventHandler` fields) ---
-  let active_touch_id: number | null = null; // LWC tracks only the first touch (plus pinch)
+  // --- touch-only state (mirrors the reference `MouseEventHandler` fields) ---
+  let active_touch_id: number | null = null; // reference tracks only the first touch (plus pinch)
   let touch_start: { x: number; y: number } | null = null; // client coords at touchstart
   let touch_region: press_region = "pane";
-  let touch_moved = false; // exceeded the tap slop (LWC _touchMoveExceededManhattanDistance/_cancelTap)
-  let touch_released = false; // gesture released to page scroll (LWC _preventTouchDragProcess)
-  let touch_scrolling = false; // deferred scroll session started (LWC _isScrolling)
+  let touch_moved = false; // exceeded the tap slop (reference _touchMoveExceededManhattanDistance/_cancelTap)
+  let touch_released = false; // gesture released to page scroll (reference _preventTouchDragProcess)
+  let touch_scrolling = false; // deferred scroll session started (reference _isScrolling)
   let longpress_timer: ReturnType<typeof setTimeout> | null = null;
-  let long_tap_active = false; // LWC _longTapActive
+  let long_tap_active = false; // reference _longTapActive
   let tap_count = 0;
   let tap_timer: ReturnType<typeof setTimeout> | null = null;
   let tap_position = { x: 0, y: 0 }; // client coords of the first tap
   let last_touch_ts = 0;
   const touch_regions = new Map<number, press_region>();
 
-  // Crosshair tracking mode (LWC _startTrackPoint !== null).
+  // Crosshair tracking mode (reference _startTrackPoint !== null).
   let touch_tracking = false;
   let track_point: { x: number; y: number } | null = null;
   let init_crosshair: { x: number; y: number } | null = null;
-  let exit_tracking_on_next_try = false; // LWC _exitTrackingModeOnNextTry
+  let exit_tracking_on_next_try = false; // reference _exitTrackingModeOnNextTry
   let last_crosshair: { x: number; y: number } | null = null;
 
-  // Pinch (LWC _startPinchMiddlePoint !== null); the zoom anchor is fixed at pinch start.
+  // Pinch (reference _startPinchMiddlePoint !== null); the zoom anchor is fixed at pinch start.
   let pinch_active = false;
   let pinch_mid_x = 0;
   let pinch_start_dist = 0;
-  let pinch_prev_scale = 1; // LWC _prevPinchScale
-  let pinch_prevented = false; // LWC _pinchPrevented
+  let pinch_prev_scale = 1; // reference _prevPinchScale
+  let pinch_prevented = false; // reference _pinchPrevented
 
   let kinetic: kinetic_animation | null = null;
   let kinetic_raf: number | null = null;
@@ -233,7 +233,7 @@ export function install_gestures(chart: chart_impl): () => void {
     chart.emit_crosshair(x, y);
   };
 
-  // LWC `_firesTouchEvents`: synthetic mouse events fire within 500 ms of the last touch.
+  // reference `_firesTouchEvents`: synthetic mouse events fire within 500 ms of the last touch.
   const fires_touch_events = (e: { timeStamp: number; sourceCapabilities?: unknown }): boolean => {
     const caps = e.sourceCapabilities as { firesTouchEvents?: boolean } | null | undefined;
     if (caps && caps.firesTouchEvents !== undefined) return caps.firesTouchEvents;
@@ -295,7 +295,7 @@ export function install_gestures(chart: chart_impl): () => void {
     kinetic = enabled ? new kinetic_animation() : null;
     kinetic?.add_position(x, performance.now());
   };
-  /** Arm the vertical price pan on `pane` at `start_y` (LWC `startScrollPrice`): prefers the
+  /** Arm the vertical price pan on `pane` at `start_y` (reference `startScrollPrice`): prefers the
    * right scale, falls back to the left; skipped under autoscale or an unresolvable range. */
   const arm_price_pan = (pane: number, start_y: number) => {
     price_pan = null;
@@ -336,7 +336,7 @@ export function install_gestures(chart: chart_impl): () => void {
   const apply_axis_drag = (p: { x: number; y: number }) => {
     if (axis_drag === null) return;
     if (axis_drag.kind === "price") {
-      // LWC `PriceScale.scaleTo`: the drag-start range snapshot is scaled around its center by
+      // reference `PriceScale.scaleTo`: the drag-start range snapshot is scaled around its center by
       // `(startY + (h-1)*0.2) / (currentY + (h-1)*0.2)` — both measured up from the pane bottom.
       const x = Math.max(0, axis_drag.pane_h - (p.y - axis_drag.pane_top));
       const coeff = Math.max(
@@ -347,7 +347,7 @@ export function install_gestures(chart: chart_impl): () => void {
       const half = ((axis_drag.start_to - axis_drag.start_from) / 2) * coeff;
       wasm.set_price_scale_visible_range(axis_drag.pane, axis_drag.target, mid - half, mid + half);
     } else {
-      // LWC `TimeScale.scaleTo`: start spacing times the ratio of the distances from the pane's
+      // reference `TimeScale.scaleTo`: start spacing times the ratio of the distances from the pane's
       // right edge at the current vs the drag-start x (drag right = zoom out).
       const pane_w = wasm.time_scale_width();
       const start_length = Math.min(Math.max(pane_w - p.x, 0), pane_w);
@@ -365,7 +365,7 @@ export function install_gestures(chart: chart_impl): () => void {
   };
   const apply_price_pan = (y: number) => {
     if (price_pan === null) return;
-    // Vertical price pan (LWC `PriceScale.scrollTo`): shift the press-time snapshot by
+    // Vertical price pan (reference `PriceScale.scrollTo`): shift the press-time snapshot by
     // dy * span/(h-1) — drag down moves the range up, so the candles follow the cursor.
     const dy = (y - price_pan.start_y) * (price_pan.invert ? -1 : 1);
     const shift = (dy * (price_pan.to - price_pan.from)) / (price_pan.pane_h - 1);
@@ -383,7 +383,7 @@ export function install_gestures(chart: chart_impl): () => void {
     sep_drag = null;
     axis_drag = null;
     price_pan = null;
-    // separator drag takes precedence over any pan/scale (LWC layout.panes.enableResize gates it)
+    // separator drag takes precedence over any pan/scale (reference layout.panes.enableResize gates it)
     const si = separator_at(p.y);
     if (si >= 0) {
       if (cfg.panes_resize) {
@@ -398,7 +398,7 @@ export function install_gestures(chart: chart_impl): () => void {
     if (price_target !== null) {
       if (cfg.axis_scale_price) {
         const pane = pane_of(p.y);
-        // LWC `PriceScale.scaleTo` is a no-op in percentage and indexed-to-100 modes.
+        // reference `PriceScale.scaleTo` is a no-op in percentage and indexed-to-100 modes.
         const mode = wasm.price_scale_mode(pane, price_target);
         const range = wasm.price_scale_visible_range(pane, price_target);
         if (mode !== 2 && mode !== 3 && range.length === 2) {
@@ -425,10 +425,10 @@ export function install_gestures(chart: chart_impl): () => void {
   };
 
   // ---------------------------------------------------------------------------------------------
-  // Wheel (LWC chart-widget.ts `_onMousewheel` + `_determineWheelSpeedAdjustment`)
+  // Wheel (reference chart-widget.ts `_onMousewheel` + `_determineWheelSpeedAdjustment`)
   // ---------------------------------------------------------------------------------------------
 
-  // LWC `windowsChrome` = isChromiumBased() && isWindows(), resolved lazily for non-browser runs.
+  // reference `windowsChrome` = isChromiumBased() && isWindows(), resolved lazily for non-browser runs.
   let windows_chrome: boolean | null = null;
   const is_windows_chromium = (): boolean => {
     if (windows_chrome === null) {
@@ -451,7 +451,7 @@ export function install_gestures(chart: chart_impl): () => void {
         return 32;
     }
     // Chromium on Windows mis-scales wheel deltas on high-density displays (Chromium issues
-    // 1001735 / 1207308); LWC corrects by 1/devicePixelRatio for consistent scroll speed.
+    // 1001735 / 1207308); reference corrects by 1/devicePixelRatio for consistent scroll speed.
     return is_windows_chromium() ? 1 / window.devicePixelRatio : 1;
   };
 
@@ -469,7 +469,7 @@ export function install_gestures(chart: chart_impl): () => void {
       wasm.zoom(e.offsetX - wasm.pane_left(), zoom_scale);
     }
     if (do_scroll) {
-      // LWC `scrollChart(deltaX * -80)`: "80 is a made up coefficient, and minus is for the
+      // reference `scrollChart(deltaX * -80)`: "80 is a made up coefficient, and minus is for the
       // 'natural' scroll" — expressed as a scroll session spanning a single jump.
       wasm.scroll_start(0);
       wasm.scroll_move(delta_x * -80);
@@ -484,9 +484,9 @@ export function install_gestures(chart: chart_impl): () => void {
 
   const on_down = (e: PointerEvent) => {
     if (e.pointerType === "touch") return;
-    if (e.button !== 0) return; // primary button only (LWC _mouseDownHandler)
+    if (e.button !== 0) return; // primary button only (reference _mouseDownHandler)
     if (fires_touch_events(e)) return; // synthetic mouse event trailing a touch
-    // Any mouse activity cancels touch tracking mode (LWC `_onMouseEvent`).
+    // Any mouse activity cancels touch tracking mode (reference `_onMouseEvent`).
     touch_tracking = false;
     track_point = null;
     stop_kinetic();
@@ -503,12 +503,12 @@ export function install_gestures(chart: chart_impl): () => void {
     moved = false;
     const region = arm_press(p);
     if (region !== "pane") return;
-    // pane press: pan (time + price in one drag, like LWC).
+    // pane press: pan (time + price in one drag, like reference).
     if (chart.gesture_config().pan) {
       begin_scroll(p.x, "mouse");
       arm_price_pan(pane_of(p.y), p.y);
     }
-    // LWC `mouseDownEvent` places the crosshair at the press point.
+    // reference `mouseDownEvent` places the crosshair at the press point.
     set_crosshair(p.x, p.y);
     chart.repaint();
   };
@@ -516,10 +516,10 @@ export function install_gestures(chart: chart_impl): () => void {
   const on_move = (e: PointerEvent) => {
     if (e.pointerType === "touch") return;
     if (fires_touch_events(e)) return;
-    // Any mouse activity cancels touch tracking mode (LWC `_onMouseEvent`).
+    // Any mouse activity cancels touch tracking mode (reference `_onMouseEvent`).
     touch_tracking = false;
     track_point = null;
-    // Ignore moves driven by a non-primary button drag (LWC `_mouseMoveWithDownHandler`); a
+    // Ignore moves driven by a non-primary button drag (reference `_mouseMoveWithDownHandler`); a
     // hover (buttons === 0) or a left-drag (bit 0 set) passes.
     if (e.buttons !== 0 && (e.buttons & 1) === 0) return;
     const p = local_xy(e);
@@ -545,7 +545,7 @@ export function install_gestures(chart: chart_impl): () => void {
 
     if (pointers.has(e.pointerId)) pointers.set(e.pointerId, p);
     if (pointers.size > 0 && press_origin !== null && !moved) {
-      // LWC CancelClickManhattanDistance = 5 (Manhattan).
+      // reference CancelClickManhattanDistance = 5 (Manhattan).
       moved = Math.abs(p.x - press_origin.x) + Math.abs(p.y - press_origin.y) >= SLOP_MANHATTAN;
     }
 
@@ -555,7 +555,7 @@ export function install_gestures(chart: chart_impl): () => void {
       kinetic?.add_position(p.x, performance.now());
       apply_price_pan(p.y);
     }
-    // Crosshair: a hover over an axis strip leaves the crosshair at its last position (LWC's
+    // Crosshair: a hover over an axis strip leaves the crosshair at its last position (the reference's
     // axis strips are separate widgets that never forward moves to the pane). During an active
     // captured drag keep feeding positions; the engine clamps them into the pane.
     if (pointers.size > 0 || (price_axis_target_at(p) === null && !is_time_axis(p))) {
@@ -563,7 +563,7 @@ export function install_gestures(chart: chart_impl): () => void {
     }
     // Hover cursor feedback (no button pressed), resolved AFTER the crosshair feed refreshed
     // the hover hit-test, so a primitive's `hit_test` cursor applies on the same move it
-    // starts hitting (LWC applies the hovered source's cursorStyle on every crosshair move).
+    // starts hitting (reference applies the hovered source's cursorStyle on every crosshair move).
     if (pointers.size === 0) {
       const region_cursor =
         separator_at(p.y) >= 0 && chart.gesture_config().panes_resize
@@ -583,9 +583,9 @@ export function install_gestures(chart: chart_impl): () => void {
 
   const end_pointer = (e: PointerEvent) => {
     if (e.pointerType === "touch") return;
-    if (e.button !== 0) return; // primary button only (LWC _mouseUpHandler)
+    if (e.button !== 0) return; // primary button only (reference _mouseUpHandler)
     if (fires_touch_events(e)) return;
-    // Any mouse activity cancels touch tracking mode (LWC `_onMouseEvent`).
+    // Any mouse activity cancels touch tracking mode (reference `_onMouseEvent`).
     touch_tracking = false;
     track_point = null;
     pointers.delete(e.pointerId);
@@ -598,7 +598,7 @@ export function install_gestures(chart: chart_impl): () => void {
       axis_drag = null;
       return;
     }
-    // LWC `mouseUpEvent` ends the scroll (maybe starting a kinetic coast) but never hides the
+    // reference `mouseUpEvent` ends the scroll (maybe starting a kinetic coast) but never hides the
     // crosshair — that only happens on mouse leave, Escape, or a touch end.
     end_drag("mouse");
     chart.repaint();
@@ -617,7 +617,7 @@ export function install_gestures(chart: chart_impl): () => void {
   const on_leave = (e: PointerEvent) => {
     if (e.pointerType !== "mouse") return;
     if (fires_touch_events(e)) return;
-    // LWC `mouseLeaveEvent` hides the crosshair; an active captured drag is left alone.
+    // reference `mouseLeaveEvent` hides the crosshair; an active captured drag is left alone.
     if (pointers.size > 0) return;
     set_sep_hover(-1);
     chart.clear_hover(); // Phase C-d: release the hover hit + hovered-series z-bump
@@ -631,13 +631,13 @@ export function install_gestures(chart: chart_impl): () => void {
     const cfg = chart.gesture_config();
     const rect = overlay.getBoundingClientRect();
     if (y > rect.height - wasm.time_scale_height()) {
-      // LWC time-axis-widget mouseDoubleClickEvent (handleScale.axisDoubleClickReset.time).
+      // reference time-axis-widget mouseDoubleClickEvent (handleScale.axisDoubleClickReset.time).
       if (cfg.axis_dblclick_reset_time) {
         wasm.reset_time_scale();
         chart.repaint();
       }
     } else if (x < 0 || x > wasm.time_scale_width()) {
-      // LWC price-axis-widget mouseDoubleClickEvent (handleScale.axisDoubleClickReset.price).
+      // reference price-axis-widget mouseDoubleClickEvent (handleScale.axisDoubleClickReset.price).
       if (cfg.axis_dblclick_reset_price) {
         wasm.set_price_scale_auto_scale(pane_of(y), x < 0 ? 1 : 0, true);
         chart.repaint();
@@ -659,15 +659,15 @@ export function install_gestures(chart: chart_impl): () => void {
     chart.emit_click(p.x, p.y);
   };
 
-  // LWC `preventScrollByWheelClick` (helpers/events.ts): suppress Chrome's middle-click
-  // autoscroll; registered Chrome-only like LWC (`window.chrome !== undefined`).
+  // reference `preventScrollByWheelClick` (helpers/events.ts): suppress Chrome's middle-click
+  // autoscroll; registered Chrome-only like reference (`window.chrome !== undefined`).
   const on_mousedown = (e: MouseEvent) => {
     if (e.button === 1) e.preventDefault();
   };
   const is_chrome = (window as unknown as { chrome?: unknown }).chrome !== undefined;
 
   // ---------------------------------------------------------------------------------------------
-  // Touch (LWC MouseEventHandler touch path: no touch-action CSS, conditional preventDefault)
+  // Touch (reference MouseEventHandler touch path: no touch-action CSS, conditional preventDefault)
   // ---------------------------------------------------------------------------------------------
 
   const event_ts = (e: Event): number => e.timeStamp || performance.now();
@@ -690,7 +690,7 @@ export function install_gestures(chart: chart_impl): () => void {
       case "time_axis":
         return true;
       case "separator":
-        // LWC only gives the separator a handler while layout.panes.enableResize is on.
+        // reference only gives the separator a handler while layout.panes.enableResize is on.
         return !cfg.panes_resize;
     }
   };
@@ -711,9 +711,9 @@ export function install_gestures(chart: chart_impl): () => void {
   const end_pinch = () => {
     pinch_active = false;
   };
-  /** LWC `_startPinch`: fixed middle anchor, initial distance, prev scale 1, stop kinetic. */
+  /** reference `_startPinch`: fixed middle anchor, initial distance, prev scale 1, stop kinetic. */
   const start_pinch = (touches: TouchList) => {
-    // LWC registers pinch on the pane widget only — it never engages from an axis strip.
+    // reference registers pinch on the pane widget only — it never engages from an axis strip.
     const a = touches[0]!;
     const b = touches[1]!;
     if (touch_regions.get(a.identifier) !== "pane" || touch_regions.get(b.identifier) !== "pane") return;
@@ -722,10 +722,10 @@ export function install_gestures(chart: chart_impl): () => void {
     pinch_start_dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
     pinch_prev_scale = 1;
     pinch_active = true;
-    stop_kinetic(); // LWC pinchStartEvent → stopTimeScaleAnimation
+    stop_kinetic(); // reference pinchStartEvent → stopTimeScaleAnimation
     clear_longpress();
   };
-  /** LWC `_checkPinchState`, evaluated on every touchstart/touchend. */
+  /** reference `_checkPinchState`, evaluated on every touchstart/touchend. */
   const check_pinch_state = (touches: TouchList) => {
     if (touches.length === 1) pinch_prevented = false;
     if (touches.length !== 2 || pinch_prevented || long_tap_active) {
@@ -769,7 +769,7 @@ export function install_gestures(chart: chart_impl): () => void {
     touch_released = false;
     touch_scrolling = false;
     long_tap_active = false;
-    // LWC `touchStartEvent`: a fresh touch while tracking arms the tracking-mode exit, and the
+    // reference `touchStartEvent`: a fresh touch while tracking arms the tracking-mode exit, and the
     // drag that follows re-anchors the crosshair on its current position.
     exit_tracking_on_next_try = touch_tracking;
     if (touch_tracking && last_crosshair !== null) {
@@ -777,13 +777,13 @@ export function install_gestures(chart: chart_impl): () => void {
       track_point = p;
     }
 
-    // LWC `longTapEvent` timer (Delay.LongTap); touchstart is passive — never preventDefault.
+    // reference `longTapEvent` timer (Delay.LongTap); touchstart is passive — never preventDefault.
     clear_longpress();
     longpress_timer = setTimeout(on_longpress, LONGPRESS_MS);
 
     arm_press(p); // deferred: scroll/scale state only engages on the first owned move
 
-    // LWC tap bookkeeping (Delay.ResetClick window for double-tap detection).
+    // reference tap bookkeeping (Delay.ResetClick window for double-tap detection).
     if (tap_timer === null) {
       tap_count = 0;
       tap_timer = setTimeout(reset_tap, TAP_RESET_MS);
@@ -791,7 +791,7 @@ export function install_gestures(chart: chart_impl): () => void {
     }
   };
 
-  /** LWC `longTapEvent`: enter tracking mode — crosshair at the press point, no panning. */
+  /** reference `longTapEvent`: enter tracking mode — crosshair at the press point, no panning. */
   const on_longpress = () => {
     longpress_timer = null;
     if (touch_moved || touch_released || active_touch_id === null || press_origin === null) return;
@@ -807,7 +807,7 @@ export function install_gestures(chart: chart_impl): () => void {
   };
 
   const on_touch_move = (e: TouchEvent) => {
-    // Pinch runs off the raw event (LWC `_initPinch`), ahead of the single-touch machinery.
+    // Pinch runs off the raw event (reference `_initPinch`), ahead of the single-touch machinery.
     if (pinch_active) {
       last_touch_ts = event_ts(e);
       if (e.touches.length === 2) {
@@ -815,7 +815,7 @@ export function install_gestures(chart: chart_impl): () => void {
         const b = e.touches[1]!;
         const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
         if (chart.gesture_config().pinch_zoom) {
-          // LWC PaneWidget.pinchEvent: incremental scale ×5, no clamp (the engine clamps spacing).
+          // reference PaneWidget.pinchEvent: incremental scale ×5, no clamp (the engine clamps spacing).
           const scale = dist / pinch_start_dist;
           const zoom_scale = (scale - pinch_prev_scale) * 5;
           pinch_prev_scale = scale;
@@ -835,7 +835,7 @@ export function install_gestures(chart: chart_impl): () => void {
     if (touch_released) return;
 
     // Any move of the first touch before the second arrives prevents a later pinch
-    // (LWC `_pinchPrevented` — "prevent pinch if move event comes faster than the second touch").
+    // (reference `_pinchPrevented` — "prevent pinch if move event comes faster than the second touch").
     pinch_prevented = true;
 
     const dx = Math.abs(touch.clientX - touch_start!.x);
@@ -844,7 +844,7 @@ export function install_gestures(chart: chart_impl): () => void {
     if (!touch_moved && manhattan < SLOP_MANHATTAN) return;
 
     if (!touch_moved) {
-      // First move past the tap slop: classify the drag (LWC `_touchMoveHandler`). The halved
+      // First move past the tap slop: classify the drag (reference `_touchMoveHandler`). The halved
       // x offset makes vertical drags win ties — "we scroll the page vertically more often".
       touch_moved = true;
       const corrected_x = dx * 0.5;
@@ -854,7 +854,7 @@ export function install_gestures(chart: chart_impl): () => void {
       clear_longpress();
       reset_tap();
       if (!chart_owns) {
-        // The page owns this gesture: release it and ignore the rest (LWC _preventTouchDragProcess).
+        // The page owns this gesture: release it and ignore the rest (reference _preventTouchDragProcess).
         touch_released = true;
         if (touch_scrolling) {
           touch_scrolling = false;
@@ -869,7 +869,7 @@ export function install_gestures(chart: chart_impl): () => void {
     const p = local_xy(touch);
 
     if (touch_tracking) {
-      // Tracking mode: the drag moves the crosshair relative to its anchor (LWC `touchMoveEvent`)
+      // Tracking mode: the drag moves the crosshair relative to its anchor (reference `touchMoveEvent`)
       // and disarms the exit a fresh touch had armed.
       exit_tracking_on_next_try = false;
       if (init_crosshair !== null && track_point !== null) {
@@ -892,7 +892,7 @@ export function install_gestures(chart: chart_impl): () => void {
 
     if (touch_region === "pane") {
       if (!touch_scrolling) {
-        // Deferred scroll start (LWC begins scrolling on the first qualifying move).
+        // Deferred scroll start (reference begins scrolling on the first qualifying move).
         touch_scrolling = true;
         begin_scroll(p.x, "touch");
         arm_price_pan(pane_of(p.y), p.y);
@@ -912,7 +912,7 @@ export function install_gestures(chart: chart_impl): () => void {
     }
     let touch = active_touch_id !== null ? touch_with_id(e.changedTouches, active_touch_id) : null;
     if (touch === null && e.touches.length === 0) {
-      // Somehow we missed the active touch's touchend (LWC `_touchEndHandler` fallback).
+      // Somehow we missed the active touch's touchend (reference `_touchEndHandler` fallback).
       touch = e.changedTouches[0] ?? null;
     }
     if (touch === null) return;
@@ -920,7 +920,7 @@ export function install_gestures(chart: chart_impl): () => void {
     last_touch_ts = event_ts(e);
     clear_longpress();
 
-    // LWC `touchEndEvent`: maybe exit tracking mode, then end the scroll.
+    // reference `touchEndEvent`: maybe exit tracking mode, then end the scroll.
     if (chart.gesture_config().tracking_exit_mode === "on_touch_end") {
       exit_tracking_on_next_try = true;
     }
@@ -938,7 +938,7 @@ export function install_gestures(chart: chart_impl): () => void {
     end_drag("touch");
     chart.repaint();
 
-    // Tap / double-tap (LWC `_touchEndHandler`).
+    // Tap / double-tap (reference `_touchEndHandler`).
     const was_tap = !touch_moved && !long_tap_active;
     tap_count += 1;
     if (tap_timer !== null && tap_count > 1) {
@@ -950,13 +950,13 @@ export function install_gestures(chart: chart_impl): () => void {
       }
       reset_tap();
     } else if (was_tap) {
-      // A tap: emit the click and suppress the synthetic one (LWC preventDefault after tapEvent).
+      // A tap: emit the click and suppress the synthetic one (reference preventDefault after tapEvent).
       const p = local_xy(touch);
       chart.emit_click(p.x, p.y);
       if (e.cancelable) e.preventDefault();
     }
     if (tap_count === 0 && e.cancelable) {
-      // A double-tap was just processed (LWC: prevent Safari's dblclick zoom / fast-click).
+      // A double-tap was just processed (reference: prevent Safari's dblclick zoom / fast-click).
       e.preventDefault();
     }
     if (e.touches.length === 0 && long_tap_active) {
@@ -966,7 +966,7 @@ export function install_gestures(chart: chart_impl): () => void {
   };
 
   const on_touch_cancel = (e: TouchEvent) => {
-    // LWC clears the long-tap timeout on touchcancel. Additionally reset the active touch when
+    // reference clears the long-tap timeout on touchcancel. Additionally reset the active touch when
     // the browser stole the gesture (e.g. it took over for a page scroll): no touchend follows,
     // and a stuck active id would ignore the next touchstart.
     clear_longpress();
@@ -999,7 +999,7 @@ export function install_gestures(chart: chart_impl): () => void {
     }
   };
   /** TradingView-style smooth keyboard scroll: ease the scroll position to the target over
-   * ~160 ms instead of jumping. (`rightOffset` semantics match LWC: larger = newer view.) */
+   * ~160 ms instead of jumping. (`rightOffset` semantics match reference: larger = newer view.) */
   const animate_scroll_to = (target: number) => {
     stop_scroll_anim();
     const start = wasm.scroll_position();
@@ -1022,7 +1022,7 @@ export function install_gestures(chart: chart_impl): () => void {
     let handled = true;
     switch (e.key) {
       // TradingView: Left scrolls back in time (older data), Right forward (newer data);
-      // Ctrl/Shift steps 10 bars. LWC rightOffset grows toward newer data, hence the signs.
+      // Ctrl/Shift steps 10 bars. reference rightOffset grows toward newer data, hence the signs.
       case "ArrowLeft":
         animate_scroll_to(wasm.scroll_position() - step);
         break;
@@ -1074,7 +1074,7 @@ export function install_gestures(chart: chart_impl): () => void {
   overlay.addEventListener("touchcancel", on_touch_cancel, { passive: false });
   // Hey mobile Safari, what's up? Without a non-passive touchmove listener Safari marks
   // touchstart and the following touchmoves cancelable=false, so the chart could not prevent
-  // the page scroll once a drag starts (ported from LWC mouse-event-handler.ts:654-659).
+  // the page scroll once a drag starts (ported from reference mouse-event-handler.ts:654-659).
   const safari_dummy_touchmove = () => {};
   overlay.addEventListener("touchmove", safari_dummy_touchmove, { passive: false });
 

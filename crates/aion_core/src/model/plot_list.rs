@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::helpers::algorithms::{lower_bound, upper_bound};
 use crate::TimePointIndex;
 
-/// `CHUNK_SIZE` in LWC.
+/// `CHUNK_SIZE` in reference.
 const CHUNK_SIZE: i64 = 30;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,7 +49,7 @@ pub enum MismatchDirection {
 pub struct PlotList {
     indices: Vec<TimePointIndex>,
     /// open/high/low/close columns; single-value series alias the same value into all four,
-    /// matching LWC's plot row layout.
+    /// matching the reference's plot row layout.
     values: [Vec<f64>; 4],
     /// (plot, chunk_index) -> chunk min/max. Cleared on set_data.
     min_max_cache: HashMap<(usize, i64), Option<MinMax>>,
@@ -163,7 +163,7 @@ impl PlotList {
         self.values[plot as usize][row]
     }
 
-    /// Whether `row` is a whitespace row (an LWC `{time}`-only item, data-consumer.ts
+    /// Whether `row` is a whitespace row (an reference `{time}`-only item, data-consumer.ts
     /// `isWhitespaceData`): the boundary convention is that all four values are NaN — a real
     /// bar never has all four NaN, and single-value series alias the one value into every
     /// column, so a NaN value is whitespace there too. Whitespace rows occupy their time
@@ -174,7 +174,7 @@ impl PlotList {
     }
 
     /// Row of the last non-whitespace bar at or left of `index`, or `None` when every bar
-    /// at or left of it is whitespace (or there is no bar at all). LWC's whitespace-filtered
+    /// at or left of it is whitespace (or there is no bar at all). the reference's whitespace-filtered
     /// plot list makes `search(NearestLeft)` land on the last real bar directly
     /// (series.ts `lastValueData`); here the whitespace rows are in the list, so scan past
     /// them to the same effect.
@@ -259,7 +259,7 @@ impl PlotList {
     }
 
     /// Brute min/max over row offsets `[start_row, end_row)`, skipping NaN.
-    /// (LWC's for-loop is a no-op when start >= end; Rust slicing would panic, so guard.)
+    /// (the reference's for-loop is a no-op when start >= end; Rust slicing would panic, so guard.)
     fn plot_min_max(&self, start_row: usize, end_row: usize, plot: usize) -> Option<MinMax> {
         if start_row >= end_row {
             return None;
@@ -482,7 +482,7 @@ mod tests {
     #[test]
     fn whitespace_rows_are_skipped_by_non_whitespace_searches() {
         let mut pl = PlotList::new();
-        // bars at 0, 3; explicit whitespace rows at 1, 2 (all-NaN, LWC `{time}`-only items)
+        // bars at 0, 3; explicit whitespace rows at 1, 2 (all-NaN, reference `{time}`-only items)
         let nan = f64::NAN;
         pl.set_data(
             vec![0, 1, 2, 3],

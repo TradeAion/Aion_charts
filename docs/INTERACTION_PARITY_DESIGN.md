@@ -1,7 +1,7 @@
 # Aion Charts — Interaction & Accessibility Parity (Design)
 
 Status: **design for review — no code yet.** Companion to [ARCHITECTURE.md](ARCHITECTURE.md).
-Covers the three interaction gaps vs lightweight-charts: **axis drag-to-scale**, **touch behavior**
+Covers the three interaction gaps vs the reference charting library: **axis drag-to-scale**, **touch behavior**
 (kinetic scroll + tracking mode), and **accessibility**.
 
 All interaction lives in the TS gesture recognizer
@@ -27,9 +27,9 @@ just `touch-action: none` on the canvases — no ARIA, `tabindex`, or keyboard.
 
 ---
 
-## 2. Axis drag-to-scale (LWC `handleScale.axisPressedMouseMove`)
+## 2. Axis drag-to-scale (reference `handleScale.axisPressedMouseMove`)
 
-LWC: pressing on the **price axis** and dragging vertically manually scales that price scale
+reference: pressing on the **price axis** and dragging vertically manually scales that price scale
 (disabling autoscale); pressing on the **time axis** and dragging horizontally scales bar spacing.
 Both gated by `handleScale.axisPressedMouseMove: { time, price }` (default both on).
 
@@ -42,20 +42,20 @@ pane index from `pane_separator_ys()`.
 
 **Price-axis drag (vertical)** — ported from `PriceScale.scaleTo` (model/price-scale.ts):
 1. On start, read `price_scale_visible_range(pane, target)` → `[from, to]` snapshot (skipping the
-   drag entirely in percentage / indexed-to-100 modes, like LWC).
+   drag entirely in percentage / indexed-to-100 modes, like reference).
 2. On move, `coeff = max(0.1, (startY + (h-1)*0.2) / (currentY + (h-1)*0.2))` with both Ys
    measured **up from the pane bottom**; scale the *snapshot* around its center:
    `half' = half * coeff`; `set_price_scale_visible_range(pane, target, mid-half', mid+half')`
-   — which flips the scale to manual (matching LWC). Drag down = zoom out.
+   — which flips the scale to manual (matching reference). Drag down = zoom out.
 
 **Time-axis drag (horizontal)** — ported from `TimeScale.scaleTo` (model/time-scale.ts):
 `spacing = startSpacing * clamp(paneW - x, 0, paneW) / clamp(paneW - xStart, 0, paneW)` — a
 start-relative ratio of distances from the pane's right edge (drag right = zoom out), clamped by
 the existing min/max bar-spacing rules.
 
-**Keyboard** — TradingView semantics on top of LWC's `rightOffset` (larger = newer view):
+**Keyboard** — TradingView semantics on top of the reference's `rightOffset` (larger = newer view):
 `ArrowLeft` steps older, `ArrowRight` newer, Ctrl/Shift = 10-bar step, eased over ~160 ms for
-the platform's smooth feel (LWC's own keyboard-lessness means the mapping lives in the host).
+the platform's smooth feel (the reference's own keyboard-lessness means the mapping lives in the host).
 
 **Cursor feedback** — extend the hover branch: `ns-resize` over a price axis, `ew-resize` over the
 time axis, `row-resize` over separators, else `crosshair`.
@@ -67,21 +67,21 @@ added to `handle_scale_options` (defaults true), resolved in `resolved_gestures`
 
 ## 3. Touch behavior
 
-### 3a. Kinetic / momentum scroll (LWC `kineticScroll: { touch, mouse }`)
-LWC coasts after a flick. Two implementations:
+### 3a. Kinetic / momentum scroll (reference `kineticScroll: { touch, mouse }`)
+reference coasts after a flick. Two implementations:
 
 - **A — JS momentum loop (recommended first):** in `gestures.ts`, track recent pointer velocity;
   on touch pointerup with velocity above a threshold, run a `requestAnimationFrame` loop calling
   `scroll_move` with exponentially decaying velocity until it stops or the user touches again.
   No engine change; easy to gate and to cancel on new input.
-- **B — engine-side kinetic model:** port LWC's `KineticAnimation` into `TimeScaleCore` and advance it
+- **B — engine-side kinetic model:** port the reference's `KineticAnimation` into `TimeScaleCore` and advance it
   from the existing animation tick. More faithful and headless-testable, but larger.
 
 Recommend **A first** (fast, cancellable, `prefers-reduced-motion`-aware), leaving B as an upgrade.
-New option `kinetic_scroll: boolean | { touch, mouse }` (LWC default `{ touch: true, mouse: false }`).
+New option `kinetic_scroll: boolean | { touch, mouse }` (reference default `{ touch: true, mouse: false }`).
 
-### 3b. Touch crosshair vs pan (tracking mode, LWC `trackingMode`)
-Today one finger pans **and** drives the crosshair. LWC on touch: a drag **scrolls** (no crosshair);
+### 3b. Touch crosshair vs pan (tracking mode, reference `trackingMode`)
+Today one finger pans **and** drives the crosshair. reference on touch: a drag **scrolls** (no crosshair);
 the crosshair appears via a distinct **tracking mode** (press-and-hold, then move to inspect; the
 next tap exits). Proposal:
 - Distinguish pointer type. **Mouse:** unchanged (hover crosshair; drag pans).
@@ -107,7 +107,7 @@ semantics:
 - **Reduced motion**: gate kinetic scroll and the last-price pulse on `prefers-reduced-motion`.
 - Keep `touch-action: none` (already present) so gestures aren't hijacked by browser scrolling.
 
-LWC itself offers little keyboard/ARIA, so items above are a modest **superset** of LWC — called out
+reference itself offers little keyboard/ARIA, so items above are a modest **superset** of reference — called out
 as an intentional divergence rather than strict parity.
 
 ---
@@ -128,7 +128,7 @@ upgraded to the engine-side model (3a-B) later if we want headless physics tests
 ## 6. Decisions for you
 
 1. **Kinetic**: JS loop first (recommended) or go straight to the engine-side model?
-2. **Touch crosshair**: adopt LWC's long-press tracking mode (recommended for parity), or keep our
+2. **Touch crosshair**: adopt the reference's long-press tracking mode (recommended for parity), or keep our
    simpler "drag shows crosshair"?
 3. **Accessibility scope**: minimal (ARIA label + focusable + keyboard pan/zoom) or also the
    `aria-live` OHLC summary (recommended, the real screen-reader win)?

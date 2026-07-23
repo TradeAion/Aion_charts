@@ -216,7 +216,7 @@ test("removing the owning series auto-detaches its primitives; later attaches ke
   await page.evaluate(() => window.__spy.request_update());
   await settle_frames(page);
 
-  // (e) Removing the owning series auto-detaches the primitive (LWC drops it with the series).
+  // (e) Removing the owning series auto-detaches the primitive (reference drops it with the series).
   await page.evaluate(() => {
     const extra = window.__chart.series_order().find((series) => series.id === window.__spy.params.series_id);
     window.__chart.remove_series(extra);

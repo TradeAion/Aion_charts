@@ -65,7 +65,7 @@ pub fn upsert_item<T>(times: &mut Vec<i64>, items: &mut Vec<T>, time: i64, item:
     }
 }
 
-/// Remove the last `count` rows (LWC `ISeriesApi.pop`, clamped to the row count), truncating
+/// Remove the last `count` rows (reference `ISeriesApi.pop`, clamped to the row count), truncating
 /// times and items together. Returns the new row count.
 pub fn pop_items<T>(times: &mut Vec<i64>, items: &mut Vec<T>, count: usize) -> usize {
     debug_assert_eq!(times.len(), items.len());

@@ -39,7 +39,7 @@ fn merge_pane_invalidation(
 /// Time-scale change requests queued into a mask.
 ///
 /// The `Animation` variant carries an opaque id: the host owns animation objects (they need a
-/// clock) and looks them up by id when applying the mask. This mirrors LWC where the mask stores
+/// clock) and looks them up by id when applying the mask. This mirrors reference where the mask stores
 /// an `ITimeScaleAnimation` reference.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TimeScaleInvalidation {

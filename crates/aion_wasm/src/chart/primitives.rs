@@ -15,10 +15,10 @@
 //! agree with engine geometry exactly: the engine rounds `(coord * ratio)` per axis and adds
 //! the integer pane origin, and `round(a + k) == round(a) + k` for integer `k`.
 //!
-//! LWC reference: model/ipane-primitive.ts (`IPanePrimitiveBase`) and api/pane-api.ts
-//! (`PaneApi.attachPrimitive`). Divergence: LWC hands renderers a raw
+//! Reference library source: model/ipane-primitive.ts (`IPanePrimitiveBase`) and api/pane-api.ts
+//! (`PaneApi.attachPrimitive`). Divergence: reference hands renderers a raw
 //! `CanvasRenderingTarget2D`; Aion renderers record backend-neutral commands instead (the
-//! design's locked A-first hybrid). LWC pane primitives carry no axis views (those exist only
+//! design's locked A-first hybrid). reference pane primitives carry no axis views (those exist only
 //! on `ISeriesPrimitiveBase`); Aion accepts `price_axis_views`/`time_axis_views` on pane
 //! primitives as a deliberate extension, painted as boxed labels through the same `AxisLabel`
 //! path the engine's price-line/crosshair labels use.
@@ -29,7 +29,7 @@ use crate::prim_decode::decode_commands;
 use aion_core::model::plot_list::PlotValueIndex;
 use aion_core::scale::price_scale_core::PriceScaleCore;
 
-/// Fallback background for a primitive axis label with no color given — the LWC crosshair
+/// Fallback background for a primitive axis label with no color given — the reference crosshair
 /// label default (frame/mod.rs `PRIMITIVE_LABEL_BG`).
 const PRIMITIVE_LABEL_BG: Color = Color::rgb(0x13, 0x17, 0x22);
 
@@ -74,7 +74,7 @@ pub(super) struct PrimitiveScaleSnapshot {
     pub(super) time_scale: aion_core::scale::time_scale_core::TimeScaleCore,
     /// Merged time points for `time_to_x` lookups (UTC seconds, ascending).
     times: Vec<i64>,
-    /// Per-pane right/left scales plus their percentage-mode base values (LWC anchors those to
+    /// Per-pane right/left scales plus their percentage-mode base values (reference anchors those to
     /// the pane's primary series' first visible value, like the tick formatter's source).
     pub(super) panes: Vec<PaneScaleSnapshot>,
     /// Horizontal/vertical bitmap ratios, recomputed with the frame build's exact formulas
@@ -159,7 +159,7 @@ impl ChartInner {
                 (entry.pane as usize, entry.obj.clone())
             };
             // A stale pane index (the pane was removed after attach) draws nowhere, exactly
-            // like a pane-less series (LWC `removePane` orphaning).
+            // like a pane-less series (reference `removePane` orphaning).
             let Some(pane_snap) = snapshot.panes.get(pane) else {
                 continue;
             };
@@ -197,21 +197,21 @@ impl ChartInner {
         }
     }
 
-    /// Hover hit testing (plugin platform Phase C-d; LWC pane-hit-test.ts `hitTestPane`).
+    /// Hover hit testing (plugin platform Phase C-d; reference pane-hit-test.ts `hitTestPane`).
     /// Resolves the primitive object and/or series under pane-relative media px `(x_css,
     /// y_css)` (x from the pane's left edge, y from the chart's top — the crosshair's space)
     /// and refreshes the engine's hovered series for the `hoveredSeriesOnTop` z-bump.
     /// Returns JSON `{"series_id":number|null,"object_id":string|null,"cursor":string|null}`:
-    /// a series-primitive hit reports its owning series too (LWC's source IS the series), a
+    /// a series-primitive hit reports its owning series too (the reference's source IS the series), a
     /// pane-primitive hit reports no series, and only a primitive hit carries a cursor.
     ///
     /// Primitives receive the same absolute bitmap-px coordinates their draw context uses.
     /// Arbitration ports `hitTestPane`: the best primitive hit is the highest z-order
-    /// (`top` > `normal` > `bottom`, first-come within a layer — LWC's priority/distance
+    /// (`top` > `normal` > `bottom`, first-come within a layer — the reference's priority/distance
     /// fields are not modeled); a `top` hit always wins, a `normal` hit blocks its own
     /// series' built-in hit and every series below it, and a `bottom` hit only survives
     /// when no series hit exists. Hidden series' primitives are skipped (a hidden series
-    /// paints nothing, so it captures no hover — LWC gates the built-in hit on visibility
+    /// paints nothing, so it captures no hover — reference gates the built-in hit on visibility
     /// but overlooks its primitive path).
     pub(super) fn hover_at(&mut self, x_css: f64, y_css: f64) -> String {
         let result =
@@ -236,7 +236,7 @@ impl ChartInner {
         let (bx, by) = (x_css * hpr + pane_left_px, y_css * vpr);
 
         // Gather the best primitive hit: series in stable paint order, topmost first (the
-        // pane is the lowest source — LWC's `[pane, ...orderedSources()].reverse()`). The
+        // pane is the lowest source — the reference's `[pane, ...orderedSources()].reverse()`). The
         // order is cloned so the loop may refresh the engine's hovered series on return.
         let order: Vec<SeriesId> = self.engine.series_order().to_vec();
         let mut best_primitive: Option<PrimitiveHit> = None;
@@ -283,7 +283,7 @@ impl ChartInner {
                 return result(hit.series, hit.external_id.clone(), hit.cursor.clone());
             }
         }
-        // Walk the sources topmost-first, accumulating the best series hit (LWC's
+        // Walk the sources topmost-first, accumulating the best series hit (the reference's
         // `isBetterHit` arbitration); reaching the best primitive hit's owning series
         // returns whatever accumulated above it, else the primitive hit.
         let mut best_series: Option<aion_engine::SeriesHit> = None;
@@ -322,12 +322,12 @@ impl ChartInner {
     }
 
     /// Refresh the engine's per-frame autoscale store from every series primitive's
-    /// `autoscale_info(from, to)` hook (Phase C-b; LWC `ISeriesPrimitiveBase.autoscaleInfo`).
+    /// `autoscale_info(from, to)` hook (Phase C-b; reference `ISeriesPrimitiveBase.autoscaleInfo`).
     /// Runs at the top of `render`, before any layout/autoscale pass consumes the scale
     /// ranges, so axis-width negotiation, the axis frame, and the pane frame all see the
-    /// merged ranges. `from`/`to` are the visible logical range, as in LWC. The engine gates
+    /// merged ranges. `from`/`to` are the visible logical range, as in reference. The engine gates
     /// each contribution on the owning series' visibility and data at merge time; a pane-less
-    /// series' contribution is dropped here (it scales nowhere, LWC `removePane` orphaning).
+    /// series' contribution is dropped here (it scales nowhere, reference `removePane` orphaning).
     pub(super) fn collect_series_primitive_autoscale(&mut self) {
         self.engine.clear_autoscale_contributions();
         if self.series_primitives.is_empty() {
@@ -361,7 +361,7 @@ impl ChartInner {
                     continue;
                 }
             };
-            // LWC: a `null` autoscale info carries no range. Non-finite bounds are rejected
+            // reference: a `null` autoscale info carries no range. Non-finite bounds are rejected
             // by the engine (`add_autoscale_contribution`).
             if result.is_null() || result.is_undefined() {
                 continue;
@@ -396,7 +396,7 @@ impl ChartInner {
     /// pass's mechanics with the binding resolved through the owning series each frame (so
     /// views follow pane moves and scale rebinding), `price_to_y(price)` bound to the series'
     /// own scale, and price-axis labels routed to that scale's strip. A hidden or pane-less
-    /// series paints nothing — LWC empties a series' views while it is not visible
+    /// series paints nothing — reference empties a series' views while it is not visible
     /// (series-pane-view-base.ts) and scales a pane-less source nowhere.
     pub(super) fn run_series_primitives(&mut self) {
         if self.series_primitives.is_empty() {
@@ -469,7 +469,7 @@ impl ChartInner {
     }
 
     /// Record one pane view's commands and append the decoded prims to the pane's layer for
-    /// the view's `z_order` (LWC `PrimitivePaneViewZOrder`: bottom → `under`, normal → `main`,
+    /// the view's `z_order` (reference `PrimitivePaneViewZOrder`: bottom → `under`, normal → `main`,
     /// top → `top`).
     fn run_primitive_view(
         &mut self,
@@ -637,7 +637,7 @@ impl ChartInner {
     /// Append the primitive's `price_axis_views`/`time_axis_views` as boxed `AxisLabel`s on the
     /// pane's right scale / the time strip, through the same IR + paint path the engine's own
     /// price-line and crosshair labels use (frame/axis.rs). Descriptor `coordinate` is media px
-    /// from the pane's top (price) / the pane's left edge (time), matching LWC's
+    /// from the pane's top (price) / the pane's left edge (time), matching the reference's
     /// `ISeriesPrimitiveAxisView.coordinate` semantics.
     fn append_primitive_axis_labels(&mut self, obj: &js_sys::Object, pane: usize) {
         self.append_primitive_price_axis_labels(obj, pane, PriceScaleTarget::Right, None);
@@ -744,7 +744,7 @@ impl ChartInner {
             let height = font_size + 2.5 * 2.0;
             // Colors mirror the price-line label resolution: the descriptor's
             // `background_color`/`color` picks the box, `text_color` the glyphs, with
-            // the LWC contrast pick as the text fallback.
+            // the reference contrast pick as the text fallback.
             let background = reflect_color(&label, "background_color")
                 .or_else(|| reflect_color(&label, "color"))
                 .unwrap_or(PRIMITIVE_LABEL_BG);
@@ -916,7 +916,7 @@ impl PrimitiveConverters {
         let left_px = f64::from(pane_left_px);
 
         let (time_scale, times) = (snapshot.time_scale.clone(), snapshot.times.clone());
-        // `time_to_x(time)`: bitmap x for an exact UTC-seconds bar time, else `null` (LWC
+        // `time_to_x(time)`: bitmap x for an exact UTC-seconds bar time, else `null` (reference
         // `timeToCoordinate` does not snap to the nearest bar).
         let time_to_x = Closure::wrap(Box::new(move |time: f64| {
             if !time.is_finite() || times.is_empty() {
@@ -974,14 +974,14 @@ fn call_view_array_with(
     value.dyn_into::<js_sys::Array>().ok()
 }
 
-/// One primitive's non-null `hit_test` result (LWC `PrimitiveHoveredItem`, reduced to Aion's
+/// One primitive's non-null `hit_test` result (reference `PrimitiveHoveredItem`, reduced to Aion's
 /// arbitration model: the host owns z-ordering, so the plugin's `z_order` only says which
-/// layer the hit belongs to; LWC's `distance`/`hitTestPriority`/`itemType`/`isBackground`
+/// layer the hit belongs to; the reference's `distance`/`hitTestPriority`/`itemType`/`isBackground`
 /// fields are not modeled).
 struct PrimitiveHit {
     external_id: Option<String>,
     cursor: Option<String>,
-    /// The owning series for a series primitive, `None` for a pane primitive (LWC's hit-test
+    /// The owning series for a series primitive, `None` for a pane primitive (the reference's hit-test
     /// source: a series-primitive hit reports its series as `hoveredSeries`, a pane-primitive
     /// hit reports none).
     series: Option<SeriesId>,

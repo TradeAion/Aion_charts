@@ -1,19 +1,19 @@
 # Aion Charts — Execution Plan
 
 Status legend: `[x]` done (with date) · `[ ]` pending. Ground truth: the full audit of
-2026-07-21 (engine vs LWC 5.2.0 feature parity, packaging, styling/control APIs). Companion to
+2026-07-21 (engine vs reference 5.2.0 feature parity, packaging, styling/control APIs). Companion to
 [ARCHITECTURE.md](ARCHITECTURE.md), [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md),
 [PLUGIN_PLATFORM_DESIGN.md](PLUGIN_PLATFORM_DESIGN.md).
 
 Goal: (1) make `@tradeaion/charts` installable via `bun add` (primary) / `npm i` from **GitHub
 Packages** (private — no public npm registry) with no source clone or Rust toolchain, (2) close
-the enumerable LWC API-breadth gaps, (3) land the plugin platform.
+the enumerable reference API-breadth gaps, (3) land the plugin platform.
 
 ---
 
 ## Phase 0 — Audit (ground truth)
 
-- [x] 2026-07-21 — Feature-parity audit vs LWC 5.2.0 (series, chart/time-scale/price-scale APIs, primitives, data model, localization).
+- [x] 2026-07-21 — Feature-parity audit vs reference 5.2.0 (series, chart/time-scale/price-scale APIs, primitives, data model, localization).
 - [x] 2026-07-21 — Packaging audit (`npm pack --dry-run`; tarball is coherent but unpublished).
 - [x] 2026-07-21 — Styling & control-API audit (all wired surfaces verified against tests/probes).
 
@@ -45,7 +45,7 @@ binary inside `dist/`, resolved relative to the bundle (`new URL(..., import.met
 - [x] 1.8 Verify: `npm run clean && npm run build`, `npm pack --dry-run` file list sane (10 files,
       wasm 492 kB, README + LICENSE included), smoke test passes, typecheck/lint green. — 2026-07-21
 
-## Phase 2 — LWC API breadth (enumerable gaps, no structural work)
+## Phase 2 — reference API breadth (enumerable gaps, no structural work)
 
 Ordered by user impact. Each item = option/method + TS type + engine plumbing + test.
 
@@ -56,14 +56,14 @@ Ordered by user impact. Each item = option/method + TS type + engine plumbing + 
       end-to-end (impl.ts:172, inner_api.rs:162). — 2026-07-21
 - [x] 2.3 `series.options()` getter (all 20 fields via `series_options_json`);
       `time_scale().options()` returns all 11 fields via `time_scale_options_json` (configured-option
-      semantics, LWC `restoreDefault` parity verified in the browser suite). — 2026-07-21
+      semantics, reference `restoreDefault` parity verified in the browser suite). — 2026-07-21
 - [x] 2.4 Price-line extras: `line_visible`, `axis_label_visible`, `axis_label_color`,
       `axis_label_text_color` + `price_line.apply_options`/`options()` (engine price_line_api.rs,
       rendering in series_geometry.rs/axis.rs). — 2026-07-21
 - [x] 2.5 Chart-JSON routing of `timeScale` behavioral options — `route_time_scale_patch`
-      (engine lib.rs) applies all 11 keys from the incoming patch only, LWC ordering. — 2026-07-21
+      (engine lib.rs) applies all 11 keys from the incoming patch only, reference ordering. — 2026-07-21
 - [x] 2.6 Public `max_bar_spacing` / `right_offset_pixels` setters (wasm + TS handle). Also added
-      LWC-`applyOptions`-faithful `apply_bar_spacing_option`/`apply_right_offset_option` (write
+      reference-`applyOptions`-faithful `apply_bar_spacing_option`/`apply_right_offset_option` (write
       option + apply live; gestures keep live-only `set_bar_spacing`). — 2026-07-21
 - [x] 2.7 `MouseEventParams.pane_index` (null on axis strips/outside). `hoveredSeries`/`sourceEvent`
       deferred — needs the plugin platform's hit-testing (Phase 3). — 2026-07-21
@@ -74,33 +74,33 @@ Ordered by user impact. Each item = option/method + TS type + engine plumbing + 
 
 ### 2b. Series styling
 - [x] 2.9 `last_value_visible` toggle + per-series last-value labels (every visible series, series-color
-      bg, LWC `_fixLabelOverlap` collision port; value tracks last *visible* bar like LWC
+      bg, reference `_fixLabelOverlap` collision port; value tracks last *visible* bar like reference
       `lastValueData(false)`). — 2026-07-21
 - [x] 2.10 Built-in price-line family: `price_line_visible`, `price_line_source` (LastBar/LastVisible),
       `price_line_width`, `price_line_color` ("" = follow series), `price_line_style` — rendered per
-      visible series, LWC defaults. — 2026-07-21
-- [x] 2.11 Line `line_style` (dash geometry frame-built via `dash_split` with LWC `getDashPattern`
+      visible series, reference defaults. — 2026-07-21
+- [x] 2.11 Line `line_style` (dash geometry frame-built via `dash_split` with reference `getDashPattern`
       patterns — pixel-identical backends by construction), `line_visible`, `point_markers_radius`
       (auto = lineWidth/2+2), full `crosshair_marker_*` family on all visible line/area/baseline
       series. — 2026-07-21
 - [x] 2.12 Baseline quadrant colors + gradients (`top/bottom_fill_color1/2`, `top/bottom_line_color`,
-      per-quadrant widths/styles — an intentional superset of LWC's shared width/style), through the
+      per-quadrant widths/styles — an intentional superset of the reference's shared width/style), through the
       shared AreaFill gradient mechanism. — 2026-07-21
 - [x] 2.13 Per-data-point colors (candle/bar `color`/`wick_color`/`border_color`, histogram/line/area
       `color`) — per-row RGBA channels in the data layer, aligned under dedupe/update/insert;
-      candle/bar/histogram overrides; line/area segment+marker color runs (LWC walk-line port);
+      candle/bar/histogram overrides; line/area segment+marker color runs (reference walk-line port);
       0-sparse-channel = no-override. Pixel-verified live. — 2026-07-21
   - [x] 2.13b Verbatim CSS strings for the older per-field color setters (up/down/wick/border/area/
       `color`) — all nine slots now `Option<String>` with render-time parsing; round-trips verbatim.
       — 2026-07-21
 - [x] 2.14 Histogram `base`; area `invert_filled_area`; bar `open_visible`/`thin_bars`. — 2026-07-21
 - [x] 2.15 Per-series `priceFormat` — price/volume/percent/custom kinds, per-series labels + ticks via
-      the scale's primary source, JS custom formatter fn with clearing, LWC-shaped options round-trip.
+      the scale's primary source, JS custom formatter fn with clearing, reference-shaped options round-trip.
       — 2026-07-21
 
 ### 2c. Behavioral parity
 - [x] 2.16 `shift_visible_range_on_new_bar` / `allow_shift_visible_range_on_whitespace_replacement` —
-      `sync_time_points` ports LWC `ChartModel.updateTimeScale` (chart-model.ts:953-984): right-edge
+      `sync_time_points` ports reference `ChartModel.updateTimeScale` (chart-model.ts:953-984): right-edge
       follow + scrolled-back offset compensation (no drift), whitespace-replacement gating.
       — 2026-07-21
 - [x] 2.17 Whitespace data items — all-NaN = explicit whitespace (kept, sorted/deduped, colors
@@ -111,22 +111,22 @@ Ordered by user impact. Each item = option/method + TS type + engine plumbing + 
 - [x] 2.19 `chart.set_crosshair_position(price, time, series)` (bar-exact, emits crosshair_move) +
       `clear_crosshair_position()`. — 2026-07-21
 - [x] 2.20 `localization.locale` (js Intl month tables → engine formatter) + `localization.date_format`
-      (LWC token tokenizer incl. naive-quote parity for the default `dd MMM 'yy`). — 2026-07-21
+      (reference token tokenizer incl. naive-quote parity for the default `dd MMM 'yy`). — 2026-07-21
 - [x] 2.21 Primary-series removal allowed (tombstone + first-live-series fallbacks);
       `chart.series_order()` / `set_series_order()` (paint + hit order, permutation-validated).
       — 2026-07-21
 
 ### 2d. Panes & axes cosmetics
 - [x] 2.22 `add_pane`/`remove_pane`/`swap_panes`, `pane.move_to`, `pane.get_series`, per-pane
-      `price_scale`, `preserve_empty_pane` (LWC orphan-on-remove + pruning at LWC's two trigger
+      `price_scale`, `preserve_empty_pane` (reference orphan-on-remove + pruning at the reference's two trigger
       points). — 2026-07-21
 - [x] 2.23 Price scale: `align_labels`, `ticks_visible`, `entire_text_only`, `minimum_width`,
       per-scale `text_color` (JSON applier + full getter + chart-group routing). Time scale:
       `ticks_visible`, `minimum_height`, `tick_mark_max_character_length`, `visible` (whole strip —
       cleanly split from the existing `time_visible` label flag). — 2026-07-21
 - [x] 2.24 Inert options resolution: `layout.background` vertical gradient (shared prim, per-pane
-      extent, both backends) and `panes.separator_hover_color` (LWC 9px hover band, gesture-driven)
-      now render. `attributionLogo` — **decided: deliberate no-op** (LWC licensing attribution,
+      extent, both backends) and `panes.separator_hover_color` (reference 9px hover band, gesture-driven)
+      now render. `attributionLogo` — **decided: deliberate no-op** (reference licensing attribution,
       not ours). `hoveredSeriesOnTop` — **deferred to Phase 3** (needs hit-testing).
       — 2026-07-21
 
@@ -142,7 +142,7 @@ buffer; swappable for a typed-array ABI later without changing the plugin API).
 - [x] 3.1/C-a Pane primitives: `pane.attach_primitive`/`detach`, lifecycle (`attached`/`detached`),
       `update_all_views`, `pane_views` → Prim commands at z-order (Bottom/Normal/Top; new
       `FramePane.top_prims` layer), `price_axis_views`/`time_axis_views` → boxed axis labels
-      (extension beyond LWC — IPanePrimitiveBase lacks them). JSON→Prim decoder
+      (extension beyond reference — IPanePrimitiveBase lacks them). JSON→Prim decoder
       (`prim_decode.rs`, host-tested). Session-bands reference primitive + Playwright fixture:
       WebGPU≡Canvas2D 0-diff with primitives active, detach restores exact pixels. Known
       placeholders: `text()` prim is a no-op on both backends until the glyph engine lands
@@ -150,11 +150,11 @@ buffer; swappable for a typed-array ABI later without changing the plugin API).
       — 2026-07-21
 - [x] 3.2/C-b Series primitives: `series.attach_primitive` bound to the series' scale (incl. overlay),
       `autoscale_info(from,to)` merged into the owning scale's range via per-frame engine
-      contributions (LWC visibility gating), series-bound axis labels (+`price` extension),
+      contributions (reference visibility gating), series-bound axis labels (+`price` extension),
       auto-detach on series removal. Position-band + scale-band demo fixtures; Playwright: numeric
       autoscale superset assertion + WebGPU≡Canvas2D 0-diff. — 2026-07-21
-- [x] 3.3/C-d `hit_test` + interaction: primitive `hit_test(x,y)` (LWC `hitTestPane` precedence
-      ported: top > built-in series > normal > bottom), per-kind series hit tests (LWC
+- [x] 3.3/C-d `hit_test` + interaction: primitive `hit_test(x,y)` (reference `hitTestPane` precedence
+      ported: top > built-in series > normal > bottom), per-kind series hit tests (reference
       range/line ports incl. tolerance 3), `hovered_series`/`hovered_object_id` on mouse params,
       hit-driven cursor, `hovered_series_on_top` render-only z-bump (closes the 2d deferral).
       17 engine hit tests + 5 Playwright specs. — 2026-07-21
@@ -162,15 +162,15 @@ buffer; swappable for a typed-array ABI later without changing the plugin API).
       time-only rows with base-index flag), host-aligned item storage (sort/dedupe/update/pop),
       `price_value_builder`/`is_whitespace` contract, autoscale via the C-b contribution path,
       `render(ctx)` with visible items at bar centers spliced at the series' paint position,
-      last-value label/line from the custom value. LWC rounded-candles plugin ported line-for-line
+      last-value label/line from the custom value. reference rounded-candles plugin ported line-for-line
       as the proof fixture. Playwright 24/24. — 2026-07-21
-- [x] 3.5 Re-express markers + watermark as plugins: `create_series_markers` (LWC v5 plugin surface;
+- [x] 3.5 Re-express markers + watermark as plugins: `create_series_markers` (reference v5 plugin surface;
       shapes + text pixel-identical to the engine built-in — 0-diff parity proof on both backends)
       and `create_text_watermark` (per-line styled multi-line). Enabled by a small `text_views`
       host hook painting plugin text on the shared overlay (the `Prim::Text` placeholder gap from
       C-a is closed at the platform level). Found + documented a pre-existing WebGPU bucket-order
       quirk (tris before quads affects engine markers identically — backlog item). — 2026-07-21
-- [ ] 3.6/C-e (Optional) Canvas2D escape-hatch primitive for raw-`ctx` LWC ports.
+- [ ] 3.6/C-e (Optional) Canvas2D escape-hatch primitive for raw-`ctx` reference ports.
 
 ## Phase 4 — Release
 
@@ -209,22 +209,22 @@ repo visibility).
   end-to-end against the packed tarball: install 295 ms, module imports, wasm ships).
 - 2026-07-21 — **Phase 2a complete (2.1–2.8).** One semantic fix surfaced by the browser suite:
   `applyOptions({barSpacing/rightOffset})` now writes the configured option *and* applies it live
-  (LWC `restoreDefault` parity — options survive `reset_time_scale`); zoom/axis-drag stay live-only.
+  (reference `restoreDefault` parity — options survive `reset_time_scale`); zoom/axis-drag stay live-only.
   Two spec assertions updated to the corrected semantics. Gates: 150 cargo tests, clippy clean,
   typecheck/lint green, pack smoke green, Playwright 10/10. Next up: Phase 2b series styling.
 - 2026-07-21 — **Phase 2b wave 1 complete (2.9–2.12, 2.14).** 28 new series style options end-to-end
   (new `series_apply_options_json` wasm method; `series_options_json` round-trips all fields).
   Rendering notes: dash strokes are frame-built geometry (backends stay 0-diff by construction);
-  last-value labels now per-series with LWC overlap resolution; last-price lines per-series; crosshair
-  marks on all line/area/baseline series. Demo volume fixture updated to match the LWC reference
+  last-value labels now per-series with reference overlap resolution; last-price lines per-series; crosshair
+  marks on all line/area/baseline series. Demo volume fixture updated to match the reference fixture
   (`price_line_visible/last_value_visible: false` — options that didn't exist when the fixture was
   written). Gates: 164 cargo tests, clippy clean, typecheck/lint green, pack smoke green,
   Playwright 10/10.
 - 2026-07-21 — **Phase 2b wave 2 complete (2.13, 2.15).** Per-data-point colors (data-layer RGBA
-  channels + per-kind render overrides + LWC walk-line segment semantics) and per-series
+  channels + per-kind render overrides + reference walk-line segment semantics) and per-series
   `price_format` (built-ins + JS custom formatter). Live probe verified: per-point pixels on
   set/update/clear, candle channel rendering, format round-trips, custom-fn invocation and clearing.
-  One LWC-shape fix: volume format serializes as exactly `{type:"volume"}`. Gates: 186 cargo tests,
+  One reference-shape fix: volume format serializes as exactly `{type:"volume"}`. Gates: 186 cargo tests,
   clippy clean workspace-wide, Playwright 10/10, pack smoke green. Next: Phase 2c behavioral parity.
 - 2026-07-21 — **Phase 2c complete (2.16–2.21 + 2.13b).** Shift-on-new-bar compensation, whitespace
   data items, pop/lastValueData/priceFormatter, programmatic crosshair, locale+dateFormat,
@@ -241,8 +241,8 @@ repo visibility).
   **Next: Phase 3 — plugin platform.**
 - 2026-07-21 — **Phase 3 C-a→C-d + 3.5 complete.** The plugin platform is live: pane + series
   primitives (Prim command plugins, z-ordered, axis views, lifecycle), `autoscale_info` engine
-  contributions, LWC `hitTestPane` precedence + per-kind series hit tests (`hovered_series`,
-  `hovered_object_id`, hit cursor, `hovered_series_on_top`), custom series (LWC rounded-candles
+  contributions, reference `hitTestPane` precedence + per-kind series hit tests (`hovered_series`,
+  `hovered_object_id`, hit cursor, `hovered_series_on_top`), custom series (reference rounded-candles
   ported line-for-line), and markers/watermark re-expressed as plugins with a 0-diff parity proof.
   Backlog notes: WebGPU tri/quad bucket order quirk (pre-existing, engine markers too);
   `Prim::Text` glyph engine (plugin text uses the overlay hook). Playwright **28/28**, 270 cargo

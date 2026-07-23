@@ -50,7 +50,7 @@ function same_time_range(a: time_range | null, b: time_range | null): boolean {
   return a === b || (a !== null && b !== null && a.from === b.from && a.to === b.to);
 }
 
-/** Duration of the animated `scroll_to_position` ease (matches the LWC smooth-scroll feel). */
+/** Duration of the animated `scroll_to_position` ease (matches the reference smooth-scroll feel). */
 const SCROLL_ANIM_MS = 300;
 
 /**
@@ -116,7 +116,7 @@ export function pane_index_of_y(separator_ys: Float64Array, y: number): number {
 /** Pack a data array into the six Float64Arrays the engine expects (single-value → o=h=l=c). */
 /**
  * Convert a `time` input to the engine's UTC-seconds form. Business days and `"YYYY-MM-DD"` strings
- * are taken at UTC midnight (matching LWC's `Date.UTC(...)/1000`). A malformed value yields `NaN`,
+ * are taken at UTC midnight (matching the reference's `Date.UTC(...)/1000`). A malformed value yields `NaN`,
  * which the engine's sanitizer drops as an invalid row.
  */
 export function time_to_utc_seconds(t: time): number {
@@ -144,7 +144,7 @@ function pack(data: readonly series_data[]): {
   const high = new Float64Array(n);
   const low = new Float64Array(n);
   const close = new Float64Array(n);
-  // Per-point color channels (LWC `color`/`wickColor`/`borderColor` on data items). A channel is
+  // Per-point color channels (reference `color`/`wickColor`/`borderColor` on data items). A channel is
   // only allocated when at least one item carries the field; rows without it pad as 0, which the
   // engine treats as "no override" within a passed channel.
   let body_colors: Uint32Array | undefined;
@@ -165,7 +165,7 @@ function pack(data: readonly series_data[]): {
       wick_colors = pack_color_channel(wick_colors, n, i, d.wick_color);
       border_colors = pack_color_channel(border_colors, n, i, d.border_color);
     } else {
-      // Whitespace (LWC `WhitespaceData`): an explicit empty slot, packed all-NaN. The engine
+      // Whitespace (reference `WhitespaceData`): an explicit empty slot, packed all-NaN. The engine
       // keeps the row as whitespace instead of dropping it.
       open[i] = high[i] = low[i] = close[i] = NaN;
     }
@@ -570,7 +570,7 @@ class series_impl implements series_api {
     if (typeof primitive.attached === "function") {
       const attached = primitive.attached;
       // The host supplies `{series_id, pane_index}`; inject `request_update` (a repaint
-      // scheduler, LWC `requestUpdate`) before the plugin sees the params.
+      // scheduler, reference `requestUpdate`) before the plugin sees the params.
       adapted.attached = (params: { series_id: number; pane_index?: number; request_update?: () => void }) => {
         params.request_update = () => this.chart.repaint();
         attached.call(primitive, params);
@@ -583,7 +583,7 @@ class series_impl implements series_api {
 }
 
 /**
- * The handle for a custom series (plugin platform Phase C-c; LWC's `ISeriesApi<'Custom'>`).
+ * The handle for a custom series (plugin platform Phase C-c; the reference's `ISeriesApi<'Custom'>`).
  * Shares the built-in handle's options/coordinate/primitive surface; the data methods work on
  * the raw plugin items (the engine rows carry times only, so `data()`/`data_by_index()` come
  * from the host's aligned item store, and `last_value_data` resolves through the engine's
@@ -594,7 +594,7 @@ class custom_series_impl extends series_impl {
     super(id, "custom", chart);
   }
 
-  /** Replace the series' items (LWC `setData`). Times convert to UTC seconds here (the same
+  /** Replace the series' items (reference `setData`). Times convert to UTC seconds here (the same
    *  boundary conversion as the built-ins); sort/dedupe happens engine-side with the items
    *  carried along, so `data()` returns the aligned raw items. */
   set_data(data: readonly custom_series_item[]): void {
@@ -605,7 +605,7 @@ class custom_series_impl extends series_impl {
     for (const handler of this.data_changed_subs) handler("full");
   }
 
-  /** Append a new item or replace the one at an existing time (LWC `update`). */
+  /** Append a new item or replace the one at an existing time (reference `update`). */
   update(item: custom_series_item): void {
     this.assert_live();
     this.chart.wasm.update_custom_series_item(this.id, { ...item, time: time_to_utc_seconds(item.time) });
@@ -955,7 +955,7 @@ export interface resolved_gestures {
 
 function apply_scroll(v: boolean | handle_scroll_options, cfg: resolved_gestures): void {
   if (typeof v === "boolean") {
-    // LWC migrateHandleScaleScrollOptions: a boolean expands to all four scroll flags.
+    // reference migrateHandleScaleScrollOptions: a boolean expands to all four scroll flags.
     cfg.pan = v;
     cfg.pan_horz_touch = v;
     cfg.pan_vert_touch = v;
@@ -972,7 +972,7 @@ function apply_scroll(v: boolean | handle_scroll_options, cfg: resolved_gestures
 
 function apply_scale(v: boolean | handle_scale_options, cfg: resolved_gestures): void {
   if (typeof v === "boolean") {
-    // LWC migrateHandleScaleScrollOptions: a boolean expands to every scale flag.
+    // reference migrateHandleScaleScrollOptions: a boolean expands to every scale flag.
     cfg.wheel_zoom = v;
     cfg.pinch_zoom = v;
     cfg.axis_dblclick_reset_time = v;
@@ -981,12 +981,12 @@ function apply_scale(v: boolean | handle_scale_options, cfg: resolved_gestures):
     cfg.axis_scale_time = v;
     return;
   }
-  // Object form merges over the current config (LWC applyOptions semantics).
+  // Object form merges over the current config (reference applyOptions semantics).
   cfg.wheel_zoom = v.mouse_wheel ?? cfg.wheel_zoom;
   cfg.pinch_zoom = v.pinch ?? cfg.pinch_zoom;
   const adr = v.axis_double_click_reset;
   if (typeof adr === "boolean") {
-    // LWC migrateHandleScaleScrollOptions: a boolean expands to both axes.
+    // reference migrateHandleScaleScrollOptions: a boolean expands to both axes.
     cfg.axis_dblclick_reset_time = adr;
     cfg.axis_dblclick_reset_price = adr;
   } else if (adr) {
@@ -1124,7 +1124,7 @@ export class chart_impl implements chart_api {
       }
     }
 
-    // Size-change diff (LWC `subscribeSizeChange`), fired on change only.
+    // Size-change diff (reference `subscribeSizeChange`), fired on change only.
     const width = this.wasm.time_scale_width();
     const height = this.wasm.time_scale_height();
     if (width !== this.last_ts_width || height !== this.last_ts_height) {
@@ -1170,7 +1170,7 @@ export class chart_impl implements chart_api {
       throw new Error("aion: add_series does not accept 'custom'; use add_custom_series(pane_view)");
     }
     // Series 0 is created by the engine at construction; the first add_series adopts it so the
-    // common "one chart, one series" path matches LWC (add_series returns the primary series).
+    // common "one chart, one series" path matches reference (add_series returns the primary series).
     let id: number;
     if (!this.next_extra_series) {
       this.next_extra_series = true;
@@ -1197,7 +1197,7 @@ export class chart_impl implements chart_api {
       if (typeof hook === "function") adapted[key] = hook.bind(pane_view);
     }
     if (typeof adapted.price_value_builder !== "function" || typeof adapted.render !== "function") {
-      throw new Error("aion: add_custom_series needs a pane view with `price_value_builder` and `render` (LWC `ensure(customPaneView)`)");
+      throw new Error("aion: add_custom_series needs a pane view with `price_value_builder` and `render` (reference `ensure(customPaneView)`)");
     }
     // The first-series adoption mirrors add_series (the engine's construction-time series 0
     // converts to Custom instead of leaving an empty built-in behind).
@@ -1211,7 +1211,7 @@ export class chart_impl implements chart_api {
     if (id === 0xffffffff) throw new Error("aion: add_custom_series was rejected by the engine");
     const series = new custom_series_impl(id, this);
     this.series_by_id.set(id, series);
-    // LWC createCustomSeriesDefinition: the view's defaultOptions merge UNDER the caller's.
+    // reference createCustomSeriesDefinition: the view's defaultOptions merge UNDER the caller's.
     const merged = { ...(pane_view.default_options ?? {}), ...(options ?? {}) } as Partial<series_options>;
     if (Object.keys(merged).length > 0) series.apply_options(merged);
     return series;
@@ -1219,7 +1219,7 @@ export class chart_impl implements chart_api {
 
   remove_series(series: series_api): void {
     const impl = this.series_by_id.get(series.id);
-    // Ignore a foreign handle or one already removed (idempotent, matching LWC leniency).
+    // Ignore a foreign handle or one already removed (idempotent, matching reference leniency).
     if (!impl) return;
     // The engine tombstones the primary series (id 0) safely, so no id is refused here.
     if (!this.wasm.remove_series(series.id)) return;
@@ -1434,7 +1434,7 @@ export class chart_impl implements chart_api {
         localization?: localization_options;
       };
     let engine_options: Record<string, unknown> = rest;
-    // layout.panes.enableResize (LWC) drives the separator drag here, not the engine; strip it
+    // layout.panes.enableResize (reference) drives the separator drag here, not the engine; strip it
     // alongside the other gesture keys before forwarding.
     const panes = (rest.layout as { panes?: { enableResize?: boolean } } | undefined)?.panes;
     if (panes?.enableResize !== undefined) {
@@ -1456,7 +1456,7 @@ export class chart_impl implements chart_api {
   }
 
   /**
-   * LWC `autoSize`: enabling hands sizing to the engine's ResizeObserver; the flag is tracked
+   * reference `autoSize`: enabling hands sizing to the engine's ResizeObserver; the flag is tracked
    * TS-side for `auto_size_active()`. The engine has no disable hook yet, so turning it off is
    * tracked here only (the engine keeps observing until teardown).
    */
@@ -1475,7 +1475,7 @@ export class chart_impl implements chart_api {
     return this.container;
   }
 
-  /** Install the host price/time formatters (LWC `localization`). Callbacks cross into wasm. */
+  /** Install the host price/time formatters (reference `localization`). Callbacks cross into wasm. */
   apply_localization(loc: localization_options): void {
     if (loc.price_formatter !== undefined) this.wasm.set_price_formatter(loc.price_formatter);
     if (loc.time_formatter !== undefined) this.wasm.set_time_formatter(loc.time_formatter);
@@ -1498,7 +1498,7 @@ export class chart_impl implements chart_api {
     this.sync_interaction_disabled();
   }
 
-  /** Resolve the LWC `layout.panes.enableResize` toggle (separator drag + hover cursor). */
+  /** Resolve the reference `layout.panes.enableResize` toggle (separator drag + hover cursor). */
   apply_panes_resize(enabled: boolean): void {
     this.gestures_cfg.panes_resize = enabled;
   }
@@ -1611,7 +1611,7 @@ export class chart_impl implements chart_api {
 
   set_crosshair_position(price: number, time: time, series: series_api): void {
     const seconds = time_to_utc_seconds(time);
-    // false = the engine refused the position (e.g. unknown series); LWC throws, we no-op.
+    // false = the engine refused the position (e.g. unknown series); reference throws, we no-op.
     if (!this.wasm.set_crosshair_position(price, seconds, series.id)) return;
     this.repaint();
     // Emit the crosshair-move at the coordinates the position resolved to, on the given series'
@@ -1641,7 +1641,7 @@ export class chart_impl implements chart_api {
     // Browser WebGPU canvases are presentable but are not synchronously readable through
     // CanvasRenderingContext2D.drawImage (Chromium returns transparent pixels). Repaint the current
     // engine frame, then execute that same retained frame through the already-warm Canvas2D pane.
-    // This keeps the LWC-style synchronous API deterministic without duplicating chart state.
+    // This keeps the reference-style synchronous API deterministic without duplicating chart state.
     this.repaint();
     // Hiding the crosshair for the capture is a clear → snapshot → restore cycle; the whole call
     // is synchronous, so the on-screen canvases never present the crosshair-less frame.

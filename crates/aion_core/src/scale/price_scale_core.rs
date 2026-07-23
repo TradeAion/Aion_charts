@@ -31,18 +31,18 @@ pub struct PriceScaleCoreOptions {
     pub tick_mark_density: f64,
     /// Layout font size in px (used for tick mark height).
     pub font_size: f64,
-    /// LWC `alignLabels` (default true): push the axis' boxed labels apart so they cannot
+    /// reference `alignLabels` (default true): push the axis' boxed labels apart so they cannot
     /// overlap each other or leave the pane edge.
     pub align_labels: bool,
-    /// LWC `ticksVisible` (default false): draw a small tick mark beside each axis label.
+    /// reference `ticksVisible` (default false): draw a small tick mark beside each axis label.
     pub ticks_visible: bool,
-    /// LWC `entireTextOnly` (default false): skip top/bottom tick marks whose label text
+    /// reference `entireTextOnly` (default false): skip top/bottom tick marks whose label text
     /// would be clipped by the pane edge.
     pub entire_text_only: bool,
-    /// LWC `minimumWidth` (default 0): floor for the axis strip width; the measured width
+    /// reference `minimumWidth` (default 0): floor for the axis strip width; the measured width
     /// still wins when the labels need more room.
     pub minimum_width: f64,
-    /// LWC `textColor` (default `None` = follow `layout.textColor`). Stored verbatim as a
+    /// reference `textColor` (default `None` = follow `layout.textColor`). Stored verbatim as a
     /// CSS string; parsed at render time.
     pub text_color: Option<String>,
 }
@@ -59,7 +59,7 @@ impl Default for PriceScaleCoreOptions {
             },
             tick_mark_density: 2.5,
             font_size: 12.0,
-            // LWC defaults (price-scale-options-defaults.ts).
+            // reference defaults (price-scale-options-defaults.ts).
             align_labels: true,
             ticks_visible: false,
             entire_text_only: false,
@@ -117,7 +117,7 @@ impl PriceScaleCore {
     }
 
     /// Change coordinate mode while keeping any convertible manual range coherent. Percentage and
-    /// indexed modes require a series base value, so—as in LWC—they always re-enter autoscale.
+    /// indexed modes require a series base value, so—as in reference—they always re-enter autoscale.
     pub fn set_mode(&mut self, mode: PriceScaleMode) {
         let old = self.options.mode;
         if old == mode {
@@ -168,29 +168,29 @@ impl PriceScaleCore {
         self.options.invert_scale = inverted;
     }
 
-    /// LWC `alignLabels` — gate the axis' label overlap resolution.
+    /// reference `alignLabels` — gate the axis' label overlap resolution.
     pub fn set_align_labels(&mut self, align: bool) {
         self.options.align_labels = align;
     }
 
-    /// LWC `ticksVisible` — draw small tick marks beside the axis labels.
+    /// reference `ticksVisible` — draw small tick marks beside the axis labels.
     pub fn set_ticks_visible(&mut self, visible: bool) {
         self.options.ticks_visible = visible;
     }
 
-    /// LWC `entireTextOnly` — skip corner tick marks whose label would be clipped.
+    /// reference `entireTextOnly` — skip corner tick marks whose label would be clipped.
     pub fn set_entire_text_only(&mut self, entire: bool) {
         self.options.entire_text_only = entire;
     }
 
-    /// LWC `minimumWidth` — floor for the axis strip width (non-negative, finite).
+    /// reference `minimumWidth` — floor for the axis strip width (non-negative, finite).
     pub fn set_minimum_width(&mut self, width: f64) {
         if width.is_finite() && width >= 0.0 {
             self.options.minimum_width = width;
         }
     }
 
-    /// LWC `textColor` — `None` follows `layout.textColor`; stored verbatim, parsed at
+    /// reference `textColor` — `None` follows `layout.textColor`; stored verbatim, parsed at
     /// render time.
     pub fn set_text_color(&mut self, css: Option<String>) {
         self.options.text_color = css;
@@ -221,7 +221,7 @@ impl PriceScaleCore {
     }
 
     /// Price-scale API representation. Logarithmic storage is converted back to raw prices; the
-    /// other modes expose their current display-domain range directly, matching LWC.
+    /// other modes expose their current display-domain range directly, matching reference.
     pub fn price_range_for_api(&self) -> Option<PriceRange> {
         let range = self.price_range?;
         Some(if self.is_log() {
@@ -345,7 +345,7 @@ impl PriceScaleCore {
     // --- coordinate conversion (RENDERING_SPEC.md §1.2) ---
     //
     // Note on log mode: the stored price range is already in log space, so
-    // `logical_to_coordinate` applies `to_log` to its input (matching LWC where
+    // `logical_to_coordinate` applies `to_log` to its input (matching reference where
     // `_logicalToCoordinate` re-transforms), while percent/indexed inputs are pre-transformed.
 
     pub fn logical_to_coordinate(&self, logical: f64) -> Coordinate {
@@ -674,7 +674,7 @@ impl PriceScaleCore {
     }
 
     /// coordinate -> logical *without* undoing the log transform (the tick mark builder works in
-    /// the transformed space; matches the closures LWC passes to `PriceTickMarkBuilder`).
+    /// the transformed space; matches the closures reference passes to `PriceTickMarkBuilder`).
     fn coordinate_to_logical_raw(&self, coordinate: f64) -> f64 {
         if self.is_empty() {
             return 0.0;
@@ -683,7 +683,7 @@ impl PriceScaleCore {
         let Some(range) = self.price_range.as_ref() else {
             return 0.0;
         };
-        // LWC's builder converters go through _coordinateToLogical which applies fromLog;
+        // the reference's builder converters go through _coordinateToLogical which applies fromLog;
         // rebuildTickMarks then walks in *price* space for log scales.
         let logical = range.min_value()
             + range.length()

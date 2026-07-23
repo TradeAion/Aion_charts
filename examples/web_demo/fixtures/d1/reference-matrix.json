@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "lwc_version": "5.2.0",
+  "ref_version": "5.2.0",
   "fixture": "candles-1000-default-light",
   "metric": "pixelmatch perceptual fraction, threshold 0.1, antialias excluded",
   "cases": [

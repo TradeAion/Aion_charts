@@ -12,14 +12,14 @@ pub struct PriceTickSpanCalculator {
 
 impl PriceTickSpanCalculator {
     /// `base` is the price scale base (e.g. 100 for 2 decimals). Panics on unexpected bases,
-    /// matching LWC's thrown errors.
+    /// matching the reference's thrown errors.
     pub fn new(base: i64, integral_dividers: Vec<f64>) -> Self {
         let fractional_dividers = if is_base_decimal(base) {
             vec![2.0, 2.5, 2.0]
         } else {
             let mut dividers = Vec::new();
             let mut base_rest = base;
-            // LWC throws on a base with prime factors other than 2 and 5 (a user-supplied
+            // reference throws on a base with prime factors other than 2 and 5 (a user-supplied
             // `min_move` like 0.03 produces one). A JS throw is catchable; a wasm panic aborts
             // the whole chart, so stop decomposing instead and use the dividers found so far.
             while base_rest != 1 && dividers.len() <= 100 {

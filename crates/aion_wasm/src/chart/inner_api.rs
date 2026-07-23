@@ -16,10 +16,10 @@ impl ChartInner {
         let removed = self.engine.remove_series(id as SeriesId);
         if removed {
             // Series primitives bound to the removed series (or to indicator outputs
-            // tombstoned with it) auto-detach (LWC `removeSeries` drops them with the series).
+            // tombstoned with it) auto-detach (reference `removeSeries` drops them with the series).
             self.detach_orphaned_series_primitives();
             // Custom series drop their entry with the series, firing the pane view's
-            // `destroy` hook (LWC `ICustomSeriesPaneView.destroy`).
+            // `destroy` hook (reference `ICustomSeriesPaneView.destroy`).
             self.drop_orphaned_custom_series();
         }
         removed
@@ -155,7 +155,7 @@ impl ChartInner {
         }
     }
 
-    /// Per-data-point color overrides (LWC data-item colors; packed RGBA `0xRRGGBBAA`, 0 = no
+    /// Per-data-point color overrides (reference data-item colors; packed RGBA `0xRRGGBBAA`, 0 = no
     /// override at that row). Delegates to the engine; a rejection (unknown/removed id or a
     /// channel length that does not match the row count) warns and leaves no partial state.
     pub fn set_series_point_colors(
@@ -177,7 +177,7 @@ impl ChartInner {
 
     /// Streaming update like [`update_series_bar`] that also sets the target bar's per-point
     /// color channels (None = no custom color for that channel).
-    #[allow(clippy::too_many_arguments)] // mirrors update_series_bar plus the three LWC color slots
+    #[allow(clippy::too_many_arguments)] // mirrors update_series_bar plus the three reference color slots
     pub fn update_series_bar_styled(
         &mut self,
         series_id: u32,
@@ -209,7 +209,7 @@ impl ChartInner {
         }
     }
 
-    /// Apply a per-series `priceFormat` JSON patch (LWC PriceFormat). Malformed JSON, an
+    /// Apply a per-series `priceFormat` JSON patch (reference PriceFormat). Malformed JSON, an
     /// unknown type, or an unknown/removed id warns and is ignored.
     pub fn series_apply_price_format_json(&mut self, id: u32, json: &str) {
         if !self
@@ -222,7 +222,7 @@ impl ChartInner {
         }
     }
 
-    /// Install a series' custom price formatter fn (LWC `priceFormat.formatter`), switching it
+    /// Install a series' custom price formatter fn (reference `priceFormat.formatter`), switching it
     /// to `type:"custom"`. Same boundary contract as the chart-level price formatter: a throw
     /// or non-string result falls back to the built-in formatter.
     pub fn set_series_price_formatter(&mut self, id: u32, formatter: js_sys::Function) {
@@ -251,7 +251,7 @@ impl ChartInner {
     }
 
     /// Sets a series' line/area/histogram stroke color from a CSS string, preserving alpha
-    /// (the r/g/b `set_series_color` form is opaque-only). Stored verbatim (LWC `options()`
+    /// (the r/g/b `set_series_color` form is opaque-only). Stored verbatim (reference `options()`
     /// returns the applied string); parsed at render time.
     pub fn set_series_color_css(&mut self, id: u32, css: &str) {
         if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
@@ -263,8 +263,8 @@ impl ChartInner {
         self.engine.set_series_visible(id as SeriesId, visible);
     }
 
-    /// Set candlestick/bar up & down body colors, stored verbatim (LWC `options()` returns
-    /// the applied string). `""` clears the override back to the LWC default palette; the
+    /// Set candlestick/bar up & down body colors, stored verbatim (reference `options()` returns
+    /// the applied string). `""` clears the override back to the reference default palette; the
     /// strings are parsed at render time.
     pub fn set_series_updown_colors(&mut self, id: u32, up: &str, down: &str) {
         if let Some(s) = self.series.iter_mut().find(|s| s.id == id as SeriesId) {
@@ -387,7 +387,7 @@ impl ChartInner {
         self.engine.remove_price_line(id);
     }
 
-    /// Merge a JSON options patch into the price line with `id` (LWC `IPriceLine.applyOptions`).
+    /// Merge a JSON options patch into the price line with `id` (reference `IPriceLine.applyOptions`).
     pub fn price_line_apply_options(&mut self, id: u32, json: &str) {
         if !self.engine.price_line_apply_options(id, json) {
             web_sys::console::warn_1(
@@ -554,43 +554,43 @@ impl ChartInner {
         }
     }
 
-    /// LWC v5 `chart.addPane(preserveEmptyPane)`: append a pane and return its index.
+    /// reference v5 `chart.addPane(preserveEmptyPane)`: append a pane and return its index.
     pub fn add_pane(&mut self, preserve_empty: bool) -> u32 {
         self.engine.add_pane(preserve_empty) as u32
     }
 
-    /// LWC `chart.removePane`: refuses the last remaining pane and stale indices (false).
-    /// The pane's series are NOT removed — they become pane-less (LWC `paneForSource` →
+    /// reference `chart.removePane`: refuses the last remaining pane and stale indices (false).
+    /// The pane's series are NOT removed — they become pane-less (reference `paneForSource` →
     /// null) and render/scale nowhere until re-assigned; panes below shift one index up.
     pub fn remove_pane(&mut self, index: u32) -> bool {
         self.engine.remove_pane(index as usize)
     }
 
-    /// LWC `chart.swapPanes`: the two panes trade places — series assignments, stretch
+    /// reference `chart.swapPanes`: the two panes trade places — series assignments, stretch
     /// factors, scales, and preserve flags ride along with them.
     pub fn swap_panes(&mut self, first: u32, second: u32) -> bool {
         self.engine.swap_panes(first as usize, second as usize)
     }
 
-    /// LWC `IPaneApi.moveTo`: relocate the pane (with its series) to a new index; the panes
+    /// reference `IPaneApi.moveTo`: relocate the pane (with its series) to a new index; the panes
     /// in between shift one slot. False for a stale index.
     pub fn pane_move_to(&mut self, index: u32, target: u32) -> bool {
         self.engine.move_pane(index as usize, target as usize)
     }
 
-    /// LWC `IPaneApi.preserveEmptyPane` (false for a stale index).
+    /// reference `IPaneApi.preserveEmptyPane` (false for a stale index).
     pub fn pane_preserve_empty(&self, index: u32) -> bool {
         self.engine.pane_preserve_empty(index as usize)
     }
 
-    /// LWC `IPaneApi.setPreserveEmptyPane`: an empty pane collapses on the next series
+    /// reference `IPaneApi.setPreserveEmptyPane`: an empty pane collapses on the next series
     /// removal/move-out unless this flag holds it open (chart-model.ts
     /// `_cleanupIfPaneIsEmpty`).
     pub fn pane_set_preserve_empty(&mut self, index: u32, flag: bool) {
         self.engine.pane_set_preserve_empty(index as usize, flag);
     }
 
-    /// LWC `IPaneApi.getSeries`: the pane's live series ids in render order (bottom first).
+    /// reference `IPaneApi.getSeries`: the pane's live series ids in render order (bottom first).
     pub fn pane_series_ids(&self, index: u32) -> Vec<u32> {
         self.engine
             .pane_series_ids(index as usize)
@@ -599,9 +599,9 @@ impl ChartInner {
             .collect()
     }
 
-    /// Attach a pane primitive (LWC `IPaneApi.attachPrimitive`, plugin platform Phase C-a) and
+    /// Attach a pane primitive (reference `IPaneApi.attachPrimitive`, plugin platform Phase C-a) and
     /// return its registry id (0 when the pane index is stale). Fires the plugin's `attached`
-    /// hook with `{pane_index}` if present (LWC `PaneAttachedParameter`, reduced to what the
+    /// hook with `{pane_index}` if present (reference `PaneAttachedParameter`, reduced to what the
     /// host can provide headlessly); a throwing hook detaches nothing and is only reported.
     pub fn attach_pane_primitive(&mut self, pane: u32, primitive: js_sys::Object) -> u32 {
         if pane as usize >= self.panes.len() {
@@ -631,7 +631,7 @@ impl ChartInner {
         id
     }
 
-    /// Detach a pane primitive by id (LWC `IPaneApi.detachPrimitive`): fires its `detached`
+    /// Detach a pane primitive by id (reference `IPaneApi.detachPrimitive`): fires its `detached`
     /// hook and drops the retained object so no JS reference leaks (mirrors the formatter
     /// clear paths). False for an unknown id.
     pub fn detach_pane_primitive(&mut self, id: u32) -> bool {
@@ -651,7 +651,7 @@ impl ChartInner {
         true
     }
 
-    /// Attach a series primitive (LWC `ISeriesApi.attachPrimitive`, plugin platform Phase C-b)
+    /// Attach a series primitive (reference `ISeriesApi.attachPrimitive`, plugin platform Phase C-b)
     /// and return its registry id (0 when the series id is unknown or already removed). Fires
     /// the plugin's `attached` hook with `{series_id, pane_index}` if present (`pane_index`
     /// omitted while the series is pane-less); the TS adapter injects `request_update` before
@@ -699,7 +699,7 @@ impl ChartInner {
         id
     }
 
-    /// Detach a series primitive by id (LWC `ISeriesApi.detachPrimitive`): fires its `detached`
+    /// Detach a series primitive by id (reference `ISeriesApi.detachPrimitive`): fires its `detached`
     /// hook and drops the retained object. False for an unknown id.
     pub fn detach_series_primitive(&mut self, id: u32) -> bool {
         let Some(position) = self
@@ -714,7 +714,7 @@ impl ChartInner {
         true
     }
 
-    /// Auto-detach every series primitive whose owning series is gone (LWC drops a removed
+    /// Auto-detach every series primitive whose owning series is gone (reference drops a removed
     /// series' primitives with it, chart-model.ts `removeSeries`). Called after any
     /// `remove_series` — indicator outputs tombstoned alongside their source are covered too,
     /// since they scan by live state rather than by the removed id.
@@ -740,7 +740,7 @@ impl ChartInner {
         }
     }
 
-    /// Merge a snake_case JSON patch of price-scale options into one pane scale (LWC
+    /// Merge a snake_case JSON patch of price-scale options into one pane scale (reference
     /// `priceScale.applyOptions`; unknown keys are ignored). Mode/width-affecting keys force
     /// a full axis-width renegotiation like `set_price_scale_mode`.
     pub fn price_scale_apply_options_json(&mut self, pane: u32, target: u8, json: &str) {
@@ -758,7 +758,7 @@ impl ChartInner {
     }
 
     /// One pane scale's full options as a snake_case JSON string ("" for an unknown
-    /// pane/target) — LWC `priceScale.options()`.
+    /// pane/target) — reference `priceScale.options()`.
     pub fn price_scale_options_json(&self, pane: u32, target: u8) -> String {
         self.engine
             .price_scale_options_json(pane as usize, price_scale_target_from_u8(target))
@@ -772,12 +772,12 @@ impl ChartInner {
     }
 
     pub fn set_time_visible(&mut self, visible: bool) {
-        // LWC `timeScale.timeVisible` — label semantics only (whether tick/crosshair labels
+        // reference `timeScale.timeVisible` — label semantics only (whether tick/crosshair labels
         // include the time of day). Strip reservation is `set_time_axis_visible`.
         self.engine.set_time_visible(visible);
     }
 
-    /// LWC `timeScale.visible`: reserve/collapse the whole time-axis strip.
+    /// reference `timeScale.visible`: reserve/collapse the whole time-axis strip.
     pub fn set_time_axis_visible(&mut self, visible: bool) {
         self.engine.set_time_axis_visible(visible);
         // The strip reservation feeds the pane content height — relayout immediately so
@@ -785,98 +785,98 @@ impl ChartInner {
         self.recompute_layout(true);
     }
 
-    /// LWC `timeScale.ticksVisible`: tick marks beside the time-axis labels.
+    /// reference `timeScale.ticksVisible`: tick marks beside the time-axis labels.
     pub fn set_time_ticks_visible(&mut self, visible: bool) {
         self.engine.set_time_ticks_visible(visible);
     }
 
-    /// LWC `timeScale.minimumHeight` (CSS px): floor for the time-axis strip height.
+    /// reference `timeScale.minimumHeight` (CSS px): floor for the time-axis strip height.
     pub fn set_time_axis_minimum_height(&mut self, height: f64) {
         self.engine.set_time_axis_minimum_height(height);
         self.recompute_layout(true);
     }
 
-    /// LWC `timeScale.tickMarkMaxCharacterLength` (0 restores the default 8).
+    /// reference `timeScale.tickMarkMaxCharacterLength` (0 restores the default 8).
     pub fn set_tick_mark_max_character_length(&mut self, n: u32) {
         self.engine.set_tick_mark_max_character_length(n);
     }
 
-    /// Set/clear the hovered pane separator (LWC pane-separator.ts hover; -1 = none). The
+    /// Set/clear the hovered pane separator (reference pane-separator.ts hover; -1 = none). The
     /// host repaints; the next axis frame carries the band position.
     pub fn set_separator_hover(&mut self, index: i32) {
         self.engine
             .set_separator_hover((index >= 0).then_some(index as usize));
     }
 
-    /// LWC `timeScale.secondsVisible`: include seconds in time labels when the time is shown.
+    /// reference `timeScale.secondsVisible`: include seconds in time labels when the time is shown.
     pub fn set_seconds_visible(&mut self, visible: bool) {
         self.engine.set_seconds_visible(visible);
     }
 
-    /// LWC `timeScale.minBarSpacing`.
+    /// reference `timeScale.minBarSpacing`.
     pub fn set_min_bar_spacing(&mut self, spacing: f64) {
         self.engine.set_min_bar_spacing(spacing);
     }
 
-    /// LWC `timeScale.maxBarSpacing` (CSS px; 0 restores the default half-width cap).
+    /// reference `timeScale.maxBarSpacing` (CSS px; 0 restores the default half-width cap).
     pub fn set_max_bar_spacing(&mut self, spacing: f64) {
         self.engine.set_max_bar_spacing(spacing);
     }
 
-    /// LWC `timeScale().applyOptions({ barSpacing })`: write the option and apply it live.
+    /// reference `timeScale().applyOptions({ barSpacing })`: write the option and apply it live.
     pub fn apply_bar_spacing_option(&mut self, spacing: f64) {
         self.engine.apply_bar_spacing_option(spacing);
     }
 
-    /// LWC `timeScale().applyOptions({ rightOffset })`: write the option and apply it live.
+    /// reference `timeScale().applyOptions({ rightOffset })`: write the option and apply it live.
     pub fn apply_right_offset_option(&mut self, offset: f64) {
         self.engine.apply_right_offset_option(offset);
     }
 
-    /// LWC `timeScale.rightOffsetPixels`: pin the right offset in pixels.
+    /// reference `timeScale.rightOffsetPixels`: pin the right offset in pixels.
     pub fn set_right_offset_pixels(&mut self, pixels: f64) {
         self.engine.set_right_offset_pixels(pixels);
     }
 
-    /// LWC `timeScale.fixLeftEdge`.
+    /// reference `timeScale.fixLeftEdge`.
     pub fn set_fix_left_edge(&mut self, fix: bool) {
         self.engine.set_fix_left_edge(fix);
     }
 
-    /// LWC `timeScale.fixRightEdge`.
+    /// reference `timeScale.fixRightEdge`.
     pub fn set_fix_right_edge(&mut self, fix: bool) {
         self.engine.set_fix_right_edge(fix);
     }
 
-    /// LWC `timeScale.lockVisibleTimeRangeOnResize`.
+    /// reference `timeScale.lockVisibleTimeRangeOnResize`.
     pub fn set_lock_visible_time_range_on_resize(&mut self, lock: bool) {
         self.engine.set_lock_visible_time_range_on_resize(lock);
     }
 
-    /// LWC `timeScale.rightBarStaysOnScroll`.
+    /// reference `timeScale.rightBarStaysOnScroll`.
     pub fn set_right_bar_stays_on_scroll(&mut self, stays: bool) {
         self.engine.set_right_bar_stays_on_scroll(stays);
     }
 
-    /// LWC `timeScale.shiftVisibleRangeOnNewBar` (default true): when the last bar is
+    /// reference `timeScale.shiftVisibleRangeOnNewBar` (default true): when the last bar is
     /// visible, the view follows newly appended bars.
     pub fn set_shift_visible_range_on_new_bar(&mut self, shift: bool) {
         self.engine.set_shift_visible_range_on_new_bar(shift);
     }
 
-    /// LWC `timeScale.allowShiftVisibleRangeOnWhitespaceReplacement` (default false).
+    /// reference `timeScale.allowShiftVisibleRangeOnWhitespaceReplacement` (default false).
     pub fn set_allow_shift_visible_range_on_whitespace_replacement(&mut self, allow: bool) {
         self.engine
             .set_allow_shift_visible_range_on_whitespace_replacement(allow);
     }
 
-    /// LWC `localization.dateFormat` (default `dd MMM \'yy`): the crosshair time-label
+    /// reference `localization.dateFormat` (default `dd MMM \'yy`): the crosshair time-label
     /// pattern. Tokens `dd`/`d`, `MM`/`M`/`MMM`/`MMMM`, `yy`/`yyyy` with `'…'` quoting.
     pub fn set_date_format(&mut self, pattern: &str) {
         self.engine.set_date_format(pattern);
     }
 
-    /// LWC `localization.locale` (default the browser language): regenerate the engine's
+    /// reference `localization.locale` (default the browser language): regenerate the engine's
     /// month-name tables (12 short + 12 long) from `Intl.DateTimeFormat` so the date-format
     /// `MMM`/`MMMM` tokens and the month tick labels localize. An invalid/unsupported tag
     /// warns and keeps the current tables.
@@ -890,7 +890,7 @@ impl ChartInner {
         self.engine.set_month_names(short, long);
     }
 
-    /// LWC v5.2 `ISeriesApi.pop(count)`: remove the last `count` data points (clamped to the
+    /// reference v5.2 `ISeriesApi.pop(count)`: remove the last `count` data points (clamped to the
     /// data length; point colors shift along). Returns the new data length (0 for an
     /// unknown/removed id — such a series has no data anyway). A custom series' host-side
     /// items truncate in lockstep with the engine rows.
@@ -905,7 +905,7 @@ impl ChartInner {
         new_len
     }
 
-    /// LWC `ISeriesApi.lastValueData(globalLast)`: JSON `{"value","formatted","time"}` of the
+    /// reference `ISeriesApi.lastValueData(globalLast)`: JSON `{"value","formatted","time"}` of the
     /// last (global) or last visible non-whitespace bar; "" when there is none.
     pub fn series_last_value_data(&self, id: u32, global_last: bool) -> String {
         self.engine
@@ -921,7 +921,7 @@ impl ChartInner {
             .unwrap_or_default()
     }
 
-    /// LWC `chart.setCrosshairPosition(price, time, series)`: position the crosshair at a
+    /// reference `chart.setCrosshairPosition(price, time, series)`: position the crosshair at a
     /// data point with no DOM event; the next render draws it (the TS layer emits its
     /// crosshair-move event). False when the time is not a bar or the series/scale can't
     /// place it.
@@ -930,7 +930,7 @@ impl ChartInner {
             .set_crosshair_position(price, time, series_id as SeriesId)
     }
 
-    /// LWC `chart.clearCrosshairPosition`: clear the programmatic crosshair (see the engine
+    /// reference `chart.clearCrosshairPosition`: clear the programmatic crosshair (see the engine
     /// note on the stored position/origin).
     pub fn clear_crosshair_position(&mut self) {
         self.engine.clear_crosshair_position();
@@ -942,20 +942,20 @@ impl ChartInner {
         self.engine.series_order_json()
     }
 
-    /// LWC `chart.setSeriesOrder`: reorder which series paints on top. The ids must name
+    /// reference `chart.setSeriesOrder`: reorder which series paints on top. The ids must name
     /// every live series exactly once; a bad permutation is rejected (false, no change).
     pub fn set_series_order(&mut self, ids: Vec<u32>) -> bool {
         self.engine
             .set_series_order(ids.into_iter().map(|id| id as SeriesId).collect())
     }
 
-    /// Host-pushed "all scaling and scrolling disabled" aggregate (LWC
+    /// Host-pushed "all scaling and scrolling disabled" aggregate (reference
     /// `_isAllScalingAndScrollingDisabled`): forces fix-edge semantics on the time scale.
     pub fn set_interaction_disabled(&mut self, disabled: bool) {
         self.engine.set_interaction_disabled(disabled);
     }
 
-    /// Install/clear the host price formatter (LWC `localization.priceFormatter`). The JS callback
+    /// Install/clear the host price formatter (reference `localization.priceFormatter`). The JS callback
     /// receives the numeric price and returns a string; a throw or non-string result falls back to
     /// the built-in formatter.
     pub fn set_price_formatter(&mut self, f: Option<js_sys::Function>) {
@@ -968,7 +968,7 @@ impl ChartInner {
         }));
     }
 
-    /// Install/clear the host time-axis tick formatter (LWC `timeScale.tickMarkFormatter`). The JS
+    /// Install/clear the host time-axis tick formatter (reference `timeScale.tickMarkFormatter`). The JS
     /// callback receives `(timeSeconds, tickMarkType)`.
     pub fn set_tick_mark_formatter(&mut self, f: Option<js_sys::Function>) {
         self.engine.set_tick_mark_formatter(f.map(|func| {
@@ -984,7 +984,7 @@ impl ChartInner {
         }));
     }
 
-    /// Install/clear the host crosshair time formatter (LWC `localization.timeFormatter`). The JS
+    /// Install/clear the host crosshair time formatter (reference `localization.timeFormatter`). The JS
     /// callback receives the UTC-second timestamp.
     pub fn set_time_formatter(&mut self, f: Option<js_sys::Function>) {
         self.engine.set_time_formatter(f.map(|func| {
@@ -996,7 +996,7 @@ impl ChartInner {
         }));
     }
 
-    /// 0 = normal, 1 = magnet (LWC default), 2 = hidden, 3 = magnet OHLC.
+    /// 0 = normal, 1 = magnet (reference default), 2 = hidden, 3 = magnet OHLC.
     pub fn set_crosshair_mode(&mut self, mode: u8) {
         self.crosshair_mode = crosshair_mode_from_u8(mode);
         // keep the options store consistent so `options()` reflects it
@@ -1042,7 +1042,7 @@ impl ChartInner {
             .unwrap_or_default()
     }
 
-    /// Merge a snake_case JSON patch of series style options into the series (LWC
+    /// Merge a snake_case JSON patch of series style options into the series (reference
     /// `series.applyOptions`; unknown keys are ignored gracefully).
     pub fn series_apply_options_json(&mut self, id: u32, json: &str) {
         if !self.engine.series_apply_options_json(id as SeriesId, json) {
@@ -1084,7 +1084,7 @@ impl ChartInner {
     /// price-scale height accordingly. Idempotent; called on resize, data change, and render.
     /// (The axis labels depend only on the price range, so one refinement pass converges.)
     pub(super) fn recompute_layout(&mut self, allow_axis_shrink: bool) {
-        // The reserved time-axis strip is LWC `timeScale.visible` (0 when hidden) floored at
+        // The reserved time-axis strip is reference `timeScale.visible` (0 when hidden) floored at
         // `timeScale.minimumHeight` — distinct from `timeVisible`, which is label semantics.
         let content_h = (self.css_height - self.engine.time_axis_height()).max(1.0);
         self.engine.layout_panes(content_h);
@@ -1183,7 +1183,7 @@ impl ChartInner {
         self.time_scale.width()
     }
     pub fn time_scale_height(&self) -> f64 {
-        // LWC `timeScale().height()`: the reserved strip height (0 when `timeScale.visible`
+        // reference `timeScale().height()`: the reserved strip height (0 when `timeScale.visible`
         // is false, else the auto height floored at `minimumHeight`).
         self.engine.time_axis_height()
     }
@@ -1258,7 +1258,7 @@ impl ChartInner {
             price_scale_target_from_u8(target),
             price_scale_mode_from_u8(mode),
         );
-        // A mode change is a full layout invalidation in LWC: label formatting can become wider
+        // A mode change is a full layout invalidation in reference: label formatting can become wider
         // (percentage) or narrower (indexed/normal), so the grow-fast/shrink-on-full-layout axis
         // policy must be allowed to renegotiate in both directions immediately.
         self.recompute_layout(true);
@@ -1382,19 +1382,19 @@ impl ChartInner {
     }
 
     /// X (CSS px) for a UTC-seconds timestamp that sits exactly on a data point, else `None`
-    /// (mirrors LWC `timeToCoordinate`, which does not snap to the nearest bar).
+    /// (mirrors reference `timeToCoordinate`, which does not snap to the nearest bar).
     pub fn time_to_coordinate(&self, time: f64) -> Option<f64> {
         self.engine.time_to_coordinate(time)
     }
 
     /// UTC-seconds timestamp of the data point nearest to X (CSS px), or `None` if X maps outside
-    /// the data range (mirrors LWC `coordinateToTime`).
+    /// the data range (mirrors reference `coordinateToTime`).
     pub fn coordinate_to_time(&self, x_css: f64) -> Option<f64> {
         self.engine.coordinate_to_time(x_css)
     }
 
     /// Integer logical bar owning an X coordinate, or `None` when there is no data. May be negative
-    /// or beyond the last bar, matching LWC's public `coordinateToLogical`.
+    /// or beyond the last bar, matching the reference's public `coordinateToLogical`.
     pub fn coordinate_to_logical(&self, x_css: f64) -> Option<f64> {
         self.engine.coordinate_to_logical(x_css)
     }
@@ -1411,7 +1411,7 @@ impl ChartInner {
     /// `[series_id, open, high, low, close, ...]`. Only series that actually have a point at that
     /// bar are included (single-value series report the value in all four slots; a whitespace
     /// row is no bar and is skipped). Empty when the cursor is off the data. Series are ordered
-    /// topmost-first, matching LWC's hit-test order (pane-hit-test.ts reverses the z-order).
+    /// topmost-first, matching the reference's hit-test order (pane-hit-test.ts reverses the z-order).
     /// Backs the façade's `seriesData` map for crosshair/click events.
     pub fn hover_data(&self, x_css: f64) -> Vec<f64> {
         use aion_core::model::plot_list::MismatchDirection;
@@ -1498,8 +1498,8 @@ fn intl_month_format(locale: &str, month: &str) -> Option<js_sys::Intl::DateTime
         .ok()
 }
 
-/// The 12 short and 12 long month names for `locale` (LWC `localization.locale`), generated
-/// through `Intl.DateTimeFormat` exactly like LWC's `format-date.ts` `toLocaleString` calls.
+/// The 12 short and 12 long month names for `locale` (reference `localization.locale`), generated
+/// through `Intl.DateTimeFormat` exactly like the reference's `format-date.ts` `toLocaleString` calls.
 fn locale_month_names(locale: &str) -> Option<([String; 12], [String; 12])> {
     let short_fmt = intl_month_format(locale, "short")?;
     let long_fmt = intl_month_format(locale, "long")?;

@@ -2,7 +2,7 @@
 //!
 //! Pipelines: solid quads (integer rects — candles, wicks, grid, crosshair), textured quads
 //! (label atlas), and triangles (line strokes, area fills). Frames are composed as scissored
-//! draw groups in one 4x MSAA pass, replicating LWC's pane/axis canvas separation. MSAA
+//! draw groups in one 4x MSAA pass, replicating the reference's pane/axis canvas separation. MSAA
 //! smooths diagonal lines while leaving pixel-aligned rects and text bit-identical.
 
 mod atlas;

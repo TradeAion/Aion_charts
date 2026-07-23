@@ -1,7 +1,7 @@
 # @tradeaion/charts
 
 A trading-chart engine in **Rust + WebGPU + WASM**, pixel-faithful to
-[lightweight-charts](https://github.com/tradingview/lightweight-charts) v5, with a plain
+the reference charting library v5, with a plain
 TypeScript API. Canvas2D fallback with automatic device-loss failover included.
 
 **Private package** — hosted on GitHub Packages (`TradeAion` org). Not on the public npm registry.
@@ -42,7 +42,7 @@ No Rust toolchain or native build step is needed — the package ships prebuilt 
 ```ts
 import { create_chart } from "@tradeaion/charts";
 
-// Async: WebGPU backend acquisition (the one deliberate divergence from LWC's sync createChart).
+// Async: WebGPU backend acquisition (the one deliberate divergence from the reference's sync createChart).
 const chart = await create_chart(document.getElementById("chart"), {
   layout: { background: { type: "solid", color: "#ffffff" }, textColor: "#191919" },
 });
@@ -56,7 +56,7 @@ series.set_data([
 chart.time_scale().fit_content();
 ```
 
-API semantics mirror lightweight-charts v5 (options, series handles, time/price scale handles,
+API semantics mirror the reference charting library v5 (options, series handles, time/price scale handles,
 events), with snake_case naming. See the
 [repository](https://github.com/TradeAion/Aion_charts) for the full docs.
 

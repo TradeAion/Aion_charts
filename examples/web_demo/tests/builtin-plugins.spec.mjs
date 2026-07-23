@@ -127,7 +127,7 @@ test("plugin markers match engine markers on WebGPU", async ({ page }, test_info
 
 // (c) set_markers([]) clears the markers without detaching; detach removes them entirely.
 // Both restore the exact baseline pixels. The default auto_scale option must also expand the
-// owning scale while markers are present (LWC autoScale behavior).
+// owning scale while markers are present (reference autoScale behavior).
 test("plugin markers clear with set_markers([]) and detach; auto_scale expands the scale", async ({ page }) => {
   await goto_fixture(page, "canvas2d");
   const baseline = await screenshot(page);

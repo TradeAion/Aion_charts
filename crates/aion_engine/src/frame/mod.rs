@@ -46,7 +46,7 @@ const VOLUME_UP: Color = Color::rgba(0x26, 0xa6, 0x9a, 0x80);
 const VOLUME_DOWN: Color = Color::rgba(0xef, 0x53, 0x50, 0x80);
 const BASELINE_TOP_LINE: Color = Color::rgb(0x26, 0xa6, 0x9a);
 const BASELINE_BOTTOM_LINE: Color = Color::rgb(0xef, 0x53, 0x50);
-/// LWC baseline quadrant fill defaults (model/series/baseline-series.ts): two-stop gradients
+/// reference baseline quadrant fill defaults (model/series/baseline-series.ts): two-stop gradients
 /// from the line to the baseline. Alphas are the CSS 0..1 values quantized to bytes
 /// (0.28 -> 71, 0.05 -> 13, matching `Color::parse_css`).
 const BASELINE_TOP_FILL1: Color = Color::rgba(0x26, 0xa6, 0x9a, 71);
@@ -55,7 +55,7 @@ const BASELINE_BOTTOM_FILL1: Color = Color::rgba(0xef, 0x53, 0x50, 13);
 const BASELINE_BOTTOM_FILL2: Color = Color::rgba(0xef, 0x53, 0x50, 71);
 pub(crate) const LINE_WIDTH: f64 = 3.0;
 const CROSSHAIR_COLOR: Color = Color::rgb(0x95, 0x98, 0xa1);
-/// LWC crosshair label background default (`#131722`); fallback when the option is unparseable.
+/// reference crosshair label background default (`#131722`); fallback when the option is unparseable.
 const CROSSHAIR_LABEL_BG: Color = Color::rgb(0x13, 0x17, 0x22);
 
 fn ceiled_odd(value: f64) -> f64 {
@@ -128,7 +128,7 @@ pub struct FramePane {
     pub scissor: [u32; 4],
     pub under: Vec<Prim>,
     pub main: Vec<Prim>,
-    /// Primitive z-order `top` layer (LWC `PrimitivePaneViewZOrder` "top" — above everything,
+    /// Primitive z-order `top` layer (reference `PrimitivePaneViewZOrder` "top" — above everything,
     /// crosshair included). The engine emits nothing here today; hosts append plugin prims
     /// after frame construction. Kept beside `under`/`main` so both backends execute it with
     /// the pane's scissor and point pool. (`FramePane.top` is already the pane's CSS y origin,
@@ -163,7 +163,7 @@ pub enum AxisTextMidpoint {
     None,
     /// Correct using this label's glyph bounds (price-axis labels).
     Label,
-    /// Correct using LWC's stable representative time-label sample (crosshair time label).
+    /// Correct using the reference's stable representative time-label sample (crosshair time label).
     StableTime,
 }
 
@@ -183,7 +183,7 @@ pub struct AxisLabel {
 pub struct AxisFrame {
     pub labels: Vec<AxisLabel>,
     pub separators: Vec<f64>,
-    /// Price-axis tick stubs (LWC `ticksVisible`): 5 css px horizontal marks painted from the
+    /// Price-axis tick stubs (reference `ticksVisible`): 5 css px horizontal marks painted from the
     /// pane edge into the axis strip at each tick coordinate, in the strip's border color.
     /// Emitted only for scales whose `ticksVisible` option is on.
     pub price_ticks: Vec<PriceAxisTick>,
@@ -191,11 +191,11 @@ pub struct AxisFrame {
     /// `ticksVisible` stubs; empty while `timeScale.ticksVisible` is off.
     pub time_ticks: Vec<f64>,
     /// Index (into `separators`) of the hovered pane separator, if any — the host paints the
-    /// `layout.panes.separatorHoverColor` band over it (LWC pane-separator.ts).
+    /// `layout.panes.separatorHoverColor` band over it (reference pane-separator.ts).
     pub separator_hover: Option<usize>,
 }
 
-/// One price-axis tick stub (LWC price-axis-widget.ts `_drawTickMarks`).
+/// One price-axis tick stub (reference price-axis-widget.ts `_drawTickMarks`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PriceAxisTick {
     /// Media-y of the tick mark (same coordinate as its label).
@@ -241,7 +241,7 @@ struct ResolvedSeries {
     bottom_line_width: f64,
     bottom_line_style: LineStyle,
     scale_target: PriceScaleTarget,
-    /// The pane this series renders on; `None` when its pane was removed (LWC `removePane`
+    /// The pane this series renders on; `None` when its pane was removed (reference `removePane`
     /// orphans the pane's series) — it draws and scales nowhere until re-assigned.
     pane: Option<usize>,
     base_value: f64,
@@ -270,7 +270,7 @@ fn css_color(value: &str, fallback: Color) -> Color {
 }
 
 /// Resolve a verbatim CSS color slot at render time (the wave-1 pattern): the stored string
-/// parses, an unset slot or an unparseable string falls back to `fallback` (LWC's default —
+/// parses, an unset slot or an unparseable string falls back to `fallback` (the reference's default —
 /// a user string the renderer cannot parse degrades to the default rather than vanishing).
 pub(crate) fn verbatim_color(value: &Option<String>, fallback: Color) -> Color {
     value
@@ -305,7 +305,7 @@ impl ChartEngine {
         any.then_some((min + max) / 2.0)
     }
 
-    /// LWC `SeriesBarColorer.barColor` (model/series-bar-colorer.ts) for the series' bar at
+    /// reference `SeriesBarColorer.barColor` (model/series-bar-colorer.ts) for the series' bar at
     /// `row`: the color the built-in last-price line, the last-value axis label, and the
     /// crosshair marker background all follow when their own color option is unset.
     /// `baseline_price` is the resolved baseline for Baseline series (`None` for other kinds).
@@ -316,7 +316,7 @@ impl ChartEngine {
         baseline_price: Option<f64>,
     ) -> Color {
         let plot = self.data.plot(series.id);
-        // LWC data-item colors: a per-point `color` (area reads `lineColor`, mapped onto the
+        // reference data-item colors: a per-point `color` (area reads `lineColor`, mapped onto the
         // body channel here) wins over the series-level resolution for every kind that reads
         // it (bar/candlestick/line/area/histogram); Baseline's barColor ignores data-item
         // colors (series-bar-colorer.ts Baseline arm).
@@ -348,7 +348,7 @@ impl ChartEngine {
                     HISTOGRAM
                 }
             }
-            // LWC baseline colorer: top line color at/above the baseline, bottom below it.
+            // reference baseline colorer: top line color at/above the baseline, bottom below it.
             SeriesKind::Baseline => {
                 let close = plot.value_at(row, PlotValueIndex::Close);
                 match baseline_price {
@@ -364,7 +364,7 @@ impl ChartEngine {
                         .unwrap_or(BASELINE_TOP_LINE),
                 }
             }
-            // LWC bar/candlestick colorer: up when open <= close.
+            // reference bar/candlestick colorer: up when open <= close.
             SeriesKind::Candlestick | SeriesKind::Bar => {
                 let open = plot.value_at(row, PlotValueIndex::Open);
                 let close = plot.value_at(row, PlotValueIndex::Close);
@@ -374,8 +374,8 @@ impl ChartEngine {
                     verbatim_color(&series.down_color, DOWN)
                 }
             }
-            // LWC custom-series colorer (series-bar-colorer.ts Custom arm): the series `color`
-            // option (the data-item color wins in LWC; the host folds those into the custom
+            // reference custom-series colorer (series-bar-colorer.ts Custom arm): the series `color`
+            // option (the data-item color wins in reference; the host folds those into the custom
             // frame values, so this arm is only the exhaustiveness fallback).
             SeriesKind::Custom => verbatim_color(&series.line_color, crate::DEFAULT_LINE_COLOR),
         }
@@ -433,7 +433,7 @@ impl ChartEngine {
         let visible = self.visible_range_for_frame();
         self.autoscale_visible();
 
-        // LWC/fancy-canvas renders each pane with its actual bitmap/media ratio, which can differ
+        // reference/fancy-canvas renders each pane with its actual bitmap/media ratio, which can differ
         // slightly from devicePixelRatio when a fractional-DPR pane dimension rounds. Using DPR
         // directly shifts bars and grid lines relative to the independently rounded pane bitmap.
         let nominal_dpr = self.dpr.max(0.01);
@@ -443,9 +443,9 @@ impl ChartEngine {
         let pane_w_px = (self.pane_w * hpr).round().max(1.0) as u32;
         let pane_left_px = (self.pane_left * nominal_dpr).round().max(0.0) as u32;
         let mut resolved = Vec::with_capacity(self.series.len());
-        // Paint in the chart's series order (LWC z-order, pane.ts orderedSources): ids run
+        // Paint in the chart's series order (reference z-order, pane.ts orderedSources): ids run
         // bottom to top so a later entry overpaints the earlier ones within its pane. With
-        // `hoveredSeriesOnTop` the hovered series repaints topmost for the frame (LWC
+        // `hoveredSeriesOnTop` the hovered series repaints topmost for the frame (reference
         // `hoveredSourceOnTopOrder` — render order only; the stable `series_order` and hit
         // arbitration are untouched). The bump is global across panes, which only reorders
         // within the hovered series' own pane since each pane paints its own series.
@@ -481,7 +481,7 @@ impl ChartEngine {
                 color: verbatim_color(&s.line_color, crate::DEFAULT_LINE_COLOR),
                 up,
                 down,
-                // LWC parity: an unset wick/border color follows the body color of its direction.
+                // reference parity: an unset wick/border color follows the body color of its direction.
                 wick_up: verbatim_color(&s.wick_up_color, up),
                 wick_down: verbatim_color(&s.wick_down_color, down),
                 border_up: verbatim_color(&s.border_up_color, up),
@@ -501,9 +501,9 @@ impl ChartEngine {
                 open_visible: s.open_visible,
                 thin_bars: s.thin_bars,
                 base: s.base,
-                // LWC baselineStyleDefaults; an unset quadrant line width follows the series'
-                // line width (LWC's single baseline lineWidth). Quadrant colors are verbatim
-                // CSS strings parsed here, with the LWC default when unset/unparseable.
+                // reference baselineStyleDefaults; an unset quadrant line width follows the series'
+                // line width (the reference's single baseline lineWidth). Quadrant colors are verbatim
+                // CSS strings parsed here, with the reference default when unset/unparseable.
                 top_fill1: s
                     .top_fill_color1
                     .as_deref()
@@ -562,7 +562,7 @@ impl ChartEngine {
             out.top_prims.clear();
             out.series_paint_marks.clear();
             out.points.clear();
-            // LWC `layout.background` vertical gradient (pane-widget.ts `_drawBackground`):
+            // reference `layout.background` vertical gradient (pane-widget.ts `_drawBackground`):
             // each pane paints its own two-stop gradient spanning its full height, behind
             // the grid and the series. A solid background emits nothing (the backends' clear
             // color already covers it).
@@ -681,10 +681,10 @@ impl ChartEngine {
         self.layout_panes(self.pane_h);
     }
 
-    /// The pane's `layout.background` gradient prim (LWC VerticalGradient,
+    /// The pane's `layout.background` gradient prim (reference VerticalGradient,
     /// pane-widget.ts `_drawBackground`): a two-stop vertical gradient covering the pane's
     /// bitmap rect. `None` for the solid variant — the backends' clear color paints that.
-    /// Accepts LWC's `"gradient"` wire value (and the `"vertical_gradient"` alias).
+    /// Accepts the reference's `"gradient"` wire value (and the `"vertical_gradient"` alias).
     fn background_gradient_prim(&self, x: u32, y: u32, w: u32, h: u32) -> Option<Prim> {
         let background = &self.options.get().layout.background;
         if background.kind != "gradient" && background.kind != "vertical_gradient" {
@@ -726,7 +726,7 @@ impl ChartEngine {
         let mut overlay_marker_margins = vec![(0.0_f64, 0.0_f64); n];
         for s in &self.series {
             // Hidden series remain engine-owned so they can be toggled back on, but—matching
-            // LWC—they must not contribute to the active price-scale autoscale range. A
+            // reference—they must not contribute to the active price-scale autoscale range. A
             // pane-less series (its pane was removed) scales nowhere either.
             if !s.visible {
                 continue;
@@ -772,7 +772,7 @@ impl ChartEngine {
                 target.1 = target.1.max(margins.1);
             }
         }
-        // Series-primitive autoscale contributions (plugin platform Phase C-b): LWC merges a
+        // Series-primitive autoscale contributions (plugin platform Phase C-b): reference merges a
         // series primitive's `autoscaleInfo` into its owning series' autoscale info (series.ts
         // `_autoscaleInfoImpl`), and price-scale.ts `_recalculatePriceRangeImpl` only consults
         // sources that are visible with a first value — so a hidden, data-less, or pane-less
@@ -865,7 +865,7 @@ impl ChartEngine {
     }
 
     fn time_marks_for_frame(&mut self) -> Vec<(i64, u8)> {
-        // LWC time-scale.ts:635 — `(fontSize + 4) * 5 / 8 * tickMarkMaxCharacterLength` with
+        // reference time-scale.ts:635 — `(fontSize + 4) * 5 / 8 * tickMarkMaxCharacterLength` with
         // the grid's fixed 12px estimate; the option widens/narrows the mark spacing.
         let max_width = (12.0 + 4.0) * 5.0 / 8.0 * f64::from(self.tick_mark_max_character_length);
         self.time_marks(max_width)

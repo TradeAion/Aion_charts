@@ -25,9 +25,9 @@ impl ChartEngine {
         let ch = self.options.get().crosshair;
         let vert_color = css_color(&ch.vert_line.color, CROSSHAIR_COLOR);
         let horz_color = css_color(&ch.horz_line.color, CROSSHAIR_COLOR);
-        // LWC lineWidth is in CSS px; generalize the crisp "1 CSS px" rule (grid uses the same
+        // reference lineWidth is in CSS px; generalize the crisp "1 CSS px" rule (grid uses the same
         // `max(1, floor(ratio))`) so width 1 keeps today's output. Vertical lines take the
-        // horizontal ratio for thickness, horizontal lines the vertical ratio. Style is the LWC
+        // horizontal ratio for thickness, horizontal lines the vertical ratio. Style is the reference
         // lineStyle u8 (default LargeDashed), expanded to a dash pattern by the backends.
         let vert_width = 1f64.max((ch.vert_line.width * hpr).floor()) as i32;
         let horz_width = 1f64.max((ch.horz_line.width * vpr).floor()) as i32;
@@ -58,7 +58,7 @@ impl ChartEngine {
                 color: horz_color,
             });
         }
-        // LWC crosshair-marks-pane-view.ts: one mark per visible Line/Area/Baseline series
+        // reference crosshair-marks-pane-view.ts: one mark per visible Line/Area/Baseline series
         // holding a bar at the crosshair index, honoring the series' `crosshairMarker*`
         // options (series.ts markerDataAtIndex).
         let background = css_color(
@@ -98,7 +98,7 @@ impl ChartEngine {
             } else {
                 None
             };
-            // LWC defaults: the background follows the bar color; the border falls back to the
+            // reference defaults: the background follows the bar color; the border falls back to the
             // chart background color at the mark (crosshair-marks-pane-view.ts:97) — for the
             // engine's solid background that is the layout background color. Pinned colors are
             // verbatim CSS strings parsed here; unparseable strings fall back to the default.
@@ -114,7 +114,7 @@ impl ChartEngine {
                 .unwrap_or(background);
             let cx = (snapped_x * hpr) as f32;
             let cy = (scale.price_to_coordinate(close, base_value) * vpr) as f32;
-            // LWC marks-renderer.ts: the border is a filled disc of radius + borderWidth under
+            // reference marks-renderer.ts: the border is a filled disc of radius + borderWidth under
             // the background disc (drawn only when the border width is non-zero).
             if series.crosshair_marker_border_width > 0.0 {
                 out.push(Prim::Circle {
@@ -139,7 +139,7 @@ impl ChartEngine {
         }
     }
 
-    /// LWC `PaneWidget._setCrosshairPosition` (pane-widget.ts:714-719) clamps the cursor into
+    /// reference `PaneWidget._setCrosshairPosition` (pane-widget.ts:714-719) clamps the cursor into
     /// the pane instead of dropping the crosshair: x into `[0, width - 1]`, y into
     /// `[0, height - 1]` (height = the full stacked-pane region).
     pub(super) fn clamped_crosshair(&self) -> Option<(f64, f64)> {
@@ -155,9 +155,9 @@ impl ChartEngine {
         self.snap_index_to_visible_series(index)
     }
 
-    /// LWC `Crosshair.snapToVisibleSeriesIfNeeded` (model/crosshair.ts:273-316): with
+    /// reference `Crosshair.snapToVisibleSeriesIfNeeded` (model/crosshair.ts:273-316): with
     /// `doNotSnapToHiddenSeriesIndices` set, move the snapped index to the nearest bar index
-    /// held by any visible series (min |Δx|, ties to the left like LWC's `indexOf(min)`).
+    /// held by any visible series (min |Δx|, ties to the left like the reference's `indexOf(min)`).
     /// Default off — the index is unchanged.
     fn snap_index_to_visible_series(&self, index: i64) -> i64 {
         if !self
@@ -175,7 +175,7 @@ impl ChartEngine {
                 continue;
             }
             let plot = self.data.plot(s.id);
-            // Whitespace rows hold no bar (LWC's plot list omits them); scan past them.
+            // Whitespace rows hold no bar (the reference's plot list omits them); scan past them.
             if let Some(row) = plot.last_non_whitespace_row(index) {
                 let candidate = plot.indices()[row];
                 if candidate == index {
@@ -204,7 +204,7 @@ impl ChartEngine {
         best
     }
 
-    /// The pane's default price scale (LWC `Pane.defaultPriceScale`): the scale of the first
+    /// The pane's default price scale (reference `Pane.defaultPriceScale`): the scale of the first
     /// visible, non-overlay series on the pane, else the pane's right scale. Returns the scale
     /// and its base (first) value for coordinate conversion.
     pub(super) fn pane_default_scale(
@@ -225,7 +225,7 @@ impl ChartEngine {
         (pane_scale(&self.panes[pane_index], target), base_value)
     }
 
-    /// Port of LWC `Magnet.align` (model/magnet.ts:30-86): in Magnet modes the horizontal line
+    /// Port of reference `Magnet.align` (model/magnet.ts:30-86): in Magnet modes the horizontal line
     /// snaps to the OHLC candidate — gathered from every visible, non-overlay series on the pane
     /// with a bar exactly at the snapped index — nearest the cursor in *pixel* space (each
     /// candidate converted on its own series' scale, so log modes compare correctly), then
@@ -249,7 +249,7 @@ impl ChartEngine {
             return (price, y_css);
         }
         let keys: &[PlotValueIndex] = match self.crosshair_mode {
-            // LWC magnetOHLCPlotRowKeys vs magnetPlotRowKeys (magnet.ts:13-21)
+            // reference magnetOHLCPlotRowKeys vs magnetPlotRowKeys (magnet.ts:13-21)
             CrosshairMode::MagnetOhlc => &[
                 PlotValueIndex::Open,
                 PlotValueIndex::High,
@@ -271,7 +271,7 @@ impl ChartEngine {
             let Some(row) = plot.search(index, MismatchDirection::None) else {
                 continue;
             };
-            // A whitespace row at the snapped index is no bar (LWC's plot list omits
+            // A whitespace row at the snapped index is no bar (the reference's plot list omits
             // whitespace, so its magnet sees no candidate there).
             if plot.is_whitespace_row(row) {
                 continue;

@@ -1,4 +1,4 @@
-//! Custom series (plugin platform Phase C-c, design doc §4.3; LWC api/chart-api.ts
+//! Custom series (plugin platform Phase C-c, design doc §4.3; reference api/chart-api.ts
 //! `addCustomSeries`, model/icustom-series.ts, model/series/custom-pane-view.ts).
 //!
 //! A custom series is a user-defined series TYPE. The engine owns its time mapping: its
@@ -62,7 +62,7 @@ extern "C" {
 }
 
 /// One registered custom series (Phase C-c): the owning engine series id, the retained
-/// pane-view plugin object (LWC `ICustomSeriesPaneView`, adapted to a plain JS object by the
+/// pane-view plugin object (reference `ICustomSeriesPaneView`, adapted to a plain JS object by the
 /// TS package), and the raw items aligned with the engine's time-only rows (post-sanitize
 /// order — `items[i]` is the row `times[i]`).
 pub(super) struct CustomSeriesEntry {
@@ -92,7 +92,7 @@ fn custom_hook(view: &js_sys::Object, name: &str) -> Option<js_sys::Function> {
 
 /// The plugin's whitespace verdict for one item: its `is_whitespace` hook when given (a throw
 /// is contained and the item counts as data), else the contract default — the item has only
-/// `time` (LWC's `{time}`-only whitespace item; a `color` or any value field marks data).
+/// `time` (the reference's `{time}`-only whitespace item; a `color` or any value field marks data).
 fn custom_is_whitespace(
     view: &js_sys::Object,
     check: Option<&js_sys::Function>,
@@ -116,7 +116,7 @@ fn custom_is_whitespace(
 }
 
 /// One item's `price_value_builder` result as `(finite values, current)`: the finite values
-/// feed the autoscale union; `current` is the raw LAST element (LWC's custom plot-row Close
+/// feed the autoscale union; `current` is the raw LAST element (the reference's custom plot-row Close
 /// slot, get-series-plot-row-creator.ts `value: [last, max, min, last]`) and may be
 /// non-finite, in which case the item carries no chrome value. A throw or a non-array result
 /// skips the item (a broken plugin must never take the frame down).
@@ -149,8 +149,8 @@ fn custom_price_values(
     (values, current.filter(|v| v.is_finite()))
 }
 
-/// LWC's custom barColorer (series-bar-colorer.ts Custom arm): the data item's `color` wins,
-/// then the series `color` option, then LWC's `customStyleDefaults.color`.
+/// the reference's custom barColorer (series-bar-colorer.ts Custom arm): the data item's `color` wins,
+/// then the series `color` option, then the reference's `customStyleDefaults.color`.
 fn custom_bar_color(item: &JsValue, series: &SeriesEntry) -> Color {
     js_sys::Reflect::get(item, &"color".into())
         .ok()
@@ -166,8 +166,8 @@ fn custom_bar_color(item: &JsValue, series: &SeriesEntry) -> Color {
 }
 
 impl ChartInner {
-    /// Add a custom series (LWC `addCustomSeries`) and return its engine id. The pane view
-    /// must carry `price_value_builder` and `render` functions (LWC `ensure(customPaneView)`);
+    /// Add a custom series (reference `addCustomSeries`) and return its engine id. The pane view
+    /// must carry `price_value_builder` and `render` functions (reference `ensure(customPaneView)`);
     /// `is_whitespace`/`default_options`/`destroy` are optional. `adopt_primary` converts the
     /// engine's construction-time series 0 instead of allocating a new one (the TS package's
     /// first-series adoption, mirroring `add_series`).
@@ -195,7 +195,7 @@ impl ChartInner {
         id
     }
 
-    /// Replace a custom series' items (LWC `ISeriesApi.setData`). Each item must carry a
+    /// Replace a custom series' items (reference `ISeriesApi.setData`). Each item must carry a
     /// `time` (UTC seconds); the raw items are kept verbatim (for `render`/`data()`) and only
     /// their times cross into the engine, as whitespace-style rows. Sanitization mirrors the
     /// built-in boundary: non-finite times drop, out-of-order input stably sorts, duplicate
@@ -244,7 +244,7 @@ impl ChartInner {
         );
     }
 
-    /// Streaming update of a custom series (LWC `ISeriesApi.update`): append a new time or
+    /// Streaming update of a custom series (reference `ISeriesApi.update`): append a new time or
     /// replace the item at an existing one (a mid-history change splices, like the data
     /// layer's rebuild case). A non-finite time drops the tick with a warning.
     pub(super) fn update_custom_series_item(&mut self, id: u32, item: JsValue) {
@@ -300,7 +300,7 @@ impl ChartInner {
     }
 
     /// Drop every custom-series entry whose owning series is gone, firing the pane view's
-    /// `destroy` hook (LWC `ICustomSeriesPaneView.destroy` runs when the series leaves the
+    /// `destroy` hook (reference `ICustomSeriesPaneView.destroy` runs when the series leaves the
     /// chart). Called after any `remove_series`, mirroring `detach_orphaned_series_primitives`.
     pub(super) fn drop_orphaned_custom_series(&mut self) {
         if self.custom_series.is_empty() {
@@ -413,7 +413,7 @@ impl ChartInner {
                 series.left_scale,
             );
             // A hidden or pane-less series contributes nothing and its frame values clear (a
-            // hidden series paints no last-value chrome either — LWC's visibility gate).
+            // hidden series paints no last-value chrome either — the reference's visibility gate).
             if !visible || pane >= self.panes.len() {
                 self.engine.set_custom_frame_values(
                     series_id as SeriesId,

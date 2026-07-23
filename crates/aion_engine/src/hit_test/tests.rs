@@ -1,4 +1,4 @@
-//! Headless tests for the series hit-test ports (LWC per-kind rules + arbitration).
+//! Headless tests for the series hit-test ports (reference per-kind rules + arbitration).
 
 use aion_render::draw_list::Prim;
 
@@ -55,7 +55,7 @@ fn candle_range_hit_covers_body_and_wick_span() {
     let low_y = y_at(&chart, 0, 10.0);
     // Body interior.
     assert_eq!(chart.hit_test_series(x, (high_y + low_y) / 2.0), Some(0));
-    // Wick-only span (between high and the body top) hits too — LWC ranges over high..low.
+    // Wick-only span (between high and the body top) hits too — reference ranges over high..low.
     assert_eq!(chart.hit_test_series(x, high_y + 1.0), Some(0));
     // Within the 3px tolerance above the high.
     assert_eq!(chart.hit_test_series(x, high_y - 2.5), Some(0));
@@ -88,7 +88,7 @@ fn candle_hit_slot_extends_to_the_midpoint_between_bars() {
     let spacing = chart.bar_spacing();
     assert!(spacing > 8.0, "fixture spacing must leave gaps");
     let x = x_at(&chart, 5);
-    // Just past bar 5's slot half the NEXT bar's slot already owns the cursor (LWC slots
+    // Just past bar 5's slot half the NEXT bar's slot already owns the cursor (reference slots
     // meet at the midpoint), and bar 6's high..low covers bar 5's mid-price.
     let mid_y = (y_at(&chart, 0, 12.0) + y_at(&chart, 0, 10.0)) / 2.0;
     assert_eq!(
@@ -121,7 +121,7 @@ fn hidden_and_removed_series_are_not_hit() {
 #[test]
 fn topmost_series_wins_equal_distance_ties() {
     let mut chart = settled_candle_chart();
-    // An identical twin added later paints on top (LWC appends to the pane's sources).
+    // An identical twin added later paints on top (reference appends to the pane's sources).
     let twin = chart.add_series(SeriesKind::Candlestick);
     let times = (0..10).map(|i| (i * 3600) as f64).collect::<Vec<_>>();
     let open = [10.0, 11.0, 12.0, 11.0, 10.0, 11.0, 12.0, 13.0, 12.0, 11.0];
@@ -164,7 +164,7 @@ fn closer_series_beats_paint_order_and_ties_go_topmost() {
     let separation = y_bottom - y_top;
     assert!((4.0..10.0).contains(&separation), "separation {separation}");
     // Stroke radius is 2 + 3 = 5 for both, so a probe a quarter of the way up from one
-    // stroke is inside both radii but closer to that stroke (LWC isBetterHit: distance
+    // stroke is inside both radii but closer to that stroke (reference isBetterHit: distance
     // beats paint order).
     assert_eq!(
         chart.hit_test_series(x, y_bottom - separation * 0.25),
@@ -199,7 +199,7 @@ fn line_stroke_radius_is_half_width_plus_tolerance() {
     assert_eq!(chart.hit_test_series(x, y + 4.5), Some(0));
     assert_eq!(chart.hit_test_series(x, y + 5.5), None);
 
-    // LWC lineVisible=false: the stroke radius falls back to width 1 (0.5 + 3).
+    // reference lineVisible=false: the stroke radius falls back to width 1 (0.5 + 3).
     chart.series[0].line_visible = false;
     assert_eq!(chart.hit_test_series(x, y + 3.0), Some(0));
     assert_eq!(chart.hit_test_series(x, y + 4.0), None);
@@ -217,7 +217,7 @@ fn point_markers_report_point_priority() {
     // marker disc reaches — a Point-class hit.
     let hit = chart.hit_test_one_series(0, x, y + 5.5).unwrap();
     assert_eq!(hit.kind, SeriesHitKind::Point);
-    // Between bars only the stroke is near (LWC returns the Point class when both cover the
+    // Between bars only the stroke is near (reference returns the Point class when both cover the
     // cursor, so the Line class shows away from the markers).
     let between = (x_at(&chart, 1) + x_at(&chart, 2)) / 2.0;
     let hit = chart.hit_test_one_series(0, between, y + 2.0).unwrap();
@@ -230,7 +230,7 @@ fn single_visible_point_line_hits_along_the_bar_segment() {
     let x = x_at(&chart, 0);
     let y = y_at(&chart, 0, 100.0);
     let spacing = chart.bar_spacing();
-    // LWC's single-point segment spans ±max(barSpacing/2, radius) at the point's y.
+    // the reference's single-point segment spans ±max(barSpacing/2, radius) at the point's y.
     assert_eq!(chart.hit_test_series(x + spacing / 2.0 - 1.0, y), Some(0));
     assert_eq!(chart.hit_test_series(x, y + 20.0), None);
 }
@@ -243,7 +243,7 @@ fn area_series_hits_the_stroke_but_not_the_fill() {
     let x = x_at(&chart, 2);
     let y = y_at(&chart, 0, 100.0);
     assert_eq!(chart.hit_test_series(x, y + 2.0), Some(0));
-    // The filled region below the line carries no hit test in LWC v5.2 (no renderer
+    // The filled region below the line carries no hit test in reference v5.2 (no renderer
     // implements hitTest) — a point deep inside the fill misses.
     assert_eq!(chart.hit_test_series(x, y + 60.0), None);
 }
@@ -392,7 +392,7 @@ fn removing_the_hovered_series_releases_the_z_bump() {
 }
 
 #[test]
-fn is_better_hit_ports_lwc_arbitration() {
+fn is_better_hit_ports_reference_arbitration() {
     let point = SeriesHit {
         series: 0,
         distance: 5.0,

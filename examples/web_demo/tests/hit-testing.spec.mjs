@@ -25,9 +25,9 @@ async function settle_frames(page) {
 async function goto_fixture(page) {
   await page.goto("/?runtimeTest=presentedFrame&backend=canvas2d&forceFallbackAdapter=1");
   await wait_for_chart(page);
-  // LWC's touch-suppression window (Delay.PreventFiresTouchEvents): mouse moves within the
+  // the reference's touch-suppression window (Delay.PreventFiresTouchEvents): mouse moves within the
   // first 500ms of page life are treated as synthetic post-touch events and ignored — wait
-  // past it before driving the pointer (same guard exists in LWC's mouse-event-handler).
+  // past it before driving the pointer (same guard exists in the reference's mouse-event-handler).
   await page.waitForFunction(() => performance.now() > 600);
 }
 
@@ -92,7 +92,7 @@ test("series primitive hit_test drives hovered_object_id, hovered_series, and th
   await page.mouse.move(400, band_y);
   const hit = await last_hover(page);
   expect(hit.obj).toBe("position-band");
-  // A series primitive's hit source IS the owning series (LWC parity).
+  // A series primitive's hit source IS the owning series (reference parity).
   const main_id = await page.evaluate(() => window.__main.id);
   expect(hit.series).toBe(main_id);
   expect(await overlay_cursor(page)).toBe("move");
@@ -130,7 +130,7 @@ test("hoveredSeriesOnTop repaints the hovered series above an overlapping one", 
   // Two flat lines, red below blue, strokes overlapping. They sit ABOVE every visible
   // candle high so the hover probe has exactly one distance-0 hit — browser-delivered
   // pointer coordinates are float32, which lands a hair off the exact line y, and an
-  // in-range candle (distance 0) would legitimately out-arbitrate that epsilon (LWC
+  // in-range candle (distance 0) would legitimately out-arbitrate that epsilon (reference
   // distance decides). Blue's value is derived on the settled scale (adding blue nudges
   // the autoscale, so the second read is the exact one).
   const setup = await page.evaluate(() => {
@@ -182,7 +182,7 @@ test("hoveredSeriesOnTop repaints the hovered series above an overlapping one", 
   await page.mouse.move(setup.x, setup.y_red);
   await settle_frames(page);
   expect(is_red(await sample()), "red on top while hovered").toBe(true);
-  // The stable paint order is untouched by the bump (LWC render-order-only semantics).
+  // The stable paint order is untouched by the bump (reference render-order-only semantics).
   const order_during = await page.evaluate(() => window.__chart.series_order().map((s) => s.id));
   expect(order_during).toEqual(setup.order_before);
 
@@ -221,7 +221,7 @@ test("a bottom-layer pane primitive hit loses to any series hit", async ({ page 
   });
   await collect_hover_events(page);
 
-  // Over a candle the series wins (LWC: bottom-layer primitive hits are last resort).
+  // Over a candle the series wins (reference: bottom-layer primitive hits are last resort).
   const spot = await visible_bar_spot(page);
   await page.mouse.move(spot.x, spot.y);
   const hit = await last_hover(page);
