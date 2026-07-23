@@ -1,5 +1,5 @@
 /**
- * Public data, option, and handle types for `@aion/charts` (snake_case; semantics mirror
+ * Public data, option, and handle types for `@tradeaion/charts` (snake_case; semantics mirror
  * lightweight-charts v5). Extracted from `index.ts`.
  */
 

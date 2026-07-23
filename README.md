@@ -19,15 +19,18 @@ trajectory toward a full TradingView-class charting platform.
 | `crates/aion_render` | Draw-list IR + rendering math (bar widths, primitives) |
 | `crates/aion_render_wgpu` | WebGPU backend (pipelines, glyph atlas) — WIP |
 | `crates/aion_wasm` | wasm-bindgen host shell (DOM, events, RAF) — WIP |
-| `packages/charts` | Public TypeScript API (`@aion/charts`), snake_case — WIP |
+| `packages/charts` | Public TypeScript API (`@tradeaion/charts`), snake_case — WIP |
 
 Naming convention: **snake_case everywhere**, including the public TS API.
 
 ## Install
 
+The package is published privately to **GitHub Packages** (not the public npm registry).
+Authenticate with a PAT that has `read:packages`, then:
+
 ```sh
-bun add @aion/charts   # primary (Bun)
-npm install @aion/charts
+bun add @tradeaion/charts   # primary (Bun — see packages/charts/README.md for bunfig.toml)
+npm install @tradeaion/charts
 ```
 
 The published package ships prebuilt JS + WASM — no Rust toolchain needed to consume it.

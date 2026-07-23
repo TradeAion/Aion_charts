@@ -1,5 +1,5 @@
 /**
- * @aion/charts — public API (snake_case; semantics mirror lightweight-charts v5).
+ * @tradeaion/charts — public API (snake_case; semantics mirror lightweight-charts v5).
  *
  * A thin, typed façade over the `aion_wasm` engine. It owns the browser-side concerns that the
  * engine deliberately leaves out: creating the two stacked canvases (WebGPU/Canvas2D pane +
@@ -33,7 +33,7 @@ import type { chart_api, chart_options, deep_partial, localization_options, trac
 /**
  * Pre-instantiate the wasm engine, optionally from an explicit URL. Only needed when the default
  * resolution (the `.wasm` shipped beside `dist/index.js`) doesn't apply — e.g. Vite's dev
- * pre-bundler (`import wasm_url from "@aion/charts/dist/aion_wasm_bg.wasm?url"`). Call once,
+ * pre-bundler (`import wasm_url from "@tradeaion/charts/dist/aion_wasm_bg.wasm?url"`). Call once,
  * before the first `create_chart`; later calls are no-ops.
  */
 export function init_wasm(wasm_url?: string | URL): Promise<unknown> {

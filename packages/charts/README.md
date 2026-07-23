@@ -1,21 +1,38 @@
-# @aion/charts
+# @tradeaion/charts
 
 A trading-chart engine in **Rust + WebGPU + WASM**, pixel-faithful to
 [lightweight-charts](https://github.com/tradingview/lightweight-charts) v5, with a plain
 TypeScript API. Canvas2D fallback with automatic device-loss failover included.
 
+**Private package** — hosted on GitHub Packages (`TradeAion` org). Not on the public npm registry.
+
 ## Install
 
-[Bun](https://bun.sh) is the primary, recommended package manager:
+GitHub Packages requires authentication for all installs. Create a personal access token (classic)
+with the `read:packages` scope (in GitHub Actions, use the built-in `GITHUB_TOKEN`).
 
-```sh
-bun add @aion/charts
+**Bun** (primary) — add to `bunfig.toml` in your project root:
+
+```toml
+[install.scopes]
+"@tradeaion" = { token = "$GITHUB_READ_PACKAGES_TOKEN", url = "https://npm.pkg.github.com/" }
 ```
 
-npm works identically:
+(Reference an env var; don't hardcode the token.) Then:
 
 ```sh
-npm install @aion/charts
+bun add @tradeaion/charts
+```
+
+**npm** — add to your project's `.npmrc`:
+
+```
+@tradeaion:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_READ_PACKAGES_TOKEN}
+```
+
+```sh
+npm install @tradeaion/charts
 ```
 
 No Rust toolchain or native build step is needed — the package ships prebuilt JS + WASM.
@@ -23,7 +40,7 @@ No Rust toolchain or native build step is needed — the package ships prebuilt 
 ## Quick start
 
 ```ts
-import { create_chart } from "@aion/charts";
+import { create_chart } from "@tradeaion/charts";
 
 // Async: WebGPU backend acquisition (the one deliberate divergence from LWC's sync createChart).
 const chart = await create_chart(document.getElementById("chart"), {
@@ -56,14 +73,14 @@ The package is ESM-only and ships two artifacts side by side in `dist/`: `index.
 
   ```ts
   // vite.config.ts
-  export default { optimizeDeps: { exclude: ["@aion/charts"] } };
+  export default { optimizeDeps: { exclude: ["@tradeaion/charts"] } };
   ```
 
   or point the engine at an explicit wasm URL:
 
   ```ts
-  import { create_chart, init_wasm } from "@aion/charts";
-  import wasm_url from "@aion/charts/dist/aion_wasm_bg.wasm?url";
+  import { create_chart, init_wasm } from "@tradeaion/charts";
+  import wasm_url from "@tradeaion/charts/dist/aion_wasm_bg.wasm?url";
 
   await init_wasm(wasm_url); // call once, before the first create_chart
   ```

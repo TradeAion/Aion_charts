@@ -5,8 +5,9 @@ Status legend: `[x]` done (with date) · `[ ]` pending. Ground truth: the full a
 [ARCHITECTURE.md](ARCHITECTURE.md), [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md),
 [PLUGIN_PLATFORM_DESIGN.md](PLUGIN_PLATFORM_DESIGN.md).
 
-Goal: (1) make `@aion/charts` installable via `bun add` (primary) / `npm i` with no source clone
-or Rust toolchain, (2) close the enumerable LWC API-breadth gaps, (3) land the plugin platform.
+Goal: (1) make `@tradeaion/charts` installable via `bun add` (primary) / `npm i` from **GitHub
+Packages** (private — no public npm registry) with no source clone or Rust toolchain, (2) close
+the enumerable LWC API-breadth gaps, (3) land the plugin platform.
 
 ---
 
@@ -173,17 +174,25 @@ buffer; swappable for a typed-array ABI later without changing the plugin API).
 
 ## Phase 4 — Release
 
-- [ ] 4.1 Create `@aion` npm org; `NPM_TOKEN` repo secret. **(user action — steps in the progress log)**
+**Distribution decision (2026-07-23, user):** publish to **GitHub Packages**, keep the package
+**private** (no public npm registry). GPR rules: scope must match the repo owner → the package is
+`@tradeaion/charts`; publishing authenticates with the built-in `GITHUB_TOKEN` (no npm org/token);
+installs always require a `read:packages` PAT (privacy is enforced at the registry regardless of
+repo visibility).
+
+- [x] 4.1 Distribution target switched: name `@tradeaion/charts`, `publishConfig.registry`
+      `https://npm.pkg.github.com`, CI publish job → GPR with `secrets.GITHUB_TOKEN` +
+      `packages: write`, READMEs rewritten (bunfig.toml / .npmrc auth), pack smoke updated.
+      — 2026-07-23
 - [x] 4.2a Pre-release validation: `npm publish --dry-run` runs the full prepublish chain and
-      reports a valid 13-file, 362 kB tarball with public access; fixed a dry-run env leak into
-      the pack smoke test. — 2026-07-23
-- [ ] 4.2 Tag `v0.1.0` → CI publishes; verify `bun add @aion/charts` (primary) and
-      `npm i @aion/charts` in a fresh Vite + webpack + plain-server consumer.
+      reports a valid tarball; fixed a dry-run env leak into the pack smoke test. — 2026-07-23
+- [ ] 4.2 Tag `v0.1.0` → CI publishes to GPR; verify `bun add @tradeaion/charts` (primary) and
+      `npm i @tradeaion/charts` in a fresh consumer with a `read:packages` token.
 - [x] 4.3 React wrapper — **decided: descoped.** Closed-source internal React app; no distribution
-      need, so no `@aion/react` package. The ~50-line `use_chart` lifecycle hook lives in the app
-      itself (StrictMode-safe create/destroy). Revisit only if the engine is ever published for
+      need, so no `@tradeaion/react` package. The ~50-line `use_chart` lifecycle hook lives in the
+      app itself (StrictMode-safe create/destroy). Revisit only if the engine is ever published for
       external consumers. — 2026-07-23
-- [x] 4.4 Docs: root README install section (bun-primary); phases archived into
+- [x] 4.4 Docs: root README install section (bun-primary, GPR); phases archived into
       PRODUCTION_ROADMAP.md. — 2026-07-23
 
 ---
@@ -241,11 +250,11 @@ buffer; swappable for a typed-array ABI later without changing the plugin API).
   Phase 4 release.
 - 2026-07-23 — **Phase 4 prep done (4.2a + 4.4).** `npm publish --dry-run` validated end-to-end
   (fixed the `npm_config_dry_run` leak into the pack smoke test). To ship v0.1.0 (user actions):
-  1. create the `@aion` org on npmjs.com; 2. generate a granular access token with publish rights
-  and add it as the `NPM_TOKEN` repo secret (GitHub → Settings → Secrets → Actions); 3. commit
-  these doc updates, then `git tag v0.1.0 && git push origin v0.1.0` — the publish CI job builds
-  and publishes after all gates pass; 4. verify in a fresh consumer: `bun add @aion/charts` then
-  `import { create_chart } from "@aion/charts"`.
+  1. create a PAT with `read:packages` + `write:packages` for local installs (in CI the built-in
+  `GITHUB_TOKEN` covers it — no secret setup needed); 2. `git tag v0.1.0 && git push origin v0.1.0`
+  — the publish CI job builds, gates, and publishes `@tradeaion/charts` to GitHub Packages;
+  3. verify in a fresh consumer: `bun add @tradeaion/charts` (with the bunfig scope auth from the
+  package README) then `import { create_chart } from "@tradeaion/charts"`.
 - 2026-07-23 — **WebGPU bucket-order fidelity bug fixed.** The WebGPU executor painted family
   buckets (tris → quads) within a layer while Canvas2D paints in prim order, so markers/rounded
   shapes z-ordered differently across backends (275 px on the marker fixture). Fixed with

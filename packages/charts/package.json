@@ -1,5 +1,5 @@
 {
-  "name": "@aion/charts",
+  "name": "@tradeaion/charts",
   "version": "0.1.0",
   "type": "module",
   "description": "Aion Charts public TypeScript API (snake_case, semantics mirror lightweight-charts v5)",
@@ -27,7 +27,7 @@
     "node": ">=18"
   },
   "publishConfig": {
-    "access": "public"
+    "registry": "https://npm.pkg.github.com"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
