@@ -73,6 +73,45 @@ function near(a, b, tol = 12) {
 
 const is_box = (c) => near(c, LABEL) || near(c, CHIP);
 
+// Locate the OUTSIDE title chip (TradingView geometry: it sits on the pane side, a ~4px gap
+// before the axis border). CHIP is the chip-only color (the price line/last-value line is LABEL),
+// so these helpers are safe even when the dashed price line crosses the strip.
+function chip_extent(png, pane_w) {
+  let left = -1, right = -1, top = -1, bottom = -1;
+  for (let y = 0; y < png.height; y += 1) {
+    for (let x = 0; x < pane_w - 3; x += 1) {
+      if (near(px(png, x, y), CHIP)) {
+        if (left === -1) left = x;
+        right = Math.max(right, x);
+        if (top === -1) top = y;
+        bottom = y;
+      }
+    }
+  }
+  return { left, right, top, bottom, found: left !== -1 };
+}
+
+function find_chip(png, pane_w, y) {
+  let left = -1, right = -1;
+  for (let x = 0; x < pane_w - 3; x += 1) {
+    if (near(px(png, x, y), CHIP)) {
+      if (left === -1) left = x;
+      right = x;
+    }
+  }
+  return { left, right, found: left !== -1 };
+}
+
+function count_chip_left(png, pane_w) {
+  let n = 0;
+  for (let y = 0; y < png.height; y += 1) {
+    for (let x = 0; x < pane_w - 3; x += 1) {
+      if (near(px(png, x, y), CHIP)) n += 1;
+    }
+  }
+  return n;
+}
+
 // Locate the cluster's painted bounding box: column pane_w+2 (inside the chip, left of its
 // centered text) brackets the vertical extent; the right edge is the widest box-colored run
 // across the rows (rounded corners only shrink the outer 2 rows).
@@ -142,9 +181,12 @@ test("last-value cluster paints chip, price, and countdown rows; chip is visibly
   // One connected two-row box (~34px at the default 12px font).
   expect(box.bottom - box.top).toBeGreaterThanOrEqual(ROW * 2 - 4);
   expect(box.bottom - box.top).toBeLessThanOrEqual(ROW * 2 + 4);
-  // The title chip (left end of the top row) is the darker shade of the label color.
-  const chip_pixel = px(on, box.left + 3, box.top + Math.floor(ROW / 2));
-  const price_pixel = px(on, box.right - 4, box.top + Math.floor(ROW / 2));
+  // The title chip sits OUTSIDE the axis strip (pane side, gap before the border), darker.
+  const chip = find_chip(on, anchor.pane_w, box.top + Math.floor(ROW / 2));
+  expect(chip.found, "title chip outside the strip").toBe(true);
+  expect(anchor.pane_w - chip.right - 1).toBeGreaterThanOrEqual(2); // visible gap to the border
+  const chip_pixel = px(on, chip.left + 3, box.top + Math.floor(ROW / 2));
+  const price_pixel = px(on, box.left + 3, box.top + Math.floor(ROW / 2));
   expect(near(chip_pixel, CHIP), `chip pixel ${chip_pixel}`).toBe(true);
   expect(near(price_pixel, LABEL), `price pixel ${price_pixel}`).toBe(true);
   const luminance = (c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
@@ -172,44 +214,43 @@ test("cluster parts toggle independently", async ({ browser }) => {
   });
   const anchor = await cluster_anchor(page);
 
-  // Title chip off: no chip-colored pixels anywhere, price + countdown rows remain.
+  // Title chip off: no chip-colored pixels anywhere (inside or outside the strip), price +
+  // countdown rows remain.
   await page.evaluate(() => window.__main.apply_options({ title_visible: false }));
   let shot = await capture(page);
   let box = find_cluster(shot, anchor.pane_w);
   expect(box.bottom - box.top).toBeGreaterThanOrEqual(ROW * 2 - 4);
+  expect(count_chip_left(shot, anchor.pane_w)).toBe(0);
   expect(count_color(shot, box, CHIP)).toBe(0);
   expect(count_color(shot, box, LABEL)).toBeGreaterThan(100);
   // Price text (white glyphs on the box) is still painted in the top row.
   expect(count_where(shot, { ...box, bottom: box.top + ROW }, is_white)).toBeGreaterThan(5);
 
-  // Price off (chip + countdown on): the chip returns, the top row's price area carries no
-  // text, and the countdown row keeps its text.
+  // Price off (chip + countdown on): the outside title chip returns, NO empty price box inside
+  // the strip's top row, and the countdown row keeps its text.
   await page.evaluate(() => window.__main.apply_options({ title_visible: true, last_value_visible: false }));
   shot = await capture(page);
   box = find_cluster(shot, anchor.pane_w);
-  expect(box.bottom - box.top).toBeGreaterThanOrEqual(ROW * 2 - 4);
-  expect(count_color(shot, box, CHIP)).toBeGreaterThan(20);
-  // Chip end = the chip→label color transition on a row above the text.
-  let chip_end = -1;
-  for (let x = box.left + 1; x < box.right; x += 1) {
-    if (near(px(shot, x, box.top + 1), LABEL)) { chip_end = x; break; }
-  }
-  expect(chip_end, "chip/price-area boundary").toBeGreaterThan(box.left);
-  expect(count_where(shot, { left: chip_end, top: box.top, right: box.right, bottom: box.top + ROW }, is_white)).toBe(0);
-  expect(count_where(shot, { ...box, top: box.top + ROW }, is_white)).toBeGreaterThan(5);
+  const extent = chip_extent(shot, anchor.pane_w);
+  expect(extent.found, "outside title chip present").toBe(true);
+  // Gap between the chip's right edge and the axis border (~4px, ±3 for AA).
+  expect(Math.abs(anchor.pane_w - extent.right - 1 - 4)).toBeLessThanOrEqual(3);
+  // Inside the strip the top row is empty above the countdown; the countdown row has text.
+  expect(count_where(shot, { ...box, top: box.top }, is_white)).toBeGreaterThan(5);
 
-  // Countdown off (chip + price on): one row, nothing painted below it, price text present.
+  // Countdown off (chip + price on): one inside row, nothing painted below it, price text present.
   await page.evaluate(() => window.__main.apply_options({ last_value_visible: true, countdown_visible: false }));
   shot = await capture(page);
   box = find_cluster(shot, anchor.pane_w);
   expect(box.bottom - box.top).toBeLessThanOrEqual(ROW + 3);
-  expect(count_color(shot, box, CHIP)).toBeGreaterThan(20);
+  expect(count_chip_left(shot, anchor.pane_w)).toBeGreaterThan(20);
   expect(count_where(shot, { ...box, bottom: box.top + ROW }, is_white)).toBeGreaterThan(5);
 
-  // Everything off: no cluster at all.
+  // Everything off: no cluster at all, no outside chip either.
   await page.evaluate(() => window.__main.apply_options({ last_value_visible: false, title_visible: false }));
   shot = await capture(page);
   expect(find_cluster(shot, anchor.pane_w).top).toBe(-1);
+  expect(count_chip_left(shot, anchor.pane_w)).toBe(0);
   await context.close();
 });
 
@@ -251,13 +292,20 @@ test("cluster rounds its axis-facing corners and keeps the chart-facing side sha
   expect(dist(corner_tr, LABEL)).toBeGreaterThan(40);
   expect(dist(corner_tr, strip_bg)).toBeLessThan(dist(corner_tr, LABEL));
   expect(near(px(shot, box.right - 1, box.top + 3), LABEL)).toBe(true);
-  // Chart-facing top-left corner (the chip's): sharp, fully filled.
-  expect(near(px(shot, box.left, box.top), CHIP)).toBe(true);
+  // Chart-facing top-left corner of the inside price chip: sharp, fully filled.
+  expect(near(px(shot, box.left, box.top), LABEL)).toBe(true);
   // Axis-facing bottom-right corner of the countdown row: clipped the same way.
   const corner_br = px(shot, box.right - 1, box.bottom - 1);
   expect(dist(corner_br, LABEL)).toBeGreaterThan(40);
   expect(near(px(shot, box.right - 1, box.bottom - 4), LABEL)).toBe(true);
   // Chart-facing bottom-left corner: sharp.
   expect(near(px(shot, box.left, box.bottom - 1), LABEL)).toBe(true);
+  // The OUTSIDE title chip is a standalone rounded box: the corner pixel itself is AA-blended
+  // (between the background and the chip color), while the pixel right of it is fully filled.
+  const extent = chip_extent(shot, anchor.pane_w);
+  expect(extent.found).toBe(true);
+  const corner = px(shot, extent.left - 1, extent.top);
+  expect(dist(corner, CHIP)).toBeGreaterThan(25); // blended, not full chip color
+  expect(near(px(shot, extent.left, extent.top), CHIP)).toBe(true); // interior is full
   await context.close();
 });

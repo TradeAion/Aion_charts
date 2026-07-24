@@ -932,80 +932,100 @@ impl ChartEngine {
         let chip_w = title_w.map(|w| w + 10.0).unwrap_or(0.0);
         let price_w = label.price_text.as_deref().map(measure).unwrap_or(0.0);
         let countdown_w = label.countdown.as_deref().map(measure).unwrap_or(0.0);
-        let width = 1.0 + 5.0 + 5.0 + 5.0 + (chip_w + price_w).max(countdown_w);
-        let box_x = if right_strip {
+        // TradingView geometry: the title chip sits OUTSIDE the axis strip (on the pane, a small
+        // gap before the border), while the price chip and the countdown chip live inside the
+        // strip, share ONE width (the wider of the two texts), and stack flush with left-aligned
+        // text so they end at the exact same place — "held together".
+        const GAP: f64 = 4.0;
+        const PAD: f64 = 5.0;
+        let inner_text_w = price_w.max(countdown_w);
+        let inner_w = 1.0 + PAD + inner_text_w + PAD;
+        let border_x = if right_strip {
             self.pane_left + self.pane_w
         } else {
-            self.pane_left - width
+            self.pane_left
         };
-        let top_y = label.y - label.height / 2.0;
-        let has_countdown = label.countdown.is_some();
+        let inner_x = if right_strip {
+            border_x
+        } else {
+            border_x - inner_w
+        };
+        let text_x = if right_strip {
+            inner_x + 1.0 + PAD
+        } else {
+            inner_x + inner_w - 1.0 - PAD
+        };
         let text_align = if right_strip {
             AxisTextAlign::Left
         } else {
             AxisTextAlign::Right
         };
-        // Centered text anchor for a box segment: on the right strip text left-aligns at the
-        // computed x, on the left strip it right-aligns (the anchor is the text's right edge).
-        let centered_x = |seg_x: f64, seg_w: f64, text_w: f64| {
-            if right_strip {
-                seg_x + (seg_w - text_w) / 2.0
-            } else {
-                seg_x + seg_w - (seg_w - text_w) / 2.0
+        let top_y = label.y - label.height / 2.0;
+        let has_countdown = label.countdown.is_some();
+        let axis_corners_top = if right_strip {
+            AxisLabelCorners {
+                top_right: true,
+                bottom_right: !has_countdown,
+                ..AxisLabelCorners::NONE
+            }
+        } else {
+            AxisLabelCorners {
+                top_left: true,
+                bottom_left: !has_countdown,
+                ..AxisLabelCorners::NONE
             }
         };
-        if label.top_height > 0.0 {
-            let row_mid_y = top_y + label.top_height / 2.0;
-            if let (Some(title), Some(title_w)) = (&label.title, title_w) {
-                labels.push(AxisLabel {
-                    text: title.clone(),
-                    x: centered_x(box_x, chip_w, title_w),
-                    y: row_mid_y,
-                    color: text_color,
-                    align: text_align,
-                    midpoint: AxisTextMidpoint::Label,
-                    bold: false,
-                    background: Some((box_x, top_y, chip_w, label.top_height, chip_color)),
-                    background_corners: if right_strip {
-                        AxisLabelCorners::NONE
-                    } else {
-                        AxisLabelCorners {
-                            top_left: true,
-                            bottom_left: !has_countdown,
-                            ..AxisLabelCorners::NONE
-                        }
-                    },
-                    measure_extra: 0.0,
-                });
-            }
-            let area_x = box_x + chip_w;
-            let area_w = width - chip_w;
-            let axis_side_top = if right_strip {
-                AxisLabelCorners {
-                    top_right: true,
-                    bottom_right: !has_countdown,
-                    ..AxisLabelCorners::NONE
-                }
+        let axis_corners_bottom = if right_strip {
+            AxisLabelCorners::RIGHT
+        } else {
+            AxisLabelCorners::LEFT
+        };
+        // Title chip: outside the strip, a small standalone rounded box next to the border.
+        if let (Some(title), Some(_)) = (&label.title, title_w) {
+            let chip_x = if right_strip {
+                border_x - GAP - chip_w
             } else {
-                // On the left strip the price area is axis-facing only when no chip covers it.
-                AxisLabelCorners {
-                    top_left: label.title.is_none(),
-                    bottom_left: label.title.is_none() && !has_countdown,
-                    ..AxisLabelCorners::NONE
-                }
+                border_x + GAP
+            };
+            let chip_row_h = if label.top_height > 0.0 {
+                label.top_height
+            } else {
+                label.height
             };
             labels.push(AxisLabel {
+                text: title.clone(),
+                x: chip_x + chip_w / 2.0,
+                y: top_y + chip_row_h / 2.0,
+                color: text_color,
+                align: AxisTextAlign::Center,
+                midpoint: AxisTextMidpoint::Label,
+                bold: false,
+                background: Some((chip_x, top_y, chip_w, chip_row_h, chip_color)),
+                // The outside chip is a standalone box — all four corners rounded.
+                background_corners: AxisLabelCorners {
+                    top_left: true,
+                    top_right: true,
+                    bottom_left: true,
+                    bottom_right: true,
+                },
+                // It lives on the pane, not in the strip: it never widens the axis.
+                measure_extra: 0.0,
+            });
+        }
+        // The inside price chip renders only when the price text is present (never an empty box).
+        if label.top_height > 0.0 && label.price_text.is_some() {
+            labels.push(AxisLabel {
                 text: label.price_text.clone().unwrap_or_default(),
-                x: centered_x(area_x, area_w, price_w),
-                y: row_mid_y,
+                x: text_x,
+                y: top_y + label.top_height / 2.0,
                 color: text_color,
                 align: text_align,
                 midpoint: AxisTextMidpoint::Label,
                 bold: false,
-                background: Some((area_x, top_y, area_w, label.top_height, label.color)),
-                background_corners: axis_side_top,
-                // The negotiated strip width must cover the chip + price row as a unit.
-                measure_extra: chip_w,
+                background: Some((inner_x, top_y, inner_w, label.top_height, label.color)),
+                background_corners: axis_corners_top,
+                // text + the standard 21px label padding already covers the chip box.
+                measure_extra: 0.0,
             });
         }
         if let Some(countdown) = &label.countdown {
@@ -1014,28 +1034,29 @@ impl ChartEngine {
             // A countdown-only cluster's top edge is the cluster's top edge, so the countdown
             // box carries the top axis-facing corner as well.
             let standalone = label.top_height == 0.0;
+            let corners = if standalone {
+                axis_corners_bottom
+            } else if right_strip {
+                AxisLabelCorners {
+                    top_right: false,
+                    ..AxisLabelCorners::RIGHT
+                }
+            } else {
+                AxisLabelCorners {
+                    top_left: false,
+                    ..AxisLabelCorners::LEFT
+                }
+            };
             labels.push(AxisLabel {
                 text: countdown.clone(),
-                x: centered_x(box_x, width, countdown_w),
+                x: text_x,
                 y: countdown_y + countdown_height / 2.0,
                 color: text_color,
                 align: text_align,
                 midpoint: AxisTextMidpoint::Label,
                 bold: false,
-                background: Some((box_x, countdown_y, width, countdown_height, label.color)),
-                background_corners: if right_strip {
-                    AxisLabelCorners {
-                        top_right: standalone,
-                        bottom_right: true,
-                        ..AxisLabelCorners::NONE
-                    }
-                } else {
-                    AxisLabelCorners {
-                        top_left: standalone,
-                        bottom_left: true,
-                        ..AxisLabelCorners::NONE
-                    }
-                },
+                background: Some((inner_x, countdown_y, inner_w, countdown_height, label.color)),
+                background_corners: corners,
                 measure_extra: 0.0,
             });
         }

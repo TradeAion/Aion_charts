@@ -1549,13 +1549,16 @@ fn last_value_cluster_rows_toggle_independently() {
     assert_eq!(chip_bg, LINE.darken(0.72));
     assert_eq!(price_bg, LINE);
     assert_eq!(cd_bg, LINE);
-    // One connected box: chip flush left of the price area, the countdown row below spanning
-    // the full cluster width, all rows the same height.
+    // TradingView geometry: the title chip sits OUTSIDE the strip (a small gap before the
+    // border), the price chip and countdown chip share one width inside and stack flush.
     assert_eq!(chip_y, price_y);
-    assert!((chip_x + chip_w - price_x).abs() < 1e-9);
-    assert!((price_y + price_h - cd_y).abs() < 1e-9);
-    assert!((cd_x - chip_x).abs() < 1e-9);
-    assert!((cd_w - (price_x + price_w - chip_x)).abs() < 1e-9);
+    assert!(
+        (price_x - (chip_x + chip_w) - 4.0).abs() < 1e-9,
+        "chip-to-border gap"
+    );
+    assert!((price_y + price_h - cd_y).abs() < 1e-9, "flush stack");
+    assert!((cd_x - price_x).abs() < 1e-9, "same left edge");
+    assert!((cd_w - price_w).abs() < 1e-9, "same width");
     assert_eq!(chip_h, price_h);
     assert_eq!(price_h, cd_h);
     // All cluster texts share the contrast-pick text color.
@@ -1563,20 +1566,18 @@ fn last_value_cluster_rows_toggle_independently() {
     assert_eq!(price.color, LINE.contrast_text());
     assert_eq!(countdown.color, LINE.contrast_text());
 
-    // Price off, title + countdown on: the cluster still renders (chip + countdown + the empty
-    // price area box), with no price text.
+    // Price off, title + countdown on: only the outside title chip and the inside countdown
+    // chip render — no empty price box.
     chart.series[0].last_value_visible = false;
     let labels = boxed_labels(&mut chart);
-    assert_eq!(labels.len(), 3);
+    assert_eq!(labels.len(), 2);
     assert!(labels.iter().any(|l| l.text == "NDQ"));
     assert!(labels.iter().any(|l| l.text == "00:50"));
     assert!(labels.iter().all(|l| l.text != "12.50"));
-    // The empty price area box still paints between chip and right edge (one connected box).
-    let area = labels
-        .iter()
-        .find(|l| l.text.is_empty())
-        .expect("empty price area box");
-    assert!(matches!(area.background, Some((.., c)) if c == LINE));
+    assert!(
+        labels.iter().all(|l| !l.text.is_empty()),
+        "no empty price box when the price text is off"
+    );
 
     // Title off, price + countdown on: no chip; the price area spans the top row's full width.
     chart.series[0].last_value_visible = true;
@@ -1661,7 +1662,16 @@ fn boxed_axis_labels_select_the_axis_facing_corners() {
             .unwrap_or_else(|| panic!("label {text}"))
             .background_corners
     };
-    assert_eq!(corners_of("NDQ"), AxisLabelCorners::NONE); // chip: chart-facing + internal only
+    assert_eq!(
+        corners_of("NDQ"),
+        AxisLabelCorners {
+            top_left: true,
+            top_right: true,
+            bottom_left: true,
+            bottom_right: true,
+        },
+        "the outside title chip is a standalone fully-rounded box"
+    );
     assert_eq!(
         corners_of("12.50"),
         AxisLabelCorners {
@@ -1704,10 +1714,19 @@ fn boxed_axis_labels_select_the_axis_facing_corners() {
         corners_of("NDQ"),
         AxisLabelCorners {
             top_left: true,
+            top_right: true,
+            bottom_left: true,
+            bottom_right: true,
+        },
+        "the outside title chip is a standalone fully-rounded box"
+    );
+    assert_eq!(
+        corners_of("12.50"),
+        AxisLabelCorners {
+            top_left: true,
             ..AxisLabelCorners::NONE
         }
     );
-    assert_eq!(corners_of("12.50"), AxisLabelCorners::NONE);
     assert_eq!(
         corners_of("00:50"),
         AxisLabelCorners {
@@ -1746,12 +1765,11 @@ fn axis_width_negotiation_covers_the_widest_cluster_row() {
     assert_eq!(with_countdown, 78.0); // 77 snapped up to even
     assert!(with_countdown > plain);
 
-    // The title chip + price row is measured as a unit (chip width includes its padding).
-    chart.now_override = Some(250.0); // "00:50" — narrower than chip + price
+    // The title chip lives OUTSIDE the strip (pane side), so it never widens the axis.
+    chart.now_override = Some(250.0); // "00:50" — same 5 chars as the price
     chart.series[0].title = "NDQ".to_string();
     let with_cluster = chart.optimal_price_axis_width_for(PriceScaleTarget::Right, measure);
-    // top row: chip (3 chars = 21) + 10 padding + price (5 chars = 35) = 66.
-    assert_eq!(with_cluster, 88.0); // 87 snapped up to even
+    assert_eq!(with_cluster, 56.0, "outside chip must not widen the strip");
 }
 
 #[test]
